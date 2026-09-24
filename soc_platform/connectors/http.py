@@ -190,6 +190,10 @@ class FixtureTransport:
                 status = int(route.get("status", 200))
                 if status == 429:
                     raise RateLimited(0)
+                if status >= 500:  # behave exactly like HttpTransport so outages are exercised in fake mode
+                    raise TransientError(f"[fixture:{self.tool}] {method} {clean} -> {status}")
+                if status >= 400:
+                    raise ConnectorError(f"[fixture:{self.tool}] {method} {clean} -> {status}")
                 body = json_copy(route.get("body"))
                 sel = route.get("select")
                 if sel and isinstance(body, dict):

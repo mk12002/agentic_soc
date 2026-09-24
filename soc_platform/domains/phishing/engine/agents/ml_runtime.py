@@ -4,6 +4,8 @@ from __future__ import annotations
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import pickle
+
+from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
 import warnings
 import logging
 from pathlib import Path
@@ -75,8 +77,10 @@ def load_model_bundle(model_path: str | Path) -> Any:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             if artifact.suffix == ".joblib":
+                verify_artifact(artifact)
                 loaded = joblib.load(artifact)
             else:
+                verify_artifact(artifact)
                 with open(artifact, "rb") as handle:
                     loaded = pickle.load(handle)  # nosec B301
 

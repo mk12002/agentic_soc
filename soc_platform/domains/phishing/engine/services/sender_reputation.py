@@ -145,7 +145,8 @@ class SenderReputationEngine:
             with self._connect() as conn:
                 with conn.cursor() as cur:
                     col = "false_positive_count" if is_false_positive else "true_positive_count"
-                    cur.execute(f"""
+                    # col is one of two hard-coded column names, never user input
+                    cur.execute(f"""  # nosec B608
                         UPDATE sender_reputation SET {col} = {col} + 1
                         WHERE sender_email = %s
                     """, (sender_email,))

@@ -43,8 +43,16 @@ STRONG_KEYS: dict[str, list[str]] = {
     "identity": ["entra_object_id", "upn", "email", "sid", "delinea_user_id"],
     "indicator": ["value"],
 }
-# A differing value on one of these proves two records are NOT the same entity.
-CONFLICT_KEYS = {"serial_number", "cloud_resource_id", "entra_object_id"}
+# A differing value on one of these proves two records are NOT the same entity: one host has exactly
+# one agent/device/asset id per tool, one cloud resource id and one serial.
+CONFLICT_KEYS = {"serial_number", "cloud_resource_id", "entra_object_id", "crowdstrike_aid", "mde_device_id",
+                 "rapid7_asset_id", "wiz_id", "canary_device_id"}
+# Hardware-derived keys are shared by cloned VMs / docking stations / virtual NICs: a match on them alone is
+# only trusted when the names do not contradict it (see EntityResolver._corroborated).
+SHARED_PRONE_KEYS = {"serial_number", "mac"}
+# Keys that can link records from *different* tools (tool-local ids such as a Rapid7 asset id cannot).
+CROSS_TOOL_KEYS = {"serial_number", "mac", "cloud_resource_id", "aad_device_id", "entra_object_id", "upn", "email",
+                   "sid", "value"}
 
 _JUNK_MACS = {"000000000000", "ffffffffffff"}
 
@@ -115,6 +123,8 @@ def hints_for(kind: str, attrs: dict[str, Any]) -> dict[str, list[str]]:
     if kind == "asset":
         if attrs.get("hostname"):
             h["hostname"] = [norm_hostname(attrs["hostname"])]
+            if "." in str(attrs["hostname"]) and not _is_ip(str(attrs["hostname"]).strip()):
+                h.setdefault("fqdn", []).append(norm_fqdn(attrs["hostname"]))
         if attrs.get("fqdn"):
             h["fqdn"] = [norm_fqdn(attrs["fqdn"])]
             h.setdefault("hostname", []).append(norm_hostname(attrs["fqdn"]))
@@ -135,6 +145,7 @@ class Candidate:
     score: float
     reasons: list[str] = field(default_factory=list)
     exact: bool = False  # exact hostname/FQDN (asset) or display name (identity) match
+    provisional: bool = False  # candidate is a nameless (IP-only) entity
 
 
 def score_asset(obs_hints: dict[str, list[str]], obs_attrs: dict[str, Any], obs_time: datetime,
@@ -143,10 +154,12 @@ def score_asset(obs_hints: dict[str, list[str]], obs_attrs: dict[str, Any], obs_
     reasons: list[str] = []
     exact = False
     obs_fqdn = set(obs_hints.get("fqdn", []))
+    last_seen = _aware(cand.last_seen)
+    recent = abs(_aware(obs_time) - last_seen) <= timedelta(days=30)
     if obs_fqdn & cand_hints.get("fqdn", set()):
-        score += 0.6
+        score += 0.75 if recent else 0.6
         exact = True
-        reasons.append("fqdn exact")
+        reasons.append("fqdn exact" + (" (recently seen)" if recent else " (stale)"))
     else:
         best = 0.0
         for a in obs_hints.get("hostname", []):
@@ -156,10 +169,9 @@ def score_asset(obs_hints: dict[str, list[str]], obs_attrs: dict[str, Any], obs_
             score += 0.5 * best if best == 1.0 else 0.4 * best
             exact = best == 1.0
             reasons.append(f"hostname similarity {best:.2f}")
-    last_seen = _aware(cand.last_seen)
     if set(obs_hints.get("ip", [])) & cand_hints.get("ip", set()):
         if abs(_aware(obs_time) - last_seen) <= ip_window:
-            score += 0.3
+            score += 0.2
             reasons.append("ip match within window")
         else:
             reasons.append("ip match outside window (ignored)")
@@ -237,7 +249,12 @@ class EntityResolver:
                     or_(*[and_(EntityKey.key_name == k, EntityKey.key_value == v) for k, v in nkeys.items()]),
                 )
             ).all()
-            ids = {h.entity_id for h in hits}
+            strong_hits = {h.entity_id for h in hits if h.key_name not in SHARED_PRONE_KEYS}
+            weak_hits = {h.entity_id for h in hits if h.key_name in SHARED_PRONE_KEYS}
+            ids = strong_hits or {e for e in weak_hits if self._corroborated(e, attributes)}
+            if not strong_hits and weak_hits and not ids:
+                ids = set()  # shared serial/MAC contradicted by names -> fall through to fuzzy / new entity
+                nkeys = {k: v for k, v in nkeys.items() if k not in SHARED_PRONE_KEYS}
             if len(ids) == 1:
                 eid = next(iter(ids))
                 if not self._conflicts(eid, nkeys):
@@ -253,6 +270,11 @@ class EntityResolver:
 
         obs_hints = hints_for(kind, attributes)
         cands = self._fuzzy_candidates(kind, obs_hints, attributes, observed_at, nkeys)
+        ip_only = (kind == "asset" and not (set(nkeys) & CROSS_TOOL_KEYS) and not obs_hints.get("hostname")
+                   and not obs_hints.get("fqdn"))
+        if ip_only and cands and not reference:
+            return ResolutionResult("unresolved", None, "ip_only", cands[0].score,
+                                    [*cands[:5]] or [])
         if cands:
             best = cands[0]
             second = cands[1].score if len(cands) > 1 else 0.0
@@ -266,6 +288,17 @@ class EntityResolver:
         return ResolutionResult("created", None, "new", 1.0 if nkeys else 0.7)
 
     # ------------------------------------------------------------------ helpers
+
+    def _corroborated(self, entity_id: str, attrs: dict[str, Any]) -> bool:
+        """A serial/MAC match counts only if the entity's known names do not contradict the observation."""
+        obs = set(hints_for("asset", attrs).get("hostname", []))
+        if not obs:
+            return True
+        known = {v for (v,) in self.s.execute(select(EntityHint.hint_value).where(
+            EntityHint.entity_id == entity_id, EntityHint.hint_name == "hostname")).all()}
+        if not known:
+            return True
+        return any(fuzz.ratio(a, b) >= 90 for a in obs for b in known)
 
     def _conflicts(self, entity_id: str, nkeys: dict[str, str]) -> bool:
         existing = self.s.execute(
@@ -309,13 +342,25 @@ class EntityResolver:
                                        .where(EntityHint.entity_id == eid)).all():
                 ch.setdefault(n, set()).add(v)
             if kind == "asset":
-                out.append(score_asset(obs_hints, attrs, observed_at, ent, ch, self.ip_window))
+                c = score_asset(obs_hints, attrs, observed_at, ent, ch, self.ip_window)
+                provisional = not ch.get("hostname") and not ch.get("fqdn")
+                if provisional and "ip match within window" in c.reasons and (obs_hints.get("hostname") or obs_hints.get("fqdn")):
+                    c.score, c.provisional = max(c.score, 0.7), True
+                    c.reasons.append("upgrades a nameless IP-only record")
+                out.append(c)
             elif kind == "identity":
                 best = max((fuzz.token_sort_ratio(a, b) / 100.0 for a in obs_hints.get("display_name", [])
                             for b in ch.get("display_name", set())), default=0.0)
                 if best >= 0.9:
                     out.append(Candidate(eid, round(best * 0.8, 3), [f"display name similarity {best:.2f}"],
                                          exact=best == 1.0))
+        prov = [c for c in out if c.provisional]
+        if kind == "asset" and len(prov) == 1 and not any(c.exact for c in out):
+            prov[0].score = round(min(1.0, prov[0].score + 0.15), 3)  # single nameless record at this IP
+        exact = [c for c in out if c.exact]
+        if kind == "asset" and len(exact) == 1 and exact[0].score >= 0.5:
+            exact[0].score = round(min(1.0, exact[0].score + 0.15), 3)
+            exact[0].reasons.append("only entity with this exact name")
         return sorted(out, key=lambda c: c.score, reverse=True)
 
     def register(self, entity: Entity, kind: str, keys: dict[str, Any], attributes: dict[str, Any]) -> None:
@@ -335,6 +380,34 @@ class EntityResolver:
                 else:
                     exists.seen_at = utcnow()
         self.s.flush()
+
+    def absorb_provisional(self, entity: Entity, attrs: dict[str, Any], observed_at: datetime) -> list[str]:
+        """Merge a single nameless (IP-only) asset seen at the same IP within the window into ``entity``."""
+        ips = hints_for("asset", attrs).get("ip", [])
+        if not ips or not (hints_for("asset", attrs).get("hostname") or hints_for("asset", attrs).get("fqdn")):
+            return []
+        cands = set(self.s.execute(select(EntityHint.entity_id).where(
+            EntityHint.kind == "asset", EntityHint.hint_name == "ip", EntityHint.hint_value.in_(ips),
+            EntityHint.entity_id != entity.id)).scalars().all())
+        prov = []
+        for eid in cands:
+            names = self.s.execute(select(EntityHint.id).where(EntityHint.entity_id == eid, EntityHint.hint_name.in_(
+                ("hostname", "fqdn")))).first()
+            other = self.s.get(Entity, eid)
+            if names or other is None or abs(_aware(other.last_seen) - _aware(observed_at)) > self.ip_window:
+                continue
+            ok = self.s.execute(select(EntityKey.key_name).where(EntityKey.entity_id == eid,
+                                                                 EntityKey.key_name.in_(CROSS_TOOL_KEYS))).first()
+            if ok is None and not self._conflicts(entity.id, {k: v for k, v in self._keys(eid).items()}):
+                prov.append(eid)
+        if len(prov) != 1:
+            return []
+        merge_entities(self.s, prov[0], entity.id, reason="named record at same IP upgraded a nameless record")
+        return prov
+
+    def _keys(self, entity_id: str) -> dict[str, str]:
+        return {k: v for k, v in self.s.execute(select(EntityKey.key_name, EntityKey.key_value)
+                                                .where(EntityKey.entity_id == entity_id)).all()}
 
     # ------------------------------------------------------------------ analyst workflow & metrics
 
@@ -395,3 +468,41 @@ def _display(kind: str, attrs: dict[str, Any], keys: dict[str, Any]) -> str:
     if kind == "identity":
         return str(keys.get("upn") or keys.get("email") or attrs.get("display_name") or "identity")
     return str(keys.get("value") or attrs.get("value") or kind)
+
+
+def merge_entities(session: Session, src_id: str, dst_id: str, *, reason: str, actor: str = "agent:resolution") -> None:
+    """Re-point everything that references ``src_id`` to ``dst_id`` and remove ``src_id`` (audited)."""
+    from soc_platform.core.models import CaseEntity, Evidence, Relation
+
+    src, dst = session.get(Entity, src_id), session.get(Entity, dst_id)
+    if src is None or dst is None or src_id == dst_id:
+        return
+    for model, col in ((SourceRecord, SourceRecord.entity_id), (EntityHint, EntityHint.entity_id),
+                       (Evidence, Evidence.entity_id), (ResolutionOverride, ResolutionOverride.entity_id)):
+        for row in session.execute(select(model).where(col == src_id)).scalars():
+            row.entity_id = dst_id
+    for k in session.execute(select(EntityKey).where(EntityKey.entity_id == src_id)).scalars():
+        k.entity_id = dst_id
+    for r in session.execute(select(Relation).where((Relation.src_id == src_id) | (Relation.dst_id == src_id))).scalars():
+        ns, nd = (dst_id if r.src_id == src_id else r.src_id), (dst_id if r.dst_id == src_id else r.dst_id)
+        dup = session.execute(select(Relation).where(Relation.src_id == ns, Relation.dst_id == nd,
+                                                     Relation.rel_type == r.rel_type, Relation.id != r.id)).scalars().first()
+        if dup is not None or ns == nd:
+            session.delete(r)
+        else:
+            r.src_id, r.dst_id = ns, nd
+    for ce in session.execute(select(CaseEntity).where(CaseEntity.entity_id == src_id)).scalars():
+        ce.entity_id = dst_id
+    merged = dict(dst.attributes or {})
+    for k, v in (src.attributes or {}).items():
+        if k == "by_tool":
+            merged["by_tool"] = {**(v or {}), **(merged.get("by_tool") or {})}
+        else:
+            merged.setdefault(k, v)
+    dst.attributes = merged
+    dst.first_seen = min(_aware(dst.first_seen), _aware(src.first_seen))
+    session.flush()
+    session.delete(src)
+    session.flush()
+    AuditLog(session).append(actor_type="agent", actor_id=actor, event_type="resolution.merge", subject_type="entity",
+                             subject_id=dst_id, payload={"merged": src_id, "reason": reason})

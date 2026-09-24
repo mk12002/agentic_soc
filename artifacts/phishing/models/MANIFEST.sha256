@@ -1,0 +1,5 @@
+# sha256  path (relative to models/) - pickle/joblib artifacts verified before load
+d80b0ab894372aa57735d30f749da6b8a3282d9cdd9aa4b423368035a55b666a  attachment_agent/model.joblib
+43fa770651a59e73e6b845acf6389439a2c33c4f2245563175669fb6c08a3342  header_agent/model.joblib
+a2ee5ecf8b8b36af45a80f4fc5b3e3ae8f0ce8cf46042458582e96041ec57922  sandbox_agent/model.joblib
+6ae0370c373b5a5fdca4cb786b6c08b5b4b927f201bfbac734a537e0a93c0e4d  url_agent/model.joblib

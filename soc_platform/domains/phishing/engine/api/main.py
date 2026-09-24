@@ -520,7 +520,7 @@ def _check_api_key(value: str | None) -> bool:
     configured = (settings.api_auth_key or "").strip()
     if not configured:
         return False
-    return (value or "").strip() == configured
+    return hmac.compare_digest((value or "").strip().encode(), configured.encode())
 
 
 def _require_api_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -531,7 +531,7 @@ def _require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     configured = (settings.api_auth_key or "").strip()
     if not configured:
         raise HTTPException(status_code=503, detail="API auth is enabled but API_AUTH_KEY is not configured")
-    if (x_api_key or "").strip() != configured:
+    if not hmac.compare_digest((x_api_key or "").strip().encode(), configured.encode()):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 

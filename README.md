@@ -29,7 +29,6 @@ git clone https://github.com/mk12002/agentic_soc.git && cd agentic_soc
 git lfs pull                                   # trained phishing models (only needed for the ML engine)
 python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements/platform.txt -r requirements/dev.txt
-pip install pyzbar Pillow ppdeep qrcode         # QR decoding + fuzzy hashing
 pip install -e .
 cp .env.example .env                           # set SOC_DEV_JWT_SECRET to a long random string
 

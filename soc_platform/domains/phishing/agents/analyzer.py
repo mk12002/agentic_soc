@@ -44,6 +44,13 @@ SECRECY = re.compile(r"\b(confidential|keep this (between us|quiet)|do not (call
                      r"in a (board )?meeting)\b", re.I)
 BULK = re.compile(r"(unsubscribe|\d+% off|\bdeals?\b|\bsale\b|limited time|shop now|newsletter)", re.I)
 CONTAINER_EXT = {".iso", ".img", ".vhd", ".vhdx"}
+# Advance-fee ("419") fraud vocabulary - count distinct hits, require several to fire.
+ADVANCE_FEE = re.compile(r"\b(next of kin|beneficiary|transfer (of|the) (the )?(sum|fund|funds)|(\d+[.,]?\d*|\w+) million "
+                         r"(united states |us |u\.s\. )?dollars|us\$ ?\d|foreign (partner|account)|"
+                         r"strictly confidential|confidential (transaction|business)|(late|deceased) (client|husband|father)|"
+                         r"inheritance|compensation fund|lottery|won (the )?(sum|prize)|claims? (agent|officer)|"
+                         r"diplomatic|consignment box|bank draft|barrister|god (reveals?|fearing)|noble proposal|"
+                         r"urgent (and )?(capable )?assistance)\b", re.I)
 SUSPICIOUS_TLD = {"xyz", "top", "click", "zip", "mov", "icu", "buzz", "cam", "rest", "shop", "live", "support",
                   "work", "gq", "tk", "ml", "cf", "ga"}
 SEVERE = {"malicious", "phishing"}
@@ -148,6 +155,12 @@ class HeuristicAnalyzer:
             secrecy = bool(SECRECY.search(em.body_text))
             add("bec_payment_request", 0.3 if secrecy else 0.2, "external sender requests a payment/transfer"
                 + (" with secrecy/unavailability pressure" if secrecy else ""), "content")
+        fee_hits = sorted({m.group(0).lower() for m in ADVANCE_FEE.finditer(em.subject + " " + em.body_text)})
+        if len(fee_hits) >= 2:
+            add("advance_fee_fraud", min(0.6, 0.2 * len(fee_hits)), f"advance-fee fraud language: {fee_hits[:5]}", "content")
+        if re.match(r"^\s*(re|fwd?)\s*:", em.subject or "", re.I) and not (em.headers.get("In-Reply-To") or
+                                                                            em.headers.get("References")):
+            add("fake_reply", 0.15, "subject pretends to be a reply/forward but no In-Reply-To/References header", "header")
         if em.sender_domain.split(".")[-1] in SUSPICIOUS_TLD:
             add("suspicious_sender_tld", 0.1, f"sender uses high-abuse TLD .{em.sender_domain.split('.')[-1]}", "header")
         for a in em.attachments:
@@ -183,7 +196,8 @@ class HeuristicAnalyzer:
         verdict = ("malicious" if score >= 0.7 or ("threat_intel_malicious" in names and score >= 0.5) else
                    "suspicious" if score >= 0.35 else
                    "spam" if (bulk or urgency) and not names & {"lookalike_sender_domain", "lookalike_url_domain",
-                                                               "credential_lure", "bec_payment_request"}
+                                                               "credential_lure", "bec_payment_request",
+                                                               "advance_fee_fraud"}
                    and (bulk or score >= 0.15) else "safe")
         if verdict == "spam":
             add("bulk_marketing", 0.0, "bulk/promotional mail characteristics (unsubscribe link, offers)", "content")
@@ -224,6 +238,7 @@ class EngineAnalyzer:
         "ABUSEIPDB_API_KEY": "", "URLSCAN_API_KEY": "", "SHODAN_API_KEY": "", "OTX_API_KEY": "",
         "THREAT_INTEL_AUTO_REFRESH_ENABLED": "0", "SANDBOX_LOCAL_DOCKER_ENABLED": "0", "SANDBOX_EXECUTOR_URL": "",
         "ACTION_SIMULATED_MODE": "1", "ACTION_REQUIRE_APPROVAL": "1", "REQUEST_DEDUPLICATION_ENABLED": "false",
+        "ENGINE_DATABASE_ENABLED": "0", "DOMAIN_WHOIS_ENABLED": "0",
     }
 
     def __init__(self, *, offline: bool = True) -> None:
@@ -325,10 +340,19 @@ class CompositeAnalyzer:
         # Most severe verdict wins; both opinions are kept for the analyst.
         order = ["safe", "spam", "suspicious", "malicious"]
         primary = e if order.index(e.verdict) >= order.index(h.verdict) else h
-        merged = AnalysisResult(primary.verdict, max(e.score, h.score), max(e.confidence, h.confidence),
+        verdict = primary.verdict
+        h_names = {x.name for x in h.signals}
+        note = None
+        if (e.verdict == "malicious" and h.verdict == "safe" and "strong_authentication" in h_names
+                and e.score < 0.85 and not any(x.weight > 0 for x in h.signals)):
+            # Engine-only signal against a strongly authenticated sender: route to an analyst rather than
+            # declaring it malicious (observed false positive on legitimate vendor invoices).
+            verdict = "suspicious"
+            note = "engine-only moderate signal on a DMARC/DKIM-authenticated sender; downgraded to suspicious for review"
+        merged = AnalysisResult(verdict, max(e.score, h.score), max(e.confidence, h.confidence),
                                 h.signals + e.signals, "engine+heuristic", explanation=e.explanation,
                                 counterfactual=e.counterfactual or h.counterfactual,
                                 mitre=e.mitre or h.mitre, missing_agents=e.missing_agents,
                                 raw={"engine": {"verdict": e.verdict, "score": e.score, **e.raw},
-                                     "heuristic": {"verdict": h.verdict, "score": h.score}})
+                                     "heuristic": {"verdict": h.verdict, "score": h.score}, "fusion_note": note})
         return merged

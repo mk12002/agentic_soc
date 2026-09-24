@@ -170,7 +170,7 @@ class PhishingService:
             for ev in block.get("evidence", []):
                 self.cases.add_evidence(case.id, summary=ev.summary, source=ev.source, dimension=ev.dimension,
                                         data=ev.data, deep_link=ev.deep_link, is_inference=ev.is_inference)
-        sub.campaign_key = hashlib.sha1(f"{em.sender_domain}|{sorted(em.url_domains)}".encode()).hexdigest()[:16]
+        sub.campaign_key = hashlib.sha256(f"{em.sender_domain}|{sorted(em.url_domains)}".encode()).hexdigest()[:16]
 
         # Grounded explanation over everything gathered (PH-F10). Figures stay in the evidence, not the model.
         evidence = self.s.execute(select(Evidence).where(Evidence.case_id == case.id)).scalars().all()

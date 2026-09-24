@@ -57,6 +57,9 @@ def _candidate_urls(database_url: str) -> list[DatabaseConnectionAttempt]:
     return ordered
 
 
+_BREAKER: dict[str, float] = {}
+
+
 def connect_database(
     database_url: str,
     *,
@@ -65,7 +68,20 @@ def connect_database(
     connect_timeout: int = 5,
     logger: Any | None = None,
 ):
-    """Connect to PostgreSQL, falling back across hostnames if needed."""
+    """Connect to PostgreSQL, falling back across hostnames if needed.
+
+    Circuit breaker: after every candidate/retry fails, the database is marked down for
+    ``DB_CIRCUIT_COOLDOWN_SECONDS`` (default 30) and further calls fail immediately instead of
+    stalling each email for the whole retry ladder. ``ENGINE_DATABASE_ENABLED=0`` disables it entirely.
+    """
+    import os
+    import time as _time
+
+    if os.environ.get("ENGINE_DATABASE_ENABLED", "1") == "0":
+        raise psycopg2.OperationalError("engine database disabled (ENGINE_DATABASE_ENABLED=0)")
+    opened_until = _BREAKER.get(database_url, 0.0)
+    if _time.monotonic() < opened_until:
+        raise psycopg2.OperationalError("database circuit open; skipping connection attempt")
 
     last_error: Exception | None = None
     candidates = _candidate_urls(database_url)
@@ -100,6 +116,7 @@ def connect_database(
                 logger.info("Retrying PostgreSQL connection", sleep_seconds=sleep_for)
             time.sleep(sleep_for)
 
+    _BREAKER[database_url] = _time.monotonic() + float(os.environ.get("DB_CIRCUIT_COOLDOWN_SECONDS", "30"))
     if last_error is None:
         raise psycopg2.OperationalError("Unable to establish a PostgreSQL connection")
     raise last_error

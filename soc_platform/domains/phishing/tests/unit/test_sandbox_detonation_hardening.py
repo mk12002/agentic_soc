@@ -112,26 +112,64 @@ def test_detonation_enforces_hardening_options(monkeypatch, tmp_path: Path) -> N
     assert fake_client.container.removed is True
 
 
-def test_detonation_compat_fallback_drops_unsupported_hardening_keys(monkeypatch, tmp_path: Path) -> None:
+def test_detonation_fails_closed_when_daemon_rejects_hardening(monkeypatch, tmp_path: Path) -> None:
+    """Security fix: the old code retried WITHOUT seccomp/pids/tmpfs limits; now it refuses to detonate."""
+    import pytest
+
     sample = tmp_path / "payload.sh"
     sample.write_text("echo hi", encoding="utf-8")
     fake_client = _FakeDockerClient(fail_first_create=True)
-
-    monkeypatch.setattr(sandbox_agent.settings, "sandbox_allow_network", True, raising=False)
+    monkeypatch.setattr(sandbox_agent.settings, "sandbox_allow_network", False, raising=False)
     monkeypatch.setattr(sandbox_agent.settings, "sandbox_timeout_seconds", 10, raising=False)
-    monkeypatch.setattr(sandbox_agent, "SANDBOX_RUNTIME_CSV", tmp_path / "sandbox_behavior" / "runtime_observations.csv")
+    with pytest.raises(sandbox_agent.SandboxHardeningError):
+        sandbox_agent._detonate_attachment(fake_client, sample)
+    assert len(fake_client.create_calls) == 1
+    assert fake_client.container.started is False
 
-    sandbox_agent._detonate_attachment(fake_client, sample)
 
-    assert len(fake_client.create_calls) == 2
-    first_call = fake_client.create_calls[0]
-    second_call = fake_client.create_calls[1]
+def test_hardened_kwargs_full_isolation(monkeypatch, tmp_path: Path) -> None:
+    import pytest
 
-    assert "security_opt" in first_call
-    assert "pids_limit" in first_call
-    assert "tmpfs" in first_call
+    sample = tmp_path / "x.sh"
+    sample.write_text("id", encoding="utf-8")
+    monkeypatch.setattr(sandbox_agent.settings, "sandbox_allow_network", False, raising=False)
+    monkeypatch.setattr(sandbox_agent.settings, "sandbox_runtime", "runsc", raising=False)
+    kw = sandbox_agent._hardened_container_kwargs("img@sha256:abc", "n", sample, "/tmp/sample.sh", "h")
+    assert kw["network_mode"] == "none" and kw["ipc_mode"] == "none" and kw["runtime"] == "runsc"
+    assert kw["memswap_limit"] == kw["mem_limit"] and kw["privileged"] is False and kw["init"] is True
+    assert {u["Name"] for u in kw["ulimits"]} == {"nofile", "core", "fsize"}
+    monkeypatch.setattr(sandbox_agent.settings, "sandbox_non_root_user", "0:0", raising=False)
+    with pytest.raises(sandbox_agent.SandboxHardeningError):
+        sandbox_agent._hardened_container_kwargs("img", "n", sample, "/tmp/sample.sh", "h")
 
-    assert "security_opt" not in second_call
-    assert "pids_limit" not in second_call
-    assert "tmpfs" not in second_call
-    assert "network_disabled" not in second_call
+
+def test_host_watchdog_kills_runaway_sample(monkeypatch, tmp_path: Path) -> None:
+    import time as _t
+
+    sample = tmp_path / "loop.sh"
+    sample.write_text("while :; do :; done", encoding="utf-8")
+    fake_client = _FakeDockerClient()
+    killed = {}
+
+    def hang(cmd, detach=False, **kw):
+        _t.sleep(3)
+        return _ExecResult(0, b"")
+
+    fake_client.container.exec_run = hang
+    fake_client.container.kill = lambda: killed.setdefault("yes", True)
+    monkeypatch.setattr(sandbox_agent.settings, "sandbox_timeout_seconds", -4, raising=False)  # deadline = 1s
+    monkeypatch.setattr(sandbox_agent, "SANDBOX_RUNTIME_CSV", tmp_path / "rt.csv")
+    score, indicators, behavior, _ = sandbox_agent._detonate_attachment(fake_client, sample)
+    assert "host_watchdog_killed_detonation" in indicators and killed.get("yes")
+    assert fake_client.container.removed is True
+
+
+def test_production_requires_pinned_image(monkeypatch, tmp_path: Path) -> None:
+    import pytest
+
+    sample = tmp_path / "a.sh"
+    sample.write_text("id", encoding="utf-8")
+    monkeypatch.setattr(sandbox_agent.settings, "app_env", "production", raising=False)
+    monkeypatch.setattr(sandbox_agent.settings, "sandbox_detonation_image", "python:3.11-slim", raising=False)
+    with pytest.raises(sandbox_agent.SandboxHardeningError):
+        sandbox_agent._detonate_attachment(_FakeDockerClient(), sample)

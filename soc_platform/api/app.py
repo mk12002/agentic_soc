@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,7 +38,67 @@ from soc_platform.core.policy import PolicyEngine, PolicyStore
 from soc_platform.llm.gateway import LLMGateway
 
 STATIC = Path(__file__).parent / "static"
-app = FastAPI(title="CCI SOC AI & Automation Platform", version=__version__)
+_PROD = get_settings().environment == "prod"
+app = FastAPI(title="CCI SOC AI & Automation Platform", version=__version__,
+              docs_url=None if _PROD else "/docs", redoc_url=None, openapi_url=None if _PROD else "/openapi.json")
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+MAX_BODY_BYTES = 30 * 1024 * 1024
+SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                               "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+                               "form-action 'self'",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Cache-Control": "no-store",
+}
+
+
+class _RateLimiter:
+    """Per-client token bucket (in-process; put a gateway/WAF limit in front for multi-replica deployments)."""
+
+    def __init__(self, rate: float = 20.0, burst: int = 120) -> None:
+        import threading
+        import time as _t
+
+        self.rate, self.burst, self._t, self._lock, self._b = rate, burst, _t, threading.Lock(), {}
+
+    def allow(self, key: str) -> bool:
+        with self._lock:
+            now = self._t.monotonic()
+            tokens, last = self._b.get(key, (float(self.burst), now))
+            tokens = min(self.burst, tokens + (now - last) * self.rate)
+            ok = tokens >= 1
+            self._b[key] = (tokens - 1 if ok else tokens, now)
+            if len(self._b) > 50_000:
+                self._b.clear()
+            return ok
+
+
+_limiter = _RateLimiter(float(__import__("os").environ.get("SOC_RATE_LIMIT_RPS", "20")),
+                        int(__import__("os").environ.get("SOC_RATE_LIMIT_BURST", "120")))
+
+
+class SecurityMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+            return JSONResponse({"detail": "request too large"}, status_code=413)
+        client = request.headers.get("authorization", "")[-24:] or (request.client.host if request.client else "anon")
+        if not _limiter.allow(client):
+            return JSONResponse({"detail": "rate limit exceeded"}, status_code=429, headers={"Retry-After": "5"})
+        response = await call_next(request)
+        for k, v in SECURITY_HEADERS.items():
+            response.headers.setdefault(k, v)
+        if request.url.scheme == "https":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
+
+
+app.add_middleware(SecurityMiddleware)
 
 
 # ----------------------------------------------------------------------------- dependencies

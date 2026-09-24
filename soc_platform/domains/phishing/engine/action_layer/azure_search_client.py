@@ -422,23 +422,25 @@ def get_azure_search_client() -> Optional[AzureSearchClient]:
     """Get or create the global Azure Search client."""
     global _azure_search_client
     
-    if _azure_search_client is not None:
-        return _azure_search_client
-    
-    # Check if Azure Search is configured (resolve settings at call time)
+    # Resolve settings at call time; the cached client is only reused while its configuration still
+    # matches, so removing or rotating credentials takes effect without a restart.
     current_settings = _get_settings()
     search_service = getattr(current_settings, "azure_search_service", None) if current_settings else None
     api_key = getattr(current_settings, "azure_search_api_key", None) if current_settings else None
-    
+
     if not search_service or not api_key:
         logger.debug("Azure Search not configured")
+        _azure_search_client = None
         return None
+    if _azure_search_client is not None and getattr(_azure_search_client, "_config_key", None) == (search_service, api_key):
+        return _azure_search_client
     
     try:
         _azure_search_client = AzureSearchClient(
             search_service=search_service,
             api_key=api_key,
         )
+        _azure_search_client._config_key = (search_service, api_key)
         return _azure_search_client
     except Exception as e:
         logger.warning("Failed to initialize Azure Search", error=str(e))

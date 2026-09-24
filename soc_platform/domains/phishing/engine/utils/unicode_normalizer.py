@@ -1,10 +1,10 @@
 """
-Unicode deception detection for phishing — homoglyphs, zero-width characters,
+Unicode deception detection for phishing \u2014 homoglyphs, zero-width characters,
 and mixed-script / punycode domain spoofing.
 
 Why this exists (grounded in real gaps):
 - ``url_agent._brand_impersonation_indicator`` checks ``brand not in host`` on the
-  raw string, so a Cyrillic look-alike like ``pаypal.com`` (the second character is
+  raw string, so a Cyrillic look-alike like ``p\u0430ypal.com`` (the second character is
   U+0430 CYRILLIC SMALL LETTER A) contains no ASCII ``paypal`` substring and is
   missed entirely.
 - ``header_agent`` uses Levenshtein distance ``<= 2`` against trusted domains, so a
@@ -13,7 +13,7 @@ Why this exists (grounded in real gaps):
 
 This module is **dependency-free** (standard-library ``unicodedata`` only). The
 confusables table is a *curated subset* covering the scripts most abused in real
-homograph attacks (Cyrillic, Greek, fullwidth/Latin variants) — it is deliberately
+homograph attacks (Cyrillic, Greek, fullwidth/Latin variants) \u2014 it is deliberately
 not the full Unicode confusables database, and every mapping here is a real,
 verifiable look-alike. Detection is conservative: it only fires on genuinely
 non-ASCII or invisible characters, so pure-ASCII input is never affected.
@@ -30,58 +30,58 @@ from typing import Any
 # ---------------------------------------------------------------------------
 _CONFUSABLES: dict[str, str] = {
     # Cyrillic lowercase look-alikes
-    "а": "a",  # а CYRILLIC SMALL LETTER A
-    "е": "e",  # е CYRILLIC SMALL LETTER IE
-    "о": "o",  # о CYRILLIC SMALL LETTER O
-    "р": "p",  # р CYRILLIC SMALL LETTER ER
-    "с": "c",  # с CYRILLIC SMALL LETTER ES
-    "х": "x",  # х CYRILLIC SMALL LETTER HA
-    "у": "y",  # у CYRILLIC SMALL LETTER U
-    "ѕ": "s",  # ѕ CYRILLIC SMALL LETTER DZE
-    "і": "i",  # і CYRILLIC SMALL LETTER BYELORUSSIAN-UKRAINIAN I
-    "ј": "j",  # ј CYRILLIC SMALL LETTER JE
-    "һ": "h",  # һ CYRILLIC SMALL LETTER SHHA
-    "ԁ": "d",  # ԁ CYRILLIC SMALL LETTER KOMI DE
-    "ԛ": "q",  # ԛ CYRILLIC SMALL LETTER QA
-    "ɡ": "g",  # ɡ LATIN SMALL LETTER SCRIPT G
+    "\u0430": "a",  # <U+0430> CYRILLIC SMALL LETTER A
+    "\u0435": "e",  # <U+0435> CYRILLIC SMALL LETTER IE
+    "\u043e": "o",  # <U+043E> CYRILLIC SMALL LETTER O
+    "\u0440": "p",  # <U+0440> CYRILLIC SMALL LETTER ER
+    "\u0441": "c",  # <U+0441> CYRILLIC SMALL LETTER ES
+    "\u0445": "x",  # <U+0445> CYRILLIC SMALL LETTER HA
+    "\u0443": "y",  # <U+0443> CYRILLIC SMALL LETTER U
+    "\u0455": "s",  # <U+0455> CYRILLIC SMALL LETTER DZE
+    "\u0456": "i",  # <U+0456> CYRILLIC SMALL LETTER BYELORUSSIAN-UKRAINIAN I
+    "\u0458": "j",  # <U+0458> CYRILLIC SMALL LETTER JE
+    "\u04bb": "h",  # <U+04BB> CYRILLIC SMALL LETTER SHHA
+    "\u0501": "d",  # <U+0501> CYRILLIC SMALL LETTER KOMI DE
+    "\u051b": "q",  # <U+051B> CYRILLIC SMALL LETTER QA
+    "\u0261": "g",  # <U+0261> LATIN SMALL LETTER SCRIPT G
     # Cyrillic uppercase look-alikes
-    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M",
-    "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
-    "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S",
+    "\u0410": "A", "\u0412": "B", "\u0415": "E", "\u041a": "K", "\u041c": "M",
+    "\u041d": "H", "\u041e": "O", "\u0420": "P", "\u0421": "C", "\u0422": "T",
+    "\u0425": "X", "\u0406": "I", "\u0408": "J", "\u0405": "S",
     # Greek look-alikes
-    "ο": "o",  # ο GREEK SMALL LETTER OMICRON
-    "α": "a",  # α GREEK SMALL LETTER ALPHA
-    "ρ": "p",  # ρ GREEK SMALL LETTER RHO
-    "ε": "e",  # ε GREEK SMALL LETTER EPSILON
-    "ν": "v",  # ν GREEK SMALL LETTER NU
-    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H",
-    "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O",
-    "Ρ": "P", "Τ": "T", "Χ": "X", "Υ": "Y",
+    "\u03bf": "o",  # <U+03BF> GREEK SMALL LETTER OMICRON
+    "\u03b1": "a",  # <U+03B1> GREEK SMALL LETTER ALPHA
+    "\u03c1": "p",  # <U+03C1> GREEK SMALL LETTER RHO
+    "\u03b5": "e",  # <U+03B5> GREEK SMALL LETTER EPSILON
+    "\u03bd": "v",  # <U+03BD> GREEK SMALL LETTER NU
+    "\u0391": "A", "\u0392": "B", "\u0395": "E", "\u0396": "Z", "\u0397": "H",
+    "\u0399": "I", "\u039a": "K", "\u039c": "M", "\u039d": "N", "\u039f": "O",
+    "\u03a1": "P", "\u03a4": "T", "\u03a7": "X", "\u03a5": "Y",
     # Latin-1 / extended accented forms commonly used to dress up brands
-    "ı": "i",  # ı LATIN SMALL LETTER DOTLESS I
-    "ӏ": "l",  # ӏ CYRILLIC SMALL LETTER PALOCHKA
+    "\u0131": "i",  # <U+0131> LATIN SMALL LETTER DOTLESS I
+    "\u04cf": "l",  # <U+04CF> CYRILLIC SMALL LETTER PALOCHKA
 }
 
 # Zero-width and bidirectional control characters. These are invisible and are used
-# to break up brand keywords (``pay​pal``) or visually reorder text.
+# to break up brand keywords (``pay<U+200B>pal``) or visually reorder text.
 _ZERO_WIDTH: dict[str, str] = {
-    "​": "ZERO WIDTH SPACE",
-    "‌": "ZERO WIDTH NON-JOINER",
-    "‍": "ZERO WIDTH JOINER",
-    "⁠": "WORD JOINER",
-    "﻿": "ZERO WIDTH NO-BREAK SPACE",
-    "­": "SOFT HYPHEN",
-    "‎": "LEFT-TO-RIGHT MARK",
-    "‏": "RIGHT-TO-LEFT MARK",
-    "‪": "LEFT-TO-RIGHT EMBEDDING",
-    "‫": "RIGHT-TO-LEFT EMBEDDING",
-    "‬": "POP DIRECTIONAL FORMATTING",
-    "‭": "LEFT-TO-RIGHT OVERRIDE",
-    "‮": "RIGHT-TO-LEFT OVERRIDE",
-    "⁦": "LEFT-TO-RIGHT ISOLATE",
-    "⁧": "RIGHT-TO-LEFT ISOLATE",
-    "⁨": "FIRST STRONG ISOLATE",
-    "⁩": "POP DIRECTIONAL ISOLATE",
+    "\u200b": "ZERO WIDTH SPACE",
+    "\u200c": "ZERO WIDTH NON-JOINER",
+    "\u200d": "ZERO WIDTH JOINER",
+    "\u2060": "WORD JOINER",
+    "\ufeff": "ZERO WIDTH NO-BREAK SPACE",
+    "\u00ad": "SOFT HYPHEN",
+    "\u200e": "LEFT-TO-RIGHT MARK",
+    "\u200f": "RIGHT-TO-LEFT MARK",
+    "\u202a": "LEFT-TO-RIGHT EMBEDDING",
+    "\u202b": "RIGHT-TO-LEFT EMBEDDING",
+    "\u202c": "POP DIRECTIONAL FORMATTING",
+    "\u202d": "LEFT-TO-RIGHT OVERRIDE",
+    "\u202e": "RIGHT-TO-LEFT OVERRIDE",
+    "\u2066": "LEFT-TO-RIGHT ISOLATE",
+    "\u2067": "RIGHT-TO-LEFT ISOLATE",
+    "\u2068": "FIRST STRONG ISOLATE",
+    "\u2069": "POP DIRECTIONAL ISOLATE",
 }
 
 
@@ -105,7 +105,7 @@ def skeleton(text: str) -> str:
     Map a string to its ASCII "skeleton" by replacing known confusable characters
     with their intended ASCII look-alike and dropping invisible characters.
 
-    ``skeleton("pаypal.com")`` -> ``"paypal.com"`` (Cyrillic 'а' folded to 'a').
+    ``skeleton("p\u0430ypal.com")`` -> ``"paypal.com"`` (Cyrillic '\u0430' folded to 'a').
     Pure-ASCII input is returned unchanged.
     """
     cleaned = strip_zero_width(text or "")
@@ -139,7 +139,7 @@ def scripts_used(text: str) -> set[str]:
 
 
 def is_mixed_script(text: str) -> bool:
-    """True if a single token mixes scripts (e.g. Latin + Cyrillic) — a strong
+    """True if a single token mixes scripts (e.g. Latin + Cyrillic) \u2014 a strong
     IDN-homograph signal that almost never occurs in legitimate domains."""
     return len(scripts_used(text)) > 1
 
@@ -159,7 +159,7 @@ def analyze_text(text: str) -> dict[str, Any]:
 
     Returns a structured, faithful report. ``skeleton`` is the folded ASCII form;
     callers compare it against known brands. Everything reported is derived
-    directly from the input characters — nothing is inferred or fabricated.
+    directly from the input characters \u2014 nothing is inferred or fabricated.
     """
     raw = text or ""
     folded = skeleton(raw)

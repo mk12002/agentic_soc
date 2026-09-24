@@ -111,6 +111,8 @@ class ContextStore:
         src.entity_id = ent.id
         src.resolution_method = res.method
         src.resolution_confidence = res.confidence
+        if kind == "asset":
+            self.resolver.absorb_provisional(ent, attrs, observed)
 
     def _materialise(self, res: ResolutionResult, kind: str, keys: dict[str, Any], attrs: dict[str, Any],
                      observed: datetime, tool: str) -> Entity:
@@ -129,6 +131,10 @@ class ContextStore:
         return ent
 
     def _touch(self, ent: Entity, attrs: dict[str, Any], observed: datetime, tool: str) -> None:
+        if ent.kind == "asset":
+            fq = attrs.get("fqdn") or (attrs.get("hostname") if "." in str(attrs.get("hostname") or "") else None)
+            if fq and "." not in (ent.display_name or ""):
+                ent.display_name = str(fq).lower()
         merged = dict(ent.attributes or {})
         by_tool = dict(merged.get("by_tool") or {})
         by_tool[tool] = {**by_tool.get(tool, {}), **attrs}

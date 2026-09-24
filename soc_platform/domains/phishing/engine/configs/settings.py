@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, description="API server port")
     api_workers: int = Field(default=4, description="Number of API workers")
     api_auth_enabled: bool = Field(
-        default=False, description="Enable shared API key authentication for protected endpoints"
+        default=True, description="Enable shared API key authentication for protected endpoints"
     )
     api_auth_key: Optional[str] = Field(
         default=None, description="Shared API key required when API auth is enabled"
@@ -532,7 +532,7 @@ class Settings(BaseSettings):
 
     # --- Sandbox Detonation ---
     sandbox_detonation_image: str = Field(
-        default="python:3.11-slim", description="Container image used for sandbox detonation"
+        default="soc-detonation:1", description="Container image used for sandbox detonation"
     )
     sandbox_timeout_seconds: int = Field(
         default=60, description="Max runtime for each sandbox detonation"
@@ -569,6 +569,18 @@ class Settings(BaseSettings):
     sandbox_pids_limit: int = Field(
         default=128, description="PID limit for each detonation container"
     )
+    sandbox_runtime: Optional[str] = Field(
+        default=None, description="OCI runtime for detonation containers, e.g. 'runsc' (gVisor) - strongly recommended")
+    sandbox_cpu_limit: float = Field(default=1.0, description="CPU cores available to a detonation container")
+    sandbox_seccomp_profile: Optional[str] = Field(
+        default=None, description="Path to a custom seccomp JSON profile (Docker default profile otherwise)")
+    sandbox_allow_image_pull: bool = Field(
+        default=False, description="Allow pulling the detonation image at runtime (dev only; prod uses a pinned local image)")
+    sandbox_max_output_bytes: int = Field(default=2_000_000, description="Cap on captured trace output per detonation")
+    sandbox_cape_url: Optional[str] = Field(
+        default=None, description="CAPEv2 base URL for Windows payload detonation (isolated analysis VM network)")
+    sandbox_cape_token: Optional[str] = Field(default=None, description="CAPEv2 API token")
+    sandbox_cape_timeout_seconds: int = Field(default=300, description="Max wait for a CAPE report")
     sandbox_max_detonations: int = Field(
         default=5, description="Maximum attachments to detonate per email"
     )
@@ -627,7 +639,7 @@ class Settings(BaseSettings):
     def validate_production_settings(self) -> list[str]:
         """Return list of warnings for unsafe production settings."""
         warnings = []
-        if self.is_production and self.app_secret_key == "change-me-in-production":
+        if self.is_production and self.app_secret_key == "change-me-in-production":  # nosec B105 - detects placeholder
             warnings.append(
                 "CRITICAL: APP_SECRET_KEY is using the default value in production! "
                 "Set a strong, unique secret key via the APP_SECRET_KEY environment variable."
@@ -643,6 +655,12 @@ class Settings(BaseSettings):
                 "Prefer isolated sandbox executor mode and disable local Docker detonation."
             )
 
+        if self.is_production and not self.api_auth_enabled:
+            warnings.append("CRITICAL: API_AUTH_ENABLED=false in production - the engine API is unauthenticated.")
+        if self.is_production and self.sandbox_allow_network:
+            warnings.append("CRITICAL: SANDBOX_ALLOW_NETWORK=true in production - detonation will be refused.")
+        if self.is_production and "@sha256:" not in (self.sandbox_detonation_image or ""):
+            warnings.append("CRITICAL: SANDBOX_DETONATION_IMAGE must be pinned by digest in production.")
         if self.sandbox_executor_url and not (self.sandbox_executor_shared_token or "").strip():
             warnings.append(
                 "WARNING: SANDBOX_EXECUTOR_URL is configured without SANDBOX_EXECUTOR_SHARED_TOKEN. "

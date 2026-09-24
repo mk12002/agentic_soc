@@ -6,6 +6,7 @@ can avoid direct Docker socket access.
 
 from __future__ import annotations
 
+import hmac
 from pathlib import Path
 from typing import Any
 
@@ -34,10 +35,11 @@ class DetonateResponse(BaseModel):
 
 
 def _validate_token(token: str | None) -> None:
+    """Fail closed: without a configured token the executor refuses every request."""
     expected = (settings.sandbox_executor_shared_token or "").strip()
-    if not expected:
-        return
-    if (token or "").strip() != expected:
+    if len(expected) < 24:
+        raise HTTPException(status_code=503, detail="Sandbox executor token not configured (min 24 chars)")
+    if not hmac.compare_digest((token or "").strip().encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="Invalid sandbox executor token")
 
 

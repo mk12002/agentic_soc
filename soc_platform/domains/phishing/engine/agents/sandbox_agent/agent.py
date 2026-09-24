@@ -8,6 +8,7 @@ import hashlib
 import math
 import re
 import shlex
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,63 @@ SUSPICIOUS_IMPORT_STRINGS = [b"VirtualAlloc", b"WriteProcessMemory", b"CreateRem
 WORKSPACE_ROOT = PHISHING_HOME
 SANDBOX_RUNTIME_CSV = WORKSPACE_ROOT / "datasets" / "sandbox_behavior" / "runtime_observations.csv"
 SANDBOX_CONTAINER_LABEL = "soc_platform.domains.phishing.engine.sandbox=detonation"
+WINDOWS_PAYLOAD_EXT = {".exe", ".dll", ".scr", ".msi", ".doc", ".docm", ".xls", ".xlsm", ".ppt", ".pptm", ".lnk",
+                       ".hta", ".vbs", ".vbe", ".wsf", ".ps1", ".bat", ".cmd", ".js", ".jse", ".one", ".iso", ".img",
+                       ".vhd", ".vhdx", ".pdf"}
+
+
+class SandboxHardeningError(RuntimeError):
+    """Raised instead of detonating when full isolation cannot be guaranteed (fail closed)."""
+
+
+def _hardened_container_kwargs(image: str, name: str, target: Path, sample_path: str, sample_hash: str) -> dict[str, Any]:
+    from docker.types import Ulimit
+
+    if settings.is_production and bool(settings.sandbox_allow_network):
+        raise SandboxHardeningError("network access for detonation is not permitted in production")
+    mem = max(64, int(settings.sandbox_memory_limit_mb))
+    security_opt = ["no-new-privileges"]
+    if settings.sandbox_seccomp_profile:
+        profile = Path(settings.sandbox_seccomp_profile)
+        if not profile.is_file():
+            raise SandboxHardeningError(f"seccomp profile {profile} not found")
+        security_opt.append(f"seccomp={profile.read_text(encoding='utf-8')}")
+    kw: dict[str, Any] = {
+        "image": image,
+        "command": ["sleep", "infinity"],
+        "detach": True,
+        "working_dir": "/sandbox",
+        "name": name,
+        "hostname": "sandbox",
+        "volumes": {str(target.resolve()): {"bind": sample_path, "mode": "ro"}},
+        "read_only": True,
+        "tmpfs": {"/sandbox": "rw,noexec,nosuid,nodev,size=256m",
+                  "/tmp": "rw,noexec,nosuid,nodev,size=128m"},  # nosec B108 - container-internal tmpfs
+        "cap_drop": ["ALL"],
+        "security_opt": security_opt,
+        "mem_limit": f"{mem}m",
+        "memswap_limit": f"{mem}m",          # no swap: memory limit is a hard limit
+        "pids_limit": max(32, int(settings.sandbox_pids_limit)),
+        "nano_cpus": int(max(0.1, float(settings.sandbox_cpu_limit)) * 1e9),
+        "ulimits": [Ulimit(name="nofile", soft=256, hard=256), Ulimit(name="core", soft=0, hard=0),
+                    Ulimit(name="fsize", soft=64 * 1024 * 1024, hard=64 * 1024 * 1024)],
+        "ipc_mode": "none",
+        "init": True,
+        "privileged": False,
+        "user": str(settings.sandbox_non_root_user or "65534:65534"),
+        "environment": {"HOME": "/sandbox", "PATH": "/usr/local/bin:/usr/bin:/bin"},
+        "stop_signal": "SIGKILL",
+        "labels": {"soc_platform.domains.phishing.engine.sandbox": "detonation",
+                   "email_security.component": "sandbox_agent", "email_security.sample": sample_hash},
+    }
+    if not bool(settings.sandbox_allow_network):
+        kw["network_disabled"] = True
+        kw["network_mode"] = "none"
+    if settings.sandbox_runtime:
+        kw["runtime"] = settings.sandbox_runtime
+    if str(kw["user"]).split(":")[0] in {"0", "root"}:
+        raise SandboxHardeningError("detonation must not run as root")
+    return kw
 
 EXECVE_RE = re.compile(r"execve\(\"(?P<exe>[^\"]+)\"(?:,\s*\[(?P<argv>.*?)\])?")
 CONNECT_RE = re.compile(r"sin_addr=inet_addr\(\"(?P<ip>\d+\.\d+\.\d+\.\d+)\"\)", re.IGNORECASE)
@@ -419,55 +477,27 @@ def _detonate_attachment(docker_client: Any, target: Path) -> tuple[float, list[
     image = settings.sandbox_detonation_image
     timeout_seconds = int(settings.sandbox_timeout_seconds)
     sample_name = f"sample{target.suffix.lower() or '.bin'}"
-    sample_path = f"/tmp/{sample_name}"
+    sample_path = f"/tmp/{sample_name}"  # nosec B108 - path inside the isolated detonation container
     ext = target.suffix.lower()
 
+    if settings.is_production and "@sha256:" not in image:
+        raise SandboxHardeningError("detonation image must be pinned by digest in production")
     try:
         docker_client.images.get(image)
     except ImageNotFound:
+        if not (bool(settings.sandbox_allow_image_pull) and not settings.is_production):
+            raise SandboxHardeningError(f"detonation image {image} not present locally and runtime pulls are disabled")
         docker_client.images.pull(image)
 
     sample_hash = hashlib.sha256(str(target).encode("utf-8", errors="ignore")).hexdigest()[:12]
     container_name = f"sandbox-det-{int(time.time())}-{sample_hash}"
 
-    container_kwargs: dict[str, Any] = {
-        "image": image,
-        "command": ["sh", "-lc", "while true; do sleep 1; done"],
-        "detach": True,
-        "working_dir": "/sandbox",
-        "name": container_name,
-        "volumes": {
-            str(target.resolve()): {
-                "bind": sample_path,
-                "mode": "ro",
-            }
-        },
-        "read_only": True,
-        "tmpfs": {
-            "/sandbox": "rw,noexec,nosuid,nodev,size=256m",
-            "/tmp": "rw,noexec,nosuid,nodev,size=128m",
-        },
-        "cap_drop": ["ALL"],
-        "security_opt": ["no-new-privileges"],
-        "mem_limit": f"{max(64, int(settings.sandbox_memory_limit_mb))}m",
-        "pids_limit": max(32, int(settings.sandbox_pids_limit)),
-        "user": str(settings.sandbox_non_root_user or "65534:65534"),
-        "labels": {
-            "soc_platform.domains.phishing.engine.sandbox": "detonation",
-            "email_security.component": "sandbox_agent",
-            "email_security.sample": sample_hash,
-        },
-    }
-    if not bool(settings.sandbox_allow_network):
-        container_kwargs["network_disabled"] = True
-
+    container_kwargs = _hardened_container_kwargs(image, container_name, target, sample_path, sample_hash)
     try:
         container = docker_client.containers.create(**container_kwargs)
-    except TypeError:
-        # Compatibility fallback for older daemons that reject one or more hardening args.
-        for key in ("security_opt", "pids_limit", "tmpfs"):
-            container_kwargs.pop(key, None)
-        container = docker_client.containers.create(**container_kwargs)
+    except (TypeError, DockerException) as exc:
+        # Fail closed: never retry with weaker isolation (the previous behaviour silently dropped hardening).
+        raise SandboxHardeningError(f"daemon rejected hardened container settings: {exc}") from exc
 
     indicators: list[str] = []
     behavior: dict[str, Any] = {
@@ -489,7 +519,6 @@ def _detonate_attachment(docker_client: Any, target: Path) -> tuple[float, list[
         detonation_cmd = _choose_exec_command(sample_path=sample_path, ext=ext)
         shell_cmd = (
             f"set -e; "
-            f"chmod +x {shlex.quote(sample_path)} || true; "
             f"if command -v strace >/dev/null 2>&1; then "
             f"  timeout {max(2, timeout_seconds - 2)}s strace -f -tt -s 256 -e trace=process,network,file {detonation_cmd}; "
             f"else "
@@ -500,13 +529,42 @@ def _detonate_attachment(docker_client: Any, target: Path) -> tuple[float, list[
 
         started = time.monotonic()
         
-        # Capture exec output directly instead of relying on detached container logs
-        exec_result = container.exec_run(["sh", "-lc", shell_cmd], detach=False)
-        
-        # Since timeout is built into shell_cmd, exec_run will block for at most timeout_seconds
-        exit_code = exec_result.exit_code if exec_result.exit_code is not None else 0
+        # Host-side watchdog: the in-container `timeout` can be killed or bypassed by the sample, so the
+        # host enforces its own deadline and kills the container if exec does not return in time.
+        box: dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                box["result"] = container.exec_run(["sh", "-c", shell_cmd], detach=False)
+            except Exception as exc:  # pragma: no cover - surfaced below
+                box["error"] = exc
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        worker.join(timeout_seconds + 5)
+        if worker.is_alive():
+            timed_out = True
+            indicators.append("host_watchdog_killed_detonation")
+            try:
+                container.kill()
+            except Exception:
+                pass
+            worker.join(5)
+        exec_result = box.get("result")
+        if box.get("error") is not None and exec_result is None:
+            raise box["error"]
+        exit_code = (exec_result.exit_code if exec_result is not None and exec_result.exit_code is not None
+                     else (124 if timed_out else 0))
         nonzero_exit = exit_code != 0
-        raw_logs = exec_result.output.decode("utf-8", errors="replace") if isinstance(exec_result.output, (bytes, bytearray)) else str(exec_result.output)
+        output = exec_result.output if exec_result is not None else b""
+        cap = max(10_000, int(settings.sandbox_max_output_bytes))
+        if isinstance(output, (bytes, bytearray)):
+            if len(output) > cap:
+                indicators.append("sandbox_output_truncated")
+                output = output[:cap]
+            raw_logs = output.decode("utf-8", errors="replace")
+        else:
+            raw_logs = str(output)[:cap]
         if "__NO_STRACE__" in raw_logs:
             indicators.append("sandbox_strace_unavailable")
             raw_logs = raw_logs.replace("__NO_STRACE__", "")
@@ -637,6 +695,55 @@ def _detonate_via_executor(target: Path) -> tuple[float, list[str], dict[str, An
     return heuristic_score, indicators, behavior, training_row
 
 
+def _detonate_via_cape(target: Path) -> tuple[float, list[str], dict[str, Any], dict[str, Any]]:
+    """Detonate in CAPEv2 (Windows analysis VMs on an isolated network) - required for PE/Office/script payloads,
+    which a Linux container cannot meaningfully execute."""
+    base = str(settings.sandbox_cape_url or "").rstrip("/")
+    if not base:
+        raise OSError("sandbox_cape_url_not_configured")
+    headers = {"Authorization": f"Token {settings.sandbox_cape_token}"} if settings.sandbox_cape_token else {}
+    deadline = time.monotonic() + max(60, int(settings.sandbox_cape_timeout_seconds))
+    with httpx.Client(timeout=60) as client:
+        with target.open("rb") as fh:
+            r = client.post(f"{base}/apiv2/tasks/create/file/", headers=headers,
+                            files={"file": (target.name, fh)},
+                            data={"timeout": str(max(60, int(settings.sandbox_timeout_seconds))), "enforce_timeout": "1",
+                                  "route": "none" if not settings.sandbox_allow_network else "internet"})
+        r.raise_for_status()
+        task_id = ((r.json().get("data") or {}).get("task_ids") or [None])[0]
+        if task_id is None:
+            raise OSError(f"CAPE did not accept the sample: {r.text[:200]}")
+        while True:
+            st = client.get(f"{base}/apiv2/tasks/status/{task_id}/", headers=headers).json().get("data")
+            if st == "reported":
+                break
+            if st in {"failed_analysis", "failed_processing", "failed_reporting"} or time.monotonic() > deadline:
+                raise OSError(f"CAPE task {task_id} status {st}")
+            time.sleep(5)
+        report = client.get(f"{base}/apiv2/tasks/get/report/{task_id}/", headers=headers).json()
+    malscore = float(report.get("malscore") or 0.0)
+    sigs = [s.get("name") for s in report.get("signatures") or [] if s.get("name")]
+    procs = [p.get("process_name") for p in (report.get("behavior") or {}).get("processes") or []]
+    hosts = [h.get("ip") if isinstance(h, dict) else h for h in (report.get("network") or {}).get("hosts") or []]
+    behavior = {"exec_chain": [p for p in procs if p], "remote_ips": [h for h in hosts if h and not _is_private_ip(h)],
+                "sensitive_writes": [], "shell_spawned": any(str(p).lower() in {"cmd.exe", "powershell.exe", "wscript.exe",
+                                                                                "cscript.exe", "mshta.exe"} for p in procs),
+                "network_tool_spawned": bool(hosts), "critical_chain_detected": malscore >= 7,
+                "cape_task_id": task_id, "cape_signatures": sigs[:50],
+                "cape_families": report.get("detections") or report.get("malfamily")}
+    score = _clamp(malscore / 10.0)
+    indicators = ["sandbox_cape_mode"] + [f"cape_signature:{s}" for s in sigs[:20]]
+    training_row = _derive_training_row(target=target, signals=behavior, timed_out=False, exit_code=0, risk_score=score)
+    return score, indicators, behavior, training_row
+
+
+def _select_detonator(target: Path, local_fn: Any) -> Any:
+    """Windows-type payloads go to CAPE when configured; everything else to the hardened executor/container."""
+    if settings.sandbox_cape_url and target.suffix.lower() in WINDOWS_PAYLOAD_EXT:
+        return _detonate_via_cape
+    return local_fn
+
+
 def analyze(data: dict[str, Any]) -> dict[str, Any]:
     logger.info("Starting analysis", agent="sandbox_agent")
     attachments = data.get("attachments", []) or []
@@ -685,6 +792,10 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
             indicators.append("sandbox_executor_mode")
             detonate_fn = _detonate_via_executor
             analysis_mode = "executor"
+        elif settings.sandbox_cape_url:
+            indicators.append("sandbox_cape_only_mode")
+            detonate_fn = _detonate_via_cape
+            analysis_mode = "cape"
         else:
             indicators.append("sandbox_local_docker_disabled")
 
@@ -735,8 +846,11 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
             indicators.append(f"sandbox_static_score:{static_score:.3f}:{target.name}")
 
             try:
-                detonation_score, detonation_indicators, behavior, training_row = detonate_fn(target)
+                detonation_score, detonation_indicators, behavior, training_row = _select_detonator(
+                    target, detonate_fn)(target)
             except Exception as exc:
+                if isinstance(exc, SandboxHardeningError):
+                    indicators.append("sandbox_refused_insecure_isolation")
                 if local_docker_enabled:
                     indicators.append("docker_sandbox_unavailable")
                 else:

@@ -9,6 +9,10 @@ import tempfile
 from pathlib import Path
 import importlib
 
+# Engine endpoint tests exercise functionality directly; auth itself is covered by test_api_security.py,
+# which enables it explicitly. Pin the setting so results do not depend on a developer's .env.
+os.environ["API_AUTH_ENABLED"] = "0"
+
 # --- IOC_DB_PATH override for local development ---
 # The .env file sets IOC_DB_PATH=/app/data/ioc_store.db (Docker path).
 # When running tests locally, /app/ doesn't exist and can't be created.

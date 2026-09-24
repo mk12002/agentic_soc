@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pickle
+
+from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
 from pathlib import Path
 from typing import Any, Optional
 
@@ -54,8 +56,10 @@ class ModelLoader:
 
             logger.info("Loading content model artifact", path=str(artifact))
             if artifact.suffix == ".joblib":
+                verify_artifact(artifact)
                 loaded = joblib.load(artifact)
             else:
+                verify_artifact(artifact)
                 with open(artifact, "rb") as handle:
                     loaded = pickle.load(handle)  # nosec B301
 

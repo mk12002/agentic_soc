@@ -13,7 +13,7 @@ def test_executor_rejects_missing_token_when_required(monkeypatch, tmp_path: Pat
     sample = tmp_path / "sample.bin"
     sample.write_bytes(b"x")
 
-    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "secret-token", raising=False)
+    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "executor-test-token-0123456789abcdef", raising=False)
     monkeypatch.setattr(executor_service.settings, "sandbox_executor_attachment_root", str(tmp_path), raising=False)
 
     client = TestClient(executor_service.app)
@@ -30,11 +30,11 @@ def test_executor_rejects_path_outside_attachment_root(monkeypatch, tmp_path: Pa
     outside = tmp_path / "outside.bin"
     outside.write_bytes(b"payload")
 
-    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "", raising=False)
+    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "executor-test-token-0123456789abcdef", raising=False)
     monkeypatch.setattr(executor_service.settings, "sandbox_executor_attachment_root", str(allowed_root), raising=False)
 
     client = TestClient(executor_service.app)
-    resp = client.post("/detonate", json={"attachment_path": str(outside)})
+    resp = client.post("/detonate", json={"attachment_path": str(outside)}, headers={"x-sandbox-token": "executor-test-token-0123456789abcdef"})
 
     assert resp.status_code == 403
     assert "outside allowed root" in resp.text
@@ -50,11 +50,11 @@ def test_executor_rejects_prefix_bypass_path(monkeypatch, tmp_path: Path) -> Non
     bypass_file = prefix_bypass / "evil.bin"
     bypass_file.write_bytes(b"payload")
 
-    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "", raising=False)
+    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "executor-test-token-0123456789abcdef", raising=False)
     monkeypatch.setattr(executor_service.settings, "sandbox_executor_attachment_root", str(allowed_root), raising=False)
 
     client = TestClient(executor_service.app)
-    resp = client.post("/detonate", json={"attachment_path": str(bypass_file)})
+    resp = client.post("/detonate", json={"attachment_path": str(bypass_file)}, headers={"x-sandbox-token": "executor-test-token-0123456789abcdef"})
 
     assert resp.status_code == 403
     assert "outside allowed root" in resp.text
@@ -63,11 +63,11 @@ def test_executor_rejects_prefix_bypass_path(monkeypatch, tmp_path: Path) -> Non
 def test_executor_rejects_missing_attachment(monkeypatch, tmp_path: Path) -> None:
     missing = tmp_path / "missing.exe"
 
-    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "", raising=False)
+    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "executor-test-token-0123456789abcdef", raising=False)
     monkeypatch.setattr(executor_service.settings, "sandbox_executor_attachment_root", str(tmp_path), raising=False)
 
     client = TestClient(executor_service.app)
-    resp = client.post("/detonate", json={"attachment_path": str(missing)})
+    resp = client.post("/detonate", json={"attachment_path": str(missing)}, headers={"x-sandbox-token": "executor-test-token-0123456789abcdef"})
 
     assert resp.status_code == 404
     assert "not found" in resp.text
@@ -80,7 +80,7 @@ def test_executor_returns_detonation_payload(monkeypatch, tmp_path: Path) -> Non
     class _DummyDockerClient:
         pass
 
-    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "abc123", raising=False)
+    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "executor-test-token-0123456789abcdef", raising=False)
     monkeypatch.setattr(executor_service.settings, "sandbox_executor_attachment_root", str(tmp_path), raising=False)
     monkeypatch.setattr(executor_service.docker, "from_env", lambda: _DummyDockerClient())
     monkeypatch.setattr(
@@ -98,7 +98,7 @@ def test_executor_returns_detonation_payload(monkeypatch, tmp_path: Path) -> Non
     resp = client.post(
         "/detonate",
         json={"attachment_path": str(sample)},
-        headers={"x-sandbox-token": "abc123"},
+        headers={"x-sandbox-token": "executor-test-token-0123456789abcdef"},
     )
 
     assert resp.status_code == 200
@@ -107,3 +107,11 @@ def test_executor_returns_detonation_payload(monkeypatch, tmp_path: Path) -> Non
     assert "remote_connect_detected" in body["indicators"]
     assert body["behavior"]["remote_ips"] == ["8.8.8.8"]
     assert body["training_row"]["behavior_risk_score"] == 0.91
+
+
+def test_executor_refuses_everything_when_token_unconfigured(monkeypatch, tmp_path: Path) -> None:
+    """Security fix: an unconfigured executor used to accept unauthenticated detonation requests."""
+    monkeypatch.setattr(executor_service.settings, "sandbox_executor_shared_token", "", raising=False)
+    client = TestClient(executor_service.app)
+    r = client.post("/detonate", json={"attachment_path": str(tmp_path / "x")})
+    assert r.status_code == 503

@@ -34,6 +34,9 @@ def load_calibrator() -> dict[str, Any] | None:
     try:
         import joblib  # type: ignore
 
+        from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
+
+        verify_artifact(path)
         payload = joblib.load(path)
         if not isinstance(payload, dict) or "method" not in payload or "model" not in payload:
             _CALIBRATOR_CACHE[key] = None

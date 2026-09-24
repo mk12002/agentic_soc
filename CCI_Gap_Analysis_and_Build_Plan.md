@@ -28,16 +28,21 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | 1 | Plug-and-play connector registry + one connector per tool (live + fixture mode) | ✅ | 20 connectors: CrowdStrike, MDE, MDO (+reporting mailbox), Entra, Rapid7, Wiz, Avanan, Umbrella, Canary, Delinea SS, Delinea PM, NVD, EPSS, CISA KEV, TI fusion (8 sources), ServiceNow, Jira, CSV CMDB, Sentinel, generic SIEM |
 | 1 | Refactor email system into `soc_platform/domains/phishing` | ✅ | ML engine at `domains/phishing/engine`, artifacts at `artifacts/phishing`; 173/176 engine tests pass in new layout (3 await repo-level deploy files) |
 | 1 | Shared case / enrichment layer (consolidated view, parallel enrichment, partial-result transparency, shadow agreement) | ✅ | `core/cases.py`, `core/enrichment.py` |
-| 1 | Platform API + analyst UI | 🟡 | |
-| 1 | Repo cleanup, README, .gitignore, push to GitHub | 🟡 | |
+| 1 | Platform API + analyst console (all 3 domains, approvals, policy, audit, reports) | ✅ | `soc_platform/api/` - strict CSP, rate limiting, RBAC; real-server smoke tested |
+| 1 | Repo cleanup, README, .gitignore, push to GitHub | ✅ | https://github.com/mk12002/agentic_soc - models via Git LFS, no secrets (scanned) |
 | 2 | Phishing: ingestion, decomposition incl. QR, analysis (engine + heuristic), reconciliation, campaign, user impact, recommendations, feedback, auto-close+sampling, propagation, metrics | ✅ | `domains/phishing/` - PH-F01..F16 covered; labelled corpus 10/10 (tuned on same corpus - see report) |
-| 3 | Reporting engine (docx/pptx, deterministic figures) | 🟡 | |
+| 3 | Reporting engine: daily exposure, weekly VM, management deck, investigation record | ✅ | `soc_platform/reporting/` - CCI templates plug in via `templates` (A08) |
 | 4 | Incident: ingestion, clustering+suppression, entity extraction, 8-dimension enrichment, exposure-informed severity, MITRE, grounded summary, recommendations, similar incidents, handover, Canary triage | ✅ | `domains/incident/service.py` - IM-F01..F16 |
 | 5 | Vulnerability: ingestion, consolidation, NVD/EPSS/KEV prioritisation, ownership, affected devices, campaigns, notifications, follow-up, validation+false closure, exceptions, risk register, metrics, NL query, new-KEV assessment, coverage | ✅ | `domains/vulnerability/` - VM-F01..F18 (report templates pending under phase 3) |
 | 6 | Guarded response: all actions via native APIs behind policy; promotion L2→L3/L4 by policy change | ✅ | promotion is a reviewed policy change; nothing auto-executes by default |
-| — | Scale / realistic-data tests, live public-feed tests, engine accuracy run, final test report | 🟡 | |
+| — | Realistic-data testing: 20 connectors, 400-host resolution stress test, live NVD/EPSS/KEV, phishing corpus + engine evaluation, resilience & security tests | ✅ | `docs/TEST_REPORT.md` |
+| H | Sandbox hardening: fail-closed isolation, host watchdog, output cap, pinned image, gVisor option, CAPEv2 backend for Windows payloads, executor fail-closed auth | ✅ | `docs/SECURITY.md` |
+| H | Engine API auth on by default + constant-time compare; model integrity manifest (pickle); DB circuit breaker; bidi chars removed; dependency CVEs fixed / unused deps removed | ✅ | bandit + pip-audit clean |
+| H | Entity resolution fixes found by stress test (clone-serial false merges, IP-only phantoms) | ✅ | 0 false merges |
+| — | Deploy images built and run | ⛔ | Docker not available on the build machine; compose validated statically |
+| — | Live connector validation against CCI tenants | ⛔ | needs CCI API access (A01, D01) |
 
-Platform test suite: 81 passed (core, connectors, incident, vulnerability, phishing). Phishing ML engine suite: 173 passed.
+Platform test suite: 98 passed + 3 live (opt-in). Phishing ML engine suite: see docs/TEST_REPORT.md §7.
 
 ---
 

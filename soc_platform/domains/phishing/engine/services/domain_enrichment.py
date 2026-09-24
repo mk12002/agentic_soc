@@ -70,6 +70,10 @@ def enrich_domain(domain: str) -> dict[str, Any]:
         return result
 
     try:
+        import os
+
+        if os.environ.get("DOMAIN_WHOIS_ENABLED", "1") == "0":
+            raise ImportError("WHOIS disabled by DOMAIN_WHOIS_ENABLED=0")
         import whois
         w = whois.whois(domain)
         if w:
