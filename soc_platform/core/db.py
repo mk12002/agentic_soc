@@ -34,6 +34,7 @@ class Database:
         from soc_platform.core import models  # noqa: F401  (register tables)
         from soc_platform.domains.phishing import models as _ph  # noqa: F401
         from soc_platform.domains.vulnerability import models as _vm  # noqa: F401
+        from soc_platform.intelligence import models as _intel  # noqa: F401
 
         Base.metadata.create_all(self.engine)
 

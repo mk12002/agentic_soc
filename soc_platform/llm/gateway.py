@@ -93,6 +93,22 @@ class AzureOpenAIProvider(Provider):
                           int(usage.get("completion_tokens", 0)), str(body.get("model", deployment)))
 
 
+def build_provider(settings: Settings) -> Provider:
+    """Provider factory: none | azure_openai | anthropic | openai_compatible (SOC_LLM_PROVIDER)."""
+    name = (settings.llm_provider or "none").lower()
+    if name == "azure_openai":
+        return AzureOpenAIProvider(settings)
+    if name == "anthropic":
+        from soc_platform.llm.providers.anthropic_provider import AnthropicProvider
+
+        return AnthropicProvider(settings)
+    if name == "openai_compatible":
+        from soc_platform.llm.providers.openai_compatible import OpenAICompatibleProvider
+
+        return OpenAICompatibleProvider(settings)
+    return NullProvider()
+
+
 class BudgetExceeded(Exception):
     pass
 
@@ -103,10 +119,12 @@ class LLMGateway:
         self.s = session
         self.settings = settings
         if provider is None:
-            provider = AzureOpenAIProvider(settings) if settings.llm_provider == "azure_openai" else NullProvider()
+            provider = build_provider(settings)
         self.provider = provider
-        self.redactor_factory = (lambda: Redactor(internal_domains=set(redactor.internal_domains),
-                                                  known_names=set(redactor.known_names))) if redactor else Redactor
+        base_domains = set(settings.org_domains) | (set(redactor.internal_domains) if redactor else set())
+        base_names = set(redactor.known_names) if redactor else set()
+        # Default redaction always knows the organisation's domains, so no caller can forget it.
+        self.redactor_factory = lambda: Redactor(internal_domains=set(base_domains), known_names=set(base_names))
 
     # ------------------------------------------------------------------ budget
 
@@ -128,6 +146,7 @@ class LLMGateway:
     def complete_json(self, workflow: str, system: str, user: str, *, tier: str = "large",
                       redactor: Redactor | None = None) -> dict[str, Any] | None:
         red = redactor or self.redactor_factory()
+        red.internal_domains |= set(self.settings.org_domains)
         prompt = red.redact(user) if self.settings.llm_redact_pii else user
         if self.budget_status()["exceeded"]:
             self._log(workflow, prompt, "", 0, 0, "none", status="budget_exceeded")

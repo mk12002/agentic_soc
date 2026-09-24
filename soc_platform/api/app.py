@@ -425,9 +425,27 @@ def list_cases(domain: str | None = None, status: str | None = None, _: Principa
 @app.get("/api/v1/cases/{cid}")
 def get_case(cid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
     try:
-        return CaseService(s).view(cid)
+        view = CaseService(s).view(cid)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    view["intelligence"] = _case_intelligence(s, view)
+    return view
+
+
+def _case_intelligence(s: Session, view: dict[str, Any]) -> dict[str, Any]:
+    from soc_platform.intelligence.models import Insight
+    from soc_platform.intelligence.risk import RiskEngine
+
+    ids = {e["id"] for e in view["entities"]}
+    insights = [i for i in s.execute(select(Insight).where(Insight.status != "dismissed")).scalars()
+                if ids & set(i.entity_ids)]
+    risk = RiskEngine(s)
+    profiles = [p for e in view["entities"] if e["kind"] in {"asset", "identity"} and (p := risk.profile(e["id"]))]
+    return {"insights": [{"id": i.id, "rule": i.rule, "title": i.title, "severity": i.severity,
+                          "narrative": i.narrative, "next_steps": i.next_steps} for i in
+                         sorted(insights, key=lambda x: -x.score)],
+            "entity_risk": [{"entity_id": p.entity_id, "name": p.name, "score": p.score, "band": p.band,
+                             "dimensions": p.dimensions} for p in sorted(profiles, key=lambda p: -p.score)]}
 
 
 class DispositionBody(BaseModel):
@@ -479,6 +497,8 @@ def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVES
     for sub in subs:
         if process and sub.status == "new":
             out.append(svc.process(sub.id)["case"])
+    if out:
+        _intel(s).refresh()
     return {"submissions": [x.id for x in subs], "processed": out}
 
 
@@ -507,6 +527,7 @@ def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INV
     ing = svc.ingest()
     cases = svc.cluster()
     done = [svc.investigate(c.id)["case"] for c in cases if investigate and c.status != "closed"]
+    _intel(s).refresh()
     return {"ingested": ing.synced, "errors": ing.errors, "new_incidents": len(cases), "investigated": done}
 
 
@@ -525,7 +546,9 @@ def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ)), 
 
 @app.post("/api/v1/vm/refresh")
 def vm_refresh(p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
-    return _services(s)["vulnerability"].refresh()
+    out = _services(s)["vulnerability"].refresh()
+    _intel(s).refresh()
+    return out
 
 
 @app.get("/api/v1/vm/metrics")
@@ -677,3 +700,85 @@ def download_report(rid: str, _: Principal = Depends(need(Perm.READ)), s: Sessio
     if run is None:
         raise HTTPException(404, "unknown report")
     return FileResponse(run.path, filename=Path(run.path).name)
+
+
+# ----------------------------------------------------------------------------- intelligence layer
+
+
+def _intel(s: Session):
+    from soc_platform.intelligence.analyst import IntelligenceService
+
+    return IntelligenceService(s, llm(s), vm=_services(s)["vulnerability"])
+
+
+def _insight(i) -> dict[str, Any]:
+    return {"id": i.id, "rule": i.rule, "title": i.title, "severity": i.severity, "score": i.score, "status": i.status,
+            "domains": i.domains, "entity_ids": i.entity_ids, "evidence": i.evidence, "next_steps": i.next_steps,
+            "narrative": i.narrative, "narrative_source": i.narrative_source, "requirements": i.requirement_refs,
+            "first_seen": i.first_seen.isoformat(), "last_seen": i.last_seen.isoformat()}
+
+
+@app.get("/api/v1/intelligence/insights")
+def intel_insights(severity: str | None = None, status: str = "new,acknowledged", _: Principal = Depends(need(Perm.READ)),
+                   s: Session = Depends(db_session)):
+    from soc_platform.intelligence.models import Insight
+
+    q = select(Insight).where(Insight.status.in_(status.split(","))).order_by(Insight.score.desc())
+    if severity:
+        q = q.where(Insight.severity.in_(severity.split(",")))
+    return [_insight(i) for i in s.execute(q).scalars()]
+
+
+@app.post("/api/v1/intelligence/refresh")
+def intel_refresh(p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+    return {"insights": len(_intel(s).refresh())}
+
+
+@app.post("/api/v1/intelligence/insights/{iid}/{verb}")
+def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+    from soc_platform.intelligence.models import Insight
+
+    status = {"acknowledge": "acknowledged", "dismiss": "dismissed", "resolve": "resolved"}.get(verb)
+    i = s.get(Insight, iid)
+    if status is None or i is None:
+        raise HTTPException(404, "unknown insight or verb")
+    i.status, i.decided_by = status, p.id
+    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type=f"insight.{status}", subject_type="insight",
+                       subject_id=iid, payload={"rule": i.rule, "title": i.title})
+    return _insight(i)
+
+
+@app.get("/api/v1/intelligence/risk/top")
+def intel_top(kind: str | None = None, limit: int = 10, _: Principal = Depends(need(Perm.READ)),
+              s: Session = Depends(db_session)):
+    from soc_platform.intelligence.risk import RiskEngine
+
+    return [p.as_dict() for p in RiskEngine(s).top(kind, limit)]
+
+
+@app.get("/api/v1/intelligence/entities/{eid}/risk")
+def intel_entity_risk(eid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    from soc_platform.intelligence.risk import RiskEngine
+
+    p = RiskEngine(s).profile(eid)
+    if p is None:
+        raise HTTPException(404, "not a user/host entity")
+    return p.as_dict()
+
+
+class AskBody(BaseModel):
+    question: str = Field(min_length=3, max_length=2000)
+
+
+@app.post("/api/v1/intelligence/ask")
+def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    out = _intel(s).analyst.ask(body.question)
+    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="intelligence.ask", subject_type="question",
+                       subject_id="ask", payload={"question": body.question, "planner": out["planner"],
+                                                  "tool_calls": out["tool_calls"]})
+    return out
+
+
+@app.get("/api/v1/intelligence/brief")
+def intel_brief(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    return _intel(s).analyst.brief()

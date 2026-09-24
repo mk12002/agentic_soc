@@ -12,7 +12,7 @@ CCI's own analyst dispositions (PH-T08, NFR-15), which the platform records auto
 
 | Area | Result |
 |---|---|
-| Platform test suite (`soc_platform/tests`) | **98 passed**, 3 live tests skipped by default (pass with `SOC_LIVE_TESTS=1`) |
+| Platform test suite (`soc_platform/tests`) | **108 passed**, 3 live tests skipped by default (pass with `SOC_LIVE_TESTS=1`) |
 | Phishing ML engine suite (`soc_platform/domains/phishing/tests`) | **224 passed** (182 unit/top-level + 42 integration), 2 skipped |
 | Connectors | **20/20** discovered; every stream syncs, every lookup answers, actions route to the right vendor |
 | Asset identity resolution at scale | **0 false merges** across 3 × 400-host messy estates (was 23 hosts wrongly merged before fixes) |
@@ -167,6 +167,24 @@ backend and model-integrity verification.
   rate limiting.
 * Sandbox: fail-closed hardening, watchdog, no network, gVisor option, CAPE for Windows payloads.
 
+## 8a. Intelligence layer
+
+`test_intelligence.py`, `test_api.py::test_intelligence_endpoints`
+
+* On the scenario the correlation engine finds: the full phishing → endpoint execution → identity
+  compromise chain for Jane; privileged secret access after compromise; deception hit corroborated by six
+  other sources; db01 exploitation attempt (T1190) against a host carrying ProxyNotShell (KEV); newly
+  KEV-listed CVE-2024-21412 on two laptops; the phishing domain still resolvable (control gap).
+* Negative checks: the Canary decoy is not scored as an asset; a low-confidence alert on web01 does not
+  produce an "under attack" finding; a dismissed insight stays dismissed on re-run; no duplicates.
+* Entity risk: Jane 98/100 (7 dimensions), JANE-LT01 92/100; every factor cites its source record.
+* LLM analyst with a scripted model: a hallucinated tool (`drop_all_tables`) is ignored, an uncited claim
+  ("approve every pending action") is dropped, and the prompt contains no internal identities.
+* **Bug found and fixed**: the analyst's prompts were not pseudonymising internal users because the default
+  redactor did not know the org domains → `SOC_ORG_DOMAINS` is now applied to every LLM call by default.
+* Providers: Anthropic (mocked SDK client: tiers, refusal fallback, refusal → deterministic path),
+  OpenAI-compatible, factory and approved-endpoint enforcement.
+
 ## 9. Not verified / limitations
 
 * **No CCI data or credentials**: live connector behaviour against CCI's tenants (scopes, licences,
@@ -176,6 +194,6 @@ backend and model-integrity verification.
   (YAML parse, service wiring, no socket mounts) but not built or run.
 * Detection accuracy is from small synthetic/public sets; the heuristic rules were informed by the same
   samples. Real accuracy must come from shadow mode on CCI's reported mail.
-* LLM narrative was tested with mocked providers only (no approved endpoint was available); the
-  platform is fully functional without an LLM.
+* LLM providers were tested with mocked clients only (no approved endpoint/key was available); the
+  platform is fully functional without an LLM, and output quality with a real model must be evaluated.
 * PostgreSQL was not exercised (SQLite used throughout); the SQLAlchemy models are dialect-neutral.

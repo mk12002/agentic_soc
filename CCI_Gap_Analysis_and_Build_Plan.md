@@ -39,10 +39,11 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | H | Sandbox hardening: fail-closed isolation, host watchdog, output cap, pinned image, gVisor option, CAPEv2 backend for Windows payloads, executor fail-closed auth | ✅ | `docs/SECURITY.md` |
 | H | Engine API auth on by default + constant-time compare; model integrity manifest (pickle); DB circuit breaker; bidi chars removed; dependency CVEs fixed / unused deps removed | ✅ | bandit + pip-audit clean |
 | H | Entity resolution fixes found by stress test (clone-serial false merges, IP-only phantoms) | ✅ | 0 false merges |
+| I | Intelligence layer: entity risk (all streams), 10 cross-domain correlation rules (U02/U04/U06/U07/U08/U10/U16), LLM analyst (narrative, daily brief, tool-planning Q&A), providers: Azure OpenAI / Anthropic Claude / OpenAI-compatible | ✅ | `soc_platform/intelligence/`, console Intelligence tab |
 | — | Deploy images built and run | ⛔ | Docker not available on the build machine; compose validated statically |
 | — | Live connector validation against CCI tenants | ⛔ | needs CCI API access (A01, D01) |
 
-Platform test suite: 98 passed + 3 live (opt-in). Phishing ML engine suite: 182 unit/top-level + 42 integration passed. Details: docs/TEST_REPORT.md.
+Platform test suite: 108 passed + 3 live (opt-in). Phishing ML engine suite: 182 unit/top-level + 42 integration passed. Details: docs/TEST_REPORT.md.
 
 ---
 

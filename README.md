@@ -55,6 +55,30 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build       
 docker compose -f deploy/docker-compose.yml --env-file .env --profile engine up -d   # + ML microservices
 ```
 
+## Intelligence layer
+
+Above the three workflows sits a cross-domain intelligence layer (`soc_platform/intelligence/`):
+
+* **Entity risk** - one explainable, time-decayed 0-100 score per user and host, fused from every stream
+  (EDR, identity, DNS, deception, privileged access, email, exposure, cloud, open cases); every point cites the
+  event, finding or case it came from.
+* **Correlation engine** - deterministic rules that surface what no single tool sees: phishing → endpoint →
+  identity compromise chains, privileged access after compromise, deception hits corroborated by other
+  telemetry, attacked hosts carrying KEV vulnerabilities (exploitation attempts called out), attacked hosts
+  without EDR, control gaps (malicious destinations still reachable), repeat clickers, newly KEV-listed CVEs on
+  exposed assets, shared attacker infrastructure. Insights are deduplicated, triaged (acknowledge / dismiss)
+  and re-opened only if they get worse.
+* **LLM analyst (when configured)** - narrates insights, writes the daily situation brief, and answers free-form
+  questions by *planning* calls to a catalogue of read-only tools that the platform executes; answers must cite
+  the tool results. The model never touches the database or any action, internal identities are pseudonymised
+  before every call, and tool calls are shown to the analyst. Without a model, a deterministic planner gives the
+  same interface.
+
+LLM providers (`SOC_LLM_PROVIDER`): `azure_openai`, `anthropic` (Claude via the official SDK; large tier
+`claude-opus-5` with server-side refusal fallback, small tier `claude-haiku-4-5`), or `openai_compatible` (OpenAI or a
+self-hosted vLLM / Ollama endpoint for tenant-resident processing). All go through the same governance:
+approved-endpoint allow-list, pseudonymisation, prompt/response log, monthly token budget, grounding.
+
 ## Connecting real tools (plug and play)
 
 Connectors live in `soc_platform/connectors/tools/` and are listed with their required settings in

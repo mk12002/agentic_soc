@@ -50,7 +50,7 @@ class Settings(BaseModel):
     fixtures_dir: str = str(Path(__file__).parent / "fixtures")
 
     # LLM governance (NFR-11)
-    llm_provider: str = "none"  # none | azure_openai
+    llm_provider: str = "none"  # none | azure_openai | anthropic | openai_compatible
     llm_endpoint: str | None = None
     llm_deployment: str | None = None
     llm_api_version: str = "2024-10-21"
@@ -58,6 +58,8 @@ class Settings(BaseModel):
     llm_approved_endpoints: list[str] = Field(default_factory=list)
     llm_monthly_token_budget: int = 5_000_000
     llm_redact_pii: bool = True
+    # Internal mail domains: identities in these domains are pseudonymised before any LLM call (PH-T06, R10)
+    org_domains: list[str] = Field(default_factory=list)
 
 
 @lru_cache(maxsize=1)
@@ -84,4 +86,5 @@ def get_settings() -> Settings:
         llm_approved_endpoints=approved,
         llm_monthly_token_budget=int(env.get("SOC_LLM_MONTHLY_TOKEN_BUDGET", "5000000")),
         llm_redact_pii=_env_bool("SOC_LLM_REDACT_PII", True),
+        org_domains=[d.strip().lower() for d in env.get("SOC_ORG_DOMAINS", "").split(",") if d.strip()],
     )

@@ -122,3 +122,18 @@ def test_security_headers_csp_and_limits(client):
     assert "onclick" not in js and "eval(" not in js and "safeUrl" in js
     big = client.post("/api/v1/ingest/alerts", headers={"content-length": str(40 * 1024 * 1024)}, content=b"{}")
     assert big.status_code == 413
+
+
+def test_intelligence_endpoints(client):
+    a = tok(client, "alice", "analyst")
+    assert client.post("/api/v1/intelligence/refresh", headers=a).json()["insights"] > 0
+    ins = client.get("/api/v1/intelligence/insights", headers=a).json()
+    assert ins and ins[0]["evidence"] and ins[0]["narrative"]
+    assert client.post(f"/api/v1/intelligence/insights/{ins[-1]['id']}/dismiss", headers=a).json()["status"] == "dismissed"
+    top = client.get("/api/v1/intelligence/risk/top?limit=3", headers=a).json()
+    assert top[0]["name"] == "jane.doe@cci-demo.com"
+    r = client.post("/api/v1/intelligence/ask", headers=a, json={"question": "who is riskiest?"}).json()
+    assert r["tool_calls"] and r["answer"]
+    assert "Top correlated threats" in client.get("/api/v1/intelligence/brief", headers=a).json()["summary"]
+    case = client.get("/api/v1/cases?domain=phishing", headers=a).json()[0]
+    assert "intelligence" in client.get(f"/api/v1/cases/{case['id']}", headers=a).json()

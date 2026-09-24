@@ -165,6 +165,12 @@ class PhishingService:
             camp = campaign_scope(self.registry, em, threshold=self.campaign_threshold)
             recips = sorted(set(camp["recipients"]) | set(em.to) | ({sub.reporter} if sub.reporter else set()))
             impact = user_impact(self.registry, em, recips)
+        for upn in sorted(set(camp["recipients"]) | set(impact["clicked"]) | set(impact["identity_compromise"])):
+            ent = self.store.find("identity", "upn", upn)
+            if ent is not None:
+                role = ("compromised" if upn in impact["identity_compromise"] else
+                        "clicked" if upn in impact["clicked"] else "recipient")
+                self.cases.link(case.id, ent.id, role)
         for block in (rec, camp, impact):
             unavailable += block.get("unavailable", [])
             for ev in block.get("evidence", []):

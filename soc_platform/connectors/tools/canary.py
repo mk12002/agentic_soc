@@ -45,7 +45,7 @@ class CanaryConnector(ToolConnector):
         d = raw.get("description") or raw
         src_ip = d.get("src_host") or d.get("src_ip")
         refs = [EntityRef(kind="asset", role="canary", keys={"canary_device_id": d.get("node_id")} if d.get("node_id") else {},
-                          attributes={"hostname": d.get("name"), "ip": d.get("dst_host")})]
+                          attributes={"hostname": d.get("name"), "ip": d.get("dst_host"), "deception": True})]
         if src_ip:
             refs.append(EntityRef(kind="asset", role="source_host", attributes={"ip": src_ip,
                                                                                 "hostname": d.get("src_host_reverse")}))

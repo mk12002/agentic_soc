@@ -18,3 +18,4 @@ setuptools>=83            # CVE fixes (PYSEC-2025-49, PYSEC-2026-3447)
 pyzbar>=0.1.9             # QR-code decoding in reported mail
 Pillow>=10.2
 ppdeep>=20200505          # fuzzy hashing (PH-T03)
+anthropic>=1.8          # optional LLM provider (SOC_LLM_PROVIDER=anthropic)

@@ -63,6 +63,13 @@ def cmd_demo() -> None:
             a = v["assessment"]
             print(f"[PH] {v['case']['verdict']} '{v['case']['title'][:50]}': {len(a['campaign']['recipients'])} recipients, "
                   f"clicked {a['user_impact']['clicked']}, compromised {a['user_impact']['identity_compromise']}")
+        from soc_platform.intelligence.analyst import IntelligenceService
+
+        intel = IntelligenceService(s, vm=vm)
+        for ins in sorted(intel.refresh(), key=lambda i: -i.score)[:6]:
+            print(f"[INTEL] {ins.severity:>8} {ins.title}")
+        ans = intel.analyst.ask("Is jane.doe@cci-demo.com compromised?")
+        print(f"[ASK] {ans['answer']}  (tools: {', '.join(c['tool'] for c in ans['tool_calls'])})")
         rs = ReportService(s, out)
         for run in (rs.daily_exposure(vm), rs.weekly_vm(vm), rs.weekly_management_deck(vm, im, ph)):
             print(f"[REPORT] {run.kind}: {run.path}")
@@ -97,6 +104,7 @@ JOBS = {  # name -> (interval seconds env var, default seconds)
     "vulnerability": ("SOC_JOB_VM_SECONDS", 6 * 3600),
     "follow_up": ("SOC_JOB_FOLLOWUP_SECONDS", 24 * 3600),
     "daily_report": ("SOC_JOB_DAILY_REPORT_SECONDS", 24 * 3600),
+    "intelligence": ("SOC_JOB_INTELLIGENCE_SECONDS", 600),
 }
 
 
@@ -129,6 +137,10 @@ def cmd_scheduler(once: bool = False) -> None:
                     elif name == "follow_up":
                         sv["vulnerability"].follow_up()
                         sv["vulnerability"].expire_exceptions()
+                    elif name == "intelligence":
+                        from soc_platform.api.app import _intel
+
+                        _intel(s).refresh()
                     elif name == "daily_report":
                         ReportService(s, get_settings().report_output_dir).daily_exposure(sv["vulnerability"])
                 print(json.dumps({"job": name, "status": "ok", "at": time.time()}), flush=True)
