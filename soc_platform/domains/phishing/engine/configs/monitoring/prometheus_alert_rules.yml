@@ -1,0 +1,67 @@
+groups:
+  - name: email-security-platform-alerts
+    rules:
+      - alert: EmailSecurityQueueDepthHigh
+        expr: sum(rabbitmq_queue_messages_ready{queue=~"email\\..*|.*results.*"}) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: messaging
+        annotations:
+          summary: "Email security queue depth is high"
+          description: "Ready messages across core queues exceeded 1000 for 10 minutes."
+
+      - alert: EmailSecurityQueueDepthCritical
+        expr: sum(rabbitmq_queue_messages_ready{queue=~"email\\..*|.*results.*"}) > 5000
+        for: 5m
+        labels:
+          severity: critical
+          component: messaging
+        annotations:
+          summary: "Email security queue depth is critical"
+          description: "Ready messages across core queues exceeded 5000 for 5 minutes."
+
+      - alert: EmailSecurityAgentLagHigh
+        expr: max(email_security_agent_lag_seconds) > 120
+        for: 10m
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "Agent lag is high"
+          description: "At least one agent has processing lag above 120 seconds for 10 minutes."
+
+      - alert: EmailSecurityErrorRateHigh
+        expr: sum(rate(email_security_errors_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: runtime
+        annotations:
+          summary: "Email security error rate is elevated"
+          description: "Platform-wide error rate exceeded 1 error/sec over 5 minutes."
+
+      - alert: EmailSecurityErrorRateCritical
+        expr: sum(rate(email_security_errors_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: critical
+          component: runtime
+        annotations:
+          summary: "Email security error rate is critical"
+          description: "Platform-wide error rate exceeded 5 errors/sec over 5 minutes."
+
+      - alert: EmailSecurityPartialFinalizationRateHigh
+        expr: |
+          (
+            sum(rate(email_security_orchestrator_finalizations_total{reason="partial_timeout"}[15m]))
+            /
+            clamp_min(sum(rate(email_security_orchestrator_finalizations_total[15m])), 0.0001)
+          ) > 0.20
+        for: 15m
+        labels:
+          severity: warning
+          component: orchestrator
+        annotations:
+          summary: "Partial finalization rate is high"
+          description: "More than 20% of orchestrations are finalizing due to timeout over 15 minutes."

@@ -1,0 +1,12 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "/incidents$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  }
+ ]
+}

@@ -1,0 +1,47 @@
+Received: from vps-2231.hostcloud.example (vps-2231.hostcloud.example
+ [185.244.25.18]) by mx1.cci-demo.com (Postfix) with ESMTPS id 4Xyz0002; Sun,
+ 20 Sep 2026 08:02:00 +0000
+Received: from mx1.cci-demo.com (10.0.0.25) by exch01.cci-demo.com
+ (10.0.0.30); Sun, 20 Sep 2026 08:02:00 +0000
+Authentication-Results: mx1.cci-demo.com; spf=softfail dkim=none dmarc=none
+ header.from=payroll-update.support
+From: "HR Benefits" <hr-benefits@payroll-update.support>
+To: jane.doe@cci-demo.com
+Subject: Action required: confirm your 2026 benefits enrolment
+Date: Sun, 20 Sep 2026 08:02:00 +0000
+Message-ID: <179026443124.13628.7103195056914888217@payroll-update.support>
+X-Test-Label: malicious
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============0648692690852642729=="
+
+--===============0648692690852642729==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Scan the QR code with your phone to confirm your benefits enrolment before Fr=
+iday.
+
+--===============0648692690852642729==
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="enrolment.png"
+MIME-Version: 1.0
+
+iVBORw0KGgoAAAANSUhEUgAAAZoAAAGaAQAAAAAefbjOAAADI0lEQVR4nO1cUY6jMAy1AamfcIM5
+CtygRxrtzZqj9ACVymclKq/sOOm0q5UmWySWyXsfCKaxAGM9PzvJsFAxQlNuQwQjBxzhgCMccIQD
+jnDAEQ44Yk+OYEdHPM3MFNIlEd2ZaE4Dpk0erxAwWsERoyiuRPJraFVstkKj3Jh5aIUnau33pELh
+8gocMWcC6Bei0WKDD0I0G1EYjXQ7e6ciwOgvjuDPs6aOfiH+vBp53PhlCLz3o8Ooe/1DGNqnSyYS
+mle4UwOjXUVErxrBPnx/YQrDpROa7/zoX8l+3qmB0fuOCFZJDJomzgexg+lJnmZNInSPpcYKdyoD
+jDbiCHnNGv1CYmfhY0kM8uadGhjtyBGsZUZsRYyypC5Ef2M5PdoTg4/byTsVAkYJqc/Qxo6DnOxM
+y4z4N61DT33+wYbAe46f6wg59TelAm9SuqJQttCsYWLCKGOjxysEjNbgiD4fYoDY5UJy0uvxavSw
+xMHgiBpib7Q0oZpBw8LlgiFFSepnb/J4ZYDR+xwhRgo6uRFnOEwzuHBIzCCRKMARtWSNJUvJNqUO
+ne7y1JHOEBH1ZI1WicKk5C2WoDyZlEwzXTZkq8crA4xW4IhRP/ezgIyUYfQQf4WyrK3WMKSlETYl
+bhGBfkS9HEEpGB59qcQMKiagI2qqNSSuhfiqIh25R4F+RF0RITkYcs3pvWsdYgySEgs6VFXoCEVU
+D0/KMq6v83jJzYv//J0aGL0/ryGxZ6mV5qxLI/Qs9jETbKXd+3cqBIy21BGSBaQXnnZmehLVZz0B
+29mRidrFZzbng1A4XnSGoxX9QQ86YovHa2C0mbJ0eJvKEkbuUcQJj0gj0BGV7ekiWwYRBv36Z5MV
+6RA+sINnlx+3FA8WkDy76Uvr+j8nRcER9fQsKc1lPdoOSWP6SPQjqjSSU1yJr9Xn+aAdqjt7vFgS
+2fjxvgUYrbqni6y46C8s4bgQU3/NW3vQj6hzTxcRSZjiGtxOwlErT+zXqHdPF39ebatGritsD4cm
+DK0/sM5yjx+3DF92dn4b+M9kO/m4DYwi4AgHHOGAIxxwhAOOcPyTI34DY1R2FBVwuYEAAAAASUVO
+RK5CYII=
+
+--===============0648692690852642729==--

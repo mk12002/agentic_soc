@@ -1,0 +1,54 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "known_exploited_vulnerabilities.json$",
+   "body": {
+    "catalogVersion": "2026.09.20",
+    "vulnerabilities": [
+     {
+      "cveID": "CVE-2021-44228",
+      "vendorProject": "Apache",
+      "product": "Apache Log4j 2.14.1",
+      "vulnerabilityName": "Apache Log4j2 JNDI remote code execution (Log4Shell)",
+      "dateAdded": "2023-10-10",
+      "dueDate": "2026-10-10",
+      "requiredAction": "Apply mitigations per vendor instructions.",
+      "knownRansomwareCampaignUse": "Known"
+     },
+     {
+      "cveID": "CVE-2024-21412",
+      "vendorProject": "Microsoft",
+      "product": "Microsoft Windows 11",
+      "vulnerabilityName": "Internet Shortcut Files security feature bypass",
+      "dateAdded": "2026-09-19",
+      "dueDate": "2026-10-10",
+      "requiredAction": "Apply mitigations per vendor instructions.",
+      "knownRansomwareCampaignUse": "Unknown"
+     },
+     {
+      "cveID": "CVE-2023-44487",
+      "vendorProject": "nginx",
+      "product": "nginx 1.18.0",
+      "vulnerabilityName": "HTTP/2 Rapid Reset denial of service",
+      "dateAdded": "2023-10-10",
+      "dueDate": "2026-10-10",
+      "requiredAction": "Apply mitigations per vendor instructions.",
+      "knownRansomwareCampaignUse": "Unknown"
+     },
+     {
+      "cveID": "CVE-2022-41082",
+      "vendorProject": "Microsoft",
+      "product": "Microsoft Windows Server 2019",
+      "vulnerabilityName": "Microsoft Exchange Server RCE (ProxyNotShell)",
+      "dateAdded": "2023-10-10",
+      "dueDate": "2026-10-10",
+      "requiredAction": "Apply mitigations per vendor instructions.",
+      "knownRansomwareCampaignUse": "Unknown"
+     }
+    ]
+   },
+   "status": 200
+  }
+ ]
+}

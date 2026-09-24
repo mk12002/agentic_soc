@@ -1,0 +1,7 @@
+# Trained model artifacts are stored with Git LFS
+artifacts/phishing/models/**/*.joblib filter=lfs diff=lfs merge=lfs -text
+artifacts/phishing/models/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+artifacts/phishing/models/**/*_xgb.json filter=lfs diff=lfs merge=lfs -text
+artifacts/phishing/data/*.db filter=lfs diff=lfs merge=lfs -text
+artifacts/phishing/datasets_processed/**/*.csv filter=lfs diff=lfs merge=lfs -text
+*.eml text eol=crlf

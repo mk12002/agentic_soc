@@ -1,0 +1,5 @@
+ember @ git+https://github.com/elastic/ember.git  # optional: only for retraining the attachment model
+tqdm>=4.66.0
+matplotlib>=3.7.0
+datasets>=2.14.0
+pyarrow>=14.0.0

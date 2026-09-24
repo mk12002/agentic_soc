@@ -1,0 +1,32 @@
+From: ceo@company-updates.net
+To: finance-team@company.com
+Subject: Wire Transfer Required - CONFIDENTIAL
+Date: Tue, 06 May 2025 14:00:00 +0000
+Message-ID: <wire-transfer-urgent@company-updates.net>
+Reply-To: ceo-personal@gmail.com
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+Authentication-Results: mx.company.com; spf=none; dkim=none; dmarc=none
+Received: from smtp.company-updates.net (unknown [91.195.240.14])
+    by mx.company.com (Postfix) with ESMTP id GHI789
+    for <finance-team@company.com>; Tue, 06 May 2025 14:00:00 +0000
+
+Hi Finance Team,
+
+I need you to process an urgent wire transfer of $47,500 to our new vendor account. This is time-sensitive and must be completed before end of business today.
+
+Please use the following details:
+- Bank: First National Bank
+- Account: 8834729103
+- Routing: 021000021
+- Reference: INV-2025-0506
+
+Do NOT discuss this with anyone else as this is part of a confidential acquisition deal. I am in meetings all day and cannot take calls. 
+
+Please confirm once the transfer is initiated by replying to this email.
+
+Thanks,
+Robert Chen
+CEO, Company Inc.
+
+Download the invoice here: http://company-updates.net/invoice/download.php?id=47500

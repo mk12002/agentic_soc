@@ -1,0 +1,41 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/ownership$",
+   "body": {
+    "rows": [
+     {
+      "hostname": "web*",
+      "owner": "Anil Rao",
+      "platform_team": "Web Platform",
+      "environment": "Production",
+      "criticality": "critical"
+     },
+     {
+      "hostname": "db*",
+      "owner": "Sunita Iyer",
+      "platform_team": "Windows Server Team",
+      "environment": "Production",
+      "criticality": "critical"
+     },
+     {
+      "hostname": "fs*",
+      "owner": "Sunita Iyer",
+      "platform_team": "Windows Server Team",
+      "environment": "Production",
+      "criticality": "high"
+     },
+     {
+      "hostname": "*-lt*",
+      "owner": "",
+      "platform_team": "End User Computing",
+      "environment": "Corporate",
+      "criticality": "medium"
+     }
+    ]
+   },
+   "status": 200
+  }
+ ]
+}

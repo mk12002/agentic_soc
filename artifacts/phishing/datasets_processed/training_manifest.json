@@ -1,0 +1,7 @@
+{
+  "content_training": "datasets_processed/content_training.csv",
+  "content_training_slm": "datasets_processed/content_training_slm.csv",
+  "url_training": "datasets_processed/url_training.csv",
+  "header_training": "",
+  "attachment_training_ember": ""
+}

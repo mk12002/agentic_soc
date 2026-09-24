@@ -1,0 +1,212 @@
+"""Governed, evidence-grounded LLM access (NFR-11, IM-T05, IM-T11, VM-T07, R02, R11).
+
+Every model call in the platform goes through ``LLMGateway``:
+  * approved endpoints only, pinned model version, tiered routing (small/large)
+  * personal data pseudonymised before the prompt leaves the platform
+  * prompt and response logged to ``llm_calls``; monthly token budget enforced
+  * ``grounded()`` returns claims that each cite evidence ids; claims citing
+    nothing valid are dropped; no evidence -> explicit insufficient-evidence
+    answer with no model call; model unavailable -> deterministic fallback.
+The model never produces figures: callers pass computed numbers in as evidence.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+import httpx
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from soc_platform.config import Settings, secret
+from soc_platform.core.models import LLMCall
+from soc_platform.llm.redaction import Redactor
+
+GROUNDING_RULES = (
+    "You are a SOC analysis assistant. Use ONLY the evidence provided. Every claim MUST cite one or "
+    "more evidence ids (e.g. E3). Mark each claim kind as 'fact' (directly observed in evidence) or "
+    "'inference' (your reasoning from facts). Do not invent hosts, users, indicators, counts or "
+    "percentages. If the evidence does not support a conclusion, set insufficient_evidence to true and "
+    "say what is missing. Respond with JSON only."
+)
+
+
+@dataclass
+class Completion:
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+    model: str
+
+
+class Provider(ABC):
+    name = "none"
+
+    @abstractmethod
+    def complete(self, system: str, user: str, *, tier: str) -> Completion | None: ...
+
+
+class NullProvider(Provider):
+    """No model configured: callers use their deterministic fallback."""
+
+    def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
+        return None
+
+
+class AzureOpenAIProvider(Provider):
+    name = "azure_openai"
+
+    def __init__(self, settings: Settings) -> None:
+        self.endpoint = (settings.llm_endpoint or "").rstrip("/")
+        self.api_version = settings.llm_api_version
+        self.deployments = {
+            "large": settings.llm_deployment or "",
+            "small": os.environ.get("SOC_LLM_DEPLOYMENT_SMALL") or settings.llm_deployment or "",
+        }
+        self.key = secret("SOC_LLM_API_KEY")
+        approved = settings.llm_approved_endpoints
+        if approved and self.endpoint not in approved:
+            raise ValueError(f"LLM endpoint {self.endpoint} is not on the approved list")
+
+    def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
+        deployment = self.deployments.get(tier) or self.deployments["large"]
+        if not (self.endpoint and deployment and self.key):
+            return None
+        url = f"{self.endpoint}/openai/deployments/{deployment}/chat/completions?api-version={self.api_version}"
+        resp = httpx.post(
+            url,
+            headers={"api-key": self.key},
+            json={"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                  "temperature": 0.1, "response_format": {"type": "json_object"}},
+            timeout=45,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        usage = body.get("usage") or {}
+        return Completion(body["choices"][0]["message"]["content"], int(usage.get("prompt_tokens", 0)),
+                          int(usage.get("completion_tokens", 0)), str(body.get("model", deployment)))
+
+
+class BudgetExceeded(Exception):
+    pass
+
+
+class LLMGateway:
+    def __init__(self, session: Session, settings: Settings, provider: Provider | None = None,
+                 redactor: Redactor | None = None) -> None:
+        self.s = session
+        self.settings = settings
+        if provider is None:
+            provider = AzureOpenAIProvider(settings) if settings.llm_provider == "azure_openai" else NullProvider()
+        self.provider = provider
+        self.redactor_factory = (lambda: Redactor(internal_domains=set(redactor.internal_domains),
+                                                  known_names=set(redactor.known_names))) if redactor else Redactor
+
+    # ------------------------------------------------------------------ budget
+
+    def tokens_this_month(self) -> int:
+        now = datetime.now(timezone.utc)
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        total = self.s.execute(select(func.coalesce(func.sum(LLMCall.prompt_tokens + LLMCall.completion_tokens), 0))
+                               .where(LLMCall.ts >= start)).scalar()
+        return int(total or 0)
+
+    def budget_status(self) -> dict[str, Any]:
+        used = self.tokens_this_month()
+        budget = self.settings.llm_monthly_token_budget
+        return {"used": used, "budget": budget, "fraction": round(used / budget, 4) if budget else None,
+                "alert": bool(budget and used >= 0.8 * budget), "exceeded": bool(budget and used >= budget)}
+
+    # ------------------------------------------------------------------ calls
+
+    def complete_json(self, workflow: str, system: str, user: str, *, tier: str = "large",
+                      redactor: Redactor | None = None) -> dict[str, Any] | None:
+        red = redactor or self.redactor_factory()
+        prompt = red.redact(user) if self.settings.llm_redact_pii else user
+        if self.budget_status()["exceeded"]:
+            self._log(workflow, prompt, "", 0, 0, "none", status="budget_exceeded")
+            raise BudgetExceeded(f"monthly LLM token budget exhausted ({workflow})")
+        try:
+            out = self.provider.complete(system, prompt, tier=tier)
+        except Exception as exc:
+            self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error")
+            return None
+        if out is None:
+            return None
+        pinned = self.settings.llm_model_version
+        status = "ok" if not pinned or pinned in out.model else "model_version_mismatch"
+        self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status)
+        parsed = _parse_json(out.text)
+        if parsed is None:
+            return None
+        return json.loads(red.restore(json.dumps(parsed)))
+
+    def grounded(self, workflow: str, question: str, evidence: list[dict[str, Any]], *,
+                 tier: str = "large", redactor: Redactor | None = None,
+                 extra_schema: str = "") -> dict[str, Any]:
+        """Evidence-grounded answer. ``evidence`` items need ``id`` and ``claim`` (plus any detail)."""
+        valid = {str(e["id"]) for e in evidence if e.get("id")}
+        if not valid:
+            return {"summary": "Insufficient evidence: no evidence was retrieved for this question.",
+                    "claims": [], "grounded": True, "insufficient_evidence": True, "source": "deterministic"}
+        lines = "\n".join(f"[{e['id']}] ({e.get('source', e.get('dimension', ''))}) {e['claim']}" for e in evidence)
+        user = (f"QUESTION:\n{question}\n\nEVIDENCE (cite by id):\n{lines}\n\n"
+                'Return JSON: {"summary": "...", "insufficient_evidence": false, "missing": ["..."], '
+                '"claims": [{"text": "...", "kind": "fact|inference", "evidence_ids": ["E1"]}]'
+                f"{extra_schema}}}")
+        try:
+            data = self.complete_json(workflow, GROUNDING_RULES, user, tier=tier, redactor=redactor)
+        except BudgetExceeded:
+            data = None
+        if data:
+            claims = validate_claims(data.get("claims"), valid)
+            if claims or data.get("insufficient_evidence"):
+                return {**data, "summary": str(data.get("summary", "")), "claims": claims, "grounded": True,
+                        "insufficient_evidence": bool(data.get("insufficient_evidence")), "source": "llm"}
+        return deterministic_grounded(evidence)
+
+    def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str) -> None:
+        self.s.add(LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
+                           response=response, prompt_tokens=pt, completion_tokens=ct, status=status,
+                           grounded=True))
+        self.s.flush()
+
+
+def validate_claims(claims: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
+    out = []
+    for c in claims or []:
+        if not isinstance(c, dict) or not str(c.get("text", "")).strip():
+            continue
+        cited = [str(i) for i in (c.get("evidence_ids") or []) if str(i) in valid_ids]
+        if not cited:
+            continue
+        kind = c.get("kind") if c.get("kind") in {"fact", "inference"} else "inference"
+        out.append({"text": str(c["text"]).strip(), "kind": kind, "evidence_ids": cited})
+    return out
+
+
+def deterministic_grounded(evidence: list[dict[str, Any]], limit: int = 8) -> dict[str, Any]:
+    ranked = sorted(evidence, key=lambda e: -float(e.get("weight", 0) or 0))[:limit]
+    claims = [{"text": str(e["claim"]), "kind": "fact", "evidence_ids": [str(e["id"])]} for e in ranked]
+    sources = sorted({str(e.get("source") or e.get("dimension") or "") for e in evidence} - {""})
+    return {"summary": f"{len(evidence)} evidence item(s) from {len(sources)} source(s): {', '.join(sources)}.",
+            "claims": claims, "grounded": True, "insufficient_evidence": False, "source": "deterministic"}
+
+
+def _parse_json(text: str | None) -> dict[str, Any] | None:
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        v = json.loads(m.group(0))
+        return v if isinstance(v, dict) else None
+    except json.JSONDecodeError:
+        return None

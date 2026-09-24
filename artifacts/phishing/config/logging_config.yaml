@@ -1,0 +1,60 @@
+# =============================================================================
+# Logging Configuration – Agentic Email Security System
+# =============================================================================
+# Centralised logging settings for Loguru-based structured logging.
+# Values here mirror the defaults in configs/settings.py and can be overridden
+# by environment variables at runtime.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# General Logging Settings
+# ---------------------------------------------------------------------------
+logging:
+  # Directory for log file output (relative to PROJECT_ROOT / email_security/)
+  log_dir: "logs/"
+
+  # Log format: 'json' for structured output, 'text' for human-readable
+  format: "json"
+
+  # Minimum log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+
+  # Log rotation threshold (e.g., '10 MB', '1 day')
+  rotation: "10 MB"
+
+  # How long to keep old log files (e.g., '30 days')
+  retention: "30 days"
+
+# ---------------------------------------------------------------------------
+# File Handlers
+# ---------------------------------------------------------------------------
+handlers:
+  # Application log – captures all events at the configured level
+  application:
+    filename_pattern: "app_{time:YYYY-MM-DD}.log"
+    serialize: true          # JSON structured output
+    compression: "gz"
+    backtrace: true
+    diagnose: false
+
+  # Error-only log – captures ERROR and above
+  errors:
+    filename_pattern: "errors_{time:YYYY-MM-DD}.log"
+    level: "ERROR"
+    serialize: true
+    compression: "gz"
+    backtrace: true
+    diagnose: true
+
+# ---------------------------------------------------------------------------
+# Console Output
+# ---------------------------------------------------------------------------
+console:
+  colorize: true
+  backtrace: true
+  diagnose: true
+  format: >-
+    <green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> |
+    <level>{level: <8}</level> |
+    <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> |
+    <level>{message}</level>

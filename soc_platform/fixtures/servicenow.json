@@ -1,0 +1,318 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/api/now/table/cmdb_ci_computer$",
+   "body": {
+    "result": [
+     {
+      "sys_id": "ci-web01",
+      "name": "web01",
+      "fqdn": "web01.cci-demo.com",
+      "ip_address": "10.10.0.5",
+      "os": "Ubuntu 22.04 LTS",
+      "serial_number": "VMware-42 1a 7c 3e",
+      "owned_by": {
+       "display_value": "Anil Rao"
+      },
+      "support_group": {
+       "display_value": "Web Platform"
+      },
+      "environment": "Production",
+      "business_criticality": "1 - most critical",
+      "location": {
+       "display_value": "Kolkata DC1"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "sysparm_query": "name=web01"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/cmdb_ci_computer$",
+   "body": {
+    "result": [
+     {
+      "sys_id": "ci-db01",
+      "name": "DB01",
+      "fqdn": "db01.cci-demo.com",
+      "ip_address": "10.10.0.6",
+      "os": "Windows Server 2019",
+      "serial_number": "VMware-42 9f 11 02",
+      "owned_by": {
+       "display_value": "Sunita Iyer"
+      },
+      "support_group": {
+       "display_value": "Windows Server Team"
+      },
+      "environment": "Production",
+      "business_criticality": "1 - most critical",
+      "location": {
+       "display_value": "Kolkata DC1"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "sysparm_query": "name=DB01"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/cmdb_ci_computer$",
+   "body": {
+    "result": [
+     {
+      "sys_id": "ci-fs01",
+      "name": "FS01",
+      "fqdn": "fs01.cci-demo.com",
+      "ip_address": "10.10.0.20",
+      "os": "Windows Server 2022",
+      "serial_number": "CZ20240001",
+      "owned_by": {
+       "display_value": "Sunita Iyer"
+      },
+      "support_group": {
+       "display_value": "Windows Server Team"
+      },
+      "environment": "Production",
+      "business_criticality": "2 - somewhat critical",
+      "location": {
+       "display_value": "Kolkata DC1"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "sysparm_query": "name=FS01"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/cmdb_ci_computer$",
+   "body": {
+    "result": [
+     {
+      "sys_id": "ci-jane",
+      "name": "JANE-LT01",
+      "fqdn": "jane-lt01.cci-demo.com",
+      "ip_address": "10.20.1.15",
+      "os": "Windows 11 Enterprise",
+      "serial_number": "5CG1234XYZ",
+      "owned_by": {
+       "display_value": "Jane Doe"
+      },
+      "support_group": {
+       "display_value": "End User Computing"
+      },
+      "environment": "Corporate",
+      "business_criticality": "3 - less critical",
+      "location": {
+       "display_value": "Kolkata HQ"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "sysparm_query": "name=JANE-LT01"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/cmdb_ci_computer$",
+   "body": {
+    "result": [
+     {
+      "sys_id": "ci-bob",
+      "name": "BOB-LT02",
+      "fqdn": "bob-lt02.cci-demo.com",
+      "ip_address": "10.20.1.22",
+      "os": "Windows 11 Enterprise",
+      "serial_number": "5CG5678ABC",
+      "owned_by": {
+       "display_value": "Bob Lee"
+      },
+      "support_group": {
+       "display_value": "End User Computing"
+      },
+      "environment": "Corporate",
+      "business_criticality": "3 - less critical",
+      "location": {
+       "display_value": "Kolkata HQ"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "sysparm_query": "name=BOB-LT02"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/cmdb_ci_computer$",
+   "body": {
+    "result": []
+   },
+   "status": 200,
+   "params": {
+    "sysparm_query": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/cmdb_ci_computer$",
+   "body": {
+    "result": [
+     {
+      "sys_id": "ci-web01",
+      "name": "web01",
+      "fqdn": "web01.cci-demo.com",
+      "ip_address": "10.10.0.5",
+      "os": "Ubuntu 22.04 LTS",
+      "serial_number": "VMware-42 1a 7c 3e",
+      "owned_by": {
+       "display_value": "Anil Rao"
+      },
+      "support_group": {
+       "display_value": "Web Platform"
+      },
+      "environment": "Production",
+      "business_criticality": "1 - most critical",
+      "location": {
+       "display_value": "Kolkata DC1"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     },
+     {
+      "sys_id": "ci-db01",
+      "name": "DB01",
+      "fqdn": "db01.cci-demo.com",
+      "ip_address": "10.10.0.6",
+      "os": "Windows Server 2019",
+      "serial_number": "VMware-42 9f 11 02",
+      "owned_by": {
+       "display_value": "Sunita Iyer"
+      },
+      "support_group": {
+       "display_value": "Windows Server Team"
+      },
+      "environment": "Production",
+      "business_criticality": "1 - most critical",
+      "location": {
+       "display_value": "Kolkata DC1"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     },
+     {
+      "sys_id": "ci-fs01",
+      "name": "FS01",
+      "fqdn": "fs01.cci-demo.com",
+      "ip_address": "10.10.0.20",
+      "os": "Windows Server 2022",
+      "serial_number": "CZ20240001",
+      "owned_by": {
+       "display_value": "Sunita Iyer"
+      },
+      "support_group": {
+       "display_value": "Windows Server Team"
+      },
+      "environment": "Production",
+      "business_criticality": "2 - somewhat critical",
+      "location": {
+       "display_value": "Kolkata DC1"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     },
+     {
+      "sys_id": "ci-jane",
+      "name": "JANE-LT01",
+      "fqdn": "jane-lt01.cci-demo.com",
+      "ip_address": "10.20.1.15",
+      "os": "Windows 11 Enterprise",
+      "serial_number": "5CG1234XYZ",
+      "owned_by": {
+       "display_value": "Jane Doe"
+      },
+      "support_group": {
+       "display_value": "End User Computing"
+      },
+      "environment": "Corporate",
+      "business_criticality": "3 - less critical",
+      "location": {
+       "display_value": "Kolkata HQ"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     },
+     {
+      "sys_id": "ci-bob",
+      "name": "BOB-LT02",
+      "fqdn": "bob-lt02.cci-demo.com",
+      "ip_address": "10.20.1.22",
+      "os": "Windows 11 Enterprise",
+      "serial_number": "5CG5678ABC",
+      "owned_by": {
+       "display_value": "Bob Lee"
+      },
+      "support_group": {
+       "display_value": "End User Computing"
+      },
+      "environment": "Corporate",
+      "business_criticality": "3 - less critical",
+      "location": {
+       "display_value": "Kolkata HQ"
+      },
+      "sys_updated_on": "2026-09-20T02:00:00"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/api/now/table/(incident|sn_vul_vulnerable_item)$",
+   "body": {
+    "result": {
+     "sys_id": "sn-sys-0001",
+     "number": "INC0012001"
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/incident/sn-sys-0001$",
+   "body": {
+    "result": {
+     "number": "INC0012001",
+     "state": "2",
+     "assignment_group": {
+      "display_value": "Web Platform"
+     },
+     "sys_updated_on": "2026-09-20T12:00:00"
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/now/table/incident$",
+   "body": {
+    "result": []
+   },
+   "status": 200
+  }
+ ]
+}

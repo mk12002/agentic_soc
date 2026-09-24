@@ -1,0 +1,129 @@
+# SOC platform deployment.
+#   docker compose -f deploy/docker-compose.yml --env-file .env up -d                  # platform only
+#   docker compose -f deploy/docker-compose.yml --env-file .env --profile engine up -d # + phishing ML microservices
+# The sandbox executor never mounts the Docker socket here (PH-T04); local detonation for
+# development is enabled only by deploy/docker-compose.dev.yml.
+
+x-platform-env: &platform-env
+  SOC_ENVIRONMENT: ${SOC_ENVIRONMENT:-dev}
+  SOC_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-soc}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-soc_platform}
+  SOC_AUTH_MODE: ${SOC_AUTH_MODE:-dev}
+  SOC_DEV_JWT_SECRET: ${SOC_DEV_JWT_SECRET:-}
+  SOC_ENTRA_TENANT_ID: ${SOC_ENTRA_TENANT_ID:-}
+  SOC_ENTRA_AUDIENCE: ${SOC_ENTRA_AUDIENCE:-}
+  SOC_CONNECTOR_MODE: ${SOC_CONNECTOR_MODE:-fake}
+  SOC_ORG_DOMAINS: ${SOC_ORG_DOMAINS:-cci-demo.com}
+  SOC_PHISHING_ENGINE: ${SOC_PHISHING_ENGINE:-0}
+  SOC_LLM_PROVIDER: ${SOC_LLM_PROVIDER:-none}
+  SOC_LLM_ENDPOINT: ${SOC_LLM_ENDPOINT:-}
+  SOC_LLM_DEPLOYMENT: ${SOC_LLM_DEPLOYMENT:-}
+  SOC_LLM_DEPLOYMENT_SMALL: ${SOC_LLM_DEPLOYMENT_SMALL:-}
+  SOC_LLM_API_KEY: ${SOC_LLM_API_KEY:-}
+  SOC_LLM_APPROVED_ENDPOINTS: ${SOC_LLM_APPROVED_ENDPOINTS:-}
+
+x-engine-env: &engine-env
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-soc}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-soc_platform}
+  REDIS_URL: redis://redis:6379/0
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USER: ${RABBITMQ_USER:-soc}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-}
+  SOC_PHISHING_HOME: /app/artifacts/phishing
+  IOC_DB_PATH: /app/data/ioc_store.db
+  ACTION_SIMULATED_MODE: "1"
+  ACTION_REQUIRE_APPROVAL: "1"
+  SANDBOX_LOCAL_DOCKER_ENABLED: "0"
+  SANDBOX_EXECUTOR_URL: ${SANDBOX_EXECUTOR_URL:-}
+  SANDBOX_EXECUTOR_SHARED_TOKEN: ${SANDBOX_EXECUTOR_SHARED_TOKEN:-}
+
+x-engine-agent: &engine-agent
+  image: soc-platform:engine
+  profiles: ["engine"]
+  command: ["python", "-m", "soc_platform.domains.phishing.engine.agents.service_runner"]
+  volumes: [attachments:/mnt/attachments, platform_data:/app/data]
+  depends_on: {rabbitmq: {condition: service_healthy}}
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-soc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-soc_platform}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"], interval: 10s, retries: 5}
+    restart: unless-stopped
+
+  platform-api:
+    build: {context: .., dockerfile: deploy/Dockerfile, args: {WITH_PHISHING_ENGINE: "${WITH_PHISHING_ENGINE:-false}"}}
+    image: soc-platform:${SOC_IMAGE_TAG:-latest}
+    environment: *platform-env
+    ports: ["${SOC_API_PORT:-8080}:8080"]
+    volumes: [platform_data:/app/data]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: unless-stopped
+
+  platform-scheduler:
+    image: soc-platform:${SOC_IMAGE_TAG:-latest}
+    command: ["python", "-m", "soc_platform", "scheduler"]
+    environment: *platform-env
+    volumes: [platform_data:/app/data]
+    depends_on: {platform-api: {condition: service_healthy}}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- phishing ML engine (profile: engine)
+  rabbitmq:
+    image: rabbitmq:3-management
+    profiles: ["engine"]
+    environment: {RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-soc}", RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}"}
+    healthcheck: {test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"], interval: 10s, retries: 5}
+  redis:
+    image: redis:7-alpine
+    profiles: ["engine"]
+  engine-build:
+    build: {context: .., dockerfile: deploy/Dockerfile, args: {WITH_PHISHING_ENGINE: "true"}}
+    image: soc-platform:engine
+    profiles: ["engine"]
+    command: ["true"]
+  engine-parser:
+    <<: *engine-agent
+    command: ["python", "-m", "soc_platform.domains.phishing.engine.services.parser_worker"]
+    environment: *engine-env
+  engine-orchestrator:
+    <<: *engine-agent
+    command: ["python", "-m", "soc_platform.domains.phishing.engine.orchestrator.runner"]
+    environment: *engine-env
+  header_agent_service:
+    <<: *engine-agent
+    environment: {<<: *engine-env, AGENT_NAME: header_agent}
+  content_agent_service:
+    <<: *engine-agent
+    environment: {<<: *engine-env, AGENT_NAME: content_agent}
+  url_agent_service:
+    <<: *engine-agent
+    environment: {<<: *engine-env, AGENT_NAME: url_agent}
+  attachment_agent_service:
+    <<: *engine-agent
+    environment: {<<: *engine-env, AGENT_NAME: attachment_agent}
+  sandbox_agent_service:
+    <<: *engine-agent
+    environment: {<<: *engine-env, AGENT_NAME: sandbox_agent}
+  threat_intel_agent_service:
+    <<: *engine-agent
+    environment: {<<: *engine-env, AGENT_NAME: threat_intel_agent}
+  user_behavior_agent_service:
+    <<: *engine-agent
+    environment:
+      <<: *engine-env
+      AGENT_NAME: user_behavior_agent
+  sandbox_executor_service:
+    <<: *engine-agent
+    command: ["python", "-m", "soc_platform.domains.phishing.engine.sandbox.executor_service"]
+    environment: *engine-env
+
+volumes:
+  pgdata:
+  platform_data:
+  attachments:

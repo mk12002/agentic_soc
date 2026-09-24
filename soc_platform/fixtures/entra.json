@@ -1,0 +1,903 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/v1.0/users$",
+   "body": {
+    "value": [
+     {
+      "id": "u-jane-0001",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "mail": "jane.doe@cci-demo.com",
+      "displayName": "Jane Doe",
+      "department": "Finance",
+      "jobTitle": "Finance Analyst",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "jane.doe",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     },
+     {
+      "id": "u-bob-0002",
+      "userPrincipalName": "bob.lee@cci-demo.com",
+      "mail": "bob.lee@cci-demo.com",
+      "displayName": "Bob Lee",
+      "department": "IT",
+      "jobTitle": "IT Support Engineer",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "bob.lee",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     },
+     {
+      "id": "u-raj-0003",
+      "userPrincipalName": "raj.mehta@cci-demo.com",
+      "mail": "raj.mehta@cci-demo.com",
+      "displayName": "Raj Mehta",
+      "department": "Executive",
+      "jobTitle": "Chief Executive Officer",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "raj.mehta",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     },
+     {
+      "id": "u-priya-0004",
+      "userPrincipalName": "priya.nair@cci-demo.com",
+      "mail": "priya.nair@cci-demo.com",
+      "displayName": "Priya Nair",
+      "department": "Finance",
+      "jobTitle": "Accounts Payable",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "priya.nair",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     },
+     {
+      "id": "u-arun-0005",
+      "userPrincipalName": "arun.k@cci-demo.com",
+      "mail": "arun.k@cci-demo.com",
+      "displayName": "Arun Kumar",
+      "department": "Sales",
+      "jobTitle": "Account Manager",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "arun.k",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     },
+     {
+      "id": "u-meera-0006",
+      "userPrincipalName": "meera.s@cci-demo.com",
+      "mail": "meera.s@cci-demo.com",
+      "displayName": "Meera Shah",
+      "department": "HR",
+      "jobTitle": "HR Partner",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "meera.s",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     },
+     {
+      "id": "u-tom-0007",
+      "userPrincipalName": "tom.w@cci-demo.com",
+      "mail": "tom.w@cci-demo.com",
+      "displayName": "Tom White",
+      "department": "Legal",
+      "jobTitle": "Counsel",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "tom.w",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     },
+     {
+      "id": "u-li-0008",
+      "userPrincipalName": "li.chen@cci-demo.com",
+      "mail": "li.chen@cci-demo.com",
+      "displayName": "Li Chen",
+      "department": "Engineering",
+      "jobTitle": "Developer",
+      "accountEnabled": true,
+      "onPremisesSamAccountName": "li.chen",
+      "createdDateTime": "2022-01-10T00:00:00Z"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/auditLogs/signIns$",
+   "body": {
+    "value": [
+     {
+      "id": "si-001",
+      "createdDateTime": "2026-09-20T08:30:00Z",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "userId": "u-jane-0001",
+      "appDisplayName": "Office 365 Exchange Online",
+      "ipAddress": "203.0.113.10",
+      "clientAppUsed": "Browser",
+      "status": {
+       "errorCode": 0
+      },
+      "location": {
+       "city": "Kolkata",
+       "countryOrRegion": "IN"
+      },
+      "riskLevelDuringSignIn": "none",
+      "riskState": "none",
+      "conditionalAccessStatus": "success",
+      "deviceDetail": {
+       "deviceId": "aad-jane01",
+       "displayName": "JANE-LT01",
+       "isCompliant": true
+      },
+      "authenticationRequirement": "multiFactorAuthentication"
+     },
+     {
+      "id": "si-002",
+      "createdDateTime": "2026-09-20T09:15:40Z",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "userId": "u-jane-0001",
+      "appDisplayName": "Office 365 Exchange Online",
+      "ipAddress": "185.220.101.4",
+      "clientAppUsed": "Browser",
+      "status": {
+       "errorCode": 0
+      },
+      "location": {
+       "city": "Frankfurt",
+       "countryOrRegion": "DE"
+      },
+      "riskLevelDuringSignIn": "high",
+      "riskState": "atRisk",
+      "conditionalAccessStatus": "success",
+      "mfaDetail": {
+       "authMethod": "Microsoft Authenticator app",
+       "authDetail": "MFA completed (push approved)"
+      },
+      "deviceDetail": {
+       "deviceId": "",
+       "displayName": "",
+       "isCompliant": false
+      },
+      "authenticationRequirement": "multiFactorAuthentication"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "$filter": "~userPrincipalName eq 'jane.doe@cci-demo.com'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/auditLogs/signIns$",
+   "body": {
+    "value": [
+     {
+      "id": "si-002",
+      "createdDateTime": "2026-09-20T09:15:40Z",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "userId": "u-jane-0001",
+      "appDisplayName": "Office 365 Exchange Online",
+      "ipAddress": "185.220.101.4",
+      "clientAppUsed": "Browser",
+      "status": {
+       "errorCode": 0
+      },
+      "location": {
+       "city": "Frankfurt",
+       "countryOrRegion": "DE"
+      },
+      "riskLevelDuringSignIn": "high",
+      "riskState": "atRisk",
+      "conditionalAccessStatus": "success",
+      "mfaDetail": {
+       "authMethod": "Microsoft Authenticator app",
+       "authDetail": "MFA completed (push approved)"
+      },
+      "deviceDetail": {
+       "deviceId": "",
+       "displayName": "",
+       "isCompliant": false
+      },
+      "authenticationRequirement": "multiFactorAuthentication"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "$filter": "ipAddress eq '185.220.101.4'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/auditLogs/signIns$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/auditLogs/signIns$",
+   "body": {
+    "value": [
+     {
+      "id": "si-001",
+      "createdDateTime": "2026-09-20T08:30:00Z",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "userId": "u-jane-0001",
+      "appDisplayName": "Office 365 Exchange Online",
+      "ipAddress": "203.0.113.10",
+      "clientAppUsed": "Browser",
+      "status": {
+       "errorCode": 0
+      },
+      "location": {
+       "city": "Kolkata",
+       "countryOrRegion": "IN"
+      },
+      "riskLevelDuringSignIn": "none",
+      "riskState": "none",
+      "conditionalAccessStatus": "success",
+      "deviceDetail": {
+       "deviceId": "aad-jane01",
+       "displayName": "JANE-LT01",
+       "isCompliant": true
+      },
+      "authenticationRequirement": "multiFactorAuthentication"
+     },
+     {
+      "id": "si-002",
+      "createdDateTime": "2026-09-20T09:15:40Z",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "userId": "u-jane-0001",
+      "appDisplayName": "Office 365 Exchange Online",
+      "ipAddress": "185.220.101.4",
+      "clientAppUsed": "Browser",
+      "status": {
+       "errorCode": 0
+      },
+      "location": {
+       "city": "Frankfurt",
+       "countryOrRegion": "DE"
+      },
+      "riskLevelDuringSignIn": "high",
+      "riskState": "atRisk",
+      "conditionalAccessStatus": "success",
+      "mfaDetail": {
+       "authMethod": "Microsoft Authenticator app",
+       "authDetail": "MFA completed (push approved)"
+      },
+      "deviceDetail": {
+       "deviceId": "",
+       "displayName": "",
+       "isCompliant": false
+      },
+      "authenticationRequirement": "multiFactorAuthentication"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/identityProtection/riskyUsers$",
+   "body": {
+    "value": [
+     {
+      "id": "u-jane-0001",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "riskLevel": "high",
+      "riskState": "atRisk",
+      "riskDetail": "none",
+      "riskLastUpdatedDateTime": "2026-09-20T09:15:41Z"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "$filter": "userPrincipalName eq 'jane.doe@cci-demo.com'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/identityProtection/riskyUsers$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/identityProtection/riskyUsers$",
+   "body": {
+    "value": [
+     {
+      "id": "u-jane-0001",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "riskLevel": "high",
+      "riskState": "atRisk",
+      "riskDetail": "none",
+      "riskLastUpdatedDateTime": "2026-09-20T09:15:41Z"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/identityProtection/riskDetections$",
+   "body": {
+    "value": [
+     {
+      "id": "rd-001",
+      "userPrincipalName": "jane.doe@cci-demo.com",
+      "userId": "u-jane-0001",
+      "riskEventType": "anonymizedIPAddress",
+      "riskLevel": "high",
+      "ipAddress": "185.220.101.4",
+      "detectedDateTime": "2026-09-20T09:15:41Z",
+      "detectionTimingType": "realtime",
+      "location": {
+       "city": "Frankfurt",
+       "countryOrRegion": "DE"
+      }
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/auditLogs/directoryAudits$",
+   "body": {
+    "value": [
+     {
+      "id": "da-001",
+      "activityDateTime": "2026-09-20T09:18:02Z",
+      "activityDisplayName": "Set-InboxRule",
+      "category": "UserManagement",
+      "result": "success",
+      "initiatedBy": {
+       "user": {
+        "userPrincipalName": "jane.doe@cci-demo.com",
+        "id": "u-jane-0001"
+       }
+      },
+      "targetResources": [
+       {
+        "type": "User",
+        "userPrincipalName": "jane.doe@cci-demo.com"
+       }
+      ]
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/jane.doe@cci-demo.com$",
+   "body": {
+    "id": "u-jane-0001",
+    "userPrincipalName": "jane.doe@cci-demo.com",
+    "mail": "jane.doe@cci-demo.com",
+    "displayName": "Jane Doe",
+    "department": "Finance",
+    "jobTitle": "Finance Analyst",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "jane.doe",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/jane.doe@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "Finance Team"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/jane.doe@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/jane.doe@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": [
+     {
+      "id": "rule-1",
+      "displayName": "..",
+      "sequence": 1,
+      "isEnabled": true,
+      "conditions": {
+       "subjectContains": [
+        "invoice",
+        "payment"
+       ]
+      },
+      "actions": {
+       "forwardTo": [
+        {
+         "emailAddress": {
+          "address": "archive.box@protonmail.example"
+         }
+        }
+       ],
+       "moveToFolder": "RSS Feeds"
+      }
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/jane.doe@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": [
+     {
+      "id": "dev-1",
+      "displayName": "JANE-LT01",
+      "registrationDateTime": "2025-02-01T00:00:00Z"
+     },
+     {
+      "id": "dev-2",
+      "displayName": "DESKTOP-7H2K9Q",
+      "registrationDateTime": "2026-09-20T09:17:00Z"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/bob.lee@cci-demo.com$",
+   "body": {
+    "id": "u-bob-0002",
+    "userPrincipalName": "bob.lee@cci-demo.com",
+    "mail": "bob.lee@cci-demo.com",
+    "displayName": "Bob Lee",
+    "department": "IT",
+    "jobTitle": "IT Support Engineer",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "bob.lee",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/bob.lee@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "IT Team"
+     },
+     {
+      "@odata.type": "#microsoft.graph.directoryRole",
+      "displayName": "Exchange Administrator"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/bob.lee@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/bob.lee@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/bob.lee@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/raj.mehta@cci-demo.com$",
+   "body": {
+    "id": "u-raj-0003",
+    "userPrincipalName": "raj.mehta@cci-demo.com",
+    "mail": "raj.mehta@cci-demo.com",
+    "displayName": "Raj Mehta",
+    "department": "Executive",
+    "jobTitle": "Chief Executive Officer",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "raj.mehta",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/raj.mehta@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "Executive Team"
+     },
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "VIP-Executives"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/raj.mehta@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/raj.mehta@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/raj.mehta@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/priya.nair@cci-demo.com$",
+   "body": {
+    "id": "u-priya-0004",
+    "userPrincipalName": "priya.nair@cci-demo.com",
+    "mail": "priya.nair@cci-demo.com",
+    "displayName": "Priya Nair",
+    "department": "Finance",
+    "jobTitle": "Accounts Payable",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "priya.nair",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/priya.nair@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "Finance Team"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/priya.nair@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/priya.nair@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/priya.nair@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/arun.k@cci-demo.com$",
+   "body": {
+    "id": "u-arun-0005",
+    "userPrincipalName": "arun.k@cci-demo.com",
+    "mail": "arun.k@cci-demo.com",
+    "displayName": "Arun Kumar",
+    "department": "Sales",
+    "jobTitle": "Account Manager",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "arun.k",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/arun.k@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "Sales Team"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/arun.k@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/arun.k@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/arun.k@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/meera.s@cci-demo.com$",
+   "body": {
+    "id": "u-meera-0006",
+    "userPrincipalName": "meera.s@cci-demo.com",
+    "mail": "meera.s@cci-demo.com",
+    "displayName": "Meera Shah",
+    "department": "HR",
+    "jobTitle": "HR Partner",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "meera.s",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/meera.s@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "HR Team"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/meera.s@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/meera.s@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/meera.s@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/tom.w@cci-demo.com$",
+   "body": {
+    "id": "u-tom-0007",
+    "userPrincipalName": "tom.w@cci-demo.com",
+    "mail": "tom.w@cci-demo.com",
+    "displayName": "Tom White",
+    "department": "Legal",
+    "jobTitle": "Counsel",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "tom.w",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/tom.w@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "Legal Team"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/tom.w@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/tom.w@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/tom.w@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/li.chen@cci-demo.com$",
+   "body": {
+    "id": "u-li-0008",
+    "userPrincipalName": "li.chen@cci-demo.com",
+    "mail": "li.chen@cci-demo.com",
+    "displayName": "Li Chen",
+    "department": "Engineering",
+    "jobTitle": "Developer",
+    "accountEnabled": true,
+    "onPremisesSamAccountName": "li.chen",
+    "createdDateTime": "2022-01-10T00:00:00Z"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/li.chen@cci-demo.com/transitiveMemberOf$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.group",
+      "displayName": "Engineering Team"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/li.chen@cci-demo.com/authentication/methods$",
+   "body": {
+    "value": [
+     {
+      "@odata.type": "#microsoft.graph.passwordAuthenticationMethod"
+     },
+     {
+      "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/li.chen@cci-demo.com/mailFolders/inbox/messageRules$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/users/li.chen@cci-demo.com/registeredDevices$",
+   "body": {
+    "value": []
+   },
+   "status": 200
+  }
+ ]
+}

@@ -1,0 +1,42 @@
+{
+  "dataset": "/home/LabsKraft/new_work/datasets_processed/user_behavior/user_behavior_training.csv",
+  "rows": 50000,
+  "features": [
+    "contact_count",
+    "days_since_last_contact",
+    "is_internal_domain",
+    "is_business_hours",
+    "urgency_score",
+    "link_count",
+    "dept_risk_tier"
+  ],
+  "auc": 0.9969598742712812,
+  "classification_report": {
+    "0": {
+      "precision": 1.0,
+      "recall": 0.982383808095952,
+      "f1-score": 0.9911136320665532,
+      "support": 8004.0
+    },
+    "1": {
+      "precision": 0.9340196537201685,
+      "recall": 1.0,
+      "f1-score": 0.9658843455117349,
+      "support": 1996.0
+    },
+    "accuracy": 0.9859,
+    "macro avg": {
+      "precision": 0.9670098268600842,
+      "recall": 0.991191904047976,
+      "f1-score": 0.978498988789144,
+      "support": 10000.0
+    },
+    "weighted avg": {
+      "precision": 0.9868303228825456,
+      "recall": 0.9859,
+      "f1-score": 0.9860778664702115,
+      "support": 10000.0
+    }
+  },
+  "model_path": "/home/LabsKraft/new_work/models/user_behavior_agent/user_behavior_xgb.json"
+}

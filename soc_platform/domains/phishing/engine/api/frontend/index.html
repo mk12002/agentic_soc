@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SOC Analysis Hub — Control Center</title>
+  <meta name="description" content="Agentic AI Email Security System — Multi-agent phishing defense with parallel analysis, counterfactual explainability, and threat storyline timelines." />
+  <link rel="stylesheet" href="/ui-assets/styles.css" />
+</head>
+<body>
+  <main class="shell" id="app"></main><canvas id="matrixCanvas"></canvas>
+
+  <script src="/ui-assets/app.js"></script>
+  <script>
+    AgentUI.onReady(() => {
+      const app = document.getElementById("app");
+      app.innerHTML = `
+        ${AgentUI.topbarHTML("overview")}
+
+        <!-- Hero -->
+        <section class="hero animate-in">
+          <div class="panel">
+            <h1 class="hero-title">Agentic Email Security<br/>Control Center</h1>
+            <p class="hero-subtitle">Production-grade, multi-agent phishing defense powered by LangGraph orchestration, 7 parallel AI agents, counterfactual explainability, and chronological attack storyline timelines.</p>
+            <div class="hero-actions">
+              <a href="/ui/analyze" class="btn btn-primary" style="text-decoration:none;color:#fff">📤 Analyze Email</a>
+              <a href="/soc/dashboard" class="btn btn-primary" style="text-decoration:none;color:#fff;background:#3B82F6;border-color:#3B82F6">📊 SOC Dashboard</a>
+              <a href="/ui/agents" class="btn btn-outline" style="text-decoration:none">🧪 Test Agents</a>
+              <a href="/docs" target="_blank" rel="noreferrer" class="btn btn-ghost" style="text-decoration:none">📄 Swagger Docs</a>
+            </div>
+            <div class="tech-row">
+              <span class="tech-badge"><span class="pulse-dot"></span> FastAPI</span>
+              <span class="tech-badge"><span class="pulse-dot"></span> LangGraph</span>
+              <span class="tech-badge"><span class="pulse-dot"></span> RabbitMQ</span>
+              <span class="tech-badge"><span class="pulse-dot"></span> Azure OpenAI</span>
+              <span class="tech-badge"><span class="pulse-dot"></span> TinyBERT SLM</span>
+              <span class="tech-badge"><span class="pulse-dot"></span> Docker</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Pipeline Visualization -->
+        <section class="panel animate-in-d1 mb-md">
+          <h2 class="section-title"><span class="icon">⚡</span> LangGraph Decision Pipeline</h2>
+          <div class="pipeline-flow">
+            <span class="pipeline-node">7 Agents</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node">Score</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node">Correlate</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node">Decide</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node highlight">Counterfactual</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node">LLM Reason</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node highlight">Storyline</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node">Garuda XDR</span>
+            <span class="pipeline-arrow">→</span>
+            <span class="pipeline-node">Enforce</span>
+          </div>
+        </section>
+
+        <!-- Analysis Agents -->
+        <section class="animate-in-d2 mb-md">
+          <h2 class="section-title"><span class="icon">🛡️</span> Analysis Agents</h2>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="card-icon">📧</span>
+              <h3>Header Security</h3>
+              <p>SPF, DKIM, DMARC validation with sender spoofing and routing anomaly detection.</p>
+              <span class="card-tag rule">Deterministic</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">🧠</span>
+              <h3>Content SLM</h3>
+              <p>TinyBERT NLP model trained on sanitized email bodies — detects phishing intent and social engineering.</p>
+              <span class="card-tag ml">ML / TinyBERT</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">🔗</span>
+              <h3>URL Detection</h3>
+              <p>Lexical heuristics + XGBoost/Random Forest ML scoring with optional reputation lookups.</p>
+              <span class="card-tag ml">ML / XGBoost</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">📎</span>
+              <h3>Attachment Static</h3>
+              <p>Metadata and signature-based inspection of email attachments without detonation.</p>
+              <span class="card-tag rule">Static Analysis</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">💣</span>
+              <h3>Sandbox Behavior</h3>
+              <p>Dynamic detonation analysis via Docker executor isolation with safe fallback paths.</p>
+              <span class="card-tag rule">Dynamic</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">🌐</span>
+              <h3>Threat Intelligence</h3>
+              <p>IOC correlation against VirusTotal, OTX, URLhaus, AbuseIPDB, Google Safe Browsing, and more.</p>
+              <span class="card-tag api">External APIs</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">👤</span>
+              <h3>User Behavior</h3>
+              <p>Recipient susceptibility scoring with context-aware target risk amplification.</p>
+              <span class="card-tag rule">Contextual</span>
+            </article>
+          </div>
+        </section>
+
+        <!-- Unique Features -->
+        <section class="animate-in-d3 mb-md">
+          <h2 class="section-title"><span class="icon">✨</span> Differentiating Features</h2>
+          <div class="feature-grid" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
+            <article class="feature-card">
+              <span class="card-icon">🔀</span>
+              <h3>Counterfactual Explainability</h3>
+              <p>Calculates the exact mathematical decision boundary — "If URL wasn't a shortener, the email would be safe."</p>
+              <span class="card-tag new">Unique</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">📖</span>
+              <h3>Threat Storyline Timeline</h3>
+              <p>Chronological Delivery → Lure → Weaponization → Containment attack narrative for SOC analysts.</p>
+              <span class="card-tag new">Unique</span>
+            </article>
+            <article class="feature-card">
+              <span class="card-icon">🤖</span>
+              <h3>GenAI SOC Explanations</h3>
+              <p>Azure OpenAI generates analyst-readable investigation summaries with deterministic fallback.</p>
+              <span class="card-tag ai">GenAI</span>
+            </article>
+          </div>
+        </section>
+
+        <!-- Architecture -->
+        <section class="panel animate-in-d3 mb-md">
+          <h2 class="section-title"><span class="icon">🏗️</span> Three-Layer Architecture</h2>
+          <div class="three-col">
+            <div class="feature-card" style="text-align:center">
+              <span class="card-icon">🔬</span>
+              <h3>Analysis Layer</h3>
+              <p>7 parallel agents evaluate different dimensions of the email simultaneously via RabbitMQ.</p>
+            </div>
+            <div class="feature-card" style="text-align:center">
+              <span class="card-icon">⚖️</span>
+              <h3>Decision Layer</h3>
+              <p>LangGraph orchestrator scores, correlates, reasons, and produces final verdict with explainability.</p>
+            </div>
+            <div class="feature-card" style="text-align:center">
+              <span class="card-icon">🚀</span>
+              <h3>Action Layer</h3>
+              <p>Enforces policy: quarantine, SOC alert, block sender, or Garuda endpoint threat hunting.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Live SOC Snapshot -->
+        <section class="panel animate-in-d4 mb-md" style="padding: 2rem; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.15);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+            <h2 class="section-title" style="margin: 0;"><span class="icon">📈</span> Live SOC Intelligence</h2>
+            <div id="overviewStatus" class="status-msg" style="font-size: 0.85rem; padding: 4px 12px; background: rgba(16, 185, 129, 0.1); color: #10B981; border-radius: 99px; border: 1px solid rgba(16, 185, 129, 0.2);">Connecting...</div>
+          </div>
+          
+          <!-- KPI Grid -->
+          <div id="metricsGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;"></div>
+          
+          <!-- Charts Area -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem;">
+            <!-- Donut Chart -->
+            <div style="background: rgba(15, 23, 42, 0.4); padding: 1.5rem; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);">
+              <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin-bottom: 1rem; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path></svg>
+                Threat Distribution
+              </h3>
+              <div style="position: relative; height: 220px; width: 100%;">
+                <canvas id="uiVerdictChart"></canvas>
+              </div>
+            </div>
+            
+            <!-- Bar Chart -->
+            <div style="background: rgba(15, 23, 42, 0.4); padding: 1.5rem; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);">
+              <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin-bottom: 1rem; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                Automated Mitigations
+              </h3>
+              <div style="position: relative; height: 220px; width: 100%;">
+                <canvas id="uiActionChart"></canvas>
+              </div>
+            </div>
+            
+            <!-- Confidence Calibration Scatter -->
+            <div style="background: rgba(15, 23, 42, 0.4); padding: 1.5rem; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);">
+              <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin-bottom: 1rem; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                Confidence vs. Risk Calibration
+              </h3>
+              <div style="position: relative; height: 220px; width: 100%;">
+                <canvas id="uiCalibrationChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </section>
+      `;
+
+      AgentUI.initSettingsDropdown();
+      
+      // Load Chart.js dynamically if not present
+      if (!window.Chart) {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+          script.onload = () => { initUICharts(); loadOverview(); };
+          document.head.appendChild(script);
+      } else {
+          initUICharts();
+          loadOverview();
+      }
+    });
+
+    let uiVerdictChart = null;
+    let uiActionChart = null;
+    let uiCalibrationChart = null;
+
+    function initUICharts() {
+        Chart.defaults.color = '#8E9BB0'; // var(--ink-muted)
+        Chart.defaults.font.family = "ui-sans-serif, system-ui, -apple-system, sans-serif";
+
+        const ctx1 = document.getElementById('uiVerdictChart');
+        if (ctx1) {
+            uiVerdictChart = new Chart(ctx1.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Malicious', 'High Risk', 'Suspicious', 'Safe'],
+                    datasets: [{
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#EF4444', '#F59E0B', '#FCD34D', '#10B981'],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: { legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 8 } } }
+                }
+            });
+        }
+
+        const ctx2 = document.getElementById('uiActionChart');
+        if (ctx2) {
+            const gradient = ctx2.getContext('2d').createLinearGradient(0, 0, 0, 200);
+            gradient.addColorStop(0, 'rgba(59, 130, 246, 0.8)');
+            gradient.addColorStop(1, 'rgba(59, 130, 246, 0.2)');
+            
+            uiActionChart = new Chart(ctx2.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Count',
+                        data: [],
+                        backgroundColor: gradient,
+                        borderRadius: 4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        x: { grid: { display: false } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        const ctx3 = document.getElementById('uiCalibrationChart');
+        if (ctx3) {
+            uiCalibrationChart = new Chart(ctx3.getContext('2d'), {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Agent Output',
+                        data: [],
+                        backgroundColor: 'rgba(16, 185, 129, 0.5)',
+                        borderColor: 'rgba(16, 185, 129, 1)',
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { 
+                            title: { display: true, text: 'Confidence (0.0 - 1.0)', color: '#8E9BB0' },
+                            min: 0.0, max: 1.0, grid: { color: 'rgba(255,255,255,0.05)' } 
+                        },
+                        y: { 
+                            title: { display: true, text: 'Risk Score (0.0 - 1.0)', color: '#8E9BB0' },
+                            min: 0.0, max: 1.0, grid: { color: 'rgba(255,255,255,0.05)' } 
+                        }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+    }
+
+    async function loadOverview() {
+      const statusEl = document.getElementById("overviewStatus");
+      const grid = document.getElementById("metricsGrid");
+      try {
+        const res = await AgentUI.apiFetch("/soc/overview");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "HTTP " + res.status);
+
+        AgentUI.showStatus(statusEl, "✅ Live telemetry updated.", "ok");
+
+        const count = data?.reports?.count || 0;
+        const avg = (data?.reports?.avg_risk_score ?? 0).toFixed(2);
+        const v = data?.reports?.verdict_counts || {};
+        const queues = (data?.queue_health || []).filter(x => x.exists).length;
+
+        grid.innerHTML = `
+          <div class="metric-card"><div class="metric-label">Analyzed</div><div class="metric-value" style="color:var(--accent-blue)">${count}</div></div>
+          <div class="metric-card"><div class="metric-label">Avg Risk</div><div class="metric-value" style="color:var(--accent-amber)">${avg}</div></div>
+          <div class="metric-card"><div class="metric-label">Active Queues</div><div class="metric-value" style="color:var(--accent-green)">${queues}</div></div>
+          <div class="metric-card"><div class="metric-label">Malicious</div><div class="metric-value" style="color:var(--accent-red)">${v.malicious || 0}</div></div>
+        `;
+
+        if (uiVerdictChart && window.Chart) {
+            uiVerdictChart.data.datasets[0].data = [
+                v.malicious || 0,
+                v.high_risk || 0,
+                v.suspicious || 0,
+                (v.safe || 0) + (v.likely_safe || 0)
+            ];
+            uiVerdictChart.update();
+        }
+
+        if (uiActionChart && window.Chart && data.response_actions) {
+            const actionEntries = Object.entries(data.response_actions).sort((a,b) => b[1] - a[1]);
+            uiActionChart.data.labels = actionEntries.map(e => e[0].replace(/_/g, ' '));
+            uiActionChart.data.datasets[0].data = actionEntries.map(e => e[1]);
+            uiActionChart.update();
+        }
+
+        if (uiCalibrationChart && window.Chart && data.agent_outputs) {
+            const scatterData = data.agent_outputs.map(item => ({
+                x: item.confidence,
+                y: item.risk_score
+            }));
+            uiCalibrationChart.data.datasets[0].data = scatterData;
+            // Color code based on risk
+            uiCalibrationChart.data.datasets[0].backgroundColor = scatterData.map(d => 
+                d.y > 0.7 ? 'rgba(239, 68, 68, 0.5)' : 
+                d.y > 0.4 ? 'rgba(245, 158, 11, 0.5)' : 
+                'rgba(16, 185, 129, 0.5)'
+            );
+            uiCalibrationChart.update();
+        }
+
+      } catch (err) {
+        AgentUI.showStatus(statusEl, "⚠ Could not load telemetry data.", "warn");
+      }
+    }
+  </script>
+</body>
+</html>
+
+<script>
+// Matrix rain effect
+const canvas = document.getElementById('matrixCanvas');
+if (canvas) {
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  canvas.style.position = 'fixed';
+  canvas.style.top = '0';
+  canvas.style.left = '0';
+  canvas.style.zIndex = '-1';
+  canvas.style.opacity = '0.15';
+
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*'.split('');
+  const fontSize = 14;
+  const columns = canvas.width / fontSize;
+  const drops = Array(Math.floor(columns)).fill(1);
+
+  function draw() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0f0';
+    ctx.font = fontSize + 'px monospace';
+    for(let i = 0; i < drops.length; i++) {
+        const text = letters[Math.floor(Math.random() * letters.length)];
+        ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+        if(drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+        drops[i]++;
+    }
+  }
+  setInterval(draw, 33);
+}
+</script>

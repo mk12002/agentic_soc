@@ -1,0 +1,52 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/api/v1/incidents/all$",
+   "body": {
+    "incidents": [
+     {
+      "id": "canary-inc-0001",
+      "description": {
+       "incident_id": "canary-inc-0001",
+       "description": "Shared File Opened",
+       "name": "FS01-Finance-Backups",
+       "node_id": "canary-node-fs01",
+       "src_host": "10.20.1.15",
+       "src_host_reverse": "jane-lt01.cci-demo.com",
+       "dst_host": "10.10.0.21",
+       "dst_port": "445",
+       "created_std": "2026-09-20T09:40:11Z",
+       "acknowledged": "False",
+       "logtype": "5000",
+       "events_count": "3",
+       "logdata": [
+        {
+         "USERNAME": "jane.doe",
+         "FILENAME": "\\\\Finance-Backups\\2026-Q3-payroll.xlsx"
+        }
+       ]
+      }
+     }
+    ],
+    "max_updated_id": 1001
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/v1/devices/all$",
+   "body": {
+    "devices": [
+     {
+      "id": "canary-node-fs01",
+      "name": "FS01-Finance-Backups",
+      "ip_address": "10.10.0.21",
+      "location": "DC1"
+     }
+    ]
+   },
+   "status": 200
+  }
+ ]
+}

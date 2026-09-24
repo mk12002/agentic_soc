@@ -1,0 +1,239 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/vt/api/v3/domains/(micros0ft-helpdesk.com|login.micros0ft-helpdesk.com)$",
+   "body": {
+    "data": {
+     "attributes": {
+      "last_analysis_stats": {
+       "malicious": 14,
+       "suspicious": 3,
+       "harmless": 50,
+       "undetected": 20
+      }
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/vt/api/v3/ip_addresses/185.220.101.4$",
+   "body": {
+    "data": {
+     "attributes": {
+      "last_analysis_stats": {
+       "malicious": 9,
+       "suspicious": 2,
+       "harmless": 60,
+       "undetected": 20
+      }
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/vt/api/v3/files/a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6$",
+   "body": {
+    "data": {
+     "attributes": {
+      "last_analysis_stats": {
+       "malicious": 38,
+       "suspicious": 0,
+       "harmless": 0,
+       "undetected": 30
+      }
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/vt/api/v3/urls/aHR0cHM6Ly9sb2dpbi5taWNyb3MwZnQ",
+   "body": {
+    "data": {
+     "attributes": {
+      "last_analysis_stats": {
+       "malicious": 14,
+       "suspicious": 3,
+       "harmless": 50,
+       "undetected": 20
+      }
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/vt/",
+   "body": {
+    "data": {
+     "attributes": {
+      "last_analysis_stats": {
+       "malicious": 0,
+       "harmless": 70,
+       "undetected": 10
+      }
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/abuseipdb/api/v2/check$",
+   "body": {
+    "data": {
+     "abuseConfidenceScore": 100,
+     "totalReports": 1840,
+     "isp": "Tor exit",
+     "isTor": true
+    }
+   },
+   "status": 200,
+   "params": {
+    "ipAddress": "185.220.101.4"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/abuseipdb/api/v2/check$",
+   "body": {
+    "data": {
+     "abuseConfidenceScore": 0,
+     "totalReports": 0
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/otx/api/v1/indicators/.*(micros0ft-helpdesk.com|login.micros0ft-helpdesk.com|185.220.101.4|a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6)",
+   "body": {
+    "pulse_info": {
+     "count": 4
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/otx/",
+   "body": {
+    "pulse_info": {
+     "count": 0
+    }
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/urlhaus/v1/",
+   "body": {
+    "query_status": "ok",
+    "threat": "phishing",
+    "url_status": "online"
+   },
+   "status": 200,
+   "body_contains": "micros0ft"
+  },
+  {
+   "method": "POST",
+   "path": "^/urlhaus/v1/",
+   "body": {
+    "query_status": "no_results"
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/threatfox/api/v1/$",
+   "body": {
+    "query_status": "ok",
+    "data": [
+     {
+      "malware_printable": "Unknown Loader",
+      "threat_type": "payload_delivery"
+     }
+    ]
+   },
+   "status": 200,
+   "body_contains": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+  },
+  {
+   "method": "POST",
+   "path": "^/threatfox/api/v1/$",
+   "body": {
+    "query_status": "no_result",
+    "data": "no results"
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/malwarebazaar/api/v1/$",
+   "body": {
+    "query_status": "ok",
+    "data": [
+     {
+      "signature": "PowerShell Loader",
+      "file_type": "ps1"
+     }
+    ]
+   },
+   "status": 200,
+   "body_contains": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+  },
+  {
+   "method": "POST",
+   "path": "^/malwarebazaar/api/v1/$",
+   "body": {
+    "query_status": "hash_not_found"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/greynoise/v3/community/185.220.101.4$",
+   "body": {
+    "noise": true,
+    "riot": false,
+    "classification": "malicious",
+    "name": "Tor exit node"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/greynoise/v3/community/",
+   "body": {
+    "noise": false,
+    "riot": false,
+    "classification": "unknown"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/shodan/shodan/host/",
+   "body": {
+    "ports": [
+     22,
+     80,
+     443,
+     9001
+    ],
+    "org": "Tor relay",
+    "tags": [
+     "tor"
+    ]
+   },
+   "status": 200
+  }
+ ]
+}

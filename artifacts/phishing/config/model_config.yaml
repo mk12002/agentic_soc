@@ -1,0 +1,84 @@
+# =============================================================================
+# Model Configuration – Agentic Email Security System
+# =============================================================================
+# Centralised model paths, training hyperparameters, and inference settings.
+# Values here mirror the defaults in configs/settings.py and can be overridden
+# by environment variables at runtime.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Model Paths (relative to PROJECT_ROOT / email_security/)
+# ---------------------------------------------------------------------------
+model_paths:
+  header_agent: "models/header_agent/"
+  content_agent: "models/content_agent/"
+  url_agent: "models/url_agent/"
+  attachment_agent: "models/attachment_agent/"
+  sandbox_agent: "models/sandbox_agent/"
+  threat_intel_agent: "models/threat_intel_agent/"
+  user_behavior_agent: "models/user_behavior_agent/"
+
+# ---------------------------------------------------------------------------
+# Dataset Paths
+# ---------------------------------------------------------------------------
+dataset_paths:
+  base: "datasets/"
+  processed: "datasets_processed/"
+
+# ---------------------------------------------------------------------------
+# SLM (Small Language Model) Training Hyperparameters
+# ---------------------------------------------------------------------------
+slm_training:
+  max_sequence_length: 256
+  max_words_per_sample: 512
+  max_samples_per_class: 500000
+  min_samples_per_class: 8000
+  num_epochs: 5
+  per_device_train_batch_size: 32
+  gradient_accumulation_steps: 2
+  num_workers: 2
+  logging_steps: 50
+
+# ---------------------------------------------------------------------------
+# Preprocessing
+# ---------------------------------------------------------------------------
+preprocessing:
+  chunk_size_mb: 256
+  workers: 8
+  keep_features_in_memory: true
+
+# ---------------------------------------------------------------------------
+# Runtime Caching (30GB RAM Optimizations)
+# ---------------------------------------------------------------------------
+caching:
+  ioc_memory_size_mb: 1024
+  url_reputation_size_mb: 512
+  threat_intel_ttl_seconds: 3600
+  model_artifacts_enabled: true
+  model_preloading: true
+
+# ---------------------------------------------------------------------------
+# Sandbox Detonation
+# ---------------------------------------------------------------------------
+sandbox:
+  detonation_image: "python:3.11-slim"
+  timeout_seconds: 60
+  memory_limit_mb: 256
+  pids_limit: 128
+  max_detonations: 5
+  cleanup_stale_seconds: 1800
+  enable_benign_bootstrap: true
+  benign_bootstrap_max_rows: 5000
+  allow_network: false
+  non_root_user: "65534:65534"
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+orchestrator:
+  max_concurrent_analyses: 50
+  worker_pool_size: 16
+  queue_depth: 500
+  cache_ttl_seconds: 900
+  partial_timeout_seconds: 90
+  min_agents_for_decision: 4

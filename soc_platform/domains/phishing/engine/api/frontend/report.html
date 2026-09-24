@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SOC Analysis Hub — Threat Report</title>
+  <link rel="stylesheet" href="/ui-assets/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <style>
+    .report-grid { display: grid; grid-template-columns: 1fr 350px; gap: 1.5rem; }
+    .heatmap-cell { padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; margin: 2px; color: #fff; font-weight: 500; text-align: center; display: inline-block; }
+    .hm-high { background: #ff0000; }
+    .hm-medhigh { background: #ff6600; }
+    .hm-med { background: #ffcc00; color: #000; }
+    .hm-low { background: #99cc00; color: #000; }
+    .hm-none { background: rgba(255,255,255,0.1); color: #aaa; }
+    .tactic-col { display: flex; flex-direction: column; gap: 4px; }
+    .tactic-header { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <main class="shell" id="app"></main>
+
+  <script src="/ui-assets/app.js"></script>
+  <script>
+    AgentUI.onReady(() => {
+      const app = document.getElementById("app");
+      app.innerHTML = `
+        ${AgentUI.topbarHTML()}
+        
+        <div class="row" style="margin-bottom:1rem; align-items:center; justify-content:space-between">
+            <div>
+                <a href="/ui" style="color:var(--accent-blue); text-decoration:none; font-size:0.9rem">← Back to Dashboard</a>
+                <h1 style="margin: 0.5rem 0 0 0; font-size: 1.8rem;">Threat Analysis Report</h1>
+                <p id="analysisIdDisplay" style="color:var(--ink-muted); font-family:monospace; margin:0.25rem 0 0 0"></p>
+                <p id="emailIdentityDisplay" style="color:var(--ink-soft); font-size:0.85rem; margin:0.25rem 0 0 0"></p>
+            </div>
+            <div class="row" style="gap:10px">
+                <button id="btnOverride" class="btn-outline">⚖️ Override</button>
+                <button id="btnStix" class="btn-outline">Export STIX</button>
+                <button id="btnNavigator" class="btn-outline">ATT&CK Navigator</button>
+                <button id="btnPdf" class="btn-primary">Export PDF</button>
+            </div>
+        </div>
+
+        <div id="loading" style="padding:3rem; text-align:center; color:var(--ink-muted)">Loading report data...</div>
+        <div id="error" class="status-msg err" style="display:none; margin-bottom:1rem"></div>
+
+        <div id="reportContent" style="display:none">
+            <!-- Exec Summary -->
+            <section class="panel mb-md" style="border-left: 4px solid var(--accent-blue)" id="execSummaryPanel">
+                <div class="row" style="justify-content:space-between; align-items:flex-start">
+                    <div>
+                        <div class="row" style="align-items:center; gap:12px; margin-bottom:12px">
+                            <h2 style="margin:0; font-size:1.4rem">Executive Summary</h2>
+                            <span id="verdictBadge" class="verdict-badge" style="font-size:0.9rem; padding:4px 12px"></span>
+                        </div>
+                        <div id="llmExplanation" style="color:var(--ink-soft); line-height:1.6; max-width:800px"></div>
+                        <div id="groundedEvidenceWrap" style="display:none; margin-top:1rem; max-width:820px">
+                            <div style="font-size:0.75rem; color:var(--ink-muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">
+                                Grounding Evidence <span style="text-transform:none">— every claim above cites these</span>
+                            </div>
+                            <div id="groundedEvidence" style="display:flex; flex-wrap:wrap; gap:6px"></div>
+                        </div>
+                    </div>
+                    <div style="text-align:right; min-width:150px">
+                        <div style="font-size:0.8rem; color:var(--ink-muted); text-transform:uppercase; letter-spacing:0.05em">Risk Score</div>
+                        <div id="riskScore" style="font-size:2.5rem; font-weight:700; font-variant-numeric: tabular-nums;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="report-grid mb-md">
+                <!-- Left Col -->
+                <div style="display:flex; flex-direction:column; gap:1.5rem">
+                    
+                    <!-- Storyline -->
+                    <section class="panel">
+                        <h3 class="section-title"><span class="icon">📖</span> Threat Storyline</h3>
+                        <div id="storylineContent"></div>
+                    </section>
+
+                    <!-- Counterfactual -->
+                    <section class="panel">
+                        <h3 class="section-title"><span class="icon">🔀</span> Counterfactual Analysis</h3>
+                        <p id="counterfactualNarrative" style="color:var(--ink-soft); margin-bottom:1rem; font-size:0.9rem; line-height:1.5"></p>
+                        <div style="height:250px"><canvas id="cfChart"></canvas></div>
+                    </section>
+
+                    <!-- Playbook -->
+                    <section class="panel">
+                        <h3 class="section-title"><span class="icon">⚡</span> Automated Response Playbook</h3>
+                        <div id="playbookContent"></div>
+                    </section>
+                </div>
+
+                <!-- Right Col -->
+                <div style="display:flex; flex-direction:column; gap:1.5rem">
+                    
+                    <!-- Agent Waterfall -->
+                    <section class="panel">
+                        <h3 class="section-title"><span class="icon">🔬</span> Agent Contributions</h3>
+                        <div style="height:300px"><canvas id="agentChart"></canvas></div>
+                    </section>
+
+                    <!-- Attribution -->
+                    <section class="panel">
+                        <h3 class="section-title"><span class="icon">👤</span> Threat Attribution</h3>
+                        <div id="attributionContent"></div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- Analyst Brief -->
+            <section class="panel mb-md" id="analystBriefPanel" style="display:none">
+                <h3 class="section-title"><span class="icon">📝</span> SOC Analyst Brief</h3>
+                <div id="analystBrief" style="color:var(--ink-soft); line-height:1.6; font-size:0.9rem"></div>
+            </section>
+
+            <!-- Provenance Chain -->
+            <section class="panel mb-md" id="provenancePanel" style="display:none">
+                <h3 class="section-title"><span class="icon">🧾</span> Decision Provenance (audit trail)</h3>
+                <div id="provenanceChain" style="display:flex; flex-direction:column; gap:6px; font-size:0.82rem"></div>
+            </section>
+
+            <!-- ATT&CK Matrix -->
+            <section class="panel mb-md">
+                <h3 class="section-title"><span class="icon">🛡️</span> MITRE ATT&CK Matrix</h3>
+                <div id="attackMatrix" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px; overflow-x:auto; padding-bottom:10px"></div>
+            </section>
+
+            <!-- Raw Data -->
+            <section class="panel">
+                <details>
+                    <summary style="cursor:pointer; color:var(--ink-soft); font-weight:600">Show Raw API JSON</summary>
+                    <pre id="rawJson" class="mt-sm" style="max-height:400px; font-size:0.75rem"></pre>
+                </details>
+            </section>
+        </div>
+      `;
+      
+      AgentUI.initSettingsDropdown();
+      mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+      loadReport();
+    });
+
+    async function loadReport() {
+        const pathParts = window.location.pathname.split('/');
+        const analysisId = pathParts[pathParts.length - 1];
+        if (!analysisId || analysisId === "report") {
+            document.getElementById("error").textContent = "No Analysis ID provided in URL.";
+            document.getElementById("error").style.display = "block";
+            document.getElementById("loading").style.display = "none";
+            return;
+        }
+
+        document.getElementById("analysisIdDisplay").textContent = analysisId;
+
+        try {
+            const res = await AgentUI.apiFetch(`/reports/${analysisId}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "HTTP " + res.status);
+
+            renderReport(data, analysisId);
+            document.getElementById("loading").style.display = "none";
+            document.getElementById("reportContent").style.display = "block";
+
+            // Bind export buttons (authenticated downloads via AgentUI.apiFetch)
+            async function downloadFromApi(path, filename) {
+                const r = await AgentUI.apiFetch(path);
+                if (!r.ok) {
+                    const detail = await r.text();
+                    alert("Export failed: " + detail);
+                    return;
+                }
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = filename; a.click();
+                URL.revokeObjectURL(url);
+            }
+            const idShort = analysisId.substring(0, 8);
+            document.getElementById("btnStix").onclick = () =>
+                downloadFromApi(`/reports/${analysisId}/stix`, `stix_bundle_${idShort}.json`);
+            document.getElementById("btnNavigator").onclick = () =>
+                downloadFromApi(`/reports/${analysisId}/navigator`, `navigator_layer_${idShort}.json`);
+            document.getElementById("btnPdf").onclick = () =>
+                downloadFromApi(`/reports/${analysisId}/pdf`, `${idShort}.pdf`);
+
+            // Bind SOC override
+            const btnOverride = document.getElementById("btnOverride");
+            if (btnOverride) {
+                btnOverride.onclick = async () => {
+                    const newVerdict = prompt("Override verdict to (e.g. malicious / benign / suspicious):");
+                    if (!newVerdict) return;
+                    const actionsRaw = prompt("Comma-separated actions to execute (e.g. quarantine,block_sender):", "");
+                    const analyst = prompt("Your name / analyst id:", "soc_analyst") || "soc_analyst";
+                    const reason = prompt("Reason for override:", "") || "";
+                    const actions = (actionsRaw || "").split(",").map(s => s.trim()).filter(Boolean);
+                    const r = await AgentUI.apiFetch(`/api/override`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ analysis_id: analysisId, new_verdict: newVerdict, actions, analyst, reason }),
+                    });
+                    const out = await r.json();
+                    if (!r.ok) { alert("Override failed: " + (out.detail || r.status)); return; }
+                    alert("Override applied: " + out.new_verdict + "\nActions: " + (out.actions_executed || []).join(", "));
+                };
+            }
+
+        } catch (err) {
+            document.getElementById("error").textContent = "Failed to load report: " + err.message;
+            document.getElementById("error").style.display = "block";
+            document.getElementById("loading").style.display = "none";
+        }
+    }
+
+    // Escape untrusted text (indicator / LLM / threat-intel content) before
+    // inserting into innerHTML or Mermaid node labels — prevents stored XSS.
+    function escapeHtml(s) {
+        return String(s == null ? "" : s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function renderReport(data, analysisId) {
+        document.getElementById("rawJson").textContent = JSON.stringify(data, null, 2);
+
+        if (data.sender || data.subject) {
+            document.getElementById("emailIdentityDisplay").textContent =
+                `From: ${data.sender || 'Unknown'}${data.subject ? '  ·  Subject: ' + data.subject : ''}`;
+        }
+
+        // Exec Summary
+        const verdict = data.verdict || "unknown";
+        const badge = document.getElementById("verdictBadge");
+        badge.textContent = verdict.toUpperCase();
+        badge.className = "verdict-badge " + AgentUI.verdictClass(verdict);
+        
+        const risk = data.overall_risk_score ?? 0;
+        const riskEl = document.getElementById("riskScore");
+        riskEl.textContent = risk.toFixed(4);
+        riskEl.style.color = risk >= 0.7 ? '#EF4444' : risk >= 0.4 ? '#F59E0B' : '#10B981';
+
+        const panel = document.getElementById("execSummaryPanel");
+        panel.style.borderLeftColor = risk >= 0.7 ? '#EF4444' : risk >= 0.4 ? '#F59E0B' : '#10B981';
+
+        document.getElementById("llmExplanation").innerHTML = marked.parse(data.llm_explanation || "No explanation provided.");
+
+        // Grounded evidence chips — each [E#] citation in the explanation maps to a concrete detector signal.
+        const evidence = data.grounded_evidence || [];
+        if (evidence.length > 0) {
+            const wrap = document.getElementById("groundedEvidenceWrap");
+            const container = document.getElementById("groundedEvidence");
+            container.innerHTML = "";
+            evidence.forEach(ev => {
+                const raw = ev.raw_value ? ` — ${ev.raw_value}` : "";
+                const chip = document.createElement("span");
+                chip.title = `${ev.claim}${raw}`;
+                chip.style.cssText = "font-size:0.72rem; padding:3px 8px; border-radius:10px; cursor:help; " +
+                    "background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.35); color:var(--ink-soft); white-space:nowrap";
+                chip.textContent = `[${ev.id}] ${ev.agent.replace('_agent','')}: ${ev.type}`;
+                container.appendChild(chip);
+            });
+            wrap.style.display = "block";
+        }
+
+        // SOC Analyst Brief — structured, grounded summary for the analyst.
+        const brief = data.analyst_brief || null;
+        if (brief && brief.executive_summary) {
+            const esc = (s) => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+            const list = (arr) => (arr || []).map(x => `<li>${esc(x)}</li>`).join("");
+            const ev = (brief.key_evidence || []).map(k =>
+                `<li><strong>[${esc(k.evidence_id)}]</strong> ${esc(k.agent.replace('_agent',''))}: ${esc(k.claim)}</li>`).join("");
+            document.getElementById("analystBrief").innerHTML =
+                `<p>${esc(brief.executive_summary)}</p>` +
+                `<p><strong>Confidence:</strong> ${esc(brief.confidence_assessment || "")}</p>` +
+                (ev ? `<p style="margin-bottom:4px"><strong>Key evidence:</strong></p><ul style="margin-top:0">${ev}</ul>` : "") +
+                (brief.investigation_steps ? `<p style="margin-bottom:4px"><strong>Investigation steps:</strong></p><ul style="margin-top:0">${list(brief.investigation_steps)}</ul>` : "") +
+                (brief.false_positive_indicators ? `<p style="margin-bottom:4px"><strong>False-positive checks:</strong></p><ul style="margin-top:0">${list(brief.false_positive_indicators)}</ul>` : "") +
+                `<p><strong>Recommendation:</strong> ${esc(brief.escalation_recommendation || "")}</p>`;
+            document.getElementById("analystBriefPanel").style.display = "block";
+        }
+
+        // Decision Provenance — ordered audit trail of how the verdict was reached.
+        const provenance = data.provenance_chain || [];
+        if (provenance.length > 0) {
+            const esc = (s) => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+            const container = document.getElementById("provenanceChain");
+            container.innerHTML = provenance.map(step => {
+                const impact = (step.impact_on_score === null || step.impact_on_score === undefined)
+                    ? "" : ` <span style="color:var(--ink-muted)">(impact ${Number(step.impact_on_score).toFixed(3)})</span>`;
+                return `<div style="padding:6px 10px; border-left:3px solid var(--accent-blue); background:rgba(59,130,246,0.06)">` +
+                    `<span style="text-transform:uppercase; font-size:0.68rem; letter-spacing:0.04em; color:var(--ink-muted)">${esc(step.stage)}</span>` +
+                    `<div>${esc(step.description)}${impact}</div></div>`;
+            }).join("");
+            document.getElementById("provenancePanel").style.display = "block";
+        }
+
+        // Agent Chart
+        const agents = data.agent_results || [];
+        if (agents.length > 0) {
+            new Chart(document.getElementById('agentChart'), {
+                type: 'bar',
+                data: {
+                    labels: agents.map(a => a.agent_name.replace('_agent','')),
+                    datasets: [{
+                        label: 'Risk Score',
+                        data: agents.map(a => a.risk_score),
+                        backgroundColor: agents.map(a => a.risk_score >= 0.5 ? 'rgba(239, 68, 68, 0.7)' : 'rgba(16, 185, 129, 0.7)'),
+                        borderColor: agents.map(a => a.risk_score >= 0.5 ? 'rgba(239, 68, 68, 1)' : 'rgba(16, 185, 129, 1)'),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, max: 1 } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        // Counterfactual Chart
+        const cf = data.counterfactual_result;
+        if (cf && cf.is_counterfactual && cf.agents_altered) {
+            document.getElementById("counterfactualNarrative").textContent = cf.narrative || "Counterfactual boundary found.";
+            new Chart(document.getElementById('cfChart'), {
+                type: 'bar',
+                data: {
+                    labels: cf.agents_altered.map(a => a.agent_name.replace('_agent','')),
+                    datasets: [
+                        { label: 'Original Risk', data: cf.agents_altered.map(a => a.original_risk), backgroundColor: 'rgba(239, 68, 68, 0.6)' },
+                        { label: 'Required Attenuation', data: cf.agents_altered.map(a => a.attenuated_risk), backgroundColor: 'rgba(59, 130, 246, 0.6)' }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        } else {
+            document.getElementById("counterfactualNarrative").textContent = "No counterfactual boundary crossed. The verdict is robust against single-agent perturbation.";
+            document.getElementById("cfChart").style.display = "none";
+        }
+
+        // Storyline
+        const storyline = data.threat_storyline || [];
+        if (storyline.length > 0) {
+            let mermaidGraph = "graph TD\n";
+            storyline.forEach((item, index) => {
+                const safeDesc = escapeHtml(item.description).replace(/[\n\r]/g, " ");
+                mermaidGraph += `  node${index}["<b>${escapeHtml(item.phase)}</b><br/>${safeDesc}"]\n`;
+                if (item.severity === 'high') {
+                    mermaidGraph += `  style node${index} fill:#451a1a,stroke:#EF4444,stroke-width:2px,color:#fff\n`;
+                } else if (item.severity === 'medium') {
+                    mermaidGraph += `  style node${index} fill:#452e1a,stroke:#F59E0B,stroke-width:1px,color:#fff\n`;
+                } else {
+                    mermaidGraph += `  style node${index} fill:#1a3329,stroke:#10B981,stroke-width:1px,color:#fff\n`;
+                }
+                if (index > 0) {
+                    mermaidGraph += `  node${index-1} --> node${index}\n`;
+                }
+            });
+            
+            const storyContainer = document.getElementById("storylineContent");
+            storyContainer.innerHTML = `<div class="mermaid">${mermaidGraph}</div>`;
+            mermaid.init(undefined, storyContainer.querySelector('.mermaid'));
+        } else {
+            document.getElementById("storylineContent").innerHTML = "<p style='color:var(--ink-muted); font-size:0.85rem'>No chronological storyline was synthesized for this analysis.</p>";
+        }
+
+        // Playbook
+        const pb = data.playbook_result;
+        if (pb) {
+            let pbHtml = `
+                <div style="margin-bottom:1rem">
+                    <strong>${escapeHtml(pb.playbook_name)}</strong> executed at ${escapeHtml(pb.completed_at || pb.started_at)}
+                </div>
+                <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px">
+            `;
+            pb.steps.forEach(s => {
+                const icon = s.status === 'executed' ? '✅' : s.status === 'pending_approval' ? '⏳' : '❌';
+                pbHtml += `<li style="background:rgba(255,255,255,0.05); padding:8px 12px; border-radius:6px; font-size:0.85rem">${icon} ${escapeHtml(s.description)} (${escapeHtml(s.action)})</li>`;
+            });
+            pbHtml += '</ul>';
+            document.getElementById("playbookContent").innerHTML = pbHtml;
+        } else {
+            const actions = data.recommended_actions || [];
+            if(actions.length > 0) {
+                document.getElementById("playbookContent").innerHTML = `<div class="row" style="flex-wrap:wrap">` + actions.map(a => `<span class="tech-badge">`+escapeHtml(a)+`</span>`).join('') + `</div>`;
+            } else {
+                document.getElementById("playbookContent").innerHTML = "<span class='tech-badge' style='background:rgba(16,185,129,0.1); color:#10B981'>No action required</span>";
+            }
+        }
+
+        // Attribution
+        const attr = data.threat_attribution;
+        if (attr && attr.candidates && attr.candidates.length > 0) {
+            document.getElementById("attributionContent").innerHTML = `
+                <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:1rem; line-height:1.5">${escapeHtml(attr.narrative)}</p>
+                <div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px">
+                    <div style="font-size:0.75rem; color:var(--ink-muted); margin-bottom:4px">TOP MATCH</div>
+                    <div style="font-size:1.1rem; font-weight:600; color:var(--accent-cyan)">${escapeHtml(attr.candidates[0].group_name)}</div>
+                    <div style="font-size:0.8rem; color:var(--ink-soft)">Origin: ${escapeHtml(attr.candidates[0].origin)}</div>
+                </div>
+            `;
+        } else {
+            document.getElementById("attributionContent").innerHTML = "<p style='color:var(--ink-muted); font-size:0.85rem'>No specific threat group attribution identified from available signals.</p>";
+        }
+
+        // ATT&CK Matrix Heatmap
+        const attack = data.attack_assessment;
+        if (attack && attack.tactics_summary) {
+            const matrix = document.getElementById("attackMatrix");
+            
+            // Standard kill chain order
+            const order = ["TA0043", "TA0042", "TA0001", "TA0002", "TA0003", "TA0004", "TA0005", "TA0006", "TA0007", "TA0008", "TA0009", "TA0011", "TA0010", "TA0040"];
+            
+            const grouped = {};
+            attack.techniques.forEach(t => {
+                if(!grouped[t.tactic_id]) grouped[t.tactic_id] = { name: t.tactic_name, techs: [] };
+                grouped[t.tactic_id].techs.push(t);
+            });
+
+            const sortedTactics = Object.keys(grouped).sort((a,b) => {
+                const ia = order.indexOf(a); const ib = order.indexOf(b);
+                return (ia===-1?99:ia) - (ib===-1?99:ib);
+            });
+
+            let matrixHtml = '';
+            sortedTactics.forEach(tid => {
+                matrixHtml += `<div class="tactic-col">`;
+                matrixHtml += `<div class="tactic-header">${escapeHtml(grouped[tid].name)}</div>`;
+                grouped[tid].techs.forEach(t => {
+                    const cf = t.confidence;
+                    const cls = cf >= 0.85 ? 'hm-high' : cf >= 0.7 ? 'hm-medhigh' : cf >= 0.5 ? 'hm-med' : 'hm-low';
+                    matrixHtml += `<div class="heatmap-cell ${cls}" title="${escapeHtml((t.evidence||[]).join('; '))}">${escapeHtml(t.technique_id)}</div>`;
+                });
+                matrixHtml += `</div>`;
+            });
+            matrix.innerHTML = matrixHtml;
+        } else {
+            document.getElementById("attackMatrix").innerHTML = "<p style='color:var(--ink-muted); font-size:0.85rem'>No ATT&CK techniques mapped.</p>";
+        }
+    }
+  </script>
+</body>
+</html>

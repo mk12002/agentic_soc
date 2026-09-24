@@ -1,0 +1,9 @@
+# DEV ONLY: local attachment detonation through the host Docker daemon.
+# Never use in a client environment (R12 / PH-T04) - production detonation runs on an
+# isolated host (separate VM / gVisor / Firecracker, no egress) reached via SANDBOX_EXECUTOR_URL.
+services:
+  sandbox_executor_service:
+    environment:
+      SANDBOX_LOCAL_DOCKER_ENABLED: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

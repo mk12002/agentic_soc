@@ -1,0 +1,313 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/rest/json/cves/2.0$",
+   "body": {
+    "totalResults": 1,
+    "vulnerabilities": [
+     {
+      "cve": {
+       "id": "CVE-2021-44228",
+       "published": "2023-01-01T00:00:00",
+       "lastModified": "2026-01-01T00:00:00",
+       "descriptions": [
+        {
+         "lang": "en",
+         "value": "Apache Log4j2 JNDI remote code execution (Log4Shell)"
+        }
+       ],
+       "metrics": {
+        "cvssMetricV31": [
+         {
+          "cvssData": {
+           "baseScore": 10.0,
+           "baseSeverity": "CRITICAL",
+           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+          }
+         }
+        ]
+       },
+       "weaknesses": [
+        {
+         "description": [
+          {
+           "value": "CWE-502"
+          }
+         ]
+        }
+       ],
+       "references": [
+        {
+         "url": "https://example.org/advisory/CVE-2021-44228",
+         "tags": [
+          "Vendor Advisory"
+         ]
+        },
+        {
+         "url": "https://example.org/poc/CVE-2021-44228",
+         "tags": [
+          "Exploit"
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "cveId": "CVE-2021-44228"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/rest/json/cves/2.0$",
+   "body": {
+    "totalResults": 1,
+    "vulnerabilities": [
+     {
+      "cve": {
+       "id": "CVE-2024-21412",
+       "published": "2023-01-01T00:00:00",
+       "lastModified": "2026-01-01T00:00:00",
+       "descriptions": [
+        {
+         "lang": "en",
+         "value": "Internet Shortcut Files security feature bypass"
+        }
+       ],
+       "metrics": {
+        "cvssMetricV31": [
+         {
+          "cvssData": {
+           "baseScore": 8.1,
+           "baseSeverity": "HIGH",
+           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+          }
+         }
+        ]
+       },
+       "weaknesses": [
+        {
+         "description": [
+          {
+           "value": "CWE-502"
+          }
+         ]
+        }
+       ],
+       "references": [
+        {
+         "url": "https://example.org/advisory/CVE-2024-21412",
+         "tags": [
+          "Vendor Advisory"
+         ]
+        },
+        {
+         "url": "https://example.org/poc/CVE-2024-21412",
+         "tags": [
+          "Exploit"
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "cveId": "CVE-2024-21412"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/rest/json/cves/2.0$",
+   "body": {
+    "totalResults": 1,
+    "vulnerabilities": [
+     {
+      "cve": {
+       "id": "CVE-2023-44487",
+       "published": "2023-01-01T00:00:00",
+       "lastModified": "2026-01-01T00:00:00",
+       "descriptions": [
+        {
+         "lang": "en",
+         "value": "HTTP/2 Rapid Reset denial of service"
+        }
+       ],
+       "metrics": {
+        "cvssMetricV31": [
+         {
+          "cvssData": {
+           "baseScore": 7.5,
+           "baseSeverity": "HIGH",
+           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+          }
+         }
+        ]
+       },
+       "weaknesses": [
+        {
+         "description": [
+          {
+           "value": "CWE-502"
+          }
+         ]
+        }
+       ],
+       "references": [
+        {
+         "url": "https://example.org/advisory/CVE-2023-44487",
+         "tags": [
+          "Vendor Advisory"
+         ]
+        },
+        {
+         "url": "https://example.org/poc/CVE-2023-44487",
+         "tags": [
+          "Exploit"
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "cveId": "CVE-2023-44487"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/rest/json/cves/2.0$",
+   "body": {
+    "totalResults": 1,
+    "vulnerabilities": [
+     {
+      "cve": {
+       "id": "CVE-2023-38408",
+       "published": "2023-01-01T00:00:00",
+       "lastModified": "2026-01-01T00:00:00",
+       "descriptions": [
+        {
+         "lang": "en",
+         "value": "OpenSSH ssh-agent PKCS#11 remote code execution"
+        }
+       ],
+       "metrics": {
+        "cvssMetricV31": [
+         {
+          "cvssData": {
+           "baseScore": 9.8,
+           "baseSeverity": "CRITICAL",
+           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+          }
+         }
+        ]
+       },
+       "weaknesses": [
+        {
+         "description": [
+          {
+           "value": "CWE-502"
+          }
+         ]
+        }
+       ],
+       "references": [
+        {
+         "url": "https://example.org/advisory/CVE-2023-38408",
+         "tags": [
+          "Vendor Advisory"
+         ]
+        },
+        {
+         "url": "https://example.org/poc/CVE-2023-38408",
+         "tags": [
+          "Exploit"
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "cveId": "CVE-2023-38408"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/rest/json/cves/2.0$",
+   "body": {
+    "totalResults": 1,
+    "vulnerabilities": [
+     {
+      "cve": {
+       "id": "CVE-2022-41082",
+       "published": "2023-01-01T00:00:00",
+       "lastModified": "2026-01-01T00:00:00",
+       "descriptions": [
+        {
+         "lang": "en",
+         "value": "Microsoft Exchange Server RCE (ProxyNotShell)"
+        }
+       ],
+       "metrics": {
+        "cvssMetricV31": [
+         {
+          "cvssData": {
+           "baseScore": 8.0,
+           "baseSeverity": "HIGH",
+           "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+          }
+         }
+        ]
+       },
+       "weaknesses": [
+        {
+         "description": [
+          {
+           "value": "CWE-502"
+          }
+         ]
+        }
+       ],
+       "references": [
+        {
+         "url": "https://example.org/advisory/CVE-2022-41082",
+         "tags": [
+          "Vendor Advisory"
+         ]
+        },
+        {
+         "url": "https://example.org/poc/CVE-2022-41082",
+         "tags": [
+          "Exploit"
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "cveId": "CVE-2022-41082"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/rest/json/cves/2.0$",
+   "body": {
+    "totalResults": 0,
+    "vulnerabilities": []
+   },
+   "status": 200
+  }
+ ]
+}

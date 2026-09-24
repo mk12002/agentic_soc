@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SOC Analysis Hub — Test Agents</title>
+  <meta name="description" content="Individually test each of the 7 email security agents with custom payloads in a safe, isolated environment." />
+  <link rel="stylesheet" href="/ui-assets/styles.css" />
+  <style>
+    .simple-form { display: flex; flex-direction: column; gap: 14px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-size: 0.78rem; font-weight: 600; color: var(--accent-cyan); text-transform: uppercase; letter-spacing: 0.06em; }
+    .form-group input, .form-group textarea { font-family: var(--font-mono); font-size: 0.84rem; color: var(--ink); background: rgba(10, 16, 30, 0.7); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); padding: 10px 14px; outline: none; transition: border-color 0.2s; }
+    .form-group input:focus, .form-group textarea:focus { border-color: var(--accent-cyan); box-shadow: 0 0 0 3px rgba(34,211,238,0.08); }
+    .form-group textarea { min-height: 100px; resize: vertical; }
+    .form-group .hint { font-size: 0.72rem; color: var(--ink-muted); line-height: 1.4; }
+    .mode-tabs { display: flex; gap: 0; margin-bottom: 18px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--glass-border); }
+    .mode-tab { flex: 1; padding: 10px 16px; text-align: center; font-size: 0.82rem; font-weight: 600; cursor: pointer; background: var(--bg-card); color: var(--ink-muted); border: none; transition: all 0.2s; font-family: var(--font-sans); }
+    .mode-tab:not(:last-child) { border-right: 1px solid var(--glass-border); }
+    .mode-tab.active { background: rgba(34, 211, 238, 0.1); color: var(--accent-cyan); }
+    .mode-tab:hover:not(.active) { color: var(--ink-soft); }
+  </style>
+</head>
+<body>
+  <main class="shell" id="app"></main>
+
+  <script src="/ui-assets/app.js"></script>
+  <script>
+    /* ── Agent Form Definitions ── */
+    const AGENT_FORMS = {
+      header_agent: {
+        title: "Header Analysis",
+        fields: [
+          { key: "sender", label: "Sender Email", placeholder: "alerts@paypa1-security.example", type: "text" },
+          { key: "reply_to", label: "Reply-To", placeholder: "support@evil.example", type: "text" },
+          { key: "subject", label: "Subject Line", placeholder: "Urgent: verify your account", type: "text" },
+          { key: "auth_results", label: "Authentication Results", placeholder: "spf=fail; dkim=fail; dmarc=fail", type: "text", hint: "SPF/DKIM/DMARC results string" },
+        ],
+        build: (vals) => ({
+          headers: {
+            sender: vals.sender || "",
+            reply_to: vals.reply_to || "",
+            subject: vals.subject || "",
+            received: ["from smtp-unknown by victim-mx"],
+            message_id: `<test-${Date.now()}>`,
+            authentication_results: vals.auth_results || "",
+          }
+        }),
+      },
+      content_agent: {
+        title: "Content / Text Analysis",
+        fields: [
+          { key: "subject", label: "Subject Line", placeholder: "Invoice overdue — action required", type: "text" },
+          { key: "body", label: "Email Body Text", placeholder: "Paste the email body text here for NLP phishing analysis...", type: "textarea" },
+        ],
+        build: (vals) => ({
+          headers: { subject: vals.subject || "" },
+          body: { plain: vals.body || "", html: "" },
+        }),
+      },
+      url_agent: {
+        title: "URL Analysis",
+        fields: [
+          { key: "urls", label: "URLs (one per line)", placeholder: "http://secure-login-paypa1.example/verify\nhttps://microsoft.com-security-login.example/reset", type: "textarea", hint: "Enter one URL per line. All will be analyzed." },
+        ],
+        build: (vals) => ({
+          urls: (vals.urls || "").split("\n").map(u => u.trim()).filter(Boolean),
+        }),
+      },
+      attachment_agent: {
+        title: "Attachment Static Analysis",
+        fields: [
+          { key: "filename", label: "Filename", placeholder: "invoice_urgent.exe", type: "text" },
+          { key: "content_type", label: "Content Type", placeholder: "application/octet-stream", type: "text" },
+          { key: "size", label: "Size (bytes)", placeholder: "24576", type: "text", hint: "Approximate file size in bytes" },
+        ],
+        build: (vals) => ({
+          attachments: [{
+            filename: vals.filename || "unknown.bin",
+            content_type: vals.content_type || "application/octet-stream",
+            size_bytes: parseInt(vals.size) || 0,
+            path: `/tmp/${vals.filename || "unknown.bin"}`,
+          }],
+        }),
+      },
+      sandbox_agent: {
+        title: "Sandbox Dynamic Analysis",
+        fields: [
+          { key: "filename", label: "Filename", placeholder: "payload.docm", type: "text" },
+          { key: "content_type", label: "Content Type", placeholder: "application/vnd.ms-word", type: "text" },
+          { key: "size", label: "Size (bytes)", placeholder: "40960", type: "text" },
+        ],
+        build: (vals) => ({
+          attachments: [{
+            filename: vals.filename || "payload.bin",
+            content_type: vals.content_type || "application/octet-stream",
+            size_bytes: parseInt(vals.size) || 0,
+            path: `/tmp/${vals.filename || "payload.bin"}`,
+          }],
+        }),
+      },
+      threat_intel_agent: {
+        title: "Threat Intelligence Lookup",
+        fields: [
+          { key: "sender", label: "Sender Email", placeholder: "attacker@evil.example", type: "text" },
+          { key: "urls", label: "URLs (one per line)", placeholder: "http://known-bad.example/phish", type: "textarea" },
+          { key: "domains", label: "Domains (comma separated)", placeholder: "evil.example, malware.com", type: "text" },
+          { key: "ips", label: "IP Addresses (comma separated)", placeholder: "185.100.87.202", type: "text" },
+          { key: "hashes", label: "File Hashes (comma separated)", placeholder: "44d88612fea8a8f36de82e1278abb02f", type: "text", hint: "MD5, SHA1, or SHA256 hashes" },
+        ],
+        build: (vals) => ({
+          headers: { sender: vals.sender || "" },
+          urls: (vals.urls || "").split("\n").map(u => u.trim()).filter(Boolean),
+          iocs: {
+            domains: (vals.domains || "").split(",").map(d => d.trim()).filter(Boolean),
+            ips: (vals.ips || "").split(",").map(i => i.trim()).filter(Boolean),
+            hashes: (vals.hashes || "").split(",").map(h => h.trim()).filter(Boolean),
+          },
+        }),
+      },
+      user_behavior_agent: {
+        title: "User Behavior Analysis",
+        fields: [
+          { key: "sender", label: "Sender Email", placeholder: "finance-team@example.com", type: "text" },
+          { key: "subject", label: "Subject Line", placeholder: "Payroll details update", type: "text" },
+          { key: "body", label: "Email Body Text", placeholder: "Please review payroll changes immediately and confirm via this link.", type: "textarea" },
+          { key: "department", label: "Recipient Department", placeholder: "finance", type: "text" },
+          { key: "role", label: "Recipient Role", placeholder: "analyst", type: "text" },
+          { key: "click_rate", label: "Historical Click Rate", placeholder: "0.35", type: "text", hint: "0.0 to 1.0 — how often this user clicks suspicious links" },
+        ],
+        build: (vals) => ({
+          headers: { sender: vals.sender || "", subject: vals.subject || "" },
+          body: vals.body || "",
+          recipient_context: {
+            department: vals.department || "general",
+            role: vals.role || "employee",
+            historical_click_rate: parseFloat(vals.click_rate) || 0.1,
+          },
+        }),
+      },
+    };
+
+    AgentUI.onReady(() => {
+      const app = document.getElementById("app");
+      app.innerHTML = `
+        ${AgentUI.topbarHTML("agents")}
+
+        <section class="hero animate-in">
+          <div class="panel">
+            <h1 class="hero-title">Test Agents Individually</h1>
+            <p class="hero-subtitle">Select an agent and simply fill in the fields — no JSON required. The system auto-builds the payload for you. Or switch to Advanced mode to edit raw JSON directly.</p>
+          </div>
+        </section>
+
+        <!-- Agent Selector -->
+        <section class="panel animate-in-d1 mb-md">
+          <h2 class="section-title"><span class="icon">🎯</span> Select Agent</h2>
+          <div class="agent-pills" id="agentPills"></div>
+          <div class="agent-desc" id="agentDesc">Select an agent above to see its description.</div>
+        </section>
+
+        <!-- Input Mode Tabs + Forms -->
+        <section class="panel animate-in-d2 mb-md">
+          <div class="mode-tabs">
+            <button class="mode-tab active" id="modeSimple" type="button">📝 Simple Mode</button>
+            <button class="mode-tab" id="modeAdvanced" type="button">⚙ Advanced (Raw JSON)</button>
+          </div>
+
+          <!-- Simple Form -->
+          <div id="simpleFormContainer" class="simple-form"></div>
+
+          <!-- Advanced JSON Editor (hidden by default) -->
+          <div id="advancedContainer" style="display:none">
+            <textarea id="payloadEditor" spellcheck="false" placeholder="{ }">{}</textarea>
+          </div>
+
+          <div class="row mt-md">
+            <button id="runTest" type="button">▶ Run Test</button>
+            <button id="loadExample" class="btn-outline" type="button">📋 Load Example</button>
+          </div>
+          <div id="status" class="status-msg mt-sm"></div>
+        </section>
+
+        <!-- Output -->
+        <section class="panel animate-in-d3 mb-md">
+          <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:14px">
+            <h2 class="section-title" style="margin-bottom:0"><span class="icon">📤</span> Agent Output</h2>
+            <button id="rawToggle" class="raw-toggle" type="button" style="display:none">Show Structured</button>
+          </div>
+          <div id="outputStructured" style="display:none"></div>
+          <pre id="resultBox">Run a test to see output here.</pre>
+        </section>
+
+        <!-- Safety Note -->
+        <div class="panel animate-in-d4">
+          <div class="safety-note">
+            <span class="safety-icon">🛡️</span>
+            <div>
+              <strong>Safety Guarantee</strong>
+              <p>Direct agent testing is fully isolated — no RabbitMQ publish, no orchestrator execution, no action-layer dispatch. Production flow is never affected.</p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      AgentUI.initSettingsDropdown();
+      initAgentsPage();
+    });
+
+    function initAgentsPage() {
+      const pillsContainer = document.getElementById("agentPills");
+      const descEl = document.getElementById("agentDesc");
+      const simpleContainer = document.getElementById("simpleFormContainer");
+      const advancedContainer = document.getElementById("advancedContainer");
+      const editor = document.getElementById("payloadEditor");
+      const resultBox = document.getElementById("resultBox");
+      const statusEl = document.getElementById("status");
+      let selectedAgent = "";
+      let examples = {};
+      let showRaw = true;
+      let isSimpleMode = true;
+
+      /* ── Mode Tabs ── */
+      document.getElementById("modeSimple").addEventListener("click", () => {
+        isSimpleMode = true;
+        document.getElementById("modeSimple").classList.add("active");
+        document.getElementById("modeAdvanced").classList.remove("active");
+        simpleContainer.style.display = "flex";
+        advancedContainer.style.display = "none";
+      });
+      document.getElementById("modeAdvanced").addEventListener("click", () => {
+        isSimpleMode = false;
+        document.getElementById("modeAdvanced").classList.add("active");
+        document.getElementById("modeSimple").classList.remove("active");
+        simpleContainer.style.display = "none";
+        advancedContainer.style.display = "block";
+        // Sync simple → advanced
+        if (selectedAgent && AGENT_FORMS[selectedAgent]) {
+          const payload = buildPayloadFromForm();
+          editor.value = AgentUI.jsonPretty(payload);
+        }
+      });
+
+      /* ── Agent Selection ── */
+      function selectAgent(name) {
+        selectedAgent = name;
+        document.querySelectorAll(".agent-pill").forEach(p => {
+          p.classList.toggle("active", p.dataset.agent === name);
+        });
+        descEl.innerHTML = `<strong>${name}</strong> — ${AgentUI.getAgentDescription(name)}`;
+        renderSimpleForm(name);
+      }
+
+      /* ── Render Simple Form ── */
+      function renderSimpleForm(agentName) {
+        const config = AGENT_FORMS[agentName];
+        if (!config) {
+          simpleContainer.innerHTML = `<p style="color:var(--ink-muted)">No simple form available for this agent. Use Advanced mode.</p>`;
+          return;
+        }
+        simpleContainer.innerHTML = config.fields.map(f => `
+          <div class="form-group">
+            <label for="field_${f.key}">${f.label}</label>
+            ${f.type === "textarea"
+              ? `<textarea id="field_${f.key}" placeholder="${f.placeholder || ""}" rows="4">${f.default || ""}</textarea>`
+              : `<input id="field_${f.key}" type="text" placeholder="${f.placeholder || ""}" value="${f.default || ""}" />`
+            }
+            ${f.hint ? `<span class="hint">💡 ${f.hint}</span>` : ""}
+          </div>
+        `).join("");
+      }
+
+      /* ── Build Payload from Form Fields ── */
+      function buildPayloadFromForm() {
+        const config = AGENT_FORMS[selectedAgent];
+        if (!config) return {};
+        const vals = {};
+        config.fields.forEach(f => {
+          const el = document.getElementById(`field_${f.key}`);
+          vals[f.key] = el ? el.value : "";
+        });
+        return config.build(vals);
+      }
+
+      /* ── Load Example ── */
+      function loadExample() {
+        const config = AGENT_FORMS[selectedAgent];
+        const examplePayload = examples[selectedAgent] || {};
+        if (isSimpleMode && config) {
+          // Fill form fields from example
+          config.fields.forEach(f => {
+            const el = document.getElementById(`field_${f.key}`);
+            if (!el) return;
+            if (f.key === "sender") el.value = examplePayload.headers?.sender || "";
+            else if (f.key === "reply_to") el.value = examplePayload.headers?.reply_to || "";
+            else if (f.key === "subject") el.value = examplePayload.headers?.subject || "";
+            else if (f.key === "auth_results") el.value = examplePayload.headers?.authentication_results || "";
+            else if (f.key === "body") el.value = examplePayload.body || "";
+            else if (f.key === "urls") el.value = (examplePayload.urls || []).join("\n");
+            else if (f.key === "filename") el.value = (examplePayload.attachments?.[0]?.filename) || "";
+            else if (f.key === "content_type") el.value = (examplePayload.attachments?.[0]?.content_type) || "";
+            else if (f.key === "size") el.value = (examplePayload.attachments?.[0]?.size_bytes) || "";
+            else if (f.key === "domains") el.value = (examplePayload.iocs?.domains || []).join(", ");
+            else if (f.key === "ips") el.value = (examplePayload.iocs?.ips || []).join(", ");
+            else if (f.key === "hashes") el.value = (examplePayload.iocs?.hashes || []).join(", ");
+            else if (f.key === "department") el.value = examplePayload.recipient_context?.department || "";
+            else if (f.key === "role") el.value = examplePayload.recipient_context?.role || "";
+            else if (f.key === "click_rate") el.value = examplePayload.recipient_context?.historical_click_rate || "";
+          });
+        }
+        editor.value = AgentUI.jsonPretty(examplePayload);
+        AgentUI.showStatus(statusEl, `📋 Example loaded for ${selectedAgent}`, "ok");
+      }
+
+      /* ── Structured Output Renderer ── */
+      function renderOutput(data) {
+        const output = data.output || {};
+        const risk = output.risk_score ?? "—";
+        const confidence = output.confidence ?? "—";
+        const indicators = output.indicators || [];
+        const agentName = data.agent_name || selectedAgent;
+
+        let html = `
+          <div class="row mb-md" style="gap:16px">
+            <span class="verdict-badge ${AgentUI.verdictClass(risk >= 0.7 ? 'malicious' : risk >= 0.4 ? 'suspicious' : 'safe')}">● ${agentName}</span>
+            <span style="font-size:0.88rem;color:var(--ink-soft)">Risk: <strong style="color:var(--ink)">${typeof risk === 'number' ? risk.toFixed(3) : risk}</strong></span>
+            <span style="font-size:0.88rem;color:var(--ink-soft)">Confidence: <strong style="color:var(--ink)">${typeof confidence === 'number' ? confidence.toFixed(3) : confidence}</strong></span>
+          </div>`;
+
+        if (indicators.length) {
+          html += `<div class="result-section"><div class="result-header">🔍 Indicators</div><div class="result-body"><div class="row">${indicators.map(i => `<span class="tech-badge" style="border-color:rgba(251,191,36,0.3);color:var(--accent-amber)">${esc(String(i))}</span>`).join("")}</div></div></div>`;
+        }
+
+        const extraKeys = Object.keys(output).filter(k => !["agent_name","risk_score","confidence","indicators","analysis_id"].includes(k));
+        if (extraKeys.length) {
+          const extra = {}; extraKeys.forEach(k => extra[k] = output[k]);
+          html += `<div class="result-section"><div class="result-header">📊 Additional Data</div><div class="result-body"><pre style="margin:0;border:0;padding:6px;max-height:250px">${AgentUI.jsonPretty(extra)}</pre></div></div>`;
+        }
+        return html;
+      }
+
+      function esc(str) { const d = document.createElement("div"); d.textContent = str; return d.innerHTML; }
+
+      /* ── Raw Toggle ── */
+      document.getElementById("rawToggle").addEventListener("click", () => {
+        showRaw = !showRaw;
+        resultBox.style.display = showRaw ? "block" : "none";
+        document.getElementById("outputStructured").style.display = showRaw ? "none" : "block";
+        document.getElementById("rawToggle").textContent = showRaw ? "Show Structured" : "Show Raw JSON";
+      });
+
+      document.getElementById("loadExample").addEventListener("click", loadExample);
+
+      /* ── Run Test ── */
+      document.getElementById("runTest").addEventListener("click", async () => {
+        if (!selectedAgent) { AgentUI.showStatus(statusEl, "⚠ Please select an agent first.", "warn"); return; }
+
+        let payload;
+        if (isSimpleMode) {
+          payload = buildPayloadFromForm();
+        } else {
+          try { payload = JSON.parse(editor.value || "{}"); }
+          catch (err) { AgentUI.showStatus(statusEl, "❌ Invalid JSON: " + err.message, "err"); return; }
+        }
+
+        AgentUI.showStatus(statusEl, `⏳ Running ${selectedAgent}…`, "warn");
+        try {
+          const res = await AgentUI.apiFetch(`/agent-test/${selectedAgent}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payload, inject_analysis_id: true, print_output: true }),
+          });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.detail || "HTTP " + res.status);
+
+          resultBox.textContent = AgentUI.jsonPretty(body);
+          document.getElementById("outputStructured").innerHTML = renderOutput(body);
+          document.getElementById("rawToggle").style.display = "inline-flex";
+          showRaw = false;
+          resultBox.style.display = "none";
+          document.getElementById("outputStructured").style.display = "block";
+          document.getElementById("rawToggle").textContent = "Show Raw JSON";
+
+          AgentUI.showStatus(statusEl, `✅ ${selectedAgent} completed successfully.`, "ok");
+        } catch (err) {
+          AgentUI.showStatus(statusEl, "❌ Test failed: " + err.message, "err");
+        }
+      });
+
+      /* ── Initialize ── */
+      async function initialize() {
+        try {
+          const [agentsRes, examplesRes] = await Promise.all([
+            AgentUI.apiFetch("/agent-test/agents"),
+            AgentUI.apiFetch("/agent-test/examples"),
+          ]);
+          const agentsBody = await agentsRes.json();
+          const examplesBody = await examplesRes.json();
+          if (!agentsRes.ok) throw new Error(agentsBody.detail || "HTTP " + agentsRes.status);
+          if (!examplesRes.ok) throw new Error(examplesBody.detail || "HTTP " + examplesRes.status);
+
+          const agents = agentsBody.supported_agents || [];
+          examples = examplesBody.examples || {};
+
+          pillsContainer.innerHTML = agents.map(a =>
+            `<button class="agent-pill" type="button" data-agent="${a}">${a.replace("_agent","")}</button>`
+          ).join("");
+
+          pillsContainer.querySelectorAll(".agent-pill").forEach(pill => {
+            pill.addEventListener("click", () => { selectAgent(pill.dataset.agent); loadExample(); });
+          });
+
+          if (agents.length) { selectAgent(agents[0]); loadExample(); }
+          AgentUI.showStatus(statusEl, "✅ Agent testing ready — select an agent above.", "ok");
+        } catch (err) {
+          // Offline fallback — still render pills from AGENT_FORMS
+          const agents = Object.keys(AGENT_FORMS);
+          pillsContainer.innerHTML = agents.map(a =>
+            `<button class="agent-pill" type="button" data-agent="${a}">${a.replace("_agent","")}</button>`
+          ).join("");
+          pillsContainer.querySelectorAll(".agent-pill").forEach(pill => {
+            pill.addEventListener("click", () => { selectAgent(pill.dataset.agent); });
+          });
+          if (agents.length) selectAgent(agents[0]);
+          AgentUI.showStatus(statusEl, "⚠ Could not connect to server. Forms loaded from client-side definitions — start backend to run tests.", "warn");
+        }
+      }
+
+      initialize();
+    }
+  </script>
+</body>
+</html>

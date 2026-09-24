@@ -1,0 +1,12 @@
+{
+ "cred_phish_lookalike": "malicious",
+ "quishing_qr": "malicious",
+ "html_attachment_phish": "malicious",
+ "bec_ceo_fraud": "malicious",
+ "malspam_macro": "malicious",
+ "iso_dropper": "malicious",
+ "marketing_spam": "spam",
+ "legit_github": "safe",
+ "legit_internal": "safe",
+ "legit_vendor_invoice": "safe"
+}

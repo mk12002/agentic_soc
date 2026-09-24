@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soc-platform"
+version = "0.1.0"
+description = "Agentic SOC platform: phishing, incident and vulnerability workflows over one governed context store"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.setuptools.packages.find]
+include = ["soc_platform*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.yml", "*.html", "*.css", "*.js", "*.j2", "*.eml"]
+
+[tool.pytest.ini_options]
+testpaths = ["soc_platform/tests"]
+markers = [
+    "smoke: fast smoke tests for trained-model sanity checks",
+    "live: tests that perform live external API calls when credentials are configured",
+    "phishing: phishing engine tests (need requirements/phishing.txt)",
+]
+filterwarnings = [
+    "ignore:Trying to unpickle estimator .*:UserWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

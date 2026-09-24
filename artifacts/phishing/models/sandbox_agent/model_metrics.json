@@ -1,0 +1,159 @@
+{
+  "model_name": "random_forest_balanced",
+  "threshold": 0.48499999999999993,
+  "feature_contract": {
+    "version": "v1",
+    "columns": [
+      "executed",
+      "return_code",
+      "timed_out",
+      "spawned_processes",
+      "suspicious_process_count",
+      "file_entropy",
+      "connect_calls",
+      "execve_calls",
+      "file_write_calls",
+      "sequence_length",
+      "sequence_process_calls",
+      "sequence_network_calls",
+      "sequence_filesystem_calls",
+      "sequence_registry_calls",
+      "sequence_memory_calls",
+      "critical_chain_detected",
+      "behavior_risk_score"
+    ]
+  },
+  "dataset": {
+    "path": "/home/LabsKraft/new_work/datasets_processed/sandbox_behavior_training.csv",
+    "rows_total": 83821,
+    "rows_train": 29967,
+    "rows_train_before_rebalance": 67054,
+    "rows_val": 16767,
+    "max_class_ratio": 20.0,
+    "label_distribution_total": {
+      "1": 82036,
+      "0": 1785
+    },
+    "source_distribution_total": {
+      "oliveira_api_sequences": 43867,
+      "cuckoo_reports": 26276,
+      "cic_maldroid_2020": 11598,
+      "polymorphic_dynamics": 1308,
+      "avast_ctu_capev2": 635,
+      "local_benign_bootstrap": 137
+    }
+  },
+  "metrics": {
+    "roc_auc": 0.9846904938051778,
+    "pr_auc_malicious": 0.9996504643253306,
+    "pr_auc_benign": 0.7387314315483704,
+    "accuracy": 0.9837180175344427,
+    "balanced_accuracy": 0.8741901756462167,
+    "precision": 0.9947265145940642,
+    "recall": 0.9886038149795844,
+    "f1": 0.9916557141547208,
+    "macro_f1": 0.8287531936746676
+  },
+  "classification_report": {
+    "0": {
+      "precision": 0.5925925925925926,
+      "recall": 0.7597765363128491,
+      "f1-score": 0.6658506731946144,
+      "support": 358.0
+    },
+    "1": {
+      "precision": 0.9947265145940642,
+      "recall": 0.9886038149795844,
+      "f1-score": 0.9916557141547208,
+      "support": 16409.0
+    },
+    "accuracy": 0.9837180175344427,
+    "macro avg": {
+      "precision": 0.7936595535933284,
+      "recall": 0.8741901756462167,
+      "f1-score": 0.8287531936746676,
+      "support": 16767.0
+    },
+    "weighted avg": {
+      "precision": 0.986140366560634,
+      "recall": 0.9837180175344427,
+      "f1-score": 0.9846992994911722,
+      "support": 16767.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      272,
+      86
+    ],
+    [
+      187,
+      16222
+    ]
+  ],
+  "candidate_scores": [
+    {
+      "name": "xgboost_weighted",
+      "threshold": 0.06,
+      "selection_score": 0.7649921948395192,
+      "val_balanced_accuracy": 0.8536426222018099,
+      "val_macro_f1": 0.6566416725078306,
+      "val_pr_auc_malicious": 0.9991985775973032,
+      "val_pr_auc_benign": 0.5880126669947564,
+      "val_roc_auc": 0.9655532918813119
+    },
+    {
+      "name": "hist_gradient_boosting",
+      "threshold": 0.16999999999999998,
+      "selection_score": 0.8336539818988928,
+      "val_balanced_accuracy": 0.8564553244557507,
+      "val_macro_f1": 0.8057856743293998,
+      "val_pr_auc_malicious": 0.9995951808949934,
+      "val_pr_auc_benign": 0.7142453751201966,
+      "val_roc_auc": 0.9823204734014682
+    },
+    {
+      "name": "random_forest_balanced",
+      "threshold": 0.48499999999999993,
+      "selection_score": 0.8537435337590197,
+      "val_balanced_accuracy": 0.8741901756462167,
+      "val_macro_f1": 0.8287531936746676,
+      "val_pr_auc_malicious": 0.9996504643253306,
+      "val_pr_auc_benign": 0.7387314315483704,
+      "val_roc_auc": 0.9846904938051778
+    },
+    {
+      "name": "logistic_balanced",
+      "threshold": 0.19999999999999996,
+      "selection_score": 0.7058828780968438,
+      "val_balanced_accuracy": 0.6966990114091225,
+      "val_macro_f1": 0.7171076040485032,
+      "val_pr_auc_malicious": 0.9950940408311304,
+      "val_pr_auc_benign": 0.33586466520051844,
+      "val_roc_auc": 0.8230008841720939
+    }
+  ],
+  "feature_importance": {
+    "file_entropy": 0.2395931747556764,
+    "sequence_length": 0.1434265055887302,
+    "sequence_registry_calls": 0.1384864617859767,
+    "sequence_memory_calls": 0.08745110384569649,
+    "sequence_filesystem_calls": 0.07860314447723735,
+    "connect_calls": 0.06549897209868136,
+    "sequence_network_calls": 0.06218236413617446,
+    "file_write_calls": 0.045679061287699,
+    "spawned_processes": 0.04091993473633336,
+    "sequence_process_calls": 0.0409027283524871,
+    "execve_calls": 0.03854010374033644,
+    "suspicious_process_count": 0.015833026705923087,
+    "executed": 0.0015712021089448417,
+    "behavior_risk_score": 0.0013122163801032015,
+    "return_code": 0.0,
+    "timed_out": 0.0,
+    "critical_chain_detected": 0.0
+  },
+  "artifacts": {
+    "model": "/home/LabsKraft/new_work/models/sandbox_agent/model.joblib",
+    "report_dir": "/home/LabsKraft/new_work/email_security/analysis_reports/sandbox_model_train_20260402_100408"
+  }
+}

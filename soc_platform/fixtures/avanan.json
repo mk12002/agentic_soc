@@ -1,0 +1,67 @@
+{
+ "routes": [
+  {
+   "method": "POST",
+   "path": "^/app/hec-api/v1.0/search/query$",
+   "body": {
+    "responseData": [
+     {
+      "entityInfo": {
+       "entityId": "av-ent-0001"
+      },
+      "entitySecurityResult": {
+       "combinedVerdict": "clean",
+       "antiphishing": {
+        "verdict": "clean"
+       },
+       "anti_malware": {
+        "verdict": "clean"
+       },
+       "clicktimeProtection": {
+        "verdict": "clean"
+       }
+      },
+      "entityActions": []
+     }
+    ]
+   },
+   "status": 200,
+   "body_contains": "<20260920090200.1111@micros0ft-helpdesk.com>"
+  },
+  {
+   "method": "POST",
+   "path": "^/app/hec-api/v1.0/search/query$",
+   "body": {
+    "responseData": []
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/app/hec-api/v1.0/event/query$",
+   "body": {
+    "responseData": [
+     {
+      "eventId": "av-evt-001",
+      "type": "spam",
+      "state": "detected",
+      "severity": "low",
+      "eventCreated": "2026-09-20T06:00:00Z",
+      "description": "Spam campaign from vendor.example",
+      "senderAddress": "news@vendor.example",
+      "recipients": [
+       "arun.k@cci-demo.com"
+      ],
+      "actions": [
+       {
+        "actionType": "tag"
+       }
+      ],
+      "entityId": "av-ent-0009"
+     }
+    ]
+   },
+   "status": 200
+  }
+ ]
+}

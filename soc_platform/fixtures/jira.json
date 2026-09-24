@@ -1,0 +1,22 @@
+{
+ "routes": [
+  {
+   "method": "POST",
+   "path": "^/rest/api/3/issue$",
+   "body": {
+    "id": "10001",
+    "key": "SEC-101"
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/rest/api/3/search$",
+   "body": {
+    "issues": [],
+    "total": 0
+   },
+   "status": 200
+  }
+ ]
+}

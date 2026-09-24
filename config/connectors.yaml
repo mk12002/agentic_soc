@@ -1,0 +1,153 @@
+# Connector configuration (plug-and-play).
+#  * mode: fake  -> vendor-shaped fixtures (soc_platform/fixtures), no credentials needed
+#  * mode: live  -> real API; settings below are read from env vars / vault-mounted *_FILE secrets
+#  * enabled: false removes the tool from every workflow; add a tool by dropping a module into
+#    soc_platform/connectors/tools/ (or installing a package with the 'soc_platform.connectors' entry point).
+connectors:
+  avanan:   # Avanan (Check Point Harmony Email) - email; confidence Low-Medium
+    enabled: true
+    mode: fake
+    settings:
+      api_url: "${AVANAN_API_URL}"   # Smart API gateway URL (region specific) (optional)
+      client_id: "${AVANAN_CLIENT_ID}"   # SECRET - Infinity Portal API client id
+      access_key: "${AVANAN_ACCESS_KEY}"   # SECRET - API access key
+      fallback: "${AVANAN_FALLBACK}"   # shared_mailbox | export if the API is not licensed (optional)
+  canary:   # Thinkst Canary - deception; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      domain_hash: "${CANARY_DOMAIN_HASH}"   # Console hash (<hash>.canary.tools)
+      auth_token: "${CANARY_AUTH_TOKEN}"   # SECRET - API auth token
+      user_domain: "${CANARY_USER_DOMAIN}"   # UPN suffix for Canary usernames (optional)
+  cisa_kev:   # CISA KEV catalogue - intel; confidence High
+    enabled: true
+    mode: fake
+  cmdb_csv:   # Ownership mapping (CSV) - cmdb; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      path: "${CMDB_CSV_PATH}"   # CSV path: hostname,owner,platform_team,environment,criticality,serial_number
+  crowdstrike:   # CrowdStrike Falcon - edr; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      base_url: "${CROWDSTRIKE_BASE_URL}"   # API base (e.g. https://api.eu-1.crowdstrike.com) (optional)
+      client_id: "${CROWDSTRIKE_CLIENT_ID}"   # SECRET - OAuth2 API client id
+      client_secret: "${CROWDSTRIKE_CLIENT_SECRET}"   # SECRET - OAuth2 API client secret
+      user_domain: "${CROWDSTRIKE_USER_DOMAIN}"   # Domain appended to bare user names to form a UPN (optional)
+  defender_endpoint:   # Microsoft Defender for Endpoint - edr; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      tenant_id: "${DEFENDER_ENDPOINT_TENANT_ID}"   # Entra tenant id
+      client_id: "${DEFENDER_ENDPOINT_CLIENT_ID}"   # SECRET - App registration (client) id
+      client_secret: "${DEFENDER_ENDPOINT_CLIENT_SECRET}"   # SECRET - App registration secret (prefer certificate-based auth in prod)
+      user_domain: "${DEFENDER_ENDPOINT_USER_DOMAIN}"   # UPN suffix for alert users (optional)
+      mde_base: "${DEFENDER_ENDPOINT_MDE_BASE}"   # API base (regional endpoints) (optional)
+  defender_office365:   # Microsoft Defender for Office 365 - email; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      tenant_id: "${DEFENDER_OFFICE365_TENANT_ID}"   # Entra tenant id
+      client_id: "${DEFENDER_OFFICE365_CLIENT_ID}"   # SECRET - App registration (client) id
+      client_secret: "${DEFENDER_OFFICE365_CLIENT_SECRET}"   # SECRET - App registration secret (prefer certificate-based auth in prod)
+      reporting_mailbox: "${DEFENDER_OFFICE365_REPORTING_MAILBOX}"   # Mailbox receiving user-reported messages / SOC mailbox
+  delinea_privilege_manager:   # Delinea Privilege Manager - pam; confidence Medium
+    enabled: true
+    mode: fake
+    settings:
+      base_url: "${DELINEA_PRIVILEGE_MANAGER_BASE_URL}"   # Privilege Manager URL
+      client_id: "${DELINEA_PRIVILEGE_MANAGER_CLIENT_ID}"   # SECRET - API client id
+      client_secret: "${DELINEA_PRIVILEGE_MANAGER_CLIENT_SECRET}"   # SECRET - API client secret
+      user_domain: "${DELINEA_PRIVILEGE_MANAGER_USER_DOMAIN}"   # UPN suffix (optional)
+  delinea_secret_server:   # Delinea Secret Server - pam; confidence Medium
+    enabled: true
+    mode: fake
+    settings:
+      base_url: "${DELINEA_SECRET_SERVER_BASE_URL}"   # Secret Server URL
+      username: "${DELINEA_SECRET_SERVER_USERNAME}"   # SECRET - API user
+      password: "${DELINEA_SECRET_SERVER_PASSWORD}"   # SECRET - API user password
+      user_domain: "${DELINEA_SECRET_SERVER_USER_DOMAIN}"   # UPN suffix (optional)
+  entra:   # Microsoft Entra ID - identity; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      tenant_id: "${ENTRA_TENANT_ID}"   # Entra tenant id
+      client_id: "${ENTRA_CLIENT_ID}"   # SECRET - App registration (client) id
+      client_secret: "${ENTRA_CLIENT_SECRET}"   # SECRET - App registration secret (prefer certificate-based auth in prod)
+  epss:   # FIRST EPSS - intel; confidence High
+    enabled: true
+    mode: fake
+  generic_siem:   # Generic SIEM/SOAR webhook - siem; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      field_map: "${GENERIC_SIEM_FIELD_MAP}"   # Mapping of platform fields to payload keys (optional)
+  jira:   # Jira (ITSM) - itsm; confidence Unknown
+    enabled: true
+    mode: fake
+    settings:
+      base_url: "${JIRA_BASE_URL}"   # https://<site>.atlassian.net
+      email: "${JIRA_EMAIL}"   # Integration user email
+      api_token: "${JIRA_API_TOKEN}"   # SECRET - API token
+      project_key: "${JIRA_PROJECT_KEY}"   # Project key (optional)
+  nvd:   # NIST NVD - intel; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      api_key: "${NVD_API_KEY}"   # SECRET - Optional NVD API key (raises rate limit) (optional)
+  rapid7:   # Rapid7 InsightVM / Nexpose - vuln; confidence Medium-High
+    enabled: true
+    mode: fake
+    settings:
+      console_url: "${RAPID7_CONSOLE_URL}"   # Security Console URL, e.g. https://ivm.cci.local:3780
+      username: "${RAPID7_USERNAME}"   # SECRET - Read-only API user
+      password: "${RAPID7_PASSWORD}"   # SECRET - API user password
+      verify_tls: "${RAPID7_VERIFY_TLS}"   # Verify console TLS certificate (optional)
+      export_csv: "${RAPID7_EXPORT_CSV}"   # Fallback: path to a findings CSV export (legacy Nexpose) (optional)
+  sentinel:   # Microsoft Sentinel - siem; confidence Unknown
+    enabled: true
+    mode: fake
+    settings:
+      tenant_id: "${SENTINEL_TENANT_ID}"   # 
+      client_id: "${SENTINEL_CLIENT_ID}"   # SECRET - 
+      client_secret: "${SENTINEL_CLIENT_SECRET}"   # SECRET - 
+      subscription_id: "${SENTINEL_SUBSCRIPTION_ID}"   # 
+      resource_group: "${SENTINEL_RESOURCE_GROUP}"   # 
+      workspace: "${SENTINEL_WORKSPACE}"   # 
+  servicenow:   # ServiceNow (ITSM + CMDB) - itsm; confidence Unknown
+    enabled: true
+    mode: fake
+    settings:
+      instance_url: "${SERVICENOW_INSTANCE_URL}"   # https://<instance>.service-now.com
+      client_id: "${SERVICENOW_CLIENT_ID}"   # SECRET - OAuth client id (optional)
+      client_secret: "${SERVICENOW_CLIENT_SECRET}"   # SECRET - OAuth client secret (optional)
+      username: "${SERVICENOW_USERNAME}"   # SECRET - Basic-auth integration user (optional)
+      password: "${SERVICENOW_PASSWORD}"   # SECRET - Basic-auth password (optional)
+      ticket_table: "${SERVICENOW_TICKET_TABLE}"   # incident | sn_vul_vulnerable_item | custom (optional)
+      cmdb_table: "${SERVICENOW_CMDB_TABLE}"   # CMDB CI table (optional)
+  threat_intel:   # Threat intelligence fusion - intel; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      virustotal_api_key: "${THREAT_INTEL_VIRUSTOTAL_API_KEY}"   # SECRET - virustotal API key (optional)
+      abuseipdb_api_key: "${THREAT_INTEL_ABUSEIPDB_API_KEY}"   # SECRET - abuseipdb API key (optional)
+      otx_api_key: "${THREAT_INTEL_OTX_API_KEY}"   # SECRET - otx API key (optional)
+      greynoise_api_key: "${THREAT_INTEL_GREYNOISE_API_KEY}"   # SECRET - greynoise API key (optional)
+      shodan_api_key: "${THREAT_INTEL_SHODAN_API_KEY}"   # SECRET - shodan API key (optional)
+      abusech_auth_key: "${THREAT_INTEL_ABUSECH_AUTH_KEY}"   # SECRET - abuse.ch Auth-Key (URLhaus/ThreatFox/MalwareBazaar) (optional)
+  umbrella:   # Cisco Umbrella - dns; confidence Medium-High
+    enabled: true
+    mode: fake
+    settings:
+      api_key: "${UMBRELLA_API_KEY}"   # SECRET - Umbrella API key
+      api_secret: "${UMBRELLA_API_SECRET}"   # SECRET - API secret
+      block_list_id: "${UMBRELLA_BLOCK_LIST_ID}"   # Destination list id used for blocks (optional)
+  wiz:   # Wiz - cloud; confidence High
+    enabled: true
+    mode: fake
+    settings:
+      api_url: "${WIZ_API_URL}"   # Tenant API endpoint, e.g. https://api.eu1.app.wiz.io
+      client_id: "${WIZ_CLIENT_ID}"   # SECRET - Service account client id
+      client_secret: "${WIZ_CLIENT_SECRET}"   # SECRET - Service account secret
+      auth_url: "${WIZ_AUTH_URL}"   # Token URL (optional)

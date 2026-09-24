@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SOC Analysis Hub — Analyze Email</title>
+  <meta name="description" content="Upload .eml, .msg, or .txt email files for full multi-agent phishing analysis." />
+  <link rel="stylesheet" href="/ui-assets/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <main class="shell" id="app"></main>
+
+  <script src="/ui-assets/app.js"></script>
+  <script>
+    AgentUI.onReady(() => {
+      const app = document.getElementById("app");
+      app.innerHTML = `
+        ${AgentUI.topbarHTML("analyze")}
+
+        <section class="hero animate-in">
+          <div class="panel">
+            <h1 class="hero-title">Analyze Email File</h1>
+            <p class="hero-subtitle">Upload a suspicious <code>.eml</code>, <code>.msg</code>, or <code>.txt</code> file. All 7 agents process it in parallel through the full LangGraph orchestration pipeline.</p>
+          </div>
+        </section>
+
+        <div class="two-col animate-in-d1">
+          <!-- Upload Panel -->
+          <section class="panel">
+            <h2 class="section-title"><span class="icon">📤</span> Upload</h2>
+            <div class="drop-zone" id="dropZone">
+              <input type="file" id="emailFile" accept=".eml,.msg,.txt" />
+              <span class="drop-icon">📧</span>
+              <div class="drop-text" id="dropText">Drag & drop email file here</div>
+              <div class="drop-hint">or click to browse — .eml, .msg, .txt</div>
+            </div>
+            <div class="row mt-md">
+              <button id="submitBtn" type="button">🚀 Start Analysis</button>
+              <button id="pollBtn" class="btn-outline" type="button" disabled>🔄 Poll Report</button>
+            </div>
+            <div id="status" class="status-msg mt-sm"></div>
+          </section>
+
+          <!-- How It Works -->
+          <section class="panel">
+            <h2 class="section-title"><span class="icon">⚡</span> How It Works</h2>
+            <ol class="how-list">
+              <li>File is sent to <code>/ingest-raw-email</code> endpoint</li>
+              <li>Email is parsed — headers, body, URLs, attachments extracted</li>
+              <li>Event published to RabbitMQ — all 7 agents run in parallel</li>
+              <li>LangGraph orchestrator scores, correlates, and decides verdict</li>
+              <li>Counterfactual + Storyline engines generate explainability data</li>
+              <li>UI polls <code>/reports/{id}</code> until report is ready</li>
+            </ol>
+            <div class="safety-note mt-md">
+              <span class="safety-icon">ℹ️</span>
+              <div>
+                <strong>Non-destructive</strong>
+                <p>This page only calls existing backend endpoints — no backend behavior is changed.</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="progress-steps animate-in-d2 mt-md" id="progressSteps">
+          <div class="progress-step" id="step1"><span class="step-num">1</span> Upload</div>
+          <div class="step-connector" id="conn1"></div>
+          <div class="progress-step" id="step2"><span class="step-num">2</span> Processing</div>
+          <div class="step-connector" id="conn2"></div>
+          <div class="progress-step" id="step3"><span class="step-num">3</span> Report Ready</div>
+        </div>
+
+        <!-- Real-time Agent Pipeline Tracker -->
+        <section class="panel animate-in-d2 mt-md" id="pipelinePanel" style="display:none">
+          <h2 class="section-title"><span class="icon">⚡</span> Live Agent Pipeline</h2>
+          <p style="font-size:0.82rem;color:var(--ink-soft);margin-bottom:14px">
+            Real-time WebSocket feed from the orchestrator. Each agent lights up as it completes.
+          </p>
+          <div id="agentGrid" class="agent-grid"></div>
+          <div id="wsStatus" style="font-size:0.75rem;color:var(--ink-muted);margin-top:10px">WebSocket: connecting…</div>
+        </section>
+
+        <!-- Ingest Response -->
+        <section class="panel animate-in-d2 mt-md">
+          <div class="result-header">
+            <span>📥 Ingestion Response</span>
+          </div>
+          <pre id="ingestResponse" class="mt-sm" style="max-height:200px">Awaiting upload…</pre>
+        </section>
+
+        <!-- Final Report -->
+        <section class="panel animate-in-d3 mt-md">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <h2 class="section-title" style="margin-bottom:0"><span class="icon">📋</span> Analysis Report</h2>
+            <button id="rawToggle" class="raw-toggle" type="button" style="display:none">Show Raw JSON</button>
+          </div>
+          <div id="reportStructured" class="mt-md" style="display:none"></div>
+          <pre id="finalReport" class="mt-sm">Report not available yet.</pre>
+        </section>
+      `;
+
+      AgentUI.initSettingsDropdown();
+      initAnalyzePage();
+    });
+
+    function initAnalyzePage() {
+      const dropZone = document.getElementById("dropZone");
+      const fileInput = document.getElementById("emailFile");
+      const dropText = document.getElementById("dropText");
+      const statusEl = document.getElementById("status");
+      let activeAnalysisId = "";
+      let pollTimer = null;
+      let showRaw = true;
+
+      // Drag-and-drop
+      dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("dragover"); });
+      dropZone.addEventListener("dragleave", () => { dropZone.classList.remove("dragover"); });
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer.files.length) {
+          fileInput.files = e.dataTransfer.files;
+          dropText.textContent = "📎 " + e.dataTransfer.files[0].name;
+        }
+      });
+      fileInput.addEventListener("change", () => {
+        if (fileInput.files.length) dropText.textContent = "📎 " + fileInput.files[0].name;
+      });
+
+      // Progress
+      function setStep(step) {
+        ["step1","step2","step3"].forEach((id, i) => {
+          const el = document.getElementById(id);
+          el.classList.remove("active","done");
+          if (i+1 < step) el.classList.add("done");
+          else if (i+1 === step) el.classList.add("active");
+        });
+        ["conn1","conn2"].forEach((id, i) => {
+          document.getElementById(id).classList.toggle("done", i+1 < step);
+        });
+      }
+
+      // Raw toggle
+      document.getElementById("rawToggle").addEventListener("click", () => {
+        showRaw = !showRaw;
+        document.getElementById("finalReport").style.display = showRaw ? "block" : "none";
+        document.getElementById("reportStructured").style.display = showRaw ? "none" : "block";
+        document.getElementById("rawToggle").textContent = showRaw ? "Show Structured" : "Show Raw JSON";
+      });
+
+      // Structured report
+      function renderReport(data) {
+        const verdict = data.verdict || data.decision?.verdict || "unknown";
+        const risk = data.overall_risk_score ?? data.decision?.overall_risk_score ?? "—";
+        const explanation = data.llm_explanation || data.reasoning?.explanation || "";
+        const agents = data.agent_results || [];
+        const actions = data.recommended_actions || data.decision?.recommended_actions || [];
+        const storyline = data.threat_storyline || [];
+        const counterfactual = data.counterfactual_result || null;
+
+        let html = `
+          <div class="row mb-md" style="gap:18px">
+            <span class="verdict-badge ${AgentUI.verdictClass(verdict)}">● ${verdict}</span>
+            <span style="font-size:0.9rem;color:var(--ink-soft)">Risk Score: <strong style="color:var(--ink)">${typeof risk === 'number' ? risk.toFixed(4) : risk}</strong></span>
+          </div>`;
+
+        if (explanation) {
+          html += `<div class="result-section"><div class="result-header">🧠 SOC Analysis</div><div class="result-body"><p style="color:var(--ink-soft);font-size:0.88rem;line-height:1.6">${esc(explanation)}</p></div></div>`;
+        }
+
+        if (agents.length) {
+          let rows = agents.map(a => `<tr><td style="color:var(--accent-cyan);font-weight:600">${a.agent_name}</td><td>${(a.risk_score??0).toFixed(3)}</td><td>${(a.confidence??0).toFixed(3)}</td><td style="font-size:0.78rem">${(a.indicators||[]).join(", ") || "—"}</td></tr>`).join("");
+          html += `<div class="result-section"><div class="result-header">🔬 Agent Results</div><div class="result-body"><table><thead><tr><th>Agent</th><th>Risk</th><th>Confidence</th><th>Indicators</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+        }
+
+        if (storyline) {
+          if (typeof storyline === "string") {
+            let renderedHtml = "";
+            if (window.marked) {
+               renderedHtml = marked.parse(storyline);
+               renderedHtml = renderedHtml.replace(/<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g, '<div class="mermaid">$1</div>');
+            } else {
+               renderedHtml = `<div style="white-space:pre-wrap">${esc(storyline)}</div>`;
+            }
+            html += `<div class="result-section"><div class="result-header">📖 Threat Storyline</div><div class="result-body"><div class="markdown-body" style="font-size:0.88rem;color:var(--ink-soft);line-height:1.6">${renderedHtml}</div></div></div>`;
+          } else if (storyline.length) {
+            let items = storyline.map(s => `<tr><td><span class="verdict-badge ${s.severity==='high'?'danger':s.severity==='medium'?'suspicious':'safe'}" style="padding:3px 10px;font-size:0.72rem">${s.phase}</span></td><td style="font-size:0.84rem">${esc(s.description)}</td><td>${(s.confidence??0).toFixed(2)}</td></tr>`).join("");
+            html += `<div class="result-section"><div class="result-header">📖 Threat Storyline</div><div class="result-body"><table><thead><tr><th>Phase</th><th>Description</th><th>Confidence</th></tr></thead><tbody>${items}</tbody></table></div></div>`;
+          }
+        }
+
+        if (counterfactual) {
+          if (typeof counterfactual === "string") {
+            html += `<div class="result-section"><div class="result-header">🔀 Counterfactual Analysis</div><div class="result-body"><p style="font-size:0.88rem;color:var(--ink-soft);white-space:pre-wrap;line-height:1.6">${esc(counterfactual)}</p></div></div>`;
+          } else {
+            html += `<div class="result-section"><div class="result-header">🔀 Counterfactual Analysis</div><div class="result-body"><pre style="margin:0;border:0;padding:8px;max-height:200px">${AgentUI.jsonPretty(counterfactual)}</pre></div></div>`;
+          }
+        }
+
+        if (actions.length) {
+          html += `<div class="result-section"><div class="result-header">⚡ Recommended Actions</div><div class="result-body"><div class="row">${actions.map(a => `<span class="tech-badge" style="border-color:rgba(34,211,238,0.2)">${a}</span>`).join("")}</div></div></div>`;
+        }
+        return html;
+      }
+
+      function esc(str) { const d = document.createElement("div"); d.textContent = str; return d.innerHTML; }
+
+      // Poll
+      async function pollReport() {
+        if (!activeAnalysisId) return;
+        try {
+          const res = await AgentUI.apiFetch(`/reports/${activeAnalysisId}`);
+          if (res.status === 404) { AgentUI.showStatus(statusEl, "⏳ Report not ready yet — polling…", "warn"); return; }
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.detail || "HTTP " + res.status);
+
+          document.getElementById("finalReport").textContent = AgentUI.jsonPretty(body);
+          document.getElementById("reportStructured").innerHTML = renderReport(body);
+          document.getElementById("rawToggle").style.display = "inline-flex";
+          showRaw = false;
+          document.getElementById("finalReport").style.display = "none";
+          document.getElementById("reportStructured").style.display = "block";
+          document.getElementById("rawToggle").textContent = "Show Raw JSON";
+
+          // Sync agent states for the pipeline grid so they don't stay "Pending" if WS events were missed
+          if (body.agent_results && body.agent_results.length > 0) {
+            body.agent_results.forEach(a => {
+              agentStates[a.agent_name] = { risk_score: a.risk_score, confidence: a.confidence };
+            });
+            renderAgentGrid();
+          }
+
+          if (window.mermaid) {
+              setTimeout(() => {
+                  try { mermaid.init(undefined, document.querySelectorAll('.mermaid')); } catch(e){}
+              }, 50);
+          }
+
+          AgentUI.showStatus(statusEl, `✅ Report ready for ${activeAnalysisId}`, "ok");
+          setStep(3);
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        } catch (err) {
+          AgentUI.showStatus(statusEl, "❌ Poll error: " + err.message, "err");
+        }
+      }
+
+      document.getElementById("pollBtn").addEventListener("click", pollReport);
+
+      // Submit
+      document.getElementById("submitBtn").addEventListener("click", async () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) { AgentUI.showStatus(statusEl, "⚠ Please select an email file first.", "warn"); return; }
+        setStep(1);
+        AgentUI.showStatus(statusEl, "⬆ Uploading file…", "warn");
+
+        const form = new FormData();
+        form.append("file", file);
+
+        try {
+          const res = await AgentUI.apiFetch("/ingest-raw-email", { method: "POST", body: form });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.detail || "HTTP " + res.status);
+
+          document.getElementById("ingestResponse").textContent = AgentUI.jsonPretty(body);
+          activeAnalysisId = body.analysis_id || "";
+          document.getElementById("pollBtn").disabled = !activeAnalysisId;
+          AgentUI.showStatus(statusEl, `✅ Ingested — Analysis ID: ${activeAnalysisId}`, "ok");
+          setStep(2);
+
+          // Show pipeline panel and connect WebSocket
+          initPipelineTracker(activeAnalysisId);
+
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = setInterval(pollReport, 4000);
+        } catch (err) {
+          AgentUI.showStatus(statusEl, "❌ Upload failed: " + err.message, "err");
+        }
+      });
+
+      // ---- WebSocket Real-Time Pipeline ----
+      const ALL_AGENTS = [
+        "header_agent", "content_agent", "url_agent",
+        "attachment_agent", "sandbox_agent",
+        "threat_intel_agent", "user_behavior_agent"
+      ];
+      const AGENT_ICONS = {
+        header_agent: "📧", content_agent: "🧠", url_agent: "🔗",
+        attachment_agent: "📎", sandbox_agent: "💣",
+        threat_intel_agent: "🌐", user_behavior_agent: "👤"
+      };
+      let agentStates = {};
+      let ws = null;
+
+      function renderAgentGrid() {
+        const grid = document.getElementById("agentGrid");
+        if (!grid) return;
+        grid.innerHTML = ALL_AGENTS.map(name => {
+          const s = agentStates[name];
+          const icon = AGENT_ICONS[name] || "🔹";
+          const label = name.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+          if (!s) {
+            return `<div class="agent-card pending"><span class="agent-icon">${icon}</span><div class="agent-label">${label}</div><div class="agent-score">Pending…</div><div class="agent-pulse"></div></div>`;
+          }
+          const scoreVal = typeof s.risk_score === "number" ? s.risk_score.toFixed(4) : "—";
+          const cls = (s.risk_score ?? 0) >= 0.5 ? "danger" : "safe";
+          return `<div class="agent-card ${cls}"><span class="agent-icon">${icon}</span><div class="agent-label">${label}</div><div class="agent-score">${scoreVal}</div></div>`;
+        }).join("");
+      }
+
+      function initPipelineTracker(analysisId) {
+        agentStates = {};
+        const panel = document.getElementById("pipelinePanel");
+        if (panel) panel.style.display = "block";
+        renderAgentGrid();
+
+        // Close existing WS
+        if (ws) { try { ws.close(); } catch(_){} }
+
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${proto}://${location.host}/ws/orchestrator`);
+        const wsStatus = document.getElementById("wsStatus");
+
+        ws.onopen = () => {
+          if (wsStatus) wsStatus.textContent = "WebSocket: connected ✅";
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.analysis_id !== analysisId) return;
+
+            if (msg.event_type === "agent_update" && msg.agent_name) {
+              agentStates[msg.agent_name] = { risk_score: msg.risk_score, confidence: msg.confidence };
+              renderAgentGrid();
+            }
+            if (msg.event_type === "final_verdict") {
+              if (wsStatus) wsStatus.textContent = `WebSocket: verdict received — ${msg.verdict} ✅`;
+              // Auto-trigger poll to load full report
+              pollReport();
+            }
+          } catch(_) {}
+        };
+        ws.onerror = () => {
+          if (wsStatus) wsStatus.textContent = "WebSocket: error ⚠️ (falling back to polling)";
+        };
+        ws.onclose = () => {
+          if (wsStatus) wsStatus.textContent = "WebSocket: disconnected";
+        };
+      }
+    }
+  </script>
+</body>
+</html>

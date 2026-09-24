@@ -1,0 +1,32 @@
+Received: from srv1.dhl-parcel-notice.top (srv1.dhl-parcel-notice.top
+ [193.42.33.12]) by mx1.cci-demo.com (Postfix) with ESMTPS id 4Xyz0006; Sun,
+ 20 Sep 2026 08:06:00 +0000
+Received: from mx1.cci-demo.com (10.0.0.25) by exch01.cci-demo.com
+ (10.0.0.30); Sun, 20 Sep 2026 08:06:00 +0000
+Authentication-Results: mx1.cci-demo.com; spf=none dkim=none dmarc=none
+ header.from=dhl-parcel-notice.top
+From: "DHL Express" <dispatch@dhl-parcel-notice.top>
+To: meera.s@cci-demo.com
+Subject: Your parcel is on hold - customs fee required
+Date: Sun, 20 Sep 2026 08:06:00 +0000
+Message-ID: <179026443137.13628.11164944433398365952@dhl-parcel-notice.top>
+X-Test-Label: malicious
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============5071451696041706694=="
+
+--===============5071451696041706694==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Your parcel could not be delivered. Open the attached label to reschedule.
+
+--===============5071451696041706694==
+Content-Type: application/x-iso9660-image
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="label_8841.iso"
+MIME-Version: 1.0
+
+Q0QwMDEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAA
+
+--===============5071451696041706694==--

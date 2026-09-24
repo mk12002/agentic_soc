@@ -1,0 +1,33 @@
+Received: from mta7.deals-weekly.example (mta7.deals-weekly.example
+ [198.51.100.77]) by mx1.cci-demo.com (Postfix) with ESMTPS id 4Xyz0007; Sun,
+ 20 Sep 2026 08:07:00 +0000
+Received: from mx1.cci-demo.com (10.0.0.25) by exch01.cci-demo.com
+ (10.0.0.30); Sun, 20 Sep 2026 08:07:00 +0000
+Authentication-Results: mx1.cci-demo.com; spf=pass dkim=pass dmarc=pass
+ header.from=deals-weekly.example
+From: "Deals Weekly" <offers@deals-weekly.example>
+To: jane.doe@cci-demo.com
+Subject: 70% off laptops this weekend only!
+Date: Sun, 20 Sep 2026 08:07:00 +0000
+Message-ID: <179026443137.13628.14773288852504261965@deals-weekly.example>
+X-Test-Label: spam
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============3537680019434102398=="
+
+--===============3537680019434102398==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Huge savings this weekend only. Unsubscribe any time.
+
+--===============3537680019434102398==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<p>Huge savings on laptops, this weekend only!</p><p><a href=3D"https://deals=
+-weekly.example/laptops?utm=3Dmail">Shop now</a> | <a href=3D"https://deals-w=
+eekly.example/unsubscribe">Unsubscribe</a></p>
+
+--===============3537680019434102398==--

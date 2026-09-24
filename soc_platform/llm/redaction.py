@@ -1,0 +1,80 @@
+"""Personal-data minimisation before LLM calls (PH-T06, NFR-10, R10).
+
+Internal people are pseudonymised with stable tokens (``<USER_1>``) that are
+restored in the model output; external/attacker indicators (sender domains,
+URLs, hashes) are left intact because they *are* the evidence.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+PHONE_RE = re.compile(r"(?<![\w.])\+?\d[\d\s()-]{7,16}\d(?![\w.])")
+CARD_RE = re.compile(r"\b(?:\d[ -]?){13,16}\b")
+PAN_RE = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")          # Indian PAN
+AADHAAR_RE = re.compile(r"\b\d{4}\s?\d{4}\s?\d{4}\b")    # Indian Aadhaar
+IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+@dataclass
+class Redactor:
+    internal_domains: set[str] = field(default_factory=set)
+    known_names: set[str] = field(default_factory=set)  # internal display names to pseudonymise
+    mapping: dict[str, str] = field(default_factory=dict)
+    _counters: dict[str, int] = field(default_factory=dict)
+
+    def _token(self, kind: str, original: str) -> str:
+        for tok, orig in self.mapping.items():
+            if orig == original:
+                return tok
+        self._counters[kind] = self._counters.get(kind, 0) + 1
+        tok = f"<{kind}_{self._counters[kind]}>"
+        self.mapping[tok] = original
+        return tok
+
+    def _is_internal(self, domain: str) -> bool:
+        d = domain.lower()
+        return any(d == i or d.endswith("." + i) for i in self.internal_domains)
+
+    def redact(self, text: str) -> str:
+        if not text:
+            return text
+
+        def _email(m: re.Match) -> str:
+            return self._token("USER", m.group(0)) if self._is_internal(m.group(2)) else m.group(0)
+
+        out = EMAIL_RE.sub(_email, text)
+        for name in sorted(self.known_names, key=len, reverse=True):
+            if name and len(name) > 3:
+                out = re.sub(re.escape(name), lambda m: self._token("PERSON", m.group(0)), out, flags=re.IGNORECASE)
+        out = PAN_RE.sub(lambda m: self._token("ID", m.group(0)), out)
+        out = AADHAAR_RE.sub(lambda m: self._token("ID", m.group(0)), out)
+        out = CARD_RE.sub(lambda m: self._token("CARD", m.group(0)) if _luhn(m.group(0)) else m.group(0), out)
+        # IPs are indicators; protect them from the phone regex by masking temporarily.
+        ips: list[str] = []
+        out = IP_RE.sub(lambda m: (ips.append(m.group(0)), f"\x00IP{len(ips) - 1}\x00")[1], out)
+        out = PHONE_RE.sub(lambda m: self._token("PHONE", m.group(0)) if 10 <= sum(c.isdigit() for c in m.group(0)) <= 13
+                           else m.group(0), out)
+        out = re.sub(r"\x00IP(\d+)\x00", lambda m: ips[int(m.group(1))], out)
+        return out
+
+    def restore(self, text: str) -> str:
+        for tok, orig in self.mapping.items():
+            text = text.replace(tok, orig)
+        return text
+
+
+def _luhn(s: str) -> bool:
+    digits = [int(c) for c in s if c.isdigit()]
+    if len(digits) < 13:
+        return False
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0

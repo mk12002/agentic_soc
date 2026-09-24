@@ -1,0 +1,91 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/Tms/api/v1/events/elevation$",
+   "body": {
+    "items": [
+     {
+      "id": 501,
+      "eventTime": "2026-09-20T09:08:00Z",
+      "userName": "CCI\\jane.doe",
+      "computerName": "JANE-LT01",
+      "applicationName": "powershell.exe",
+      "outcome": "Denied",
+      "policyName": "Block unsigned admin tools",
+      "fileHash": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "userName": "jane.doe"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/Tms/api/v1/events/elevation$",
+   "body": {
+    "items": [
+     {
+      "id": 501,
+      "eventTime": "2026-09-20T09:08:00Z",
+      "userName": "CCI\\jane.doe",
+      "computerName": "JANE-LT01",
+      "applicationName": "powershell.exe",
+      "outcome": "Denied",
+      "policyName": "Block unsigned admin tools",
+      "fileHash": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "computerName": "JANE-LT01"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/Tms/api/v1/events/elevation$",
+   "body": {
+    "items": []
+   },
+   "status": 200,
+   "params": {
+    "userName": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/Tms/api/v1/events/elevation$",
+   "body": {
+    "items": []
+   },
+   "status": 200,
+   "params": {
+    "computerName": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/Tms/api/v1/events/elevation$",
+   "body": {
+    "items": [
+     {
+      "id": 501,
+      "eventTime": "2026-09-20T09:08:00Z",
+      "userName": "CCI\\jane.doe",
+      "computerName": "JANE-LT01",
+      "applicationName": "powershell.exe",
+      "outcome": "Denied",
+      "policyName": "Block unsigned admin tools",
+      "fileHash": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+     }
+    ],
+    "hasMore": false,
+    "lastId": 501
+   },
+   "status": 200
+  }
+ ]
+}

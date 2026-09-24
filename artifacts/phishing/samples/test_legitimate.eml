@@ -1,0 +1,30 @@
+From: john.smith@microsoft.com
+To: alice.johnson@company.com
+Subject: Q2 Team Meeting - Agenda & Notes
+Date: Tue, 06 May 2025 09:00:00 +0000
+Message-ID: <meeting-notes-q2@microsoft.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+Authentication-Results: mx.company.com; spf=pass; dkim=pass; dmarc=pass
+Received: from mail-eopbgr140055.outbound.protection.outlook.com (mail-eopbgr140055.outbound.protection.outlook.com [40.107.14.55])
+    by mx.company.com (Postfix) with ESMTPS id DEF456
+    for <alice.johnson@company.com>; Tue, 06 May 2025 09:00:00 +0000
+
+Hi Alice,
+
+Here's the agenda for our Q2 team meeting scheduled for next Thursday at 2 PM:
+
+1. Project updates from each team lead
+2. Budget review for Q3 planning
+3. New hire introductions
+4. Open discussion
+
+Please review the attached notes from last quarter's meeting and come prepared with your updates.
+
+The meeting will be held in Conference Room B or you can join via Teams:
+https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc123
+
+Best regards,
+John Smith
+Senior Project Manager
+Microsoft Corporation

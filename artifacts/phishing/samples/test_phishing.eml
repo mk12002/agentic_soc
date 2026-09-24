@@ -1,0 +1,51 @@
+From: admin@rnicrosoft-security.com
+To: victim@company.com
+Subject: URGENT: Your account has been compromised - Verify Now
+Date: Tue, 06 May 2025 10:30:00 +0000
+Message-ID: <phishing-test-001@rnicrosoft-security.com>
+Reply-To: hacker@evil-domain.net
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=_Part_12345"
+Authentication-Results: mx.company.com; spf=fail; dkim=fail; dmarc=fail
+Received: from suspicious-relay.evil-domain.net (suspicious-relay.evil-domain.net [185.100.87.202])
+    by mx.company.com (Postfix) with ESMTP id ABC123
+    for <victim@company.com>; Tue, 06 May 2025 10:30:00 +0000
+
+------=_Part_12345
+Content-Type: text/plain; charset="UTF-8"
+
+Dear Customer,
+
+We have detected unauthorized access to your Microsoft 365 account. 
+Your account will be permanently suspended within 24 hours unless you take immediate action.
+
+Click the link below to verify your identity and secure your account:
+http://secure-login-micr0soft.evil-domain.net/verify?token=abc123&user=victim
+
+If you do not respond within 24 hours, your account data will be permanently deleted.
+
+Regards,
+Microsoft Security Team
+Account Protection Division
+
+------=_Part_12345
+Content-Type: text/html; charset="UTF-8"
+
+<html>
+<body>
+<div style="font-family: Arial; max-width: 600px; margin: 0 auto;">
+<img src="https://evil-domain.net/microsoft-logo-fake.png" alt="Microsoft">
+<h2 style="color: #d32f2f;">⚠️ URGENT: Account Security Alert</h2>
+<p>Dear Customer,</p>
+<p>We have detected <strong>unauthorized access</strong> to your Microsoft 365 account from an unrecognized device.</p>
+<p>Your account will be <strong>permanently suspended within 24 hours</strong> unless you take immediate action.</p>
+<a href="http://secure-login-micr0soft.evil-domain.net/verify?token=abc123" 
+   style="display: inline-block; background: #0078d4; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px;">
+   Verify Your Account Now
+</a>
+<p style="color: #666; font-size: 12px;">This is an automated message from Microsoft Security. Do not reply.</p>
+</div>
+</body>
+</html>
+
+------=_Part_12345--
