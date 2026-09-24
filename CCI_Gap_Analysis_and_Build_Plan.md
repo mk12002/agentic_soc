@@ -42,7 +42,7 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | — | Deploy images built and run | ⛔ | Docker not available on the build machine; compose validated statically |
 | — | Live connector validation against CCI tenants | ⛔ | needs CCI API access (A01, D01) |
 
-Platform test suite: 98 passed + 3 live (opt-in). Phishing ML engine suite: see docs/TEST_REPORT.md §7.
+Platform test suite: 98 passed + 3 live (opt-in). Phishing ML engine suite: 182 unit/top-level + 42 integration passed. Details: docs/TEST_REPORT.md.
 
 ---
 

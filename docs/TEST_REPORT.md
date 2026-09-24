@@ -13,12 +13,13 @@ CCI's own analyst dispositions (PH-T08, NFR-15), which the platform records auto
 | Area | Result |
 |---|---|
 | Platform test suite (`soc_platform/tests`) | **98 passed**, 3 live tests skipped by default (pass with `SOC_LIVE_TESTS=1`) |
-| Phishing ML engine suite (`soc_platform/domains/phishing/tests`) | see §7 |
+| Phishing ML engine suite (`soc_platform/domains/phishing/tests`) | **224 passed** (182 unit/top-level + 42 integration), 2 skipped |
 | Connectors | **20/20** discovered; every stream syncs, every lookup answers, actions route to the right vendor |
 | Asset identity resolution at scale | **0 false merges** across 3 × 400-host messy estates (was 23 hosts wrongly merged before fixes) |
 | Live public APIs (NVD, EPSS, CISA KEV) | **working** against the real services |
 | Phishing detection (labelled set, 18 msgs) | composite: 12/12 malicious flagged, 0 false "malicious" after fusion rule (see §5) |
 | Security scans | bandit: all high/medium findings fixed or verified false positives; pip-audit: **no known vulnerabilities** |
+| Fresh clone install (platform requirements only) | **98 passed** - README quick start verified |
 | Real HTTP server smoke test | health, auth (401 without token), security headers, console assets, cases across domains |
 
 ## 2. What "realistic data" means here
@@ -142,7 +143,10 @@ now 0.26 s.
 The original 7-agent system was moved into `soc_platform/domains/phishing/engine` and re-tested.
 
 * Before refactor (original layout): 176 passed, 2 skipped.
-* After refactor + hardening: **RESULT_PLACEHOLDER**
+* After refactor + hardening: unit + top-level **182 passed, 2 skipped, 0 failed**; integration **42 passed**
+  (Garuda retry, operational flow, Graph action bot, sandbox executor, external intel, agent API).
+* Bug found by the integration run and fixed: the Azure Search client stayed cached after its
+  credentials were removed or rotated.
 
 Tests changed deliberately (security fixes), each documented in the test itself:
 `test_detonation_fails_closed_when_daemon_rejects_hardening` (was: asserted silent downgrade),
