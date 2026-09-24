@@ -21,7 +21,7 @@ build/
 dist/
 
 # --- runtime data (generated) ---
-data/
+/data/
 soc_platform.db
 *.sqlite3
 logs/
