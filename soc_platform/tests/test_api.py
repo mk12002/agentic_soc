@@ -30,6 +30,15 @@ def client(tmp_path_factory):
     return TestClient(appmod.app)
 
 
+@pytest.fixture(scope="module")
+def seeded(client):
+    """Sample estate loaded once for this module, whatever order its tests run in."""
+    a = tok(client, "seed", "analyst")
+    return {"vm": client.post("/api/v1/vm/refresh", headers=a).json(),
+            "inc": client.post("/api/v1/incidents/run", headers=a).json(),
+            "ph": client.post("/api/v1/phishing/ingest", headers=a).json()}
+
+
 def tok(client, user, roles):
     return {"Authorization": "Bearer " + client.get(f"/api/v1/dev/token?user={user}&roles={roles}").json()["token"]}
 
@@ -44,14 +53,12 @@ def test_auth_required_and_rbac(client):
     assert "approve_action" in me["permissions"] and "approve_policy" not in me["permissions"]
 
 
-def test_all_three_domains_over_http(client):
+def test_all_three_domains_over_http(client, seeded):
     a, lead = tok(client, "alice", "analyst"), tok(client, "lena", "lead")
     assert len(client.get("/api/v1/connectors", headers=a).json()) >= 20
-    vm = client.post("/api/v1/vm/refresh", headers=a).json()
+    vm, inc, ph = seeded["vm"], seeded["inc"], seeded["ph"]
     assert vm["consolidation"]["consolidated"] == 6
-    inc = client.post("/api/v1/incidents/run", headers=a).json()
     assert inc["new_incidents"] >= 3 and inc["investigated"]
-    ph = client.post("/api/v1/phishing/ingest", headers=a).json()
     assert ph["processed"][0]["verdict"] == "malicious"
     cases = client.get("/api/v1/cases", headers=a).json()
     assert {c["domain"] for c in cases} >= {"incident", "phishing"}
@@ -81,7 +88,7 @@ def test_all_three_domains_over_http(client):
     assert client.get("/api/v1/metrics/shadow?domain=incident", headers=a).json()["agreement"]["sample_size"] == 1
 
 
-def test_reports_and_audit_chain(client):
+def test_reports_and_audit_chain(client, seeded):
     a = tok(client, "alice", "analyst")
     for kind in ("daily_exposure", "weekly_vm", "weekly_mgmt"):
         r = client.post(f"/api/v1/reports/{kind}", headers=a).json()
@@ -124,7 +131,7 @@ def test_security_headers_csp_and_limits(client):
     assert big.status_code == 413
 
 
-def test_intelligence_endpoints(client):
+def test_intelligence_endpoints(client, seeded):
     a = tok(client, "alice", "analyst")
     assert client.post("/api/v1/intelligence/refresh", headers=a).json()["insights"] > 0
     ins = client.get("/api/v1/intelligence/insights", headers=a).json()

@@ -87,6 +87,9 @@ class ReportService:
         self.templates = templates or {}
 
     def _record(self, kind: str, path: Path, metrics: dict[str, Any], by: str) -> ReportRun:
+        from soc_platform.core.crypto import seal_file
+
+        seal_file(path)  # reports carry case details: encrypted at rest like raw payloads
         run = ReportRun(kind=kind, path=str(path), metrics=metrics, generated_by=by)
         self.s.add(run)
         self.s.flush()

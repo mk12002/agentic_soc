@@ -155,7 +155,7 @@ const NAV = [
   ['Govern', [['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['reports', 'Reports', 'reports'],
     ['access', 'Access', 'access'], ['audit', 'Audit log', 'audit']]],
 ];
-const TITLES = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label])));
+const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity'};
 
 function route() {
   const parts = (location.hash.replace(/^#\/?/, '') || 'overview').split('/').map(decodeURIComponent);
@@ -208,7 +208,8 @@ async function render() {
   const {name, params} = route();
   document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === name));
   const title = TITLES[name] || cap(name);
-  $('#crumbs').innerHTML = params.length ? `<a href="#/${esc(name)}">${esc(title)}</a> <span class="muted">/</span> <b>Detail</b>` : `<b>${esc(title)}</b>`;
+  const parent = {story: 'cases', entity: 'cases'}[name] || name;
+  $('#crumbs').innerHTML = params.length ? `<a href="#/${esc(parent)}">${esc(TITLES[parent] || title)}</a> <span class="muted">/</span> <b>${esc(name === 'story' ? 'Attack story' : name === 'entity' ? 'Entity 360' : 'Detail')}</b>` : `<b>${esc(title)}</b>`;
   document.title = title + ' · Agentic SOC';
   const view = (window.VIEWS || {})[name];
   const main = $('#main');

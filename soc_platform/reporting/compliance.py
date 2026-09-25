@@ -160,4 +160,7 @@ def build_pack(session: Session, settings: Settings, out_dir: str | Path, *, per
         z.writestr("audit_log.jsonl", "".join(export_audit(session)))
         z.write(docx_tmp, "summary.docx")
     docx_tmp.unlink(missing_ok=True)
+    from soc_platform.core.crypto import seal_file
+
+    seal_file(path)
     return path, ev

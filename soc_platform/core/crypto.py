@@ -76,6 +76,15 @@ def write_protected(path: str | Path, data: bytes, cipher: DataCipher | None = N
     return p
 
 
+def seal_file(path: str | Path, cipher: DataCipher | None = None) -> Path:
+    """Encrypt an already-written file in place (e.g. a generated report) when a data key is configured."""
+    p = Path(path)
+    data = p.read_bytes()
+    if data.startswith(MAGIC):
+        return p
+    return write_protected(p, data, cipher)
+
+
 def read_protected(path: str | Path, cipher: DataCipher | None = None) -> bytes:
     blob = Path(path).read_bytes()
     if not blob.startswith(MAGIC):

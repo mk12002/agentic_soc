@@ -67,7 +67,8 @@ class ConnectorManifest:
     fake_settings: dict[str, Any] = field(default_factory=dict)  # demo defaults applied in fake mode only
 
     def fixture_transport(self) -> FixtureTransport:
-        return FixtureTransport.from_file(FIXTURES_DIR / f"{self.name}.json", tool=self.name)
+        base = Path(os.environ.get("SOC_FIXTURES_DIR") or FIXTURES_DIR)   # a different sample estate can be loaded
+        return FixtureTransport.from_file(base / f"{self.name}.json", tool=self.name)
 
     def describe(self) -> dict[str, Any]:
         return {"name": self.name, "tool": self.tool, "vendor": self.vendor, "category": self.category,

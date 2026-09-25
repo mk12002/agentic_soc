@@ -135,7 +135,7 @@ async function CaseDetail(id) {
   setMainG(__g, `<div class="page-head"><div>
       <div class="inline" style="margin-bottom:8px"><a href="#/cases" class="small">${icon('back', '')}</a>${chip(c.severity)}${chip(c.verdict || 'pending', 'plain')}<span class="muted small">${esc(cap(c.domain))} · ${esc(cap(c.status))} · opened ${dt(c.created_at)}</span></div>
       <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} · automation mode ${esc(cap(c.autonomy_mode || 'recommend'))}</p></div>
-      <div class="actions">${btn('Investigation record', 'dl', [`/api/v1/cases/${id}/report`], '', 'download')}</div></div>
+      <div class="actions"><a class="btn primary" href="#/story/${encodeURIComponent(id)}">${icon('intel')}Attack story</a>${btn('Investigation record', 'dl', [`/api/v1/cases/${id}/report`], '', 'download')}</div></div>
     ${un.length ? `<div class="callout"><b>Incomplete picture.</b>&nbsp;Unavailable sources: ${un.map(u => esc(u.source)).join(', ')}. Conclusions below exclude them.</div>` : ''}
     <div class="grid g-2">
       <div class="stack">
@@ -158,7 +158,7 @@ async function CaseDetail(id) {
         ${can('investigate') ? card('Analyst decision', `<div class="stack" style="gap:10px"><select id="dv">${['true_positive', 'malicious', 'suspicious', 'false_positive', 'benign'].map(o => `<option value="${o}">${cap(o)}</option>`).join('')}</select>
           <textarea id="dr" rows="3" placeholder="Reasoning (used as feedback for tuning)"></textarea>${btn('Record decision', 'decide', [id], 'primary')}</div>
           ${v.dispositions.map(d => `<div class="list-row small"><span class="grow">${esc(d.analyst)}: <b>${esc(cap(d.verdict))}</b> - ${esc(d.reasoning)}</span><span class="muted">${dt(d.at)}</span></div>`).join('')}`) : ''}
-        ${card('Timeline', v.timeline.slice(-30).reverse().map(t => `<div class="list-row small"><span class="mono muted" style="min-width:110px">${dt(t.ts)}</span><span class="grow">${esc(t.title)}</span><span class="tag">${esc(t.tool || '')}</span></div>`).join('') || empty('No events'))}
+        ${card('Timeline', v.timeline.slice(-30).reverse().map(t => `<div class="tl-row"><div class="tl-meta"><span class="mono muted">${dt(t.ts)}</span><span class="tag">${esc(t.tool || '')}</span></div><div class="tl-title">${esc(t.title)}</div></div>`).join('') || empty('No events'))}
         ${card('Audit trail', `<details><summary>${v.audit.length} audited events</summary>${v.audit.map(x => `<div class="list-row small"><span class="mono muted">#${x.seq}</span><span class="grow">${esc(x.event)}</span><span class="muted">${esc(x.actor)}</span></div>`).join('')}</details>`)}
       </div>
     </div>`);
@@ -179,7 +179,7 @@ async function Entity(id) {
         ${card('Why this score', (r && r.factors.length) ? r.factors.map(f => `<div class="list-row" style="align-items:flex-start"><span class="score mono" style="min-width:42px">+${Math.round(f.decayed)}</span>
           <div class="grow"><div class="t-title">${esc(cap(f.signal))}</div><div class="t-sub">${esc(f.detail)}</div></div><span class="tag">${esc(f.source)}</span><span class="muted small">${dt(f.when)}</span></div>`).join('') : empty('No risk factors in the window'),
           {sub: 'weights decay with age'})}
-        ${card('Timeline across tools', e.timeline.slice(-40).reverse().map(t => `<div class="list-row small"><span class="mono muted" style="min-width:110px">${dt(t.ts)}</span><span class="grow">${esc(t.title)}</span><span class="tag">${esc(t.tool || '')}</span></div>`).join('') || empty('No events'))}
+        ${card('Timeline across tools', e.timeline.slice(-40).reverse().map(t => `<div class="tl-row"><div class="tl-meta"><span class="mono muted">${dt(t.ts)}</span><span class="tag">${esc(t.tool || '')}</span></div><div class="tl-title">${esc(t.title)}</div></div>`).join('') || empty('No events'))}
       </div>
       <div class="stack">
         ${card('Identifiers', `<dl class="kv">${Object.entries(e.keys).map(([k, v]) => `<dt>${esc(cap(k))}</dt><dd class="mono">${esc(v)}</dd>`).join('')}</dl>`)}
@@ -298,7 +298,7 @@ async function Coverage() {
     `<div class="grid g-kpi">${kpi('Weighted coverage', s.weighted_coverage_pct + '%', `${s.covered} of ${s.techniques} techniques`)}${kpi('Priority blind spots', nf(s.priority_blind_spots), 'no enabled tool detects these', s.priority_blind_spots > 0)}
       ${kpi('Single-source', nf(s.single_source_priority), 'one tool down = blind')}${kpi('Firing', nf(s.firing), 'observed in alerts and cases')}</div>
     <div class="mt">${card('Matrix', `<div class="legend" style="margin:0 0 12px"><span><i style="background:var(--low-bd)"></i>Full</span><span><i style="background:var(--med-bd)"></i>Partial</span><span><i style="background:var(--crit-bd)"></i>Priority blind spot</span><span>● times observed · hover for tools</span></div>
-      <div class="matrix" style="grid-template-columns:repeat(${c.tactics.length},minmax(112px,1fr))">${c.tactics.map(t => `<div><div class="col-h">${esc(t.name)}<small>${t.coverage_pct}%</small></div>
+      <div class="matrix">${c.tactics.map(t => `<div class="tactic"><div class="col-h">${esc(t.name)}<small>${t.coverage_pct}%</small></div>
         ${t.techniques.map(x => `<div class="tech ${x.coverage === 'full' ? 'full' : x.coverage === 'partial' ? 'partial' : x.priority ? 'blind' : ''}" title="${esc(`${x.technique} ${x.name}\nDetected by: ${Object.entries(x.detected_by).map(([k, v]) => k + ' (' + v + ')').join(', ') || 'nothing enabled'}\nObserved: ${x.observed}`)}">
           ${x.observed ? `<span class="fired">●${x.observed}</span>` : ''}<b>${esc(x.technique)}</b>${esc(x.name)}</div>`).join('')}</div>`).join('')}</div>`)}</div>
     ${c.priority_blind_spots.length ? `<div class="mt">${card('Blind spots to close', c.priority_blind_spots.map(b => `<div class="list-row"><span class="tag">${esc(b.technique)}</span><span class="grow">${esc(b.name)}</span></div>`).join(''))}</div>` : ''}`));
@@ -366,13 +366,64 @@ async function approvePolicy(id) { await post(`/api/v1/policy/proposals/${id}/ap
 // ================================================================= Reports
 async function Reports() {
   const __g = GEN;
+  const [tp, llmSt, cases] = await Promise.all([api('/api/v1/reports/templates'), api('/api/v1/llm/status'), api('/api/v1/cases')]);
+  window.__rcases = cases.filter(c => c.status !== 'closed' && ['critical', 'high'].includes(c.severity));
   const kinds = [['daily_exposure', 'Daily exposure report', 'Word · VM-F13', 'vulnerability'], ['weekly_vm', 'Weekly vulnerability report', 'Word · VM-F13', 'vulnerability'],
     ['weekly_mgmt', 'Management deck', 'PowerPoint · all domains', '*']];
-  setMainG(__g, page('Reports', 'Generated from one validated dataset; figures are computed in code, commentary is grounded on them. CCI templates plug in.', '',
-    `<div class="grid g-3">${kinds.filter(([, , , d]) => d === '*' ? window.ME.domains.includes('*') : inDomain(d)).map(([k, t, s]) => card(t, `<p class="small muted" style="margin-top:0">${esc(s)}</p>${btn('Generate', 'report', [k], 'primary', 'download')}`)).join('')}
-      ${can('export_evidence') ? card('Compliance evidence pack', `<p class="small muted" style="margin-top:0">Control tests, evidence JSON, chained audit export and summary (ZIP) · U17</p>${btn('Generate pack', 'compliancePack', [], 'primary', 'download')}<div id="comp"></div>`) : ''}
+  const writer = llmSt.configured ? `Narrative is written by the approved LLM (${esc(llmSt.provider)}) from computed figures; every sentence must cite a figure or it is removed.`
+    : 'No LLM is configured, so narrative uses deterministic templates. Configure an approved LLM endpoint for richer prose; the figures are identical either way.';
+  const tcard = t => card(esc(t.title), `<p class="small muted" style="margin-top:0">${esc(t.description || '')}</p>
+      <div class="small" style="margin-bottom:10px"><span class="tag">${t.format === 'pptx' ? 'PowerPoint' : 'Word'}</span><span class="tag">${esc(t.audience)}</span><span class="tag">last ${esc(t.days)} day(s)</span><span class="tag">${t.sections.length} section(s)</span></div>
+      ${t.needs_case ? caseSelect('rc-' + t.id) : ''}${btn('Generate', 'buildTemplate', [t.id], 'primary', 'download')}`, {sub: t.standard ? 'standard' : 'saved · ' + esc(t.created_by || '')});
+  setMainG(__g, page('Reports', 'Standard reports are preconfigured; any other report can be described in words. Figures are always computed in code from the platform records.', '',
+    `<div class="callout info">${writer}</div>
+    ${card('Describe a report', `<div class="stack" style="gap:10px"><textarea id="rq" rows="3" placeholder="e.g. A one-page board brief on phishing and supplier risk this quarter, as slides"></textarea>
+      <div class="inline">${btn('Plan report', 'reportPlan', [], 'primary')}<span class="small muted">You review the plan before anything is generated. Sections come only from the data catalogue (${tp.sources.length} sources).</span></div></div><div id="rplan"></div>`)}
+    <div id="rout"></div>
+    <h2 class="section-h">Standard reports</h2><div class="grid g-3">${tp.templates.filter(t => t.standard).map(tcard).join('')}</div>
+    ${tp.templates.some(t => !t.standard) ? `<h2 class="section-h">Saved reports</h2><div class="grid g-3">${tp.templates.filter(t => !t.standard).map(tcard).join('')}</div>` : ''}
+    <h2 class="section-h">Exports</h2><div class="grid g-3">${kinds.filter(([, , , d]) => d === '*' ? window.ME.domains.includes('*') : inDomain(d)).map(([k, t, s]) => card(t, `<p class="small muted" style="margin-top:0">${esc(s)}</p>${btn('Generate', 'report', [k], '', 'download')}`)).join('')}
+      ${can('export_evidence') ? card('Compliance evidence pack', `<p class="small muted" style="margin-top:0">Control tests, evidence JSON, chained audit export and summary (ZIP) · U17</p>${btn('Generate pack', 'compliancePack', [], '', 'download')}<div id="comp"></div>`) : ''}
       ${can('export_evidence') ? card('Audit export', `<p class="small muted" style="margin-top:0">Full hash-chained audit log as JSON Lines with verification, for archiving or SIEM.</p>${btn('Export', 'dl', ['/api/v1/audit/export'], '', 'download')}`) : ''}
     </div>`));
+}
+function caseSelect(id) {
+  const cs = window.__rcases || [];
+  if (!cs.length) return '<p class="small muted">No open critical or high case to report on.</p>';
+  return `<select id="${esc(id)}" style="width:100%;margin-bottom:10px" aria-label="Case">${cs.map(c => `<option value="${esc(c.id)}">${esc(cap(c.severity))} · ${esc(c.title)}</option>`).join('')}</select>`;
+}
+async function reportPlan() {
+  const q = ($('#rq').value || '').trim();
+  if (q.length < 3) { toast('Describe the report first', true); return; }
+  $('#rplan').innerHTML = '<div class="skeleton" style="margin-top:12px"></div>';
+  const sp = await post('/api/v1/reports/plan', {request: q});
+  window.__plan = sp;
+  $('#rplan').innerHTML = `<div class="plan-box"><div class="t-title">${esc(sp.title)}</div>
+      <div class="t-sub">${esc(sp.audience)} · ${sp.format === 'pptx' ? 'PowerPoint' : 'Word'} · last ${esc(sp.days)} day(s) · planned by ${sp.planner === 'llm' ? 'the LLM (catalogue sources only)' : 'keyword rules (no LLM)'}</div>
+    <ol class="plan-secs">${sp.sections.map(x => `<li><b>${esc(x.title)}</b> <span class="tag">${esc(x.source)}</span><div class="small muted">${esc(x.instruction)}</div></li>`).join('')}</ol>
+    <div class="inline">${btn('Generate', 'buildPlanned', [], 'primary', 'download')}${btn('Save as template', 'savePlanned', [])}</div></div>`;
+}
+async function buildPlanned() { if (window.__plan) await runBuild({spec: window.__plan}); }
+async function savePlanned() {
+  if (!window.__plan) return;
+  await post('/api/v1/reports/templates', {spec: window.__plan});
+  toast('Saved to your reports');
+  render();
+}
+async function buildTemplate(id) {
+  const sel = $('#rc-' + id);
+  await runBuild({template_id: id, case_id: sel ? sel.value : null});
+}
+async function runBuild(body) {
+  toast('Generating…');
+  $('#rout').innerHTML = card('Generating report', '<div class="skeleton"></div><div class="skeleton"></div>');
+  let r;
+  try { r = await post('/api/v1/reports/build', body); } catch (e) { $('#rout').innerHTML = ''; throw e; }
+  $('#rout').innerHTML = card(esc(r.title), `<div class="small muted" style="margin-bottom:10px">Narrative: ${esc(r.writer)}${r.skipped.length ? ` · skipped: ${r.skipped.map(x => esc(x.source + ' (' + x.reason + ')')).join(', ')}` : ''}</div>
+    ${r.sections.map(x => `<div class="rep-sec"><h3>${esc(x.title)} <span class="tag">${esc(x.writer)}</span></h3><p>${esc(x.narrative)}</p>
+      <details><summary class="small">Figures (${x.facts.length})</summary><dl class="kv">${x.facts.map(([k, v], i) => `<dt>F${i + 1} · ${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></details></div>`).join('')}`,
+    {right: btn('Download ' + (r.format === 'pptx' ? 'PowerPoint' : 'Word'), 'dl', ['/api/v1/reports/' + r.id + '/download'], 'primary', 'download')});
+  $('#rout').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 async function report(kind) { toast('Generating…'); const r = await post('/api/v1/reports/' + kind); await dl('/api/v1/reports/' + r.id + '/download'); }
 async function compliancePack() {
@@ -427,9 +478,128 @@ async function Audit() {
       <td class="small">${esc(x.actor_type)} · ${esc(x.actor_id)}</td><td class="mono small">${esc(x.event_type)}</td><td class="small muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td></tr>`)), {flush: true})));
 }
 
+
+// ================================================================= Attack story
+const HCLS = {rejected: 'ok', unlikely: 'medium', plausible: 'high', cannot_assess: 'info'};
+const HLBL = {rejected: 'Rejected', unlikely: 'Unlikely', plausible: 'Still plausible', cannot_assess: 'Cannot assess'};
+const NODE = {identity: 'var(--c-critical)', asset: 'var(--c-high)', secret: 'var(--c-vulnerability)', indicator: 'var(--c-other)',
+  recipient: 'var(--c-phishing)', case: 'var(--text-3)', campaign: 'var(--c-phishing)'};
+
+function blastGraph(b) {
+  const W = 640, H = 440, cx = W / 2, cy = H / 2;
+  const center = b.nodes.filter(n => n.principal), ring1 = b.nodes.filter(n => !n.principal && ['secret', 'case', 'campaign'].includes(n.kind)),
+    ring2 = b.nodes.filter(n => !n.principal && ['indicator', 'recipient'].includes(n.kind));
+  const pos = {};
+  center.forEach((n, i) => { pos[n.id] = [cx + (center.length > 1 ? (i - (center.length - 1) / 2) * 110 : 0), cy]; });
+  const place = (arr, r) => arr.forEach((n, i) => { const a = (i / Math.max(arr.length, 1)) * 2 * Math.PI - Math.PI / 2 + (r > 150 ? 0.25 : 0);
+    pos[n.id] = [cx + r * 1.35 * Math.cos(a), cy + r * Math.sin(a)]; });
+  place(ring1, 105); place(ring2, 178);
+  const short = s => { s = String(s || ''); return s.length > 24 ? s.slice(0, 22) + '…' : s; };
+  let g = '';
+  b.edges.forEach(e => { const a = pos[e.from], c = pos[e.to]; if (a && c) g += `<line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}"/>`; });
+  // campaign hub links principals to recipients
+  if (pos.campaign) center.filter(n => n.kind === 'identity').forEach(n => { const a = pos[n.id], c = pos.campaign; g += `<line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}"/>`; });
+  b.nodes.forEach(n => {
+    const p = pos[n.id]; if (!p) return;
+    const r = n.principal ? 13 : n.kind === 'recipient' ? 6 : 8;
+    const fill = n.kind === 'recipient' && !n.interacted ? 'var(--surface)' : (NODE[n.kind] || 'var(--c-other)');
+    g += `<g><title>${esc(n.kind)}: ${esc(n.label)}${n.interacted ? ' (interacted)' : ''}</title><circle cx="${p[0]}" cy="${p[1]}" r="${r}" style="fill:${fill};stroke:${NODE[n.kind] || 'var(--c-other)'};stroke-width:2"/>
+      <text x="${p[0]}" y="${p[1] + r + 12}" text-anchor="middle" style="${n.principal ? 'font-weight:650;fill:var(--text)' : ''}">${esc(short(n.label))}</text></g>`;
+  });
+  return `<svg class="graph" viewBox="0 0 ${W} ${H}" role="img" aria-label="blast radius">${g}</svg>
+    <div class="legend">${[['identity', 'User'], ['asset', 'Host'], ['secret', 'Privileged secret'], ['indicator', 'Indicator'], ['recipient', 'Recipient (filled = interacted)'], ['case', 'Related case']]
+      .map(([k, l]) => `<span><i style="background:${NODE[k]}"></i>${l}</span>`).join('')}</div>`;
+}
+
+async function Story(id) {
+  const __g = GEN;
+  const [st, llmSt] = await Promise.all([api('/api/v1/cases/' + encodeURIComponent(id) + '/story'), api('/api/v1/llm/status')]);
+  const a = st.assessment, b = st.blast_radius.stats;
+  const evById = Object.fromEntries(st.events.map(e => [e.ref, e]));
+  const refs = rs => rs.map(r => { const e = evById[r]; return `<abbr class="cite" title="${esc(e ? `${e.tool} · ${e.ts || 'time not reported'} · ${e.title}` : r)}">${esc(r)}</abbr>`; }).join('');
+  const kc = st.kill_chain.map(k => `<div class="stg ${esc(k.state)}" title="${esc(k.name)}: ${esc(cap(k.state))}"><b>${esc(k.name)}</b>${
+    {observed: 'Observed', blocked: 'Blocked', no_evidence: 'Checked - none', blind_spot: 'Blind spot', before_scope: '-'}[k.state] || esc(k.state)}</div>`).join('');
+  const steps = st.steps.map(s => `<div class="stp ${s.outcome === 'blocked' ? 'blocked' : ''}">
+      <div class="when">${s.start ? esc(dt(s.start)) : 'time not reported by the tool'} · step ${s.n}</div>
+      <div class="ttl">${esc(s.stage_name)}: ${esc(s.title)}</div>
+      ${s.narrative !== s.title ? `<div class="small" style="color:var(--text-2)">${esc(s.narrative)}</div>` : ''}
+      <div class="meta">${s.outcome === 'blocked' ? chip('blocked', 'ok plain') : chip('succeeded', 'critical plain')}
+        ${s.techniques.map(t => `<span class="tag" title="${esc(t.name)}">${esc(t.id)}</span>`).join('')}
+        ${s.tools.map(t => `<span class="tag">${esc(t)}</span>`).join('')}
+        <span class="small muted">confidence ${esc(s.confidence)} (${esc(s.confidence_reason)})</span> ${refs(s.evidence)}</div></div>`).join('');
+  const hyps = st.hypotheses.map(h => `<div class="hyp"><div class="inline" style="justify-content:space-between"><span class="strong small">${esc(h.hypothesis)}</span>
+      ${status(HCLS[h.status] || 'info', HLBL[h.status] || h.status)}</div><div class="small" style="color:var(--text-2);margin-top:3px">${esc(h.reasoning)} ${refs(h.evidence)}</div></div>`).join('');
+  const gaps = st.gaps.map(g => `<div class="list-row small">${status(g.status === 'blind_spot' ? 'critical' : 'info', g.status === 'blind_spot' ? 'Blind spot' : 'No evidence')}<span class="grow">${esc(g.text)}</span></div>`).join('');
+  const plan = st.response_plan.map(ph => `<div class="small strong" style="margin:12px 0 2px">${esc(ph.label)}</div>` + ph.actions.map(x => `
+      <div class="plan-item">${x.approvable && can('approve_action') ? `<input type="checkbox" class="plan-cb" value="${esc(x.id)}" ${ph.phase === 'contain' || ph.phase === 'preserve' ? 'checked' : ''} aria-label="select">` : `<span style="width:13px"></span>`}
+        <div class="grow"><div class="mono small strong">${esc(x.action_type)}</div><div class="small" style="color:var(--text-2)">${esc(x.rationale)}</div>
+        <div class="t-sub">${esc(x.targets.join(', '))}${(x.duplicate_ids || []).length ? ` · ×${x.duplicate_ids.length + 1} (one per related case, approved together)` : ''}${x.four_eyes ? ' · four-eyes: needs a second approver' : ''}</div></div>
+        ${status(x.status === 'executed' ? 'ok' : x.approvable ? 'medium' : 'info', cap(x.status))}</div>`).join('')).join('');
+  const da = st.deep_analysis;
+  const deepPanel = !llmSt.configured
+    ? `<div class="callout info"><span>No LLM is configured, so the deep analysis is unavailable. The story above is complete and deterministic: every step, gap and explanation is computed from stored records. To enable a deep analysis, set an approved endpoint (<code>SOC_LLM_PROVIDER</code>); internal identities are pseudonymised before any call.</span></div>`
+    : `<div id="deep">${da ? deepHtml(da, evById) : `<p class="small muted" style="margin-top:0">A principal-responder review of this story by <b>${esc(llmSt.provider)}</b>. Only the evidence above is sent (internal identities pseudonymised); every statement must cite it or it is removed.</p>`}</div>
+       ${can('investigate') ? `<div class="inline mt">${btn(da ? 'Re-run deep analysis' : 'Run deep analysis', 'runDeep', [id, !!da], 'primary', 'intel')}</div>` : ''}`;
+  setMainG(__g, `<div class="page-head"><div>
+      <div class="inline" style="margin-bottom:8px"><a href="#/cases/${encodeURIComponent(id)}" class="small">${icon('back')}</a><span class="verdict ${esc(a.verdict)}">${esc(a.label)}</span>
+        <span class="small muted">${esc(a.confidence)} confidence · ${esc(a.reason)}</span></div>
+      <h1>Attack story</h1><p>${esc(st.title)} · reconstructed from ${st.generated_from.length} case(s), ${st.tools.length} tools${st.span_minutes != null ? ` · ${st.span_minutes} min from first to last step` : ''}</p></div></div>
+    ${card(null, `<div class="prose" style="font-size:14px">${esc(st.summary)}</div>`)}
+    <div class="grid g-kpi mt">${kpi('Kill-chain stages', st.stages_observed.length, 'observed')}${kpi('Steps', st.steps.length, `${st.steps.filter(s => s.outcome === 'blocked').length} blocked`)}
+      ${kpi('Users reached', b.users_received ? `${b.users_interacted} / ${b.users_received}` : '0', 'interacted / received')}${kpi('Hosts', b.hosts)}
+      ${kpi('Privileged secrets', b.privileged_secrets, esc(st.blast_radius.secrets.join(', ')), b.privileged_secrets > 0)}${kpi('Gaps checked', st.gaps.length, `${st.gaps.filter(g => g.status === 'blind_spot').length} blind spot(s)`)}</div>
+    <div class="mt">${card('Kill chain', `<div class="chain">${kc}</div>`, {sub: 'MITRE ATT&CK tactics - observed, blocked, checked without evidence, or blind'})}</div>
+    <div class="grid g-2 mt">
+      <div class="stack">
+        ${card('What happened', st.steps.length ? `<div class="steps">${steps}</div>` : empty('No attack step found in any connected tool.'), {sub: 'every step cites the events it rests on - hover a reference'})}
+        ${card('Response plan', plan ? plan + (can('approve_action') ? `<div class="inline mt">${btn('Approve selected', 'approveBundle', [id], 'primary')}<span class="small muted">Each action still passes policy and four-eyes checks.</span></div>` : '') : empty('No actions for this story'), {sub: 'phased: contain, preserve, eradicate, recover, communicate'})}
+      </div>
+      <div class="stack">
+        ${card('Blast radius', blastGraph(st.blast_radius))}
+        ${card('Benign explanations tested', hyps || empty('None applicable'), {sub: 'what else could explain this'})}
+        ${card('Gaps', gaps || empty('Every stage after the first step has evidence'), {sub: 'what we looked for and did not find'})}
+        ${st.exposure.length ? card('Exposure on affected assets', st.exposure.slice(0, 6).map(x => `<div class="list-row small">${chip(x.severity || 'info')}<span class="grow">${esc(x.title)}</span><span class="tag">${esc(x.tool)}</span></div>`).join('')) : ''}
+      </div>
+    </div>
+    <div class="mt">${card('Deep analysis', deepPanel, {sub: 'optional LLM review, bound to the evidence above'})}</div>`);
+}
+
+function deepHtml(d, evById) {
+  if (!d.ok) return `<div class="callout">${esc(d.reason || 'Deep analysis unavailable')}</div>`;
+  const cite = ids => (ids || []).map(r => `<abbr class="cite" title="${esc(evById[r] ? evById[r].title : r)}">${esc(r)}</abbr>`).join('');
+  return `${d.disagreement ? `<div class="callout danger">${esc(d.disagreement)}</div>` : ''}
+    <div class="inline" style="margin-bottom:8px">${chip(d.confidence === 'high' ? 'critical' : d.confidence === 'medium' ? 'medium' : 'info', 'plain')}<span class="small">model confidence <b>${esc(d.confidence)}</b> · ${esc(d.provider)} ${esc(d.model || '')} · ${esc(dt(d.generated_at))}${d.cached ? ' · cached' : ''}</span>
+      ${d.dropped_statements ? `<span class="small" style="color:var(--high)">${d.dropped_statements} unsupported statement(s) removed</span>` : '<span class="small muted">every statement cited</span>'}</div>
+    <div class="prose">${esc(d.assessment)}</div>
+    ${d.attacker_objective ? `<p class="small"><b>Likely objective:</b> ${esc(d.attacker_objective.text)} ${cite(d.attacker_objective.evidence_ids)}</p>` : ''}
+    <div class="grid g-2e mt">
+      <div><div class="small strong">Key findings</div>${d.key_findings.map(f => `<div class="${f.kind === 'fact' ? 'fact' : 'inf'} small">${esc(f.text)} ${cite(f.evidence_ids)}</div>`).join('') || empty('None')}</div>
+      <div><div class="small strong">Alternative explanations</div>${d.alternative_explanations.map(h => `<div class="hyp small"><b>${esc(h.hypothesis)}</b> ${status(HCLS[h.status] || 'info', HLBL[h.status] || h.status)}<div style="color:var(--text-2)">${esc(h.reasoning)} ${cite(h.evidence_ids)}</div></div>`).join('') || empty('None')}</div>
+    </div>
+    <div class="grid g-2e mt">
+      <div><div class="small strong">Priorities</div>${d.priorities.map((p, i) => `<div class="list-row small"><span class="score">${i + 1}</span><div class="grow">${esc(p.text)} <span class="tag">${esc(p.action_ref)}</span><div class="t-sub">${esc(p.why)} ${cite(p.evidence_ids)}</div></div></div>`).join('') || empty('None')}</div>
+      <div><div class="small strong">Open questions</div>${d.open_questions.map(q => `<div class="list-row small"><div class="grow">${esc(q.question)}<div class="t-sub">${esc(q.why)} ${cite(q.evidence_ids)}</div></div></div>`).join('') || empty('None')}</div>
+    </div>`;
+}
+async function runDeep(id, force) {
+  const el = $('#deep'); if (el) el.innerHTML = '<div class="inline muted"><span class="spin"></span> Analysing the evidence…</div>';
+  const r = await post(`/api/v1/cases/${id}/deep-analysis`, {force});
+  if (r.available === false) { toast(r.reason, true); return; }
+  toast(r.ok ? 'Deep analysis complete' : r.reason, !r.ok);
+  Story(id);
+}
+async function approveBundle(id) {
+  const ids = [...document.querySelectorAll('.plan-cb:checked')].map(x => x.value);
+  if (!ids.length) { toast('Select at least one action', true); return; }
+  const r = await post(`/api/v1/cases/${id}/story/approve`, {action_ids: ids});
+  const failed = r.results.filter(x => !x.ok);
+  toast(`${r.approved} approved${failed.length ? ` · ${failed.length} not approved: ${failed[0].error}` : ''}`, failed.length > 0);
+  refreshStatus(); Story(id);
+}
+
 // ================================================================= registry
-window.VIEWS = {overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
+window.VIEWS = {story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
-Object.assign(ALLOWED, {approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});

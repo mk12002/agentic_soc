@@ -15,8 +15,13 @@ plus 12 sample emails. Nothing in the screenshots is mocked; every number is com
 4. [Vulnerability module](#4-vulnerability-management-module)
 5. [Intelligence layer](#5-intelligence-layer)
 6. [Connectors](#6-connectors)
-7. [Operations, reporting and compliance](#7-operations-reporting-and-compliance)
-8. [How it was verified](#8-how-it-was-verified)
+7. [Operations, reporting and compliance](#7-operations-reporting-and-compliance) - incl. the AI report builder
+8. [Works on any organisation](#8-works-on-any-organisation-not-just-the-sample-data)
+9. [How it was verified](#9-how-it-was-verified)
+
+Headline features: **[Attack story](#51-attack-story)** (the whole attack across every tool, on one page),
+**[deep analysis](#52-deep-analysis-optional-llm)** (an evidence-bound LLM review) and the
+**[report builder](#71-ai-report-builder)** (standard reports preconfigured, any other report described in words).
 
 ---
 
@@ -239,6 +244,46 @@ legitimate vendor, internal and marketing mail).
 
 ![](screenshots/22-dark-coverage.png)
 
+### 5.1 Attack story
+
+Opened from any case ("Attack story" button). One page answers *what happened, how far did it get, what else
+could explain it, what did we not see, and what do we do now*, across every connected tool:
+
+* **Kill chain** - each MITRE ATT&CK tactic marked *observed*, *blocked*, *checked, no evidence* or *blind*
+  (no connected tool can see it).
+* **What happened** - a timeline of steps built only from stored records (email delivery, click, DNS, process,
+  sign-in, lateral movement, secret access, persistence, mailbox rules). Each step shows its technique, the tools
+  that saw it, the outcome (succeeded / blocked) and a confidence with its reason; every step cites the records
+  (S#) it rests on.
+* **Benign explanations tested** - "user travelling / VPN", "legitimate admin script", "authorised scanner",
+  "normal duties" and others are accepted, rejected or marked unlikely, each with its evidence.
+* **Gaps** - stages where nothing was found, naming the tools that were checked.
+* **Blast radius** - users who received / interacted, hosts, privileged secrets, related cases, as a graph.
+* **Response plan** - pending actions grouped into contain → preserve → eradicate → recover → communicate;
+  select and approve in one step. Each action still goes through policy and four-eyes checks.
+* The same attack gives the same story from any related case (phishing case, incident case, entity page), and the
+  analyst assistant uses it for "what happened to …" questions.
+
+| Attack story | Dark theme |
+|---|---|
+| ![](screenshots/24-attack-story.png) | ![](screenshots/27-dark-attack-story.png) |
+
+### 5.2 Deep analysis (optional LLM)
+
+With an approved LLM endpoint, *Run deep analysis* sends the story's evidence (internal identities pseudonymised)
+for a principal-responder review: assessment, likely objective, key findings, alternative explanations, open
+questions and priorities. Guardrails: every statement must cite evidence ids from the story or it is removed (the
+count is shown); priorities may only reference real pending actions or be marked *manual*; the model's confidence
+is compared with the deterministic assessment and disagreement is flagged; results are cached per evidence
+fingerprint, logged, and subject to the token budget. Without an LLM the page says so and the story is complete.
+
+![](screenshots/28-deep-analysis-stub-llm.png)
+
+*This screenshot was produced with a local stub model (its name, "stub-model (not a real LLM)", is shown on the
+card) because no approved LLM key was available. It exercises the real provider → gateway → guardrail → UI path;
+the stub deliberately cites one non-existent record, which the guardrail removed ("1 unsupported statement(s)
+removed").*
+
 ---
 
 ## 6. Connectors
@@ -262,7 +307,8 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
   alert; database lease so replicas never double-run; replay from the console.
 * **Observability** - connector freshness and reconciliation, job health, enrichment latency, drift,
   Prometheus `/metrics` (scraped with an auditor service-account key).
-* **Reports** - daily exposure, weekly VM, management deck, investigation records; CCI templates plug in.
+* **Reports** - the [report builder](#71-ai-report-builder) plus fixed exports (daily exposure, weekly VM,
+  management deck, investigation records); CCI templates plug in.
 * **Compliance evidence pack (U17)** - control tests with pass/fail (audit-chain integrity, four-eyes approvals,
   policy change control, MFA and access controls, LLM governance, encryption and retention, kill switch,
   integration freshness) + evidence JSON + full chained audit export + summary document, as one ZIP.
@@ -271,15 +317,46 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
 |---|---|
 | ![](screenshots/19-compliance-pack.png) | ![](screenshots/16-reports.png) |
 
+### 7.1 AI report builder
+
+* **Standard reports, preconfigured** - board monthly (PowerPoint), CISO weekly, vulnerability weekly, phishing
+  and awareness monthly, post-incident report (per case), quarterly control assurance, SOC daily situation report.
+* **Any other report, described in words** - e.g. *"a one-page board brief on phishing and supplier risk this
+  quarter, as slides"*. A planner (the LLM when configured, keyword rules otherwise) turns the request into sections,
+  audience, format and period, using **only** the 16 sources in the data catalogue. You review the plan, then
+  generate it, and can save it as a reusable template.
+* **Figures are always computed in code** from the platform's records. The LLM writes each section's narrative
+  from that section's figures (F#); a sentence that does not cite a figure, or cites one that does not exist, is
+  removed. Without an LLM a deterministic writer is used and the figures are identical.
+* Every report is limited to the reader's data scope (a vulnerability-only analyst gets only vulnerability
+  sections; counts are scoped), audited, and **encrypted at rest**; downloads decrypt and re-check scope.
+
+| Plan from a request | Generated report |
+|---|---|
+| ![](screenshots/25-report-plan.png) | ![](screenshots/26-report-generated.png) |
+
 ---
 
-## 8. How it was verified
+## 8. Works on any organisation, not just the sample data
+
+`scripts/rename_estate.py` rewrites the whole sample estate into a different organisation ("Northwind Labs":
+another domain, people, hosts, IP plan, phishing infrastructure, privileged secrets and suppliers), including
+emails embedded as base64 attachments. The generalisation test runs every workflow on both estates - vulnerability
+consolidation, cloud posture, incident clustering and investigation, phishing verdicts on the corpus, correlation,
+attack story, supplier risk, shadow IT, ATT&CK coverage, the analyst assistant and **all seven standard reports** -
+and requires structurally identical results, and **no original name** in any output about the new organisation.
+The same script can produce a client-branded demo estate (`SOC_FIXTURES_DIR=<out>/fixtures`).
+
+---
+
+## 9. How it was verified
 
 | Check | Result |
 |---|---|
 | Platform test suite (unit, integration, API, security, scale, client-demo walkthrough) | see [TEST_REPORT.md](TEST_REPORT.md) |
 | Phishing ML engine test suite | 162 passed |
-| Browser tour (this document): real server, Chrome, every screen, light + dark, 3 roles | 24 screens, **0 browser errors, 0 server errors, 0 horizontal overflow** |
+| Browser tour (this document): real server, Chrome, every screen, light + dark, 4 roles | 28 screenshots + 57 screens audited at 1280 / 1024 px: **0 browser errors, 0 server errors, 0 clipped / off-screen / overflowing elements** |
+| Feature-by-feature verification (each feature mapped to the tests that prove it) | [FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md) |
 | Identity / asset resolution stress tests | 0 false merges |
 | Labelled phishing corpus | 100 % detection, 0 % false positives |
 | Static security analysis / dependency audit | bandit 0 high / 0 medium; pip-audit clean |

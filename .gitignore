@@ -42,3 +42,4 @@ test_reports/private/
 .idea/
 .DS_Store
 Thumbs.db
+node_modules/

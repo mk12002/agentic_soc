@@ -150,9 +150,14 @@ def test_full_client_demo(client, tmp_path):
 
     # 8. reports: every kind generates and downloads as a valid file
     for kind in ("daily_exposure", "weekly_vm", "weekly_mgmt"):
-        rid = ok(client.post(f"/api/v1/reports/{kind}", headers=an)).json()["id"]
+        made = ok(client.post(f"/api/v1/reports/{kind}", headers=an)).json()
+        rid = made["id"]
         body = ok(client.get(f"/api/v1/reports/{rid}/download", headers=an)).content
         assert body[:2] == b"PK" and len(body) > 5000, kind   # docx / pptx are zip containers
+        assert Path(made["path"]).read_bytes().startswith(b"SOCENC1:"), kind            # but encrypted at rest
+    built = ok(client.post("/api/v1/reports/build", headers=lead, json={"template_id": "ciso_weekly"})).json()
+    assert len(built["sections"]) == 6
+    assert ok(client.get(f"/api/v1/reports/{built['id']}/download", headers=lead)).content[:2] == b"PK"
     case_id = next(c["id"] for c in cases if c["domain"] == "incident")
     assert ok(client.get(f"/api/v1/cases/{case_id}/report", headers=an)).content[:2] == b"PK"
     assert client.post("/api/v1/reports/compliance", headers=an).status_code == 403   # auditors only

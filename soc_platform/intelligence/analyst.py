@@ -61,6 +61,8 @@ class IntelligenceAnalyst:
             ToolSpec("vulnerability_query", "question", "Vulnerability findings in natural language.", self._vm_query),
             ToolSpec("affected_devices", "cve", "Assets affected by a CVE with owners.", self._affected),
             ToolSpec("pending_approvals", "", "Actions waiting for analyst approval.", self._pending),
+            ToolSpec("attack_story", "case_id", "Reconstructed cross-tool attack chain, gaps, reach and plan for a case.",
+                     self._attack_story),
             ToolSpec("entity_context", "entity_id", "Cases, correlated findings and pending actions for a user/host.",
                      self._entity_context),
         ]}
@@ -137,6 +139,17 @@ class IntelligenceAnalyst:
         return {"cve": r["cve"], "affected": r["affected"], "intel": r["intel"],
                 "assets": [{k: a[k] for k in ("asset", "platform_team", "priority", "status", "internet_exposed")}
                            for a in r["assets"]]}
+
+    def _attack_story(self, case_id: str = "") -> Any:
+        from soc_platform.intelligence.story import story_for_case
+
+        try:
+            st = story_for_case(self.s, case_id)
+        except KeyError:
+            return {"not_found": case_id}
+        return {"case_id": case_id, "summary": st["summary"], "assessment": st["assessment"],
+                "steps": [f"{(x['start'] or 'time n/a')[:16]} {x['stage_name']}: {x['title'][:120]} ({x['outcome']})" for x in st["steps"]],
+                "gaps": [g["text"] for g in st["gaps"]]}
 
     def _entity_context(self, entity_id: str = "") -> Any:
         """Cases, correlated findings and pending actions that involve one user/host."""
@@ -240,6 +253,14 @@ class IntelligenceAnalyst:
     def ask(self, question: str) -> dict[str, Any]:
         calls, planner = self._plan(question)
         results = self._execute(calls)
+        if re.search(r"what happened|story|timeline|how did|attack chain|kill chain|walk me through", question, re.I):
+            sev = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+            cases = [c for r in results if r["tool"] == "entity_context" and isinstance(r["result"], dict)
+                     for c in r["result"].get("cases", []) if c.get("status") != "closed"]
+            if cases and not any(r["tool"] == "attack_story" for r in results):
+                top = max(cases, key=lambda c: sev.get(c.get("severity"), 0))
+                results.append({"tool": "attack_story", "args": {"case_id": top["case_id"]},
+                                "result": self._attack_story(top["case_id"])})
         evidence = self._to_evidence(results)
         if self.llm is not None:
             answer = self.llm.grounded("intelligence.answer", question, evidence)
@@ -325,6 +346,8 @@ def _facts_summary(results: list[dict[str, Any]]) -> str:
             if c.get("pending_actions"):
                 parts.append(f"{len(c['pending_actions'])} containment action(s) for this entity are waiting for approval ("
                              + ", ".join(a["action"] for a in c["pending_actions"][:3]) + ")")
+        elif r["tool"] == "attack_story" and isinstance(res, dict) and res.get("summary"):
+            parts.insert(0, res["summary"].rstrip("."))
         elif r["tool"] == "find_entity" and isinstance(res, dict) and res.get("not_found"):
             parts.append(f"no record found for {res['not_found']}")
         elif r["tool"] == "affected_devices" and isinstance(res, dict) and "affected" in res:
@@ -357,7 +380,8 @@ def _readable_claims(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     def add(text: str, r: dict[str, Any], kind: str = "fact") -> None:
         claims.append({"text": text, "kind": kind, "evidence_ids": [_ref(results, r)]})
 
-    for r in results:
+    # the reconstructed attack chain is the most important evidence when present: list it first
+    for r in sorted(results, key=lambda x: x["tool"] != "attack_story"):
         res = r["result"]
         if isinstance(res, dict) and res.get("error"):
             add(f"{r['tool']} could not run: {res['error']}", r, "inference")
@@ -375,6 +399,11 @@ def _readable_claims(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 add(f"Correlated finding ({i['severity']}): {i['title']}", r)
             for a in res.get("pending_actions", [])[:3]:
                 add(f"Awaiting approval: {a['action']} - {a['rationale']}", r)
+        elif r["tool"] == "attack_story" and isinstance(res, dict) and res.get("steps"):
+            for stp in res["steps"][:10]:
+                add(stp, r)
+            for g in res.get("gaps", [])[:3]:
+                add(g, r, "inference")
         elif r["tool"] == "affected_devices" and isinstance(res, dict):
             for a in res.get("assets", [])[:8]:
                 add(f"{a['asset']}: priority {a['priority']}, owner {a.get('platform_team') or 'unknown'}, "

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -307,6 +307,19 @@ def _services(s: Session):
             "phishing": PhishingService(s, reg, policy=pol, llm=gw, actions=acts, org_domains=org,
                                         use_engine=__import__("os").environ.get("SOC_PHISHING_ENGINE", "0") == "1",
                                         raw_dir=Path(st.raw_payload_dir) / "phishing")}
+
+
+def _protected_file(path: str):
+    """Serve a generated file, decrypting it if it is encrypted at rest."""
+    import mimetypes
+
+    from fastapi.responses import Response as RawResponse
+
+    from soc_platform.core.crypto import read_protected
+
+    name = Path(path).name
+    return RawResponse(read_protected(path), media_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                       headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 def _err(exc: Exception) -> HTTPException:
@@ -802,7 +815,79 @@ def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = 
     from soc_platform.reporting.reports import ReportService
 
     run = ReportService(s, get_settings().report_output_dir, llm=llm(s)).investigation_report(CaseService(s).view(cid), by=p.id)
-    return FileResponse(run.path, filename=Path(run.path).name)
+    return _protected_file(run.path)
+
+
+class BundleBody(BaseModel):
+    action_ids: list[str] = Field(min_length=1, max_length=50)
+    note: str = ""
+
+
+@app.get("/api/v1/cases/{cid}/story")
+def case_story(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    """Attack Story: cross-tool attack chain, gaps, benign explanations, blast radius, response plan."""
+    from soc_platform.intelligence.story import story_for_case
+
+    _case_in_scope(s, p, cid)
+    story = story_for_case(s, cid, registry())
+    if "*" not in p.domains:  # related cases from other domains are summarised, not exposed
+        story["generated_from"] = [c for c in story["generated_from"] if p.in_domain((s.get(Case, c) or Case()).domain)]
+    story["deep_analysis"] = ((s.get(Case, cid).assessment or {}).get("deep_analysis"))
+    return story
+
+
+@app.post("/api/v1/cases/{cid}/story/approve")
+def story_approve(cid: str, body: BundleBody, p: Principal = Depends(need(Perm.APPROVE_ACTION)), s: Session = Depends(db_session)):
+    """Approve several response-plan actions at once. Each goes through the normal policy / four-eyes checks."""
+    from soc_platform.intelligence.story import story_for_case
+
+    _case_in_scope(s, p, cid)
+    rows = {a["id"]: a for ph in story_for_case(s, cid, registry())["response_plan"] for a in ph["actions"] if a["approvable"]}
+    svc, out = _action_service(s), []
+    expanded = [x for aid in body.action_ids for x in [aid, *rows.get(aid, {}).get("duplicate_ids", [])]]
+    allowed = set(rows) | {d for r in rows.values() for d in r.get("duplicate_ids", [])}
+    for aid in dict.fromkeys(expanded):
+        if aid not in allowed:
+            out.append({"id": aid, "ok": False, "error": "not a pending action of this story"})
+            continue
+        ar = s.get(ActionRequest, aid)
+        if not p.in_domain(ar.domain if ar.domain in {"phishing", "incident", "vulnerability"} else "*"):
+            out.append({"id": aid, "ok": False, "error": "outside your data scope"})
+            continue
+        try:
+            with s.begin_nested():
+                r = svc.approve(aid, p, note=body.note or "approved from attack story")
+            out.append({"id": aid, "ok": True, "status": r.status})
+        except Exception as exc:  # noqa: BLE001 - reported per action
+            out.append({"id": aid, "ok": False, "error": str(exc)[:200]})
+    AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="story.bundle_approve", subject_type="case",
+                       subject_id=cid, payload={"requested": len(body.action_ids), "approved": sum(1 for x in out if x["ok"])})
+    return {"results": out, "approved": sum(1 for x in out if x["ok"])}
+
+
+class DeepBody(BaseModel):
+    force: bool = False
+
+
+@app.post("/api/v1/cases/{cid}/deep-analysis")
+def deep_analysis(cid: str, body: DeepBody | None = None, p: Principal = Depends(need(Perm.INVESTIGATE)),
+                  s: Session = Depends(db_session)):
+    """Evidence-bound LLM review of the attack story (requires an approved LLM endpoint)."""
+    from soc_platform.intelligence.deep_analysis import run_deep_analysis
+    from soc_platform.intelligence.story import story_for_case
+
+    _case_in_scope(s, p, cid)
+    story = story_for_case(s, cid, registry())
+    return run_deep_analysis(s, story, llm(s), actor=p.id, force=bool(body and body.force),
+                             org_domains=get_settings().org_domains)
+
+
+@app.get("/api/v1/llm/status")
+def llm_status(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    st = get_settings()
+    return {"configured": st.llm_provider != "none", "provider": st.llm_provider,
+            "model_pinned": st.llm_model_version, "redaction": st.llm_redact_pii,
+            "budget": LLMGateway(s, st).budget_status() if st.llm_provider != "none" else None}
 
 
 @app.get("/api/v1/metrics/shadow")
@@ -1110,6 +1195,92 @@ def _report_allowed(p: Principal, kind: str) -> bool:
     return "*" in p.domains if dom == "*" else p.in_domain(dom)
 
 
+class PlanBody(BaseModel):
+    request: str = Field(min_length=3, max_length=1500)
+
+
+class BuildBody(BaseModel):
+    template_id: str | None = None
+    spec: dict[str, Any] | None = None
+    case_id: str | None = None
+
+
+class SaveTemplateBody(BaseModel):
+    spec: dict[str, Any]
+
+
+def _custom_report_allowed(p: Principal, metrics: dict[str, Any]) -> bool:
+    """A generated report may be read only by someone whose data scope covers what it was built from: every
+    domain it contains, and the builder's own scope (scope-dependent sections such as the overview)."""
+    if "*" in p.domains:
+        return True
+    needed = set(metrics.get("domains") or []) | set(metrics.get("scope") or ["*"])
+    return "*" not in needed and needed <= set(p.domains)
+
+
+@app.get("/api/v1/reports/templates")
+def report_templates(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    """Standard and saved report specifications, plus the data-source catalogue they may use."""
+    from soc_platform.reporting.builder import catalogue, list_templates
+
+    return {"templates": list_templates(s), "sources": catalogue()}
+
+
+@app.post("/api/v1/reports/plan")
+def report_plan(body: PlanBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    """Turn a report described in words into a spec (catalogue sources only) for review before generating."""
+    from soc_platform.reporting.builder import plan_report
+
+    spec = plan_report(body.request, llm(s))
+    AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="report.planned", subject_type="report",
+                       subject_id="plan", payload={"planner": spec["planner"], "sections": [x["source"] for x in spec["sections"]]})
+    return spec
+
+
+@app.post("/api/v1/reports/templates")
+def save_report_template(body: SaveTemplateBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    from soc_platform.reporting.builder import validate_spec
+    from soc_platform.reporting.models import ReportTemplate
+
+    try:
+        spec = validate_spec(body.spec)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    t = ReportTemplate(title=spec["title"], spec=spec, created_by=p.id)
+    s.add(t)
+    s.flush()
+    AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="report.template_saved", subject_type="report_template",
+                       subject_id=t.id, payload={"title": t.title, "sections": [x["source"] for x in spec["sections"]]})
+    return {"id": t.id, **spec}
+
+
+@app.post("/api/v1/reports/build")
+def build_custom_report(body: BuildBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    """Generate a standard, saved or ad-hoc report: figures computed in code, narrative grounded on them."""
+    from soc_platform.reporting.builder import build_report, get_template, validate_spec
+
+    if body.template_id:
+        spec = get_template(s, body.template_id)
+        if spec is None:
+            raise HTTPException(404, "unknown report template")
+    elif body.spec:
+        spec = body.spec
+    else:
+        raise HTTPException(422, "template_id or spec is required")
+    try:
+        spec = {**validate_spec(spec), "id": spec.get("id"), "planner": spec.get("planner")}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if spec["needs_case"]:
+        if not body.case_id:
+            raise HTTPException(422, "this report is about one case: case_id is required")
+        _case_in_scope(s, p, body.case_id)
+    denied = frozenset() if p.can(Perm.EXPORT_EVIDENCE) else frozenset({"compliance"})
+    r = build_report(s, registry(), spec, get_settings().report_output_dir, llm=llm(s), by=p.id,
+                     domains=frozenset(p.domains), case_id=body.case_id, denied_sources=denied)
+    return r
+
+
 @app.post("/api/v1/reports/{kind}")
 def make_report(kind: str, period_days: int = Query(90, ge=1, le=730), p: Principal = Depends(need(Perm.READ)),
                 s: Session = Depends(db_session)):
@@ -1150,12 +1321,17 @@ def download_report(rid: str, p: Principal = Depends(need(Perm.READ)), s: Sessio
         raise HTTPException(404, "unknown report")
     if run.kind == "investigation":
         _case_in_scope(s, p, (run.metrics or {}).get("case_id"))
+    elif run.kind.startswith("custom:"):
+        if (run.metrics or {}).get("case_id"):
+            _case_in_scope(s, p, run.metrics["case_id"])
+        if not _custom_report_allowed(p, run.metrics or {}):
+            raise HTTPException(404, "unknown report")
     elif not _report_allowed(p, run.kind):
         raise HTTPException(404, "unknown report")
     root = Path(get_settings().report_output_dir).resolve()
     if root not in Path(run.path).resolve().parents:
         raise HTTPException(404, "unknown report")
-    return FileResponse(run.path, filename=Path(run.path).name)
+    return _protected_file(run.path)
 
 
 # ----------------------------------------------------------------------------- dashboards

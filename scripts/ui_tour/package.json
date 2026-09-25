@@ -1,0 +1,7 @@
+{
+  "name": "soc-ui-tour",
+  "private": true,
+  "description": "Browser tour and layout audit for the Agentic SOC console",
+  "scripts": {"tour": "node tour.js"},
+  "dependencies": {"playwright-core": "1.47.2"}
+}
