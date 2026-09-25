@@ -357,3 +357,4 @@ svg.graph line { stroke: var(--border-strong); stroke-width: 1; }
 .rep-sec h3 { font-size: 14px; margin: 0 0 6px; }
 .rep-sec p { margin: 0 0 8px; line-height: 1.55; overflow-wrap: anywhere; }
 .rep-sec dl.kv dt { overflow-wrap: anywhere; }
+.mb { margin-bottom: 16px; }

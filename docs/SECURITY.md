@@ -86,6 +86,9 @@ responsibility of the hosting environment.
 | A real phishing email received in a staff mailbox was tracked in the repository (`artifacts/phishing/samples`) | Medium (privacy) | Removed from the tree and kept locally under the git-ignored `test_reports/private/`; it remains in git history until history is rewritten (owner decision) |
 | Pseudonym tokens the model wrote without brackets (``USER_1``) were not restored and reached analysts | Low | Restore matches tokens with or without brackets, as whole words; live test asserts zero placeholders |
 | Service-account key visible in a documentation screenshot (ephemeral test server) | Low | Tour masks the key before capturing |
+| Audit log readable in full by domain-scoped analysts (subjects and payloads of other domains) | Medium | Scoped readers see records about their domains (and their own actions); the full export needs all-domain scope |
+| Access log (request paths naming cases of every domain) readable by domain-scoped analysts | Medium | All-domain scope required |
+| Investigating / validating an unknown incident or campaign answered 500; the incident endpoint accepted a phishing case id | Low | 404 for unknown ids and for cases of another domain; every route fuzzed with bogus ids and malformed bodies in CI |
 | Report overview section computed across all domains for a domain-scoped requester (caught by test before release) | Medium | Overview computed with the requester's scope; download re-checks builder scope |
 | Concurrent first-use DB initialisation race | Low | Locked, publish-after-create |
 | Identity records silently dropping keys owned by another person | Low (data integrity) | Queued as key collisions for analyst review |

@@ -188,6 +188,24 @@ FEATURES: list[tuple[str, str, list[str]]] = [
      ["test_report_builder.py::test_llm_narrative_is_grounded_and_figures_never_come_from_the_model"]),
     ("Reports", "Saved templates, data-scope enforcement on build and download, reports encrypted at rest",
      ["test_report_builder.py::test_report_builder_over_http_scope_and_encryption"]),
+    # ---------------------------------------------------------------- whole-system consistency
+    ("Consistency", "Every figure identical on every surface: dashboards, lists, badges, brief, analyst tools, report facts, generated Word documents",
+     ["test_consistency.py::test_every_figure_agrees_across_every_surface"]),
+    ("Consistency", "Re-running every pipeline and scheduled job changes nothing (no duplicate cases, actions, campaigns or risk)",
+     ["test_consistency.py::test_rerunning_every_pipeline_and_job_changes_nothing", "test_phishing.py::test_reported_message_ingested_with_original_headers"]),
+    ("Consistency", "LLM on or off: identical verdicts, scores, severities, risk, insights, actions and findings; invented figures never shown",
+     ["test_consistency.py::test_llm_on_or_off_gives_identical_figures_verdicts_and_actions",
+      "test_core_context.py::test_grounded_drops_statements_with_figures_not_in_their_evidence",
+      "test_core_context.py::test_figures_hidden_inside_ids_never_make_an_invented_number_look_supported"]),
+    ("Consistency", "Every GET route as 7 roles: no server errors, auth required, no cross-domain leaks, explicit UTC timestamps, unknown ids 4xx",
+     ["test_consistency.py::test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc"]),
+    ("Consistency", "Every write route with bogus ids and malformed bodies never answers 5xx",
+     ["test_consistency.py::test_malformed_input_never_crashes_any_write_route"]),
+    ("Consistency", "Every stored reference resolves (links, evidence, actions, campaigns, insights, citations)",
+     ["test_consistency.py::test_every_stored_reference_resolves"]),
+    ("Consistency", "Platform self-check in product: hourly job + endpoint; catches corruption, raises and resolves a finding",
+     ["test_consistency.py::test_self_check_passes_on_a_consistent_platform_and_catches_corruption",
+      "test_consistency.py::test_self_check_endpoint_is_for_all_domain_auditors"]),
     # ---------------------------------------------------------------- generalisation
     ("Generalisation", "Whole platform on a renamed organisation (other domain, people, hosts, IPs, suppliers): identical results",
      ["test_generalisation.py::test_renamed_estate_gives_structurally_identical_results",
@@ -283,7 +301,8 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
                            capture_output=True, text=True)
         res = json.loads((shots / "tour-result.json").read_text())
         ok = p.returncode == 0 and not res["problems"]
-        detail = (("LLM on - " if with_llm else "") + f"{res['screenshots']} screenshots, layout audited at {', '.join(map(str, res['audited_widths']))} px in light + dark; "
+        detail = (("LLM on - " if with_llm else "") + f"{res['screenshots']} screenshots, layout audited at {', '.join(map(str, res['audited_widths']))} px in light + dark, "
+                  "every KPI / badge / tab count on screen cross-checked against the API; "
                   f"problems: {len(res['problems'])}" + ("" if ok else " - " + "; ".join(res["problems"][:5])))
         return ok, detail
     finally:

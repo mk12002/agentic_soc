@@ -288,6 +288,11 @@ def policy_engine(s: Session) -> PolicyEngine:
     return PolicyEngine(PolicyStore(s).active(), kill_switch=kill_switch_on(s, get_settings()))
 
 
+def _iso(value: datetime | None) -> str | None:
+    """ISO 8601 with an explicit UTC offset (models return aware UTC datetimes)."""
+    return value.isoformat() if value else None
+
+
 def llm(s: Session) -> LLMGateway | None:
     st = get_settings()
     return LLMGateway(s, st) if st.llm_provider != "none" else None
@@ -506,7 +511,8 @@ def logout(p: Principal = Depends(current_user), s: Session = Depends(db_session
 
 @app.get("/api/v1/admin/access-log")
 def admin_access_log(principal_id: str | None = None, status_min: int = 0, limit: int = Query(200, le=2000),
-                     _: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session)):
+                     _: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session)):
+    # request paths name cases and entities of every domain: all-domain readers only
     ACCESS_LOG.flush(2.0)
     q = select(AccessLogRecord).order_by(AccessLogRecord.seq.desc()).limit(limit)
     if principal_id:
@@ -527,8 +533,9 @@ def admin_retention(dry_run: bool = True, p: Principal = Depends(need(Perm.MANAG
 
 
 @app.get("/api/v1/audit/export")
-def audit_export(since_seq: int = 0, p: Principal = Depends(need(Perm.EXPORT_EVIDENCE)), s: Session = Depends(db_session)):
-    """JSON Lines export of the hash-chained audit log for external archiving / SIEM (NFR-04)."""
+def audit_export(since_seq: int = 0, p: Principal = Depends(need(Perm.EXPORT_EVIDENCE, "*")), s: Session = Depends(db_session)):
+    """JSON Lines export of the hash-chained audit log for external archiving / SIEM (NFR-04). The whole chain is
+    needed to verify it, so this requires all-domain scope."""
     from fastapi.responses import PlainTextResponse
 
     from soc_platform.core.retention import export_audit
@@ -612,17 +619,36 @@ def action_catalog(_: Principal = Depends(need(Perm.READ)), s: Session = Depends
 
 
 @app.get("/api/v1/actions")
-def list_actions(status: str | None = None, case_id: str | None = None, p: Principal = Depends(need(Perm.READ)),
-                 s: Session = Depends(db_session)):
+def list_actions(status: str | None = None, case_id: str | None = None, domain: str | None = None,
+                 p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    if case_id:
+        from soc_platform.core.cases import actions_for_case
+
+        _case_in_scope(s, p, case_id)
+        rows = [a for a in actions_for_case(s, case_id) if not status or a.status in status.split(",")]
+        return [_action(a) for a in rows if "*" in p.domains or a.domain in p.domains]
     q = select(ActionRequest).order_by(ActionRequest.created_at.desc()).limit(500)
     if status:
         q = q.where(ActionRequest.status.in_(status.split(",")))
-    if case_id:
-        _case_in_scope(s, p, case_id)
-        q = q.where(ActionRequest.case_id == case_id)
+    if domain:
+        q = q.where(ActionRequest.domain == domain)
     if "*" not in p.domains:
         q = q.where(ActionRequest.domain.in_(sorted(p.domains)))  # "platform" actions are cross-domain
     return [_action(a) for a in s.execute(q).scalars()]
+
+
+@app.get("/api/v1/actions/summary")
+def actions_summary(status: str | None = None, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    """True totals behind the action list (badge and tab counts), scoped like the list."""
+    from sqlalchemy import func
+
+    q = select(ActionRequest.domain, func.count()).group_by(ActionRequest.domain)
+    if status:
+        q = q.where(ActionRequest.status.in_(status.split(",")))
+    if "*" not in p.domains:
+        q = q.where(ActionRequest.domain.in_(sorted(p.domains)))
+    by = {d: n for d, n in s.execute(q).all()}
+    return {"total": sum(by.values()), "by_domain": by, "list_limit": 500}
 
 
 def _action(a: ActionRequest) -> dict[str, Any]:
@@ -683,10 +709,40 @@ def decide_action(aid: str, verb: str, body: Decision, p: Principal = Depends(cu
 
 
 @app.get("/api/v1/audit")
-def audit(subject_id: str | None = None, actor_id: str | None = None, event_type: str | None = None, limit: int = 200,
-          _: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session)):
+def audit(subject_id: str | None = None, actor_id: str | None = None, event_type: str | None = None,
+          limit: int = Query(200, ge=1, le=100_000), p: Principal = Depends(need(Perm.READ_AUDIT)),
+          s: Session = Depends(db_session)):
     log = AuditLog(s)
-    return AuditLog.export(log.query(subject_id=subject_id, actor_id=actor_id, event_type=event_type, limit=limit))
+    if "*" in p.domains:
+        rows = log.query(subject_id=subject_id, actor_id=actor_id, event_type=event_type, limit=limit)
+    else:  # domain-scoped readers see records about their own domains (and their own actions) only
+        rows = [r for r in log.query(subject_id=subject_id, actor_id=actor_id, event_type=event_type, limit=100_000)
+                if r.actor_id == p.id or _audit_domain(s, r.subject_type, r.subject_id) in p.domains][:limit]
+    return [{**rec, "ts_utc": row.ts.isoformat()} for rec, row in zip(AuditLog.export(rows), rows)]
+
+
+_VM_SUBJECTS = {"finding", "campaign", "misconfiguration", "plan", "action_plan", "risk_entry", "vm"}
+
+
+def _audit_domain(s: Session, subject_type: str, subject_id: str) -> str | None:
+    """Domain an audit record is about (None = platform-wide, visible to all-domain readers only)."""
+    if subject_type == "case":
+        c = s.get(Case, subject_id)
+        return c.domain if c else None
+    if subject_type == "action":
+        a = s.get(ActionRequest, subject_id)
+        return a.domain if a and a.domain in {"phishing", "incident", "vulnerability"} else None
+    if subject_type == "submission":
+        return "phishing"
+    return "vulnerability" if subject_type in _VM_SUBJECTS else None
+
+
+@app.get("/api/v1/admin/self-check")
+def self_check(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session)):
+    """The platform proves its own figures agree across every surface and its records are intact (see core.selfcheck)."""
+    from soc_platform.core.selfcheck import run_self_check
+
+    return run_self_check(s)
 
 
 @app.get("/api/v1/audit/verify")
@@ -760,8 +816,25 @@ def list_cases(domain: str | None = None, status: str | None = None, p: Principa
     if status:
         q = q.where(Case.status.in_(status.split(",")))
     return [{"id": c.id, "domain": c.domain, "title": c.title, "status": c.status, "severity": c.severity,
-             "verdict": c.verdict, "confidence": c.confidence, "created_at": c.created_at.isoformat()}
+             "verdict": c.verdict, "confidence": c.confidence, "created_at": _iso(c.created_at)}
             for c in s.execute(q).scalars()]
+
+
+LIST_LIMIT = 500
+
+
+@app.get("/api/v1/cases/summary")
+def cases_summary(status: str | None = None, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    """True totals behind the case list (the list itself returns the 500 most recent)."""
+    from sqlalchemy import func
+
+    q = select(Case.domain, func.count()).group_by(Case.domain)
+    if "*" not in p.domains:
+        q = q.where(Case.domain.in_(sorted(p.domains)))
+    if status:
+        q = q.where(Case.status.in_(status.split(",")))
+    by = {d: n for d, n in s.execute(q).all()}
+    return {"total": sum(by.values()), "by_domain": by, "list_limit": LIST_LIMIT}
 
 
 @app.get("/api/v1/cases/{cid}")
@@ -969,6 +1042,9 @@ def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INV
 
 @app.post("/api/v1/incidents/{cid}/investigate")
 def incident_investigate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")), s: Session = Depends(db_session)):
+    case = s.get(Case, cid)
+    if case is None or case.domain != "incident":
+        raise HTTPException(404, "unknown incident")
     return _services(s)["incident"].investigate(cid)
 
 
@@ -1056,6 +1132,10 @@ def vm_follow(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s
 
 @app.post("/api/v1/vm/campaigns/{cid}/validate")
 def vm_validate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
+    from soc_platform.domains.vulnerability.models import RemediationCampaign
+
+    if s.get(RemediationCampaign, cid) is None:
+        raise HTTPException(404, "unknown campaign")
     return _services(s)["vulnerability"].validate_campaign(cid)
 
 

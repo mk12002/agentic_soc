@@ -130,7 +130,7 @@ Details, threat model and operator responsibilities: [docs/SECURITY.md](docs/SEC
 ## Tests
 
 ```bash
-pytest soc_platform/tests                            # platform: core, connectors, 3 domains, API, security, scale, demo walkthrough
+pytest soc_platform/tests                            # platform: core, connectors, 3 domains, API, security, scale, demo walkthrough, consistency
 pytest soc_platform/domains/phishing/tests/unit      # phishing ML engine (needs requirements/phishing.txt)
 python scripts/eval_phishing.py                      # labelled corpus accuracy
 python scripts/eval_resolution_at_scale.py 400 7     # asset resolution stress test

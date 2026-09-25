@@ -18,7 +18,6 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
-    DateTime,
     Float,
     ForeignKey,
     Integer,
@@ -29,7 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from soc_platform.core.db import Base
+from soc_platform.core.db import Base, UTCDateTime
 
 
 def utcnow() -> datetime:
@@ -54,9 +53,9 @@ class Entity(Base):
     canonical_key: Mapped[str | None] = mapped_column(String(512), index=True, nullable=True)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
-    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    first_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, onupdate=utcnow)
 
 
 class EntityKey(Base):
@@ -82,7 +81,7 @@ class EntityHint(Base):
     kind: Mapped[str] = mapped_column(String(32))
     hint_name: Mapped[str] = mapped_column(String(64))
     hint_value: Mapped[str] = mapped_column(String(512), index=True)
-    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class SourceRecord(Base):
@@ -102,9 +101,9 @@ class SourceRecord(Base):
     deep_link: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     resolution_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolution_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    first_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class Relation(Base):
@@ -117,8 +116,8 @@ class Relation(Base):
     rel_type: Mapped[str] = mapped_column(String(64))
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     source_tool: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    first_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class Evidence(Base):
@@ -135,8 +134,8 @@ class Evidence(Base):
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     deep_link: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     is_inference: Mapped[bool] = mapped_column(Boolean, default=False)
-    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    observed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class Case(Base):
@@ -157,9 +156,9 @@ class Case(Base):
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     autonomy_mode: Mapped[str] = mapped_column(String(16), default="shadow")   # shadow | live
     assignee: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, onupdate=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class CaseEntity(Base):
@@ -180,7 +179,7 @@ class EnrichmentCache(Base):
     key: Mapped[str] = mapped_column(String(256), primary_key=True)
     source: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 # --------------------------------------------------------------------------- entity resolution
@@ -200,7 +199,7 @@ class ResolutionOverride(Base):
     entity_id: Mapped[str] = mapped_column(ForeignKey("entities.id"))
     decided_by: Mapped[str] = mapped_column(String(256))
     reason: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class UnresolvedItem(Base):
@@ -213,7 +212,7 @@ class UnresolvedItem(Base):
     reason: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default="open", index=True)
     resolved_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 # --------------------------------------------------------------------------- decisions & actions
@@ -241,9 +240,9 @@ class ActionRequest(Base):
     decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     reverse_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class PolicyVersion(Base):
@@ -257,8 +256,8 @@ class PolicyVersion(Base):
     approved_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="proposed")  # proposed|active|superseded|rejected
     note: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class Disposition(Base):
@@ -276,7 +275,7 @@ class Disposition(Base):
     analyst: Mapped[str] = mapped_column(String(256))
     reasoning: Mapped[str] = mapped_column(Text, default="")
     detection_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 # --------------------------------------------------------------------------- audit & governance
@@ -288,7 +287,7 @@ class AuditRecord(Base):
     __tablename__ = "audit_log"
 
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    ts: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     actor_type: Mapped[str] = mapped_column(String(16))  # agent | human | system
     actor_id: Mapped[str] = mapped_column(String(256), index=True)
     event_type: Mapped[str] = mapped_column(String(64), index=True)
@@ -315,7 +314,7 @@ class LLMCall(Base):
     __tablename__ = "llm_calls"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    ts: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     workflow: Mapped[str] = mapped_column(String(64), index=True)
     provider: Mapped[str] = mapped_column(String(32))
     model: Mapped[str] = mapped_column(String(128))
@@ -338,8 +337,8 @@ class ConnectorCheckpoint(Base):
     connector: Mapped[str] = mapped_column(String(64), primary_key=True)
     stream: Mapped[str] = mapped_column(String(64), primary_key=True)
     cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_count: Mapped[int] = mapped_column(Integer, default=0)
     ingested_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -360,9 +359,9 @@ class RoleAssignment(Base):
     domains: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["*"])
     granted_by: Mapped[str] = mapped_column(String(256))
     reason: Mapped[str] = mapped_column(Text, default="")
-    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    granted_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
@@ -377,10 +376,10 @@ class ApiKey(Base):
     roles: Mapped[list[str]] = mapped_column(JSON, default=list)
     domains: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["*"])
     created_by: Mapped[str] = mapped_column(String(256))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class TokenRevocation(Base):
@@ -391,10 +390,10 @@ class TokenRevocation(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     token_id: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
     principal_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
-    not_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    not_before: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     revoked_by: Mapped[str] = mapped_column(String(256))
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ts: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class AccessLogRecord(Base):
@@ -403,7 +402,7 @@ class AccessLogRecord(Base):
     __tablename__ = "access_log"
 
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    ts: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     principal_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     auth_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     method: Mapped[str] = mapped_column(String(8))
@@ -432,7 +431,7 @@ class SystemFlag(Base):
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     updated_by: Mapped[str] = mapped_column(String(256))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 
@@ -448,7 +447,7 @@ class JobRun(Base):
     status: Mapped[str] = mapped_column(String(16), index=True)  # ok | error | dead_letter
     attempts: Mapped[int] = mapped_column(Integer, default=1)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

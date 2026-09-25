@@ -3,15 +3,38 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from datetime import datetime, timezone
+from typing import Any, Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import DateTime, create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.types import TypeDecorator
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class UTCDateTime(TypeDecorator):
+    """Timestamps are always timezone-aware UTC in Python, whatever the database keeps.
+
+    SQLite drops the offset, so values read back were naive; serialised naive, a browser reads them as the viewer's
+    local time and the same event shows different times on different screens. Stored as UTC; returned aware.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
+        if isinstance(value, datetime):
+            return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value).astimezone(timezone.utc)
+        return value
+
+    def process_result_value(self, value: Any, dialect: Any) -> Any:
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class Database:

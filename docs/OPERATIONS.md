@@ -46,6 +46,13 @@ Intervals: `SOC_JOB_<NAME>_SECONDS`. Every run is recorded (`GET /api/v1/jobs`, 
 failing 3 runs in a row is marked **dead_letter** and raises a high insight; fix the cause and use
 *Run now* / `POST /api/v1/jobs/{name}/run`. Jobs are idempotent, so replays never duplicate incidents or actions.
 
+## Platform self-check
+
+`self_check` runs hourly (`SOC_JOB_SELF_CHECK_SECONDS`). It recomputes each shared figure through every code path,
+resolves every stored reference, looks for duplicates re-runs must never create, and verifies the audit chain. A
+failure raises a high-severity *Platform self-check* finding (resolved automatically when consistent again). On
+demand: `GET /api/v1/admin/self-check` (auditor / admin, all-domain scope) or the card on the Integrations screen.
+
 ## Monitoring
 
 * `/health` - DB, audit-chain verification, kill switch.

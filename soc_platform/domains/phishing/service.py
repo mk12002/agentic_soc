@@ -128,6 +128,8 @@ class PhishingService:
         for _ in range(100):
             page = mdo.fetch_page("reported_messages", cursor)
             for rep in page.records:
+                if self.s.execute(select(Submission.id).where(Submission.source_ref == f"mdo:{rep['id']}")).first():
+                    continue            # already ingested: don't re-download the message, don't return it again
                 raw, _att = mdo.original_mime(rep["id"])
                 if not raw:
                     continue
@@ -141,8 +143,14 @@ class PhishingService:
 
     # ------------------------------------------------------------------ full pipeline
 
-    def process(self, submission_id: str) -> dict[str, Any]:
+    def process(self, submission_id: str, *, force: bool = False) -> dict[str, Any]:
+        """Analyse a submission into a case. Idempotent: a submission that already has a case returns that case
+        (re-running an ingest or a job never creates a second case for the same report); ``force`` re-analyses."""
         sub = self.s.get(Submission, submission_id)
+        if sub is None:
+            raise KeyError(f"unknown submission {submission_id}")
+        if sub.case_id and not force and self.s.get(Case, sub.case_id) is not None:
+            return self.cases.view(sub.case_id)
         if not sub.raw_path:
             raise ValueError("original message no longer retained (retention policy)")
         raw = read_protected(sub.raw_path)
@@ -362,7 +370,8 @@ class PhishingService:
             sub.status = "escalated" if r.verdict in {"malicious", "suspicious"} or gateway_flagged else "analysed"
             return
         sub.auto_closed = True
-        sub.sampled_for_review = p.sampled(sub.id)
+        # stable key: the same message always gets the same QA decision (reproducible), still a uniform sample
+        sub.sampled_for_review = p.sampled(f"{sub.mime_sha256 or sub.internet_message_id or sub.id}|{sub.reporter or ''}")
         if sub.sampled_for_review:
             sub.status = "auto_closed"
             case.status = "awaiting_qa"

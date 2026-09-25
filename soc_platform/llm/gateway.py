@@ -218,10 +218,21 @@ def _norm(n: str) -> str:
     return str(int(n)) if n.isdigit() else n.rstrip("0").rstrip(".")
 
 
+# timestamps in evidence are split into their parts so a statement may quote the time ("09:05") or the date
+_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?")
+
+
+def _quantities(text: str) -> set[str]:
+    """Standalone quantities in a text - the same notion for statements and evidence, so digits buried in ids and
+    hashes (``9a87b999...``) never make an invented figure look supported."""
+    text = _ISO.sub(lambda m: " " + " ".join(g for g in m.groups() if g) + " ", text)
+    return {_norm(x) for x in _QTY.findall(text)}
+
+
 def unsupported_numbers(text: str, support: str) -> list[str]:
     """Figures a model statement contains that appear nowhere in the evidence it rests on (R02: numbers come from
     code, never from the model). ``support`` is the text of the cited evidence (plus the question)."""
-    have = {_norm(x) for x in re.findall(r"\d+(?:\.\d+)?", support)} | {_norm(x) for x in re.findall(r"\d+", support)}
+    have = _quantities(support)
     return [n for n in (_norm(x) for x in _QTY.findall(text)) if n not in _TRIVIAL and n not in have]
 
 

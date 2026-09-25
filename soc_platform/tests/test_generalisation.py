@@ -94,6 +94,8 @@ def _run(session, reg, corpus: Path, org: str, suppliers_file: Path, names: list
         "shadow": shadow["summary"], "coverage": cov["summary"],
         "ask_uses_story": "attack_story" in [c["tool"] for c in ask["tool_calls"]],
         "reports": [[(x["source"], len(x["facts"])) for x in r["sections"]] for r in reports],
+        "self_check": [c["check"] for c in __import__("soc_platform.core.selfcheck", fromlist=["x"]).run_self_check(session)["checks"]
+                       if not c["ok"]],
     }
     text = json.dumps({"story": st, "insights": [i.title + i.narrative for i in insights], "ask": ask["answer"],
                        "sup": sup, "shadow": shadow, "reports": reports}, default=str).lower()
@@ -144,6 +146,7 @@ def test_every_feature_produced_real_output_on_the_new_organisation(both):
     assert sig["ask_uses_story"] and sig["shadow"]["unsanctioned_services"] >= 3
     assert "supplier_impersonation" in sig["supplier_findings"]
     assert len(sig["reports"]) >= 7 and all(sig["reports"])                               # every standard report builds
+    assert sig["self_check"] == []                                                        # internally consistent too
     assert all(v in {"malicious", "suspicious"} for k, v in sig["verdicts"].items() if k.startswith(("cred", "bec", "supplier_look")))
     st = both["renamed"]["story"]
     assert st["principals"] and any("northwind-labs.io" in p["name"] for p in st["principals"])

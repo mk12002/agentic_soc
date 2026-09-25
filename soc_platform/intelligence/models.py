@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, String, Text
+from sqlalchemy import JSON, Float, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from soc_platform.core.db import Base
+from soc_platform.core.db import Base, UTCDateTime
 from soc_platform.core.models import new_id, utcnow
 
 
@@ -29,6 +29,6 @@ class Insight(Base):
     narrative_source: Mapped[str] = mapped_column(String(32), default="deterministic")
     status: Mapped[str] = mapped_column(String(16), default="new", index=True)  # new|acknowledged|dismissed|resolved
     requirement_refs: Mapped[list[str]] = mapped_column(JSON, default=list)
-    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    first_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     decided_by: Mapped[str | None] = mapped_column(String(256), nullable=True)

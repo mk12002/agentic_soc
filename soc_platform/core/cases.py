@@ -22,6 +22,18 @@ from soc_platform.core.models import ActionRequest, Case, CaseEntity, Dispositio
 from soc_platform.core.policy import PolicyEngine
 
 
+def actions_for_case(session: Session, case_id: str) -> list[ActionRequest]:
+    """A case's actions: its own, plus live actions it shares with another case (one containment approval can
+    cover several cases). Used by the case page and the actions API, so both always list the same actions."""
+    own = list(session.execute(select(ActionRequest).where(ActionRequest.case_id == case_id)
+                               .order_by(ActionRequest.created_at)).scalars())
+    shared = [a for a in session.execute(select(ActionRequest).where(
+        ActionRequest.case_id != case_id, ActionRequest.status.in_(("recommended", "pending_approval", "approved",
+                                                                     "executed")))).scalars()
+              if case_id in (a.result or {}).get("linked_cases", [])]
+    return own + shared
+
+
 @dataclass
 class Recommendation:
     action_type: str
@@ -149,12 +161,7 @@ class CaseService:
             by_dim[ev.dimension].append({"id": ev.id, "ref": ref_of.get(ev.id), "source": ev.source_tool, "summary": ev.summary,
                                          "deep_link": ev.deep_link, "type": "inference" if ev.is_inference else "fact",
                                          "observed_at": ev.observed_at.isoformat() if ev.observed_at else None})
-        actions = list(self.s.execute(select(ActionRequest).where(ActionRequest.case_id == case_id)
-                                      .order_by(ActionRequest.created_at)).scalars())
-        actions += [a for a in self.s.execute(select(ActionRequest).where(
-            ActionRequest.case_id != case_id, ActionRequest.status.in_(("recommended", "pending_approval", "approved",
-                                                                         "executed")))).scalars()
-                    if case_id in (a.result or {}).get("linked_cases", [])]  # shared with another case
+        actions = actions_for_case(self.s, case_id)
         dispositions = self.s.execute(select(Disposition).where(Disposition.subject_id == case_id)).scalars().all()
         timeline = self.store.timeline([x["id"] for x in entities if x["kind"] in {"asset", "identity", "indicator"}])
         summaries = {ev.id: (ev.summary, ev.source_tool, ev.deep_link) for ev in evidence}

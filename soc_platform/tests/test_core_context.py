@@ -217,3 +217,13 @@ def test_grounded_drops_statements_with_figures_not_in_their_evidence(session):
                                                    "Host app01 at 10.2.3.4 hit CVE-2021-44228 on 2026-09-20"]
     assert out["summary"] == "Risk is 100/100 across 6 tools."                      # unsupported sentence removed
     assert out["dropped_unsupported_figures"] == 3
+
+
+def test_figures_hidden_inside_ids_never_make_an_invented_number_look_supported():
+    """Regression (found by the LLM-parity test, intermittently): evidence ids are random hex, so digits inside
+    them used to count as support - "999 affected hosts" passed whenever an id happened to contain 999."""
+    from soc_platform.llm.gateway import unsupported_numbers
+
+    support = "case 9a87b999e57a4e1e; entity b534587e021449f1; sha256 a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8"
+    assert unsupported_numbers("There are 999 affected hosts", support) == ["999"]
+    assert unsupported_numbers("Sign-in at 09:15 on 2026-09-20 from 185.220.101.4", "2026-09-20T09:15:40+00:00 185.220.101.4") == []

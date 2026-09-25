@@ -166,6 +166,51 @@ async function visit(page, hash, name, full = true) {
   await shot(page, '26-report-generated', false);
   await visit(page, 'audit', '17-audit', false);
 
+  // ---------- what the screens show must equal what the API computes (every KPI, badge and tab count)
+  const kpis = async (hash) => { await page.goto(`${BASE}/#/${hash}`); await settle(page);
+    return page.$$eval('.kpi', els => Object.fromEntries(els.map(e => [e.querySelector('.label').textContent.trim(), e.querySelector('.value').textContent.trim()]))); };
+  const same = (where, label, shown, expected) => { if (String(shown) !== String(expected)) problems.push(`screen/API mismatch - ${where} "${label}": screen ${shown}, API ${expected}`); };
+  const ov = await call(lead, 'GET', '/api/v1/dashboard/overview');
+  let k = await kpis('overview');
+  same('overview', 'Open cases', k['Open cases'], ov.cases.open);
+  same('overview', 'Awaiting approval', k['Awaiting approval'], ov.actions.pending_approval);
+  same('overview', 'Open insights', k['Open insights'], ov.insights.open);
+  same('overview', 'Open vulnerabilities', k['Open vulnerabilities'], ov.vulnerability.open_findings);
+  const asum = await call(lead, 'GET', '/api/v1/actions/summary?status=recommended,pending_approval');
+  same('sidebar', 'Approvals badge', (await page.textContent('#nav-approvals')).trim(), asum.total);
+  await page.goto(`${BASE}/#/approvals`); await settle(page);
+  const tabs = await page.$$eval('.seg button', bs => Object.fromEntries(bs.map(b => [b.childNodes[0].textContent.trim().toLowerCase(), b.querySelector('.muted') ? b.querySelector('.muted').textContent.trim() : ''])));
+  same('approvals', 'All tab', tabs.all, asum.total);
+  for (const [d, n] of Object.entries(asum.by_domain)) same('approvals', `${d} tab`, tabs[d], n);
+  same('approvals', 'rows listed', await page.$$eval('table tbody tr', r => r.length), Math.min(asum.total, 500));
+  const csum = await call(lead, 'GET', '/api/v1/cases/summary');
+  await page.goto(`${BASE}/#/cases`); await settle(page);
+  const ctabs = await page.$$eval('.seg button', bs => Object.fromEntries(bs.map(b => [b.childNodes[0].textContent.trim().toLowerCase(), b.querySelector('.muted') ? b.querySelector('.muted').textContent.trim() : ''])));
+  same('cases', 'All tab', ctabs.all, csum.total);
+  for (const d of ['phishing', 'incident', 'vulnerability']) same('cases', `${d} tab`, ctabs[d], csum.by_domain[d] || 0);
+  const pm = await call(lead, 'GET', '/api/v1/phishing/metrics'); k = await kpis('phishing');
+  same('phishing', 'Reported', k['Reported'], pm.reported); same('phishing', 'Auto-closed', k['Auto-closed'], pm.auto_closed);
+  same('phishing', 'Campaigns', k['Campaigns'], pm.campaigns); same('phishing', 'Repeat clickers', k['Repeat clickers'], pm.repeat_clickers.length);
+  const vm = await call(lead, 'GET', '/api/v1/vm/metrics'); k = await kpis('vulnerabilities');
+  same('vulnerabilities', 'Open findings', k['Open findings'], vm.open); same('vulnerabilities', 'CISA KEV', k['CISA KEV'], vm.kev_open);
+  same('vulnerabilities', 'Internet-exposed', k['Internet-exposed'], vm.internet_exposed_open); same('vulnerabilities', 'Past SLA', k['Past SLA'], vm.sla_breached);
+  const mis = (await call(lead, 'GET', '/api/v1/vm/misconfigurations')).metrics; k = await kpis('cloud');
+  same('cloud', 'Open', k['Open'], mis.open); same('cloud', 'Past SLA', k['Past SLA'], mis.overdue); same('cloud', 'False closures', k['False closures'], mis.false_closures);
+  const sh = (await call(lead, 'GET', '/api/v1/dashboard/shadow-it')).summary; k = await kpis('shadow-it');
+  same('shadow IT', 'Unsanctioned services', k['Unsanctioned services'], sh.unsanctioned_services);
+  same('shadow IT', 'Users involved', k['Users involved'], sh.users_on_unsanctioned_services);
+  same('shadow IT', 'Risky sites reached', k['Risky sites reached'], sh.risky_destinations_reached);
+  const cv = (await call(lead, 'GET', '/api/v1/dashboard/attack-coverage')).summary; k = await kpis('coverage');
+  same('coverage', 'Weighted coverage', k['Weighted coverage'], cv.weighted_coverage_pct + '%'); same('coverage', 'Firing', k['Firing'], cv.firing);
+  same('coverage', 'Priority blind spots', k['Priority blind spots'], cv.priority_blind_spots);
+  const story = await call(lead, 'GET', `/api/v1/cases/${phishCase.id}/story`); k = await kpis(`story/${phishCase.id}`);
+  same('attack story', 'Steps', k['Steps'], story.steps.length); same('attack story', 'Hosts', k['Hosts'], story.blast_radius.stats.hosts);
+  same('attack story', 'Users reached', k['Users reached'], `${story.blast_radius.stats.users_interacted} / ${story.blast_radius.stats.users_received}`);
+  const risk = await call(lead, 'GET', `/api/v1/intelligence/entities/${jane.id}/risk`);
+  await page.goto(`${BASE}/#/entity/${jane.id}`); await settle(page);
+  same('entity 360', 'risk score', (await page.$eval('.kpi .value', e => e.childNodes[0].textContent.trim())), risk.score);
+  console.log('screen/API cross-check done');
+
   // ---------- dark mode via the real toggle
   await page.goto(`${BASE}/#/overview`); await settle(page);
   await page.click('#theme-btn'); await page.waitForTimeout(300);

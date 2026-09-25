@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text
+from sqlalchemy import JSON, Boolean, Float, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from soc_platform.core.db import Base
+from soc_platform.core.db import Base, UTCDateTime
 from soc_platform.core.models import new_id, utcnow
 
 
@@ -19,7 +19,7 @@ class Submission(Base):
     source: Mapped[str] = mapped_column(String(64))            # defender_office365 | avanan | upload | shared_mailbox
     source_ref: Mapped[str] = mapped_column(String(512), unique=True)  # report message id / event id (dedupe on replay)
     reporter: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     internet_message_id: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
     subject: Mapped[str] = mapped_column(String(1024), default="")
     sender: Mapped[str | None] = mapped_column(String(512), nullable=True)

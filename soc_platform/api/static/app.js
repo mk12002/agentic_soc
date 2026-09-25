@@ -170,7 +170,7 @@ function shell() {
       <div class="brand"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations</div></div></div>
       ${NAV.map(([g, items]) => `<div class="nav-group">${g}</div>` + items.filter(([, , , d]) => !d || inDomain(d)).map(([id, label, ic]) =>
         `<a class="nav-item" href="#/${id}" data-nav="${id}">${icon(ic)}<span>${esc(label)}</span>${id === 'approvals' ? '<span class="count" id="nav-approvals" hidden></span>' : ''}</a>`).join('')).join('')}
-      <div class="sidebar-foot">Signed in as ${esc(me.auth_method === 'api_key' ? 'service account' : me.roles.join(', ') || 'no role')}<br>${esc(me.domains.includes('*') ? 'All domains' : me.domains.join(', '))}</div>
+      <div class="sidebar-foot">Signed in as ${esc(me.auth_method === 'api_key' ? 'service account' : me.roles.join(', ') || 'no role')}<br>${esc(me.domains.includes('*') ? 'All domains' : me.domains.join(', '))}<br>All times UTC</div>
     </aside>
     <div class="main">
       <header class="topbar">
@@ -197,8 +197,8 @@ async function refreshStatus() {
     const el = $('#kill-status');
     if (el) { el.className = 'status-pill' + (h.kill_switch ? ' halt' : ''); el.innerHTML = `<span class="dot"></span>${h.kill_switch ? 'Automation halted' : 'Automation active'}`; }
     if (can('approve_action') || can('request_action')) {
-      const xs = await api('/api/v1/actions?status=recommended,pending_approval');
-      const b = $('#nav-approvals'); if (b) { b.hidden = !xs.length; b.textContent = xs.length; }
+      const sm = await api('/api/v1/actions/summary?status=recommended,pending_approval');
+      const b = $('#nav-approvals'); if (b) { b.hidden = !sm.total; b.textContent = sm.total; }
     }
   } catch (e) { /* status is best-effort */ }
 }

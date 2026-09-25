@@ -85,7 +85,9 @@ def test_llm_narrative_is_grounded_and_figures_never_come_from_the_model(session
         assert "2 TB" not in sec["narrative"] and "Uncited" not in sec["narrative"]
         assert sec["narrative"].endswith("[F1]")
     risk = next(s for s in r["sections"] if s["source"] == "risk")
-    assert any("98/100" in v for _, v in risk["facts"])                                     # figures computed in code
+    from soc_platform.intelligence.risk import RiskEngine
+    top = RiskEngine(session).top(None, 1)[0]
+    assert (top.name, f"risk {top.score}/100") in [(k, v.split(" (")[0]) for k, v in risk["facts"]]   # figures from code
     assert all("jane.doe@acme-demo.com" not in p for p in prov.prompts)                     # identities pseudonymised
 
 

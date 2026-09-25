@@ -91,7 +91,8 @@ Draw it as four layers (full diagram in [ARCHITECTURE.md](ARCHITECTURE.md)):
      Cloud misconfigurations go through the same lifecycle.
 4. **Intelligence.**
    - Explainable fused risk per user and host.
-   - 12 correlation rules, plus 2 operational alerts.
+   - 12 correlation rules, plus 3 operational alerts.
+   - A platform self-check that proves the same figures agree everywhere (hourly).
    - Analyst Q&A with cited answers.
    - Situation brief.
    - **Attack story** and optional **deep analysis**.
@@ -446,7 +447,17 @@ Use these when someone asks "how do you get that number?". Every one is determin
 | Supplier risk | Vendor compromise, impersonation, payment diversion |
 | Model drift | Verdict quality drifting against analyst decisions |
 
-Operational alerts: a scheduled job dead-lettered after 3 failures; break-glass access used.
+Operational alerts: a scheduled job dead-lettered after 3 failures; break-glass access used; the platform self-check
+failing (§6.9).
+
+### 6.9 Platform self-check
+
+Every hour the platform recomputes each figure that appears in more than one place - awaiting approvals, open
+cases, open findings, open vulnerabilities - through each independent code path (dashboard, database count,
+analyst tool, report builder) and compares them. It also resolves every stored reference (case links, evidence,
+actions, campaigns, insight entities, citations), checks nothing that must be unique is duplicated (one case per
+reported email, no duplicate active campaigns), and verifies the audit chain. A failure raises a *Platform
+self-check* finding. **Say:** "The platform doesn't just show numbers; it proves every hour that they agree." 
 
 ### 6.8 Reports
 
@@ -541,7 +552,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 170 passed (plus 12 opt-in live tests) |
+| Platform test suite | 179 passed (plus 12 opt-in live tests) |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 162 passed |
@@ -550,6 +561,8 @@ and recommendation is identical."
 | Browser tour | real server + Chrome, 4 roles, every screen, light and dark, layout audited at 1440/1280/1024 px: 0 errors, 0 clipped or overflowing elements, and no table needing sideways scroll at desktop width |
 | Stress tests | 0 false merges (400 hosts; 300 people) |
 | Output review | every model output of a full run audited for figures not in its evidence (see below) |
+| Consistency suite | the same figure compared across every surface (dashboards, lists, badges, brief, analyst tools, report facts, generated Word documents); every pipeline and job run twice with zero change; LLM on vs off with identical figures; every GET route × 7 roles (no errors, no leaks, explicit UTC); every write route fuzzed; every stored reference resolved |
+| Screen vs API | the browser tour reads every KPI, badge and tab count off the rendered screens and compares it with the API |
 
 **The output review, and what it caught.** All screens and model outputs from a full run with the real LLM were
 reviewed and cross-checked against the database. Every issue was fixed with a regression test:
@@ -575,6 +588,20 @@ reviewed and cross-checked against the database. Every issue was fixed with a re
 - **Live NVD returned nothing:** found by the live public-feed test during final verification. NVD now answers
   single-CVE lookups with an empty page unless the page size is explicit, so live mode would silently have lacked
   NVD scores (prioritisation falls back to scanner CVSS). The connector now requests the page explicitly.
+
+**Consistency round (testing from every angle).** A second review compared every figure across every surface,
+re-ran every pipeline, swept every route as every role and fuzzed every write. It found and fixed:
+- **Duplicates on re-run:** pulling the reporting mailbox again created a second case for the same email (so
+  recipients' risk doubled), and a second campaign for the same CVE notified owners twice. Both are idempotent now,
+  and the self-check watches for it.
+- **Cross-domain exposure:** a phishing-only analyst could read the whole audit log and the access log, including
+  other domains' case ids. Both are scoped now.
+- **Crashes on bad input:** an unknown incident or campaign id answered a server error instead of 404, and the
+  incident endpoint accepted a phishing case.
+- **Same data, different values:** a case page listed 9 actions while the actions API listed 4 (shared actions).
+  Badge and tab counts were derived from a 500-row list, and timestamps carried no timezone.
+- **Run-to-run differences:** the QA sample of auto-closed reports changed between runs; it is stable now.
+- **An intermittent guardrail hole:** digits inside random ids could make an invented number look "supported".
 
 **Say, if asked "how do you know the AI isn't making things up?":** "We audited every model output of a full run
 against its evidence, found the discrepancies above, traced each to our code - not the model - fixed them, and
@@ -654,7 +681,8 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | 170 platform tests, 162 engine tests, live tests (public feeds, the LLM), stress tests, a browser tour with a layout audit, and a feature-by-feature verification report. |
+| How was it tested? | 179 platform tests, 162 engine tests, live tests (public feeds, the LLM), stress tests, a consistency suite (every figure on every surface, re-runs, LLM on/off, every route × role, fuzzing, integrity), a browser tour that audits layout and cross-checks screen values against the API, and a feature-by-feature verification report. The platform also self-checks hourly. |
+| Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
 | What didn't you test? | Section 10. |
 
 ---
@@ -665,13 +693,13 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 |---|---|
 | Connectors | 20 (live + fake mode each) |
 | Workflows | 3 (phishing, incident, vulnerability) + intelligence layer |
-| Correlation rules | 12 + 2 operational alerts |
+| Correlation rules | 12 + 3 operational alerts |
 | Action types under the autonomy policy | 25, default L2 (recommend) |
 | Roles | 5 |
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 170 (+12 opt-in live) / 162 |
+| Platform tests / engine tests | 179 (+12 opt-in live) / 162 |
 | Features verified | 76 of 76 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
@@ -689,7 +717,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | A page shows a skeleton for a long time with the LLM on | The model is writing (deep analysis or report). Wait 10-20 s. Or say "this is the optional narrative - the deterministic view is already complete" and show the story. |
 | Deep analysis says unavailable | No LLM configured in this session: "the story is complete without it". Or the budget is exhausted: "the platform falls back automatically". |
 | An approval is refused | Probably four-eyes or self-approval: "that's the control working". Approve as a different, senior user. |
-| Numbers differ from the screenshots | Data was loaded twice or at a different time (risk decays with age). Re-initialise: `init-db` then `demo`. |
+| Numbers differ from the screenshots | Time has passed: risk decays with age and SLA dates fall due. Loading the data again changes nothing (every pipeline is idempotent). Uploading extra emails adds real reports. To reset: `init-db` then `demo`. |
 | A connector shows stale or error | In fake mode, re-run the jobs from Integrations. In live mode it's the monitoring working: "freshness is checked against each stream's cadence". |
 | The server won't start | Check `.env` values (a mistyped LLM endpoint fails closed by design). Remove `SOC_LLM_*` to run deterministic. |
 

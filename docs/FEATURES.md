@@ -224,7 +224,7 @@ legitimate vendor, internal and marketing mail).
 ![](screenshots/02-intelligence.png)
 
 * **Explainable risk engine** - per user and host across all domains, time-decayed, every factor shown.
-* **12 correlation rules** raising insights with evidence and next steps (plus two operational alerts: a scheduled job dead-lettered, break-glass access used): phishing → endpoint → identity chain
+* **12 correlation rules** raising insights with evidence and next steps (plus three operational alerts: a scheduled job dead-lettered, break-glass access used, platform self-check failing): phishing → endpoint → identity chain
   (U08), privileged access after compromise (U07), deception corroborated (U04), exposed host under attack (U06),
   attacked host without EDR, control gap - a blocked indicator still reachable in another control (U10), repeat
   clickers (U16), new KEV exposure (U02), shared infrastructure, high entity risk, **supplier risk (U18)** and
@@ -304,6 +304,11 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
 
 ## 7. Operations, reporting and compliance
 
+* **Platform self-check** - the platform proves its own numbers: every figure that appears on more than one surface
+  (dashboard, approvals badge, analyst answers, brief, report facts) is recomputed through each code path and
+  compared; every stored reference is resolved; nothing that must be unique is duplicated; the audit chain is
+  verified. Runs hourly (a failure raises a *platform integrity* finding, which resolves itself once consistent),
+  on demand at `GET /api/v1/admin/self-check`, and as a card on the Integrations screen.
 * **Durable jobs** - every scheduled run recorded; retries with backoff; dead letter after 3 failed runs with an
   alert; database lease so replicas never double-run; replay from the console.
 * **Observability** - connector freshness and reconciliation, job health, enrichment latency, drift,

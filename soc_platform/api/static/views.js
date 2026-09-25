@@ -99,8 +99,10 @@ let CASE_FILTER = 'all';
 async function Cases(id) {
   const __g = GEN;
   if (id) return CaseDetail(id);
-  const cs = await api('/api/v1/cases');
-  const rows = (CASE_FILTER === 'all' ? cs : cs.filter(c => c.domain === CASE_FILTER)).map(c => `
+  const [cs, csum] = await Promise.all([api('/api/v1/cases' + (CASE_FILTER === 'all' ? '' : '?domain=' + encodeURIComponent(CASE_FILTER))),
+    api('/api/v1/cases/summary')]);
+  const shown = CASE_FILTER === 'all' ? csum.total : (csum.by_domain[CASE_FILTER] || 0);
+  const rows = cs.map(c => `
     <tr class="click" data-fn="goTo" data-args="${arg('#/cases/' + c.id)}"><td>${chip(c.severity)}</td>
       <td><div class="t-title">${esc(c.title)}</div><div class="t-sub">${esc(cap(c.domain))}</div></td>
       <td>${esc(cap(c.verdict || 'pending'))}</td><td class="num">${c.confidence != null ? pct(c.confidence) : '–'}</td>
@@ -109,8 +111,9 @@ async function Cases(id) {
     (can('investigate') && inDomain('phishing') ? btn('Pull reported email', 'runPh', [], '', 'phishing') : '');
   setMainG(__g, page('Cases', 'Investigations across all domains. Open a case for the evidence, reasoning and recommended actions.', actions,
     card(null, `<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="seg">${['all', 'phishing', 'incident', 'vulnerability'].map(f =>
-      `<button class="${f === CASE_FILTER ? 'on' : ''}" data-fn="caseFilter" data-args="${arg(f)}">${cap(f)}${f !== 'all' ? ` <span class="muted">${cs.filter(c => c.domain === f).length}</span>` : ''}</button>`).join('')}</div></div>` +
-      table([{h: 'Severity'}, {h: 'Case'}, {h: 'Verdict'}, {h: 'Confidence', num: 1}, {h: 'Status'}, {h: 'Opened'}], rows, {empty: 'No cases yet - run a pipeline to ingest alerts and reported email.'}), {flush: true})));
+      `<button class="${f === CASE_FILTER ? 'on' : ''}" data-fn="caseFilter" data-args="${arg(f)}">${cap(f)} <span class="muted">${f === 'all' ? csum.total : (csum.by_domain[f] || 0)}</span></button>`).join('')}</div></div>` +
+      table([{h: 'Severity'}, {h: 'Case'}, {h: 'Verdict'}, {h: 'Confidence', num: 1}, {h: 'Status'}, {h: 'Opened'}], rows, {empty: 'No cases yet - run a pipeline to ingest alerts and reported email.'}) +
+      (cs.length < shown ? `<div class="small muted" style="padding:10px 14px">Showing the ${cs.length} most recent of ${shown} cases.</div>` : ''), {flush: true})));
 }
 function caseFilter(f) { CASE_FILTER = f; Cases(); }
 async function runInc() { toast('Running incident pipeline…'); const r = await post('/api/v1/incidents/run'); toast(`${r.new_incidents} new incident(s), ${r.investigated.length} investigated`); render(); }
@@ -197,18 +200,20 @@ async function Entity(id) {
 let APPROVAL_FILTER = 'all';
 async function Approvals() {
   const __g = GEN;
-  const all = await api('/api/v1/actions?status=recommended,pending_approval');
-  const doms = [...new Set(all.map(x => x.domain))].sort();
-  const xs = APPROVAL_FILTER === 'all' ? all : all.filter(x => x.domain === APPROVAL_FILTER);
+  const [xs, sm] = await Promise.all([api('/api/v1/actions?status=recommended,pending_approval' + (APPROVAL_FILTER === 'all' ? '' : '&domain=' + encodeURIComponent(APPROVAL_FILTER))),
+    api('/api/v1/actions/summary?status=recommended,pending_approval')]);
+  const doms = Object.keys(sm.by_domain).sort();
+  const total = APPROVAL_FILTER === 'all' ? sm.total : (sm.by_domain[APPROVAL_FILTER] || 0);
   setMainG(__g, page('Approvals', 'Actions the platform recommends. Nothing here runs until someone with the right role approves it; four-eyes actions need a second person.', '',
     card(null, `<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="seg">${['all', ...doms].map(f =>
-      `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}">${esc(cap(f))} <span class="muted">${f === 'all' ? all.length : all.filter(x => x.domain === f).length}</span></button>`).join('')}</div></div>` +
+      `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}">${esc(cap(f))} <span class="muted">${f === 'all' ? sm.total : (sm.by_domain[f] || 0)}</span></button>`).join('')}</div></div>` +
       table(['Action', 'Targets', 'Rationale', 'Policy', ''], xs.map(x => `<tr>
       <td class="nowrap"><div class="t-title mono">${esc(x.action_type)}</div><div class="t-sub">${esc(cap(x.domain))} · L${esc(x.level)}</div></td>
       <td class="small wrap">${x.targets.slice(0, 3).map(t => esc(t.name || t.recipient || t.id)).join('<br>') || '<span class="muted">-</span>'}</td><td class="small wrap">${esc(x.rationale)}</td>
       <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}</td>
       <td><div class="inline" style="flex-wrap:wrap;gap:6px">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}${x.case_id ? `<a class="btn sm ghost" href="#/cases/${encodeURIComponent(x.case_id)}">Case</a>` : ''}</div></td></tr>`),
-      {empty: 'Nothing is waiting for approval.'}), {flush: true})));
+      {empty: 'Nothing is waiting for approval.'}) +
+      (xs.length < total ? `<div class="small muted" style="padding:10px 14px">Showing the ${xs.length} most recent of ${total} actions.</div>` : ''), {flush: true})));
 }
 function approvalFilter(f) { APPROVAL_FILTER = f; Approvals(); }
 
@@ -324,12 +329,16 @@ async function ShadowIt() {
 // ================================================================= Integrations
 async function Integrations() {
   const __g = GEN;
-  const [cs, jr] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200')]);
+  const canCheck = can('read_audit') && window.ME.domains.includes('*');
+  const [cs, jr, sc] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200'),
+    canCheck ? api('/api/v1/admin/self-check') : Promise.resolve(null)]);
   const last = {}; jr.runs.forEach(r => { if (!last[r.job]) last[r.job] = r; });
   const stc = {healthy: 'ok', on_demand: 'info', stale: 'medium', error: 'high', misconfigured: 'high', disabled: 'info'};
   const jst = {ok: 'ok', error: 'high', dead_letter: 'critical'};
   setMainG(__g, page('Integrations', 'Connector health, data freshness against each stream\'s expected cadence, and scheduled job runs.', '',
-    `${card(`Connectors <span class="muted">(${cs.filter(c => c.enabled).length} enabled)</span>`, table(['Tool', 'State', 'Mode', 'Streams · age / expected', ''], cs.map(c => `<tr>
+    `${sc ? `<div class="mb">${card('Platform self-check', `<div class="inline" style="margin-bottom:${sc.ok ? 0 : 10}px">${status(sc.ok ? 'ok' : 'high', sc.ok ? 'Consistent' : 'Attention')}<span class="small">${sc.passed} of ${sc.total} checks pass - the same figures agree on every screen, report and answer; every stored reference resolves; nothing is duplicated; the audit chain verifies.</span></div>` +
+      sc.checks.filter(c => !c.ok).map(c => `<div class="list-row small"><span class="grow"><b>${esc(c.check)}</b></span><span class="mono muted">${esc(JSON.stringify(c.detail)).slice(0, 160)}</span></div>`).join(''), {sub: 'runs hourly; a failure raises a finding'})}</div>` : ''}
+    ${card(`Connectors <span class="muted">(${cs.filter(c => c.enabled).length} enabled)</span>`, table(['Tool', 'State', 'Mode', 'Streams · age / expected', ''], cs.map(c => `<tr>
       <td><div class="t-title">${esc(c.tool)}</div><div class="t-sub">${esc(c.name)} · ${esc(c.category)}</div></td>
       <td>${status(stc[c.state] || 'info', cap(c.state))}${c.config_problems.map(p => `<div class="t-sub" style="color:var(--high)">${esc(p)}</div>`).join('')}</td>
       <td><span class="tag">${esc(c.mode || '')}</span></td>
@@ -473,7 +482,7 @@ async function Audit() {
   const __g = GEN;
   const [v, xs] = await Promise.all([api('/api/v1/audit/verify'), api('/api/v1/audit?limit=300')]);
   setMainG(__g, page('Audit log', 'Append-only and hash-chained: every retrieval, inference, recommendation, approval and action, attributed to an agent or a person.',
-    v.ok ? `<span class="status-pill"><span class="dot"></span>Chain verified · ${nf(v.records)} records</span>` : `<span class="status-pill halt"><span class="dot"></span>Chain broken at #${esc(v.first_bad_seq)}</span>`,
+    v.ok ? `<span class="status-pill"><span class="dot"></span>Chain verified · ${nf(v.records)} records in the full log${window.ME.domains.includes('*') ? '' : ' (you see those about your domains)'}</span>` : `<span class="status-pill halt"><span class="dot"></span>Chain broken at #${esc(v.first_bad_seq)}</span>`,
     card(null, table([{h: '#', num: 1}, 'Time', 'Actor', 'Event', 'Subject'], xs.map(x => `<tr><td class="num mono small muted">${x.seq}</td><td class="mono small">${dt(x.ts)}</td>
       <td class="small">${esc(x.actor_type)} · ${esc(x.actor_id)}</td><td class="mono small">${esc(x.event_type)}</td><td class="small muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td></tr>`)), {flush: true})));
 }

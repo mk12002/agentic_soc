@@ -42,7 +42,12 @@ def test_reported_message_ingested_with_original_headers(session, ph):
     assert len(subs) == 1 and subs[0].reporter == "bob.lee@acme-demo.com"
     raw = Path(subs[0].raw_path).read_bytes()
     assert b"Authentication-Results" in raw and b"Received: from mail.micros0ft-helpdesk.com" in raw
-    assert ph.ingest_reported()[0].id == subs[0].id  # replay does not duplicate
+    assert ph.ingest_reported() == []                                            # replay returns nothing new
+    from soc_platform.domains.phishing.models import Submission
+    assert session.query(Submission).count() == 1                                  # ... and duplicates nothing
+    first = ph.process(subs[0].id)
+    assert ph.process(subs[0].id)["case"]["id"] == first["case"]["id"]              # re-processing: same case
+    assert ph.process(subs[0].id, force=True)["case"]["id"] != first["case"]["id"]  # explicit re-analysis only
 
 
 def test_full_investigation_of_reported_campaign(session, ph):

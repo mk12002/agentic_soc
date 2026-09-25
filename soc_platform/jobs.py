@@ -31,6 +31,7 @@ JOBS: dict[str, tuple[str, int]] = {  # name -> (interval env var, default secon
     "daily_report": ("SOC_JOB_DAILY_REPORT_SECONDS", 24 * 3600),
     "intelligence": ("SOC_JOB_INTELLIGENCE_SECONDS", 600),
     "retention": ("SOC_JOB_RETENTION_SECONDS", 24 * 3600),
+    "self_check": ("SOC_JOB_SELF_CHECK_SECONDS", 3600),
 }
 RETRIES = 3
 DEAD_LETTER_AFTER = 3
@@ -78,6 +79,13 @@ def _body(name: str, s: Session) -> dict[str, Any]:
         from soc_platform.core.retention import run_retention
 
         return run_retention(s, get_settings())
+    if name == "self_check":
+        from soc_platform.core.selfcheck import raise_or_resolve, run_self_check
+
+        result = run_self_check(s)
+        raise_or_resolve(s, result)
+        return {"passed": result["passed"], "total": result["total"],
+                "failing": [c["check"] for c in result["checks"] if not c["ok"]]}
     raise KeyError(f"unknown job {name}")
 
 
