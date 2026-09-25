@@ -6,7 +6,6 @@ when verdicts are finalized.
 """
 
 from __future__ import annotations
-import json, time
 from datetime import datetime, timezone
 from typing import Any, Optional
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger

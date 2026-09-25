@@ -133,6 +133,87 @@ def test_threat_intel_fusion_attributes_every_source(reg):
 
 
 def test_registry_status_lists_everything(reg):
-    rows = reg.status()
+    rows = reg.status(probe=True)
     assert {r["name"] for r in rows} >= EXPECTED
     assert all(r["health"]["ok"] for r in rows if r["enabled"])
+
+
+def test_every_connector_health_probe_passes_in_fixture_mode(reg):
+    for name in sorted(EXPECTED):
+        h = reg.get(name).health()
+        assert h["ok"], (name, h)
+
+
+def test_health_probe_reports_failure_without_leaking_secrets():
+    from soc_platform.connectors.http import FixtureTransport
+    from soc_platform.connectors.tools._common import _redact
+
+    reg = ConnectorRegistry.all_fake()
+    conn = reg.get("rapid7")
+    conn.http = FixtureTransport([{"method": "GET", "path": ".*", "status": 503}], "rapid7")
+    h = conn.health()
+    assert h["ok"] is False and h["error"]
+    assert "k3y" not in _redact("GET https://x/api?apikey=k3y&a=1 Bearer abc.def") and "***" in _redact("?token=zz")
+
+
+def test_mde_findbyip_sends_a_timestamp(reg):
+    r = reg.get("defender_endpoint").lookup("ip", "10.20.1.15")
+    assert r.ok and r.records, r  # fixture only answers when an ISO timestamp is present
+
+
+def test_rapid7_and_wiz_cve_lookups_return_affected_assets(reg):
+    r7 = reg.get("rapid7").lookup("cve", "CVE-2021-44228")
+    assert r7.ok and r7.signals["affected_assets"] >= 1 and r7.records
+    wz = reg.get("wiz").lookup("cve", "cve-2021-44228")
+    assert wz.ok and wz.signals["findings"] == 1 and wz.signals["assets"] == ["web01"]
+    assert reg.get("wiz").lookup("cve", "CVE-1999-0001").signals["findings"] == 0
+
+
+def test_wiz_lookup_follows_pagination():
+    from soc_platform.connectors.http import FixtureTransport
+
+    conn = ConnectorRegistry.all_fake().get("wiz")
+    node = lambda i: {"id": f"v{i}", "name": "CVE-2021-44228", "vulnerableAsset": {"name": "web01"}}  # noqa: E731
+    conn.http = FixtureTransport([
+        {"method": "POST", "path": "^/graphql$", "body_contains": '"after": null',
+         "body": {"data": {"vulnerabilityFindings": {"nodes": [node(1)], "pageInfo": {"hasNextPage": True, "endCursor": "c2"}}}}},
+        {"method": "POST", "path": "^/graphql$", "body_contains": '"after": "c2"',
+         "body": {"data": {"vulnerabilityFindings": {"nodes": [node(2)], "pageInfo": {"hasNextPage": False}}}}}], "wiz")
+    r = conn.lookup("host", "web01")
+    assert r.signals["findings"] == 2 and r.signals["truncated"] is False
+
+
+def test_jira_uses_enhanced_search_with_page_tokens():
+    from soc_platform.connectors.http import FixtureTransport
+
+    conn = ConnectorRegistry.all_fake().get("jira")
+    issue = lambda i: {"id": str(i), "key": f"SEC-{i}", "fields": {"summary": "x", "status": {"name": "Done"}}}  # noqa: E731
+    conn.http = FixtureTransport([
+        {"method": "GET", "path": "^/rest/api/3/search/jql$", "params": {"nextPageToken": "t2"},
+         "body": {"issues": [issue(2)], "isLast": True}},
+        {"method": "GET", "path": "^/rest/api/3/search/jql$", "params": {"nextPageToken": "!"},
+         "body": {"issues": [issue(1)], "isLast": False, "nextPageToken": "t2"}}], "jira")
+    p1 = conn.fetch_page("tickets", None)
+    p2 = conn.fetch_page("tickets", p1.next_cursor)
+    assert [i["key"] for i in p1.records + p2.records] == ["SEC-1", "SEC-2"] and p1.more and not p2.more
+
+
+def test_exchange_admin_calls_use_their_own_token_audience():
+    from soc_platform.connectors.http import Response, RoutingTransport
+
+    seen = []
+
+    class Rec:
+        def __init__(self, tag):
+            self.tag = tag
+
+        def request(self, method, path, **kw):
+            seen.append((self.tag, path))
+            return Response(200, {})
+
+    rt = RoutingTransport(Rec("graph"), {"https://outlook.office365.com": Rec("exo")})
+    rt.request("POST", "https://outlook.office365.com/adminapi/beta/t/InvokeCommand")
+    rt.request("GET", "/v1.0/users")
+    assert seen == [("exo", "https://outlook.office365.com/adminapi/beta/t/InvokeCommand"), ("graph", "/v1.0/users")]
+    from soc_platform.connectors.tools import defender_office365 as mdo
+    assert mdo.MANIFEST.live_transport is mdo._live

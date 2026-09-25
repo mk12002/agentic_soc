@@ -16,6 +16,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -343,3 +344,111 @@ class ConnectorCheckpoint(Base):
     source_count: Mapped[int] = mapped_column(Integer, default=0)
     ingested_count: Mapped[int] = mapped_column(Integer, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# --------------------------------------------------------------------------- access control (NFR-09)
+
+
+class RoleAssignment(Base):
+    """Platform-managed role grants on top of the identity provider's roles (time-bound, domain-scoped)."""
+
+    __tablename__ = "role_assignments"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    principal_id: Mapped[str] = mapped_column(String(256), index=True)
+    role: Mapped[str] = mapped_column(String(32))
+    domains: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["*"])
+    granted_by: Mapped[str] = mapped_column(String(256))
+    reason: Mapped[str] = mapped_column(Text, default="")
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+
+class ApiKey(Base):
+    """Service-account key. Only a SHA-256 of the secret is stored; the secret is shown once at creation."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(128))
+    secret_sha256: Mapped[str] = mapped_column(String(64))
+    roles: Mapped[list[str]] = mapped_column(JSON, default=list)
+    domains: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["*"])
+    created_by: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TokenRevocation(Base):
+    """Revoked token ids (jti) and per-principal not-before times (log-out everywhere)."""
+
+    __tablename__ = "token_revocations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    token_id: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
+    principal_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    not_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[str] = mapped_column(String(256))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AccessLogRecord(Base):
+    """Who called what (append-only via the ORM; pruned only by the audited retention job)."""
+
+    __tablename__ = "access_log"
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    principal_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    auth_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    method: Mapped[str] = mapped_column(String(8))
+    path: Mapped[str] = mapped_column(String(512))
+    status: Mapped[int] = mapped_column(Integer)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+@event.listens_for(AccessLogRecord, "before_update")
+def _refuse_access_update(*_args) -> None:
+    raise PermissionError("access_log is append-only")
+
+
+@event.listens_for(AccessLogRecord, "before_delete")
+def _refuse_access_delete(*_args) -> None:
+    raise PermissionError("access_log is append-only (use the retention job)")
+
+
+class SystemFlag(Base):
+    """Durable operational switches shared by every replica (e.g. the global kill switch)."""
+
+    __tablename__ = "system_flags"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[str] = mapped_column(String(256))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+
+class JobRun(Base):
+    """One execution of a scheduled job (VM-T11): outcome, retries, error and summary; dead-letter visible."""
+
+    __tablename__ = "job_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    job: Mapped[str] = mapped_column(String(64), index=True)
+    trigger: Mapped[str] = mapped_column(String(32), default="schedule")
+    ordinal: Mapped[int] = mapped_column(BigInteger, index=True, default=0)  # strictly increasing run order
+    status: Mapped[str] = mapped_column(String(16), index=True)  # ok | error | dead_letter
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

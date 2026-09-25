@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-from datetime import datetime, timezone
 from typing import Any
 
 from soc_platform.domains.phishing.engine.agents.user_behavior_agent.feature_extractor import extract_features

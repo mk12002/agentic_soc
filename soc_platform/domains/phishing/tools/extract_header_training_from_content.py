@@ -21,7 +21,6 @@ from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import argparse
 import json
 import math
-import random
 from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser

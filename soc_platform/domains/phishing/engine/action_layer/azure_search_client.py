@@ -13,9 +13,8 @@ This module is optional but significantly enhances threat intel capabilities.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 import importlib
@@ -118,7 +117,6 @@ class AzureSearchClient:
             from azure.search.documents.indexes import SearchIndexClient
             from azure.search.documents.indexes.models import (
                 SearchIndex,
-                SearchField,
                 SearchFieldDataType,
                 SimpleField,
                 SearchableField,

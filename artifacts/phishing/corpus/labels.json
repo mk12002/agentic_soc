@@ -8,5 +8,7 @@
  "marketing_spam": "spam",
  "legit_github": "safe",
  "legit_internal": "safe",
- "legit_vendor_invoice": "safe"
+ "legit_vendor_invoice": "safe",
+ "supplier_bank_change": "suspicious",
+ "supplier_lookalike_payment": "malicious"
 }

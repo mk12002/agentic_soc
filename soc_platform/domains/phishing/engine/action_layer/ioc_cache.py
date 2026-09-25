@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger

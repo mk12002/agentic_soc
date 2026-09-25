@@ -11,10 +11,10 @@
   },
   {
    "method": "GET",
-   "path": "^/rest/api/3/search$",
+   "path": "^/rest/api/3/search/jql$",
    "body": {
     "issues": [],
-    "total": 0
+    "isLast": true
    },
    "status": 200
   }

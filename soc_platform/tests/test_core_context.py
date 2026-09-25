@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from soc_platform.connectors.base import BaseConnector, Page, RateLimited, SyncRunner, iter_records, with_backoff
+from soc_platform.connectors.base import BaseConnector, RateLimited, SyncRunner, iter_records, with_backoff
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.entity_resolution import EntityResolver
 from soc_platform.core.models import UnresolvedItem

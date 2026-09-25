@@ -146,6 +146,23 @@ def corpus() -> list[tuple[str, EmailMessage]]:
     m.add_attachment(_pdf("Invoice 2026-09 total INR 1,24,000"), maintype="application", subtype="pdf",
                      filename="invoice-2026-09.pdf")
     out.append(("legit_vendor_invoice", m))
+
+    # U18: a real supplier's mailbox is compromised - authenticated mail asking to change bank details
+    m = _base("suspicious", "accounts@krishna-logistics.com", "Krishna Logistics Accounts", f"arun.k@{ORG}",
+              "Updated bank details for remittance", auth="spf=pass dkim=pass dmarc=pass",
+              relay="mail-sg2apc01.outbound.protection.outlook.com", ip="40.107.215.98", minutes=11)
+    m.set_content("Dear Arun,\nPlease note our bank details have changed due to an audit. Kindly use the new bank "
+                  "account below for the remittance of invoices KL-4471 and KL-4478 (INR 6,85,000) this week.\n"
+                  "Account: 50200071234567, IFSC HDFC0001234.\nRegards,\nAccounts Team, Krishna Logistics")
+    out.append(("supplier_bank_change", m))
+
+    # U18: look-alike of the same supplier (i -> l), unauthenticated
+    m = _base("malicious", "accounts@krishna-logistlcs.com", "Krishna Logistics Accounts", f"arun.k@{ORG}",
+              "RE: Invoice KL-4471 - payment today", auth="spf=none dkim=none dmarc=none",
+              relay="mail.krishna-logistlcs.com", ip="45.144.225.19", minutes=12)
+    m.set_content("Arun,\nFollowing up on KL-4471. Our new bank account details are below; please process the bank "
+                  "transfer today as the old account is frozen. Do not call, I am travelling.\nRegards,\nAccounts")
+    out.append(("supplier_lookalike_payment", m))
     return out
 
 

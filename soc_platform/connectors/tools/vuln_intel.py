@@ -12,7 +12,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import ApiKeyHeader, HttpTransport, NoAuth
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ToolConnector, ok_lookup, parse_ts
+from soc_platform.connectors.tools._common import ToolConnector, ok_lookup
 
 
 class NvdConnector(ToolConnector):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -85,8 +86,22 @@ class ToolConnector(BaseConnector):
         res.elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
         return res
 
+    health_stream: str | None = None  # stream probed by health(); default: the first pull stream
+
     def health(self) -> dict[str, Any]:
-        return {"ok": True, "transport": type(self.http).__name__}
+        """Live connectivity + permission check: authenticate and read one page of a stream."""
+        stream = self.health_stream or (self.streams[0] if self.streams else None)
+        out: dict[str, Any] = {"transport": type(self.http).__name__, "stream": stream}
+        if stream is None:
+            return out | {"ok": True, "detail": "no pull streams (push or lookup-only)"}
+        t0 = time.perf_counter()
+        try:
+            page = self.fetch_page(stream, None)
+            return out | {"ok": True, "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                          "sample_records": len(page.records), "more": page.more}
+        except Exception as exc:  # noqa: BLE001 - reported, never raised
+            return out | {"ok": False, "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                          "error": f"{type(exc).__name__}: {_redact(str(exc))[:300]}"}
 
 
 class ConnectorAction(ActionSpec):
@@ -127,3 +142,9 @@ def ok_lookup(conn: BaseConnector, records: list[NormalizedRecord], summary: str
               deep_link: str | None = None, **signals: Any) -> LookupResult:
     return LookupResult(conn.tool, conn.dimension, True, records=records, summary=summary, deep_link=deep_link,
                         signals=signals)
+
+
+def _redact(msg: str) -> str:
+    """Strip query-string values and bearer tokens from error text before it is shown or stored."""
+    msg = re.sub(r"([?&][A-Za-z0-9_.-]+=)[^&\s'\"]+", r"\1***", msg)
+    return re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1***", msg)

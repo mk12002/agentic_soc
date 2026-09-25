@@ -17,13 +17,9 @@ from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import csv
 import hashlib
-import json
-import math
-import os
 import random
 import time
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse
 
 import numpy as np
@@ -637,7 +633,7 @@ def run_pipeline():
         logger.info(f"  {name}: {len(split)} total | {int(pos)} malicious ({pos/len(split)*100:.1f}%) | {int(neg)} benign ({neg/len(split)*100:.1f}%)")
 
     feature_cols = [c for c in MESSAGE_FEATURE_COLUMNS]
-    logger.info(f"\nFeature summary (train split):")
+    logger.info("\nFeature summary (train split):")
     summary = df_train[feature_cols].describe().round(3)
     logger.info(f"\n{summary.to_string()}")
 

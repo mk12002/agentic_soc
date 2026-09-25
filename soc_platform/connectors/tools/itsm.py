@@ -113,12 +113,14 @@ class JiraConnector(ToolConnector):
     streams = ("tickets",)
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
-        start = int(cursor or 0)
-        body = self.get("/rest/api/3/search", params={"jql": f"project={self.settings.get('project_key', 'SEC')} "
-                                                             "AND updated >= -30d", "startAt": start, "maxResults": 100})
-        issues = body.get("issues") or []
-        return Page(issues, str(start + len(issues)), source_total=body.get("total"),
-                    has_more=start + len(issues) < int(body.get("total", 0)))
+        project = self.settings.get("project_key", "SEC")
+        params = {"jql": f'project = "{project}" AND updated >= -30d ORDER BY updated ASC',
+                  "maxResults": 100, "fields": "summary,status,components,updated,priority,resolution"}
+        if cursor:
+            params["nextPageToken"] = cursor
+        body = self.get("/rest/api/3/search/jql", params=params)
+        nxt = None if body.get("isLast", True) else body.get("nextPageToken")
+        return Page(body.get("issues") or [], nxt, has_more=bool(nxt))
 
     def normalize(self, stream: str, i: dict[str, Any]) -> list[NormalizedRecord]:
         f = i.get("fields") or {}
@@ -169,6 +171,9 @@ class CsvCmdbConnector(ToolConnector):
         return Page(self.rows(), None, has_more=False)
 
     def normalize(self, stream, r):
+        host = str(r.get("hostname") or "").strip()
+        if not host or any(ch in host for ch in "*?[]"):
+            return []  # ownership *rules* (patterns / subscriptions) are used by owner_for, they are not assets
         return [NormalizedRecord(kind="asset", tool=self.tool, source_type="ownership", source_id=r["hostname"],
                                  keys={"serial_number": r.get("serial_number")}, dimension="ticketing",
                                  attributes={"hostname": r["hostname"], "owner": r.get("owner"),
@@ -179,8 +184,13 @@ class CsvCmdbConnector(ToolConnector):
         import fnmatch
 
         host = str(attrs.get("hostname") or attrs.get("fqdn") or "").lower().split(".")[0]
+        sub = str(attrs.get("subscription") or "").lower()
         for r in self.rows():
-            if host and fnmatch.fnmatch(host, r["hostname"].lower()):
+            if host and r.get("hostname") and fnmatch.fnmatch(host, r["hostname"].lower()):
+                return {"owner": r.get("owner"), "platform_team": r.get("platform_team"),
+                        "environment": r.get("environment"), "criticality": r.get("criticality"), "source": "cmdb_csv"}
+        for r in self.rows():  # cloud resources without a CI: owner of the subscription / account
+            if sub and r.get("subscription") and fnmatch.fnmatch(sub, str(r["subscription"]).lower()):
                 return {"owner": r.get("owner"), "platform_team": r.get("platform_team"),
                         "environment": r.get("environment"), "criticality": r.get("criticality"), "source": "cmdb_csv"}
         return None
@@ -195,7 +205,7 @@ def _dv(v: Any) -> Any:
 
 def _ticket_actions(c: Any) -> list:
     def create(params: dict, targets: list) -> dict:
-        return c.create_ticket(title=params["title"], description=params.get("description", ""),
+        return {"provider": c.name} | c.create_ticket(title=params["title"], description=params.get("description", ""),
                                group=params.get("group"), priority=int(params.get("priority", 3)),
                                correlation_id=params.get("correlation_id"))
 

@@ -134,3 +134,28 @@ def test_metrics_and_audit(session, ph, analyst, lead):
     events = {r.event_type for r in AuditLog(session).query(limit=1000)}
     assert {"phishing.reported", "case.created", "case.assessed", "action.requested", "action.executed"} <= events
     assert AuditLog(session).verify()["ok"]
+
+
+def test_supplier_email_risk_u18(session):
+    """A real supplier asking to change bank details and a look-alike of that supplier are both surfaced."""
+    from pathlib import Path
+
+    from soc_platform.connectors.registry import ConnectorRegistry
+    from soc_platform.domains.phishing.service import PhishingService
+    from soc_platform.domains.phishing.supplier import SupplierMonitor, load_suppliers
+    from soc_platform.intelligence.correlation import CorrelationEngine
+
+    corpus = Path(__file__).resolve().parents[2] / "artifacts" / "phishing" / "corpus"
+    svc = PhishingService(session, ConnectorRegistry.all_fake(), org_domains=["cci-demo.com"])
+    for name in ("supplier_bank_change", "supplier_lookalike_payment", "legit_vendor_invoice"):
+        sub = svc.submit_raw((corpus / f"{name}.eml").read_bytes(), source="test", reporter="arun.k@cci-demo.com")
+        svc.process(sub.id)
+    rep = SupplierMonitor(session, load_suppliers()).assess()
+    kl = rep["suppliers"]["Krishna Logistics"]
+    kinds = {f["type"] for f in kl["findings"]}
+    assert {"supplier_payment_diversion", "supplier_impersonation"} <= kinds, kl
+    assert kl["status"] == "critical"                     # high-criticality supplier escalates
+    ms = rep["suppliers"]["Microsoft (cloud provider)"]
+    assert ms["findings"] == [] and ms["status"] == "ok"  # authentic, clean vendor mail raises nothing
+    ins = [i for i in CorrelationEngine(session).run() if i.rule == "supplier_risk"]
+    assert ins and all("U18" in i.requirement_refs for i in ins)

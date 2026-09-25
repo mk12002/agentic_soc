@@ -4,12 +4,9 @@ Generates statistical summaries and Matplotlib visualizations for all training d
 """
 
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
-import os
-from pathlib import Path
 import warnings
 
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")

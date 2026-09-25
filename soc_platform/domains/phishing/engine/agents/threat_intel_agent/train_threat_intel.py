@@ -8,9 +8,7 @@ importance, ROC, learning curves, correlation).
 """
 
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
-import os
 import json
-import time
 from pathlib import Path
 from datetime import datetime
 
@@ -24,8 +22,7 @@ from sklearn.metrics import (
     roc_curve,
     brier_score_loss,
     confusion_matrix,
-    classification_report,
-    PrecisionRecallDisplay
+    classification_report
 )
 
 from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import MESSAGE_FEATURE_COLUMNS

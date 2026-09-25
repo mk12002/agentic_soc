@@ -6,7 +6,7 @@ interoperability with SIEMs, SOAR platforms, and threat intelligence sharing.
 """
 
 from __future__ import annotations
-import hashlib, json, uuid
+import hashlib, uuid
 from datetime import datetime, timezone
 from typing import Any
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger

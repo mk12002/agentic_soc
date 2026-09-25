@@ -144,12 +144,12 @@ class SenderReputationEngine:
         try:
             with self._connect() as conn:
                 with conn.cursor() as cur:
-                    col = "false_positive_count" if is_false_positive else "true_positive_count"
-                    # col is one of two hard-coded column names, never user input
-                    cur.execute(f"""  # nosec B608
-                        UPDATE sender_reputation SET {col} = {col} + 1
-                        WHERE sender_email = %s
-                    """, (sender_email,))
+                    if is_false_positive:
+                        cur.execute("UPDATE sender_reputation SET false_positive_count = false_positive_count + 1 "
+                                    "WHERE sender_email = %s", (sender_email,))
+                    else:
+                        cur.execute("UPDATE sender_reputation SET true_positive_count = true_positive_count + 1 "
+                                    "WHERE sender_email = %s", (sender_email,))
                 conn.commit()
         except Exception as e:
             logger.warning("Failed to record feedback", error=str(e))

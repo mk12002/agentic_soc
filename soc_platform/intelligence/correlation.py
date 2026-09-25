@@ -13,6 +13,8 @@ Rules and the requirement / use case each serves:
   new_kev_exposure            U02 / VM-F16 newly KEV-listed CVE present on internet-exposed assets
   shared_infrastructure       indicator seen across several users / hosts (campaign blast radius)
   entity_risk_high            U07 any user/host whose fused risk is high/critical across >= 3 dimensions
+  supplier_risk               U18 vendor email compromise / impersonation / payment diversion
+  model_drift                 R14 / NFR-13 verdict quality drift against analyst dispositions
 """
 
 from __future__ import annotations
@@ -63,7 +65,8 @@ class CorrelationEngine:
                 ins = rule(p)
                 if ins is not None:
                     found.append(ins)
-        found += self._repeat_clickers() + self._control_gaps() + self._new_kev_exposure() + self._shared_infra()
+        found += (self._repeat_clickers() + self._control_gaps() + self._new_kev_exposure() + self._shared_infra()
+                  + self._supplier_risk() + self._drift())
         stored = [self._upsert(i) for i in found]
         if stored:
             AuditLog(self.s).append(actor_type="agent", actor_id="agent:correlation", event_type="intelligence.run",
@@ -264,6 +267,44 @@ class CorrelationEngine:
         return out
 
     # ------------------------------------------------------------------ persistence
+
+    def _drift(self) -> list[Insight]:
+        from soc_platform.intelligence.drift import drift_insights
+
+        try:
+            return drift_insights(self.s)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _supplier_risk(self) -> list[Insight]:
+        from soc_platform.domains.phishing.supplier import SupplierMonitor
+
+        try:
+            report = SupplierMonitor(self.s).assess()
+        except Exception:  # noqa: BLE001 - a bad supplier file must not stop the other rules
+            return []
+        steps = {"supplier_account_compromise": ["Call the supplier on a number on file: their mailbox/tenant is likely "
+                                                 "compromised", "Hold pending payments to this supplier",
+                                                 "Search and purge other messages from the sender"],
+                 "supplier_payment_diversion": ["Do not change bank details on email instructions",
+                                                "Verify with the supplier by phone (number from the vendor master)",
+                                                "Alert accounts payable"],
+                 "supplier_impersonation": ["Block the look-alike domain at the mail gateway and Umbrella",
+                                            "Warn accounts payable / procurement"],
+                 "supplier_spoofing": ["Ask the supplier to enforce DMARC (p=reject)",
+                                       "Add a transport rule to quarantine unauthenticated mail claiming this domain"]}
+        out = []
+        for f in report["findings"]:
+            out.append(Insight(rule="supplier_risk", dedupe_key=_key("sup", f["type"], f["case_id"]),
+                               severity=f["severity"] if f["severity"] in SEV_RANK else "medium",
+                               title=f"{f['supplier']}: {f['type'].replace('supplier_', '').replace('_', ' ')} "
+                                     f"({f['sender']})",
+                               score={"critical": 95.0, "high": 75.0, "medium": 50.0}.get(f["severity"], 30.0),
+                               entity_ids=[], domains=["phishing"],
+                               evidence=[{"ref": f["case_id"], "signal": f["type"], "source": "phishing",
+                                          "summary": f["detail"]}],
+                               next_steps=steps.get(f["type"], []), requirement_refs=["U18"]))
+        return out
 
     def _upsert(self, ins: Insight) -> Insight:
         cur = self.s.execute(select(Insight).where(Insight.dedupe_key == ins.dedupe_key)).scalars().first()

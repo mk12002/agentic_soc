@@ -40,7 +40,7 @@ from soc_platform.core.models import (
 STRONG_KEYS: dict[str, list[str]] = {
     "asset": ["crowdstrike_aid", "mde_device_id", "aad_device_id", "cloud_resource_id", "serial_number",
               "mac", "rapid7_asset_id", "wiz_id", "canary_device_id"],
-    "identity": ["entra_object_id", "upn", "email", "sid", "delinea_user_id"],
+    "identity": ["entra_object_id", "upn", "email", "sam", "sid", "delinea_user_id"],
     "indicator": ["value"],
 }
 # A differing value on one of these proves two records are NOT the same entity: one host has exactly
@@ -105,7 +105,7 @@ def normalize_keys(kind: str, keys: dict[str, Any]) -> dict[str, str]:
         v = str(value).strip()
         if name == "mac":
             v = norm_mac(v)
-        elif name in {"upn", "email", "sid"}:
+        elif name in {"upn", "email", "sid", "sam"}:
             v = v.lower()
         elif name in {"serial_number"}:
             v = v.upper()
@@ -133,6 +133,8 @@ def hints_for(kind: str, attrs: dict[str, Any]) -> dict[str, list[str]]:
     elif kind == "identity":
         if attrs.get("display_name"):
             h["display_name"] = [str(attrs["display_name"]).strip().lower()]
+        if attrs.get("derived_upn"):
+            h["derived_upn"] = [str(attrs["derived_upn"]).strip().lower()]
     return {k: sorted(set(v)) for k, v in h.items() if v}
 
 
@@ -215,6 +217,11 @@ class ResolutionResult:
     method: str  # override | deterministic | probabilistic | new | conflict | ambiguous
     confidence: float
     candidates: list[Candidate] = field(default_factory=list)
+    merge_ids: list[str] = field(default_factory=list)  # other entities proven identical by an authoritative record
+
+
+# Keys whose owner is authoritative for identity (directory object id, hardware / cloud / agent ids).
+AUTHORITATIVE_KEYS = {"entra_object_id", "serial_number", "cloud_resource_id", "crowdstrike_aid", "mde_device_id"}
 
 
 class EntityResolver:
@@ -243,10 +250,14 @@ class EntityResolver:
 
         nkeys = normalize_keys(kind, keys)
         if nkeys:
+            pairs = set(nkeys.items())
+            if kind == "identity":  # a UPN and a primary/alias email are the same namespace
+                for v in [nkeys[k] for k in ("upn", "email") if k in nkeys]:
+                    pairs |= {("upn", v), ("email", v)}
             hits = self.s.execute(
                 select(EntityKey.entity_id, EntityKey.key_name).where(
                     EntityKey.kind == kind,
-                    or_(*[and_(EntityKey.key_name == k, EntityKey.key_value == v) for k, v in nkeys.items()]),
+                    or_(*[and_(EntityKey.key_name == k, EntityKey.key_value == v) for k, v in pairs]),
                 )
             ).all()
             strong_hits = {h.entity_id for h in hits if h.key_name not in SHARED_PRONE_KEYS}
@@ -262,9 +273,21 @@ class EntityResolver:
                 return ResolutionResult("unresolved", None, "conflict", 0.0,
                                         [Candidate(eid, 1.0, ["strong key match but conflicting serial/cloud id"])])
             if len(ids) > 1:
+                # An authoritative record (e.g. the directory entry) that matches several partial entities by
+                # *different* keys proves they are one entity - provided none of them contradicts it.
+                if set(nkeys) & AUTHORITATIVE_KEYS and not any(self._conflicts(i, nkeys) for i in ids)                         and not self._mutually_conflicting(sorted(ids)):
+                    primary = max(ids, key=lambda i: (self._has_authoritative(i), -len(self._keys(i))))
+                    return ResolutionResult("matched", primary, "deterministic_merge", 1.0,
+                                            merge_ids=sorted(i for i in ids if i != primary))
                 return ResolutionResult("unresolved", None, "conflict", 0.0,
                                         [Candidate(i, 1.0, ["shares a strong key"]) for i in sorted(ids)])
 
+        if kind == "identity" and attributes.get("derived_upn"):
+            d = str(attributes["derived_upn"]).lower()
+            ids = set(self.s.execute(select(EntityKey.entity_id).where(
+                EntityKey.kind == "identity", EntityKey.key_name.in_(("upn", "email")), EntityKey.key_value == d)).scalars())
+            if len(ids) == 1:
+                return ResolutionResult("matched", next(iter(ids)), "derived_upn", 0.9)
         if kind == "indicator":
             return ResolutionResult("created", None, "new", 1.0)
 
@@ -299,6 +322,20 @@ class EntityResolver:
         if not known:
             return True
         return any(fuzz.ratio(a, b) >= 90 for a in obs for b in known)
+
+    def _has_authoritative(self, entity_id: str) -> bool:
+        return self.s.execute(select(EntityKey.id).where(EntityKey.entity_id == entity_id,
+                                                         EntityKey.key_name.in_(AUTHORITATIVE_KEYS))).first() is not None
+
+    def _mutually_conflicting(self, ids: list[str]) -> bool:
+        seen: dict[str, str] = {}
+        for i in ids:
+            for k, v in self.s.execute(select(EntityKey.key_name, EntityKey.key_value).where(
+                    EntityKey.entity_id == i, EntityKey.key_name.in_(AUTHORITATIVE_KEYS))).all():
+                if k in seen and seen[k] != v:
+                    return True
+                seen[k] = v
+        return False
 
     def _conflicts(self, entity_id: str, nkeys: dict[str, str]) -> bool:
         existing = self.s.execute(
@@ -363,13 +400,22 @@ class EntityResolver:
             exact[0].reasons.append("only entity with this exact name")
         return sorted(out, key=lambda c: c.score, reverse=True)
 
-    def register(self, entity: Entity, kind: str, keys: dict[str, Any], attributes: dict[str, Any]) -> None:
-        """Index strong keys and weak hints for an entity after a match/create."""
-        for name, value in normalize_keys(kind, keys).items():
+    def register(self, entity: Entity, kind: str, keys: dict[str, Any], attributes: dict[str, Any]) -> list[tuple[str, str]]:
+        """Index strong keys and weak hints for an entity after a match/create.
+
+        A key already owned by *another* entity is never moved (that would silently merge two things);
+        it is returned as a collision so the caller can surface it for review."""
+        collisions: list[tuple[str, str]] = []
+        pairs = list(normalize_keys(kind, keys).items())
+        if kind == "identity":
+            pairs += [("email", str(a).lower()) for a in (attributes.get("email_aliases") or []) if "@" in str(a)]
+        for name, value in pairs:
             exists = self.s.execute(select(EntityKey).where(EntityKey.kind == kind, EntityKey.key_name == name,
                                                             EntityKey.key_value == value)).scalars().first()
             if exists is None:
                 self.s.add(EntityKey(entity_id=entity.id, kind=kind, key_name=name, key_value=value))
+            elif exists.entity_id != entity.id:
+                collisions.append((name, value))
         for name, values in hints_for(kind, attributes).items():
             for v in values:
                 exists = self.s.execute(select(EntityHint).where(EntityHint.entity_id == entity.id,
@@ -380,6 +426,11 @@ class EntityResolver:
                 else:
                     exists.seen_at = utcnow()
         self.s.flush()
+        return collisions
+
+    def key_owner(self, kind: str, name: str, value: str) -> str | None:
+        return self.s.execute(select(EntityKey.entity_id).where(EntityKey.kind == kind, EntityKey.key_name == name,
+                                                                EntityKey.key_value == value)).scalars().first()
 
     def absorb_provisional(self, entity: Entity, attrs: dict[str, Any], observed_at: datetime) -> list[str]:
         """Merge a single nameless (IP-only) asset seen at the same IP within the window into ``entity``."""
@@ -404,6 +455,42 @@ class EntityResolver:
             return []
         merge_entities(self.s, prov[0], entity.id, reason="named record at same IP upgraded a nameless record")
         return prov
+
+    def absorb_identity_aliases(self, entity: Entity) -> list[str]:
+        r"""Order independence for users: a SAM-only identity created earlier (e.g. from ``CCI\jane.doe`` before the
+        directory record arrived) whose derived UPN equals one of this entity's UPN/email keys is merged into it -
+        only when exactly one such provisional identity exists and no strong keys conflict."""
+        mine = {v for (v,) in self.s.execute(select(EntityKey.key_value).where(
+            EntityKey.entity_id == entity.id, EntityKey.key_name.in_(("upn", "email")))).all()}
+        if not mine:
+            return []
+        cands = set(self.s.execute(select(EntityHint.entity_id).where(
+            EntityHint.kind == "identity", EntityHint.hint_name == "derived_upn", EntityHint.hint_value.in_(mine),
+            EntityHint.entity_id != entity.id)).scalars())
+        prov = []
+        for eid in cands:
+            has_upn = self.s.execute(select(EntityKey.id).where(EntityKey.entity_id == eid,
+                                                                EntityKey.key_name.in_(("upn", "email", "entra_object_id")))).first()
+            if has_upn is None and not self._conflicts(entity.id, self._keys(eid)):
+                prov.append(eid)
+        merged: list[str] = []
+        if len(prov) == 1:
+            merge_entities(self.s, prov[0], entity.id, reason="directory identity absorbed an earlier account-name-only record")
+            merged.append(prov[0])
+        # A directory record (entra_object_id) is authoritative for the addresses it lists (primary + proxy
+        # addresses are unique per tenant): address-only identities created earlier from an alias or an old
+        # address are the same mailbox.
+        if self.s.execute(select(EntityKey.id).where(EntityKey.entity_id == entity.id,
+                                                     EntityKey.key_name == "entra_object_id")).first() is not None:
+            owners = set(self.s.execute(select(EntityKey.entity_id).where(
+                EntityKey.kind == "identity", EntityKey.key_name.in_(("upn", "email")), EntityKey.key_value.in_(mine),
+                EntityKey.entity_id != entity.id)).scalars())
+            for eid in sorted(owners):
+                other = self._keys(eid)
+                if set(other) <= {"upn", "email"} and not self._conflicts(entity.id, other):
+                    merge_entities(self.s, eid, entity.id, reason="directory identity owns this address (alias / former address)")
+                    merged.append(eid)
+        return merged
 
     def _keys(self, entity_id: str) -> dict[str, str]:
         return {k: v for k, v in self.s.execute(select(EntityKey.key_name, EntityKey.key_value)

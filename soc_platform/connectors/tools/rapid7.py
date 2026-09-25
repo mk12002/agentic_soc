@@ -125,10 +125,14 @@ class Rapid7Connector(ToolConnector):
                 return ok_lookup(self, recs, f"Rapid7: {len(assets)} asset(s), {vulns} vulnerabilities ({crit} critical)",
                                  recs[0].deep_link if recs else None, vulnerabilities=vulns, critical=crit)
             if entity_type == "cve":
-                body = self.get("/api/3/vulnerabilities", params={"cves": value})
-                vs = body.get("resources") or []
-                affected = sum(int(v.get("affected_assets", 0) or 0) for v in vs)
-                return ok_lookup(self, [], f"{value}: {len(vs)} Rapid7 check(s), {affected} affected asset(s)")
+                body = self.post("/api/3/assets/search", params={"size": 500}, json={
+                    "match": "all", "filters": [{"field": "cve", "operator": "is", "value": value.upper()}]})
+                assets = body.get("resources") or []
+                recs = [self._asset(a) for a in assets]
+                hosts = sorted({a.get("hostName") or a.get("ip") for a in assets})
+                return ok_lookup(self, recs, f"{value}: {len(assets)} affected asset(s) in Rapid7"
+                                             + (f" ({', '.join(hosts[:10])})" if hosts else ""),
+                                 affected_assets=len(assets), hosts=hosts)
             raise ValueError(entity_type)
 
         return self.timed_lookup(run)

@@ -12,6 +12,7 @@ from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import ApiKeyQuery, HttpTransport
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
+from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 
@@ -51,11 +52,9 @@ class CanaryConnector(ToolConnector):
                                                                                 "hostname": d.get("src_host_reverse")}))
             refs.append(EntityRef(kind="indicator", role="source_ip", keys={"value": src_ip}, attributes={"type": "ip"}))
         user = (d.get("logdata") or [{}])[0].get("USERNAME") if isinstance(d.get("logdata"), list) else None
-        if user:
-            dom = self.settings.get("user_domain")
-            upn = user if "@" in user else (f"{user}@{dom}" if dom else None)
-            refs.append(EntityRef(kind="identity", role="user", attributes={"display_name": user},
-                                  keys={"upn": upn.lower()} if upn else {}))
+        u = user_ref(user, default_domain=self.settings.get("user_domain"))
+        if u is not None:
+            refs.append(u)
         return [NormalizedRecord(
             kind="deception", tool=self.tool, source_type="incident", source_id=str(raw.get("id") or d.get("incident_id")),
             observed_at=parse_ts(d.get("created_std") or d.get("created")), title=d.get("description") or "Canary incident",

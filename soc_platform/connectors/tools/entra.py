@@ -14,6 +14,7 @@ from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.registry import ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ok_lookup, parse_ts, targets_of
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport
+from soc_platform.core.identity import email_aliases
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 PORTAL = "https://entra.microsoft.com"
@@ -37,7 +38,7 @@ class EntraConnector(MicrosoftConnector):
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
         path, params = {
             "users": ("/v1.0/users", {"$select": "id,userPrincipalName,mail,displayName,department,jobTitle,"
-                                                  "accountEnabled,onPremisesSamAccountName,onPremisesSecurityIdentifier",
+                                                  "accountEnabled,onPremisesSamAccountName,onPremisesSecurityIdentifier,proxyAddresses,otherMails",
                                       "$top": 999}),
             "signins": ("/v1.0/auditLogs/signIns", {"$top": 500}),
             "risky_users": ("/v1.0/identityProtection/riskyUsers", {"$top": 500}),
@@ -61,10 +62,11 @@ class EntraConnector(MicrosoftConnector):
         return NormalizedRecord(
             kind="identity", tool=self.tool, source_type="user", source_id=u["id"], dimension="identity",
             keys={"entra_object_id": u["id"], "upn": u.get("userPrincipalName"), "email": u.get("mail"),
-                  "sid": u.get("onPremisesSecurityIdentifier")},
+                  "sid": u.get("onPremisesSecurityIdentifier"), "sam": u.get("onPremisesSamAccountName")},
             attributes={"display_name": u.get("displayName"), "department": u.get("department"),
                         "job_title": u.get("jobTitle"), "account_enabled": u.get("accountEnabled"),
-                        "sam_account_name": u.get("onPremisesSamAccountName")},
+                        "sam_account_name": u.get("onPremisesSamAccountName"),
+                        "email_aliases": email_aliases(u.get("proxyAddresses"), u.get("otherMails"))},
             deep_link=f"{PORTAL}/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/{u['id']}")
 
     def _uref(self, upn: str | None, oid: str | None) -> EntityRef:
@@ -133,10 +135,9 @@ class EntraConnector(MicrosoftConnector):
     def identity_context(self, upn: str, since_iso: str | None = None) -> dict[str, Any]:
         u = self.get(f"/v1.0/users/{upn}", params={"$select": "id,userPrincipalName,displayName,department,jobTitle,"
                                                                "accountEnabled,createdDateTime"})
-        roles = [r.get("displayName") for r in self.get(f"/v1.0/users/{upn}/transitiveMemberOf").get("value", [])
-                 if r.get("@odata.type", "").endswith("directoryRole")]
-        groups = [g.get("displayName") for g in self.get(f"/v1.0/users/{upn}/transitiveMemberOf").get("value", [])
-                  if g.get("@odata.type", "").endswith("group")]
+        membership = self.odata_all(f"/v1.0/users/{upn}/transitiveMemberOf", limit=2000)
+        roles = [r.get("displayName") for r in membership if r.get("@odata.type", "").endswith("directoryRole")]
+        groups = [g.get("displayName") for g in membership if g.get("@odata.type", "").endswith("group")]
         methods = [m.get("@odata.type", "").split(".")[-1] for m in
                    self.get(f"/v1.0/users/{upn}/authentication/methods").get("value", [])]
         flt = f"userPrincipalName eq '{upn}'" + (f" and createdDateTime ge {since_iso}" if since_iso else "")

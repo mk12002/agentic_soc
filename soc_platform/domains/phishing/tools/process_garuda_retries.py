@@ -6,8 +6,6 @@ from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
 REPO_ROOT = PHISHING_HOME
 pass  # (package import; no sys.path hack needed)

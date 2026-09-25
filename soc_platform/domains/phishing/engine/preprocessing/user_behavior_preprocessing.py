@@ -5,14 +5,10 @@ and outputs a compiled feature dataset ready for XGBoost.
 """
 
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
-import os
 import sqlite3
 import random
-import time
 import pandas as pd
-import numpy as np
 from pathlib import Path
-from datetime import datetime, timedelta
 
 from soc_platform.domains.phishing.engine.preprocessing.user_behavior_feature_contract import extract_behavior_features
 
@@ -113,7 +109,7 @@ def synthesize_email_payloads(conn: sqlite3.Connection, employees: list) -> pd.D
                 subject = "URGENT: Password Reset Required Immediately"
                 urls = ["http://evil.com/login"]
             elif scenario == "cold_exec_spoof":
-                sender = f"ceo_personal@gmail.com"
+                sender = "ceo_personal@gmail.com"
                 subject = "Urgent wire transfer needed"
                 urls = []
             else:

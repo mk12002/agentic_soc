@@ -10,19 +10,19 @@ From: "Microsoft Azure" <billing@azure.microsoft.com>
 To: jane.doe@cci-demo.com
 Subject: Your Azure invoice for September 2026
 Date: Sun, 20 Sep 2026 08:10:00 +0000
-Message-ID: <179026443137.13628.9092099675233782745@azure.microsoft.com>
+Message-ID: <179028143810.25860.15316426753929184196@azure.microsoft.com>
 X-Test-Label: safe
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============2359851108872425530=="
+Content-Type: multipart/mixed; boundary="===============0006384606459074233=="
 
---===============2359851108872425530==
+--===============0006384606459074233==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 
 Your invoice is available in the Azure portal: https://portal.azure.com/#blad=
 e/Billing
 
---===============2359851108872425530==
+--===============0006384606459074233==
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="invoice-2026-09.pdf"
@@ -35,4 +35,4 @@ dGggNjU+PnN0cmVhbQpCVCAvRjEgMTIgVGYgNzIgNzIwIFRkIChJbnZvaWNlIDIwMjYtMDkgdG90
 YWwgSU5SIDEsMjQsMDAwKSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEg
 MCBSPj4KJSVFT0Y=
 
---===============2359851108872425530==--
+--===============0006384606459074233==--

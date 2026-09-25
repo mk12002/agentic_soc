@@ -13,6 +13,7 @@ from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
+from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 API = "https://api.umbrella.com"
@@ -42,8 +43,9 @@ class UmbrellaConnector(ToolConnector):
         if ident.get("label"):
             refs.append(EntityRef(kind="asset", role="host", attributes={"hostname": ident["label"],
                                                                           "ip": raw.get("internalip")}))
-        if user.get("label") and "@" in user.get("label", ""):
-            refs.append(EntityRef(kind="identity", role="user", keys={"upn": user["label"]}))
+        u = user_ref(user.get("label"))
+        if u is not None and u.keys.get("upn"):  # Umbrella directory labels are only trusted when they carry a UPN
+            refs.append(u)
         ts = raw.get("timestamp") or f"{raw.get('date')}T{raw.get('time')}Z"
         return [NormalizedRecord(
             kind="dns", tool=self.tool, source_type="dns_request",
@@ -68,6 +70,19 @@ class UmbrellaConnector(ToolConnector):
         if identity:
             params["identityids"] = identity
         return self.get("/reports/v2/activity/dns", params=params).get("data") or []
+
+    def activity_all(self, *, since: str = "-7days", max_rows: int = 50_000) -> tuple[list[dict[str, Any]], bool]:
+        """Every DNS activity row in the window (offset paging); returns (rows, truncated)."""
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while len(rows) < max_rows:
+            page = self.get("/reports/v2/activity/dns", params={"from": since, "to": "now", "limit": 1000,
+                                                                "offset": offset}).get("data") or []
+            rows += page
+            if len(page) < 1000:
+                return rows, False
+            offset += len(page)
+        return rows[:max_rows], True
 
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:

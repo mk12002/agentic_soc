@@ -23,17 +23,36 @@ from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 
 class RawStore:
-    """Object storage for raw source payloads (VM-T05). Local filesystem in dev; blob in prod."""
+    """Object storage for raw source payloads (VM-T05). Local filesystem in dev; blob in prod.
 
-    def __init__(self, root: str | Path) -> None:
+    Payloads are encrypted at rest when ``SOC_DATA_KEY`` is configured (mandatory in prod)."""
+
+    def __init__(self, root: str | Path, cipher: Any = "auto") -> None:
+        from soc_platform.core.crypto import get_cipher
+
         self.root = Path(root)
+        self.cipher = get_cipher() if cipher == "auto" else cipher
 
     def put(self, tool: str, source_type: str, source_id: str, payload: dict[str, Any]) -> str:
-        digest = hashlib.sha256(source_id.encode()).hexdigest()[:24]
-        path = self.root / tool / source_type / f"{digest}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, default=str, indent=1), encoding="utf-8")
+        from soc_platform.core.crypto import write_protected
+
+        digest = hashlib.sha256(f"{tool}|{source_type}|{source_id}".encode()).hexdigest()[:32]
+        path = self.root / _safe(tool) / _safe(source_type) / f"{digest}.json"
+        write_protected(path, json.dumps(payload, default=str, indent=1).encode("utf-8"), self.cipher)
         return str(path)
+
+    def get(self, ref: str) -> dict[str, Any]:
+        from soc_platform.core.crypto import read_protected
+
+        p = Path(ref).resolve()
+        if self.root.resolve() not in p.parents:
+            raise PermissionError("raw reference outside the raw store")
+        return json.loads(read_protected(p, self.cipher).decode("utf-8"))
+
+
+def _safe(part: str) -> str:
+    """Path component from tool/stream names: no traversal, no separators."""
+    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(part)).strip(".") or "_"
 
 
 class ContextStore:
@@ -70,7 +89,10 @@ class ContextStore:
                 ent = self.s.get(Entity, src.entity_id)
                 if ent is not None:
                     self._touch(ent, rec.attributes, observed, rec.tool)
-                    self.resolver.register(ent, rec.kind, rec.keys, rec.attributes)
+                    collisions = self.resolver.register(ent, rec.kind, rec.keys, rec.attributes)
+                    if rec.kind == "identity":
+                        self.resolver.absorb_identity_aliases(ent)
+                    self._queue_collisions(src, ent, rec.kind, collisions)
         else:
             event = self._event_entity(src, rec, observed)
             for ref in rec.refs:
@@ -113,10 +135,16 @@ class ContextStore:
         src.resolution_confidence = res.confidence
         if kind == "asset":
             self.resolver.absorb_provisional(ent, attrs, observed)
+        elif kind == "identity":
+            self.resolver.absorb_identity_aliases(ent)
 
     def _materialise(self, res: ResolutionResult, kind: str, keys: dict[str, Any], attrs: dict[str, Any],
                      observed: datetime, tool: str) -> Entity:
         if res.entity_id:
+            from soc_platform.core.entity_resolution import merge_entities
+
+            for other in res.merge_ids:
+                merge_entities(self.s, other, res.entity_id, reason=f"authoritative {tool} record matched both")
             ent = self.s.get(Entity, res.entity_id)
             assert ent is not None
             self._touch(ent, attrs, observed, tool)
@@ -128,6 +156,8 @@ class ContextStore:
             self.s.add(ent)
             self.s.flush()
         self.resolver.register(ent, kind, keys, attrs)
+        if kind == "identity":
+            self.resolver.absorb_identity_aliases(ent)
         return ent
 
     def _touch(self, ent: Entity, attrs: dict[str, Any], observed: datetime, tool: str) -> None:
@@ -163,6 +193,22 @@ class ContextStore:
         src.resolution_method = "event"
         src.resolution_confidence = 1.0
         return ent
+
+    def _queue_collisions(self, src: SourceRecord, ent: Entity, kind: str, collisions: list[tuple[str, str]]) -> None:
+        """A re-synced record now carries a key another entity owns (e.g. an address reassigned to a different
+        user, or a corrupted record). Never merge automatically; ask an analyst."""
+        from soc_platform.core.entity_resolution import Candidate
+
+        owners = {}
+        for name, value in collisions:
+            owner = self.resolver.key_owner(kind, name, value)
+            if owner and owner != ent.id:
+                owners.setdefault(owner, []).append(f"{name}={value}")
+        if owners:
+            res = ResolutionResult("unresolved", None, "key_collision", 0.0,
+                                   [Candidate(ent.id, 1.0, ["current owner of this record"])] +
+                                   [Candidate(o, 0.0, [f"already owns {', '.join(v)}"]) for o, v in owners.items()])
+            self._queue(src, kind, res, reason="key_collision: record carries keys owned by another entity")
 
     def _queue(self, src: SourceRecord, kind: str, res: ResolutionResult, reason: str,
                extra: dict[str, Any] | None = None) -> None:

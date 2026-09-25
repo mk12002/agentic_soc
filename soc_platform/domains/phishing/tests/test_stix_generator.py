@@ -1,4 +1,3 @@
-import pytest
 from soc_platform.domains.phishing.engine.orchestrator.stix_generator import generate_stix_bundle
 
 def test_generate_stix_bundle():

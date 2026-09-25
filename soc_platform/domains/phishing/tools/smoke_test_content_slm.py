@@ -7,7 +7,6 @@ before sending text through the HuggingFace inference pipeline.
 
 import sys
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
-from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
 

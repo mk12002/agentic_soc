@@ -25,7 +25,8 @@ from sqlalchemy.orm import Session
 from soc_platform.connectors.registry import ConnectorRegistry
 from soc_platform.core.actions import ActionRegistry
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.auth import Perm, Principal
+from soc_platform.core.auth import Principal
+from soc_platform.core.crypto import read_protected, write_protected
 from soc_platform.core.cases import CaseService, Recommendation
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.enrichment import evidence_for_llm
@@ -79,7 +80,7 @@ class PhishingService:
                  raw_dir: str | Path = "./data/raw/phishing", campaign_threshold: float = 0.5) -> None:
         self.s = session
         self.registry = registry
-        self.policy = policy or PolicyEngine()
+        self.policy = policy or PolicyEngine.for_session(session)
         self.llm = llm
         self.actions = actions or registry.action_registry()
         self.cases = CaseService(session)
@@ -87,7 +88,10 @@ class PhishingService:
         self.audit = AuditLog(session)
         self.org_domains = [d.lower() for d in (org_domains or [])]
         ti = registry.get("threat_intel") if "threat_intel" in registry.enabled_names() else None
-        heuristic = HeuristicAnalyzer(org_domains=self.org_domains, threat_intel=ti)
+        from soc_platform.domains.phishing.supplier import load_suppliers
+
+        partners = [d for sup in load_suppliers() for d in sup.domains]
+        heuristic = HeuristicAnalyzer(org_domains=self.org_domains, threat_intel=ti, partner_domains=partners)
         self.analyzer = CompositeAnalyzer(heuristic, EngineAnalyzer() if use_engine else None)
         self.auto_close = auto_close or AutoClosePolicy()
         self.raw_dir = Path(raw_dir)
@@ -102,9 +106,8 @@ class PhishingService:
         existing = self.s.execute(select(Submission).where(Submission.source_ref == ref)).scalars().first()
         if existing:
             return existing  # replay-safe
-        self.raw_dir.mkdir(parents=True, exist_ok=True)
         path = self.raw_dir / f"{sha}.eml"
-        path.write_bytes(raw)  # original message preserved intact (headers included)
+        write_protected(path, raw)  # original message preserved intact (headers included); encrypted at rest
         em = decompose(raw)
         sub = Submission(source=source, source_ref=ref, reporter=(reporter or "").lower() or None,
                          internet_message_id=em.message_id, subject=em.subject, sender=em.sender, mime_sha256=sha,
@@ -140,7 +143,9 @@ class PhishingService:
 
     def process(self, submission_id: str) -> dict[str, Any]:
         sub = self.s.get(Submission, submission_id)
-        raw = Path(sub.raw_path).read_bytes()
+        if not sub.raw_path:
+            raise ValueError("original message no longer retained (retention policy)")
+        raw = read_protected(sub.raw_path)
         em = decompose(raw)
         result = self.analyzer.analyze(em, raw)
         case = self.cases.create("phishing", f"Reported: {em.subject or '(no subject)'}", severity=SEVERITY[result.verdict],

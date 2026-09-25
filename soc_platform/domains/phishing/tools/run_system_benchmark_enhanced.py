@@ -23,7 +23,6 @@ import statistics
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -153,7 +152,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         endpoint = args.base_url.rstrip("/") + args.endpoint_path
     semaphore = asyncio.Semaphore(max(1, args.concurrency))
 
-    print(f"📊 Benchmarking Configuration:")
+    print("📊 Benchmarking Configuration:")
     print(f"  - Endpoint: {endpoint}")
     print(f"  - Requests: {args.requests}")
     print(f"  - Concurrency: {args.concurrency}")
@@ -272,8 +271,8 @@ def _format_report_md(report: dict[str, Any]) -> str:
         f"- Error Rate: `{report['results']['error_rate']:.2f}%`",
         "",
         "## Latency (ms)",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Min | {report['latency_ms']['min']} |",
         f"| Avg | {report['latency_ms']['avg']} |",
         f"| P50 | {report['latency_ms']['p50']} |",
@@ -291,8 +290,8 @@ def _format_report_md(report: dict[str, Any]) -> str:
         f"- Overall SLA: `{'✓ PASS' if report['sla']['overall_passed'] else '✗ FAIL'}`",
         "",
         "## System Metrics",
-        f"| Metric | Pre | Post | Delta |",
-        f"|--------|-----|------|-------|",
+        "| Metric | Pre | Post | Delta |",
+        "|--------|-----|------|-------|",
         f"| Memory (MB) | {report['system_metrics']['pre_benchmark'].get('memory_mb', 'N/A')} | {report['system_metrics']['post_benchmark'].get('memory_mb', 'N/A')} | {report['system_metrics']['memory_delta_mb']} |",
         f"| CPU % | {report['system_metrics']['pre_benchmark'].get('cpu_percent', 'N/A')} | {report['system_metrics']['post_benchmark'].get('cpu_percent', 'N/A')} | - |",
     ]

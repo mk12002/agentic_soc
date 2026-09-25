@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Any, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 import importlib

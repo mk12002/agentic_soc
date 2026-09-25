@@ -1,8 +1,5 @@
-import time
-import json
 from fastapi.testclient import TestClient
 from soc_platform.domains.phishing.engine.api.main import app
-from soc_platform.domains.phishing.engine.services.messaging_service import RabbitMQClient
 
 
 

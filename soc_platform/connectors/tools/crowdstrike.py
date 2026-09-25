@@ -19,6 +19,7 @@ from soc_platform.connectors.tools._common import (
     parse_ts,
     targets_of,
 )
+from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 CONSOLE = "https://falcon.crowdstrike.com"
@@ -86,12 +87,7 @@ class CrowdStrikeConnector(ToolConnector):
                                      "os": dev.get("os_version") or dev.get("platform_name")})
 
     def _user_ref(self, user: str | None) -> EntityRef | None:
-        if not user:
-            return None
-        u = user.split("\\")[-1]
-        domain = self.settings.get("user_domain")
-        keys = {"upn": u if "@" in u else f"{u}@{domain}"} if ("@" in u or domain) else {}
-        return EntityRef(kind="identity", role="user", keys=keys, attributes={"display_name": u})
+        return user_ref(user, default_domain=self.settings.get("user_domain"))
 
     def _host(self, d: dict[str, Any]) -> NormalizedRecord:
         return NormalizedRecord(

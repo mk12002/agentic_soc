@@ -6,9 +6,9 @@ and registrar reputation scoring.
 """
 
 from __future__ import annotations
-import time, hashlib, json, re, socket
+import time, re
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("domain_enrichment")

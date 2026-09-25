@@ -44,7 +44,6 @@ from datasets import Dataset
 from tqdm.auto import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
     BertTokenizer,
     BertForSequenceClassification,
     DataCollatorWithPadding,
@@ -81,7 +80,7 @@ LOGGING_STEPS = int(os.getenv("SLM_LOGGING_STEPS", str(settings.slm_logging_step
 RESUME_TRAINING = os.getenv("SLM_RESUME", "1") == "1"
 FORCE_RETRAIN = os.getenv("SLM_FORCE_RETRAIN", "0") == "1"
 
-print(f"✓ SLM Training Parameters (30GB RAM Optimized):")
+print("✓ SLM Training Parameters (30GB RAM Optimized):")
 print(f"  - Max Sequence Length: {MAX_SEQ_LEN} (increased from 96)")
 print(f"  - Max Words per Sample: {MAX_WORDS_PER_SAMPLE} (increased from 180)")
 print(f"  - Max Samples per Class: {MAX_SAMPLES_PER_CLASS} (increased from 120K)")
@@ -313,9 +312,9 @@ def main():
                     "or increase SLM_NUM_EPOCHS."
                 )
                 return
-            print(f"==================================================")
+            print("==================================================")
             print(f" RESUMING TRAINING from checkpoint: {last_checkpoint}")
-            print(f"==================================================")
+            print("==================================================")
 
     training_args = TrainingArguments(
         output_dir=str(OUTPUT_DIR),

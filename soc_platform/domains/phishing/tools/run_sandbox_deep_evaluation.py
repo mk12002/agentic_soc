@@ -5,7 +5,6 @@ from __future__ import annotations
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
-import os
 import sys
 import tempfile
 from contextlib import contextmanager

@@ -73,6 +73,210 @@
          "operatingSystem": "Linux",
          "hasWideInternetExposure": true
         }
+       }
+      ],
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": "c1"
+      }
+     }
+    }
+   },
+   "status": 200,
+   "body_contains": [
+    "vulnerabilityExternalId",
+    "\"CVE-2021-44228\""
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/graphql$",
+   "body": {
+    "data": {
+     "vulnerabilityFindings": {
+      "nodes": [],
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": "c1"
+      }
+     }
+    }
+   },
+   "status": 200,
+   "body_contains": [
+    "vulnerabilityExternalId",
+    "\"CVE-2024-21412\""
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/graphql$",
+   "body": {
+    "data": {
+     "vulnerabilityFindings": {
+      "nodes": [
+       {
+        "id": "wiz-vf-cve-2023-44487",
+        "name": "CVE-2023-44487",
+        "CVSSSeverity": "HIGH",
+        "score": 7.5,
+        "exploitabilityScore": 3.9,
+        "hasExploit": true,
+        "hasCisaKevExploit": true,
+        "status": "OPEN",
+        "firstDetectedAt": "2026-08-20T00:00:00Z",
+        "lastDetectedAt": "2026-09-20T04:00:00Z",
+        "fixedVersion": null,
+        "detailedName": "nginx",
+        "version": "1.18.0",
+        "remediation": "Upgrade nginx 1.18.0",
+        "portalUrl": "https://app.wiz.io/vulnerability-findings#CVE-2023-44487",
+        "vulnerableAsset": {
+         "id": "wiz-vm-web01",
+         "name": "web01",
+         "type": "VIRTUAL_MACHINE",
+         "providerUniqueId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web01",
+         "ipAddresses": [
+          "10.10.0.5"
+         ],
+         "operatingSystem": "Linux",
+         "hasWideInternetExposure": true
+        }
+       }
+      ],
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": "c1"
+      }
+     }
+    }
+   },
+   "status": 200,
+   "body_contains": [
+    "vulnerabilityExternalId",
+    "\"CVE-2023-44487\""
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/graphql$",
+   "body": {
+    "data": {
+     "vulnerabilityFindings": {
+      "nodes": [
+       {
+        "id": "wiz-vf-cve-2023-38408",
+        "name": "CVE-2023-38408",
+        "CVSSSeverity": "CRITICAL",
+        "score": 9.8,
+        "exploitabilityScore": 3.9,
+        "hasExploit": false,
+        "hasCisaKevExploit": false,
+        "status": "OPEN",
+        "firstDetectedAt": "2026-08-20T00:00:00Z",
+        "lastDetectedAt": "2026-09-20T04:00:00Z",
+        "fixedVersion": null,
+        "detailedName": "OpenSSH",
+        "version": "8.9p1",
+        "remediation": "Upgrade OpenSSH 8.9p1",
+        "portalUrl": "https://app.wiz.io/vulnerability-findings#CVE-2023-38408",
+        "vulnerableAsset": {
+         "id": "wiz-vm-web01",
+         "name": "web01",
+         "type": "VIRTUAL_MACHINE",
+         "providerUniqueId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web01",
+         "ipAddresses": [
+          "10.10.0.5"
+         ],
+         "operatingSystem": "Linux",
+         "hasWideInternetExposure": true
+        }
+       }
+      ],
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": "c1"
+      }
+     }
+    }
+   },
+   "status": 200,
+   "body_contains": [
+    "vulnerabilityExternalId",
+    "\"CVE-2023-38408\""
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/graphql$",
+   "body": {
+    "data": {
+     "vulnerabilityFindings": {
+      "nodes": [],
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": "c1"
+      }
+     }
+    }
+   },
+   "status": 200,
+   "body_contains": [
+    "vulnerabilityExternalId",
+    "\"CVE-2022-41082\""
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/graphql$",
+   "body": {
+    "data": {
+     "vulnerabilityFindings": {
+      "nodes": [],
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": "c1"
+      }
+     }
+    }
+   },
+   "status": 200,
+   "body_contains": "vulnerabilityExternalId"
+  },
+  {
+   "method": "POST",
+   "path": "^/graphql$",
+   "body": {
+    "data": {
+     "vulnerabilityFindings": {
+      "nodes": [
+       {
+        "id": "wiz-vf-cve-2021-44228",
+        "name": "CVE-2021-44228",
+        "CVSSSeverity": "CRITICAL",
+        "score": 10.0,
+        "exploitabilityScore": 3.9,
+        "hasExploit": true,
+        "hasCisaKevExploit": true,
+        "status": "OPEN",
+        "firstDetectedAt": "2026-08-20T00:00:00Z",
+        "lastDetectedAt": "2026-09-20T04:00:00Z",
+        "fixedVersion": "2.17.1",
+        "detailedName": "Apache",
+        "version": "2.14.1",
+        "remediation": "Upgrade Apache Log4j 2.14.1",
+        "portalUrl": "https://app.wiz.io/vulnerability-findings#CVE-2021-44228",
+        "vulnerableAsset": {
+         "id": "wiz-vm-web01",
+         "name": "web01",
+         "type": "VIRTUAL_MACHINE",
+         "providerUniqueId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web01",
+         "ipAddresses": [
+          "10.10.0.5"
+         ],
+         "operatingSystem": "Linux",
+         "hasWideInternetExposure": true
+        }
        },
        {
         "id": "wiz-vf-cve-2023-44487",
@@ -146,7 +350,7 @@
    "path": "^/graphql$",
    "body": {
     "data": {
-     "issues": {
+     "issuesV2": {
       "nodes": [
        {
         "id": "wiz-issue-001",
@@ -195,7 +399,7 @@
     }
    },
    "status": 200,
-   "body_contains": "issues("
+   "body_contains": "issuesV2("
   }
  ]
 }

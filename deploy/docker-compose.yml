@@ -30,6 +30,7 @@ x-engine-env: &engine-env
   RABBITMQ_USER: ${RABBITMQ_USER:-soc}
   RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-}
   SOC_PHISHING_HOME: /app/artifacts/phishing
+  API_HOST: 0.0.0.0   # container network only; the engine port is not published to the host
   IOC_DB_PATH: /app/data/ioc_store.db
   ACTION_SIMULATED_MODE: "1"
   ACTION_REQUIRE_APPROVAL: "1"

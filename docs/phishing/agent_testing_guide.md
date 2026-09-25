@@ -181,7 +181,7 @@ For `attachment_agent` and `sandbox_agent`, include realistic attachment metadat
 ## File Location
 
 This guide is saved at:
-- `email_security/docs/agent_testing_guide.md`
+- `docs/phishing/agent_testing_guide.md`
 
 graph TD
     classDef newFeature fill:#1e40af,stroke:#60a5fa,stroke-width:2px,color:#fff

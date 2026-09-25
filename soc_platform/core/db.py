@@ -58,16 +58,23 @@ def _sqlite_pragmas(dbapi_conn, _record) -> None:
 
 
 _default: Database | None = None
+_init_lock = __import__("threading").Lock()
 
 
 def get_database() -> Database:
+    """Process-wide database, created once (thread-safe: request threads and background writers race here)."""
     global _default
-    if _default is None:
-        from soc_platform.config import get_settings
+    db = _default
+    if db is not None:
+        return db
+    with _init_lock:
+        if _default is None:
+            from soc_platform.config import get_settings
 
-        _default = Database(get_settings().database_url)
-        _default.create_all()
-    return _default
+            fresh = Database(get_settings().database_url)
+            fresh.create_all()
+            _default = fresh  # published only once the schema exists
+        return _default
 
 
 def set_database(db: Database) -> None:

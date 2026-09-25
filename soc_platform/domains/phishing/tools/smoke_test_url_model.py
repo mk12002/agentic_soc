@@ -5,7 +5,6 @@ from __future__ import annotations
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import importlib.util
-import sys
 from pathlib import Path
 
 REPO_ROOT = PHISHING_HOME

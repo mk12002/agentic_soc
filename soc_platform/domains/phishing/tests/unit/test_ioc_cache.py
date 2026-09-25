@@ -1,6 +1,5 @@
 """Tests for the IOC multi-tier cache system."""
 
-import pytest
 import time
 from soc_platform.domains.phishing.engine.action_layer.ioc_cache import MultiTierIOCCache
 

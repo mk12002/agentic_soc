@@ -5,7 +5,6 @@ Uses the shared ml_runtime loader for consistency across agents.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 from soc_platform.domains.phishing.engine.agents.ml_runtime import load_model_bundle, resolve_model_path

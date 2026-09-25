@@ -18,6 +18,7 @@ import base64
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
+from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ok_lookup, parse_ts, sev_name
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport, kql_list, kql_str
@@ -242,7 +243,7 @@ class DefenderOffice365Connector(MicrosoftConnector):
         """Tenant Allow/Block List entry through the Exchange Online admin API (verify in tenant)."""
         senders = [t["value"] for t in targets if t.get("type") == "indicator" and t.get("indicator_type") in {"email", "domain"}]
         tenant = self.settings.get("tenant_id", "")
-        body = self.post(f"https://outlook.office365.com/adminapi/beta/{tenant}/InvokeCommand", json={
+        body = self.post(f"{EXO}/adminapi/beta/{tenant}/InvokeCommand", json={
             "CmdletInput": {"CmdletName": "New-TenantAllowBlockListItems", "Parameters": {
                 "ListType": "Sender", "Block": True, "Entries": senders,
                 "ExpirationDate": params.get("expires"), "Notes": params.get("reason", "SOC platform")}}})
@@ -251,10 +252,19 @@ class DefenderOffice365Connector(MicrosoftConnector):
     def unblock_sender(self, params: dict, targets: list) -> dict:
         senders = [t["value"] for t in targets if t.get("type") == "indicator"]
         tenant = self.settings.get("tenant_id", "")
-        self.post(f"https://outlook.office365.com/adminapi/beta/{tenant}/InvokeCommand", json={
+        self.post(f"{EXO}/adminapi/beta/{tenant}/InvokeCommand", json={
             "CmdletInput": {"CmdletName": "Remove-TenantAllowBlockListItems",
                             "Parameters": {"ListType": "Sender", "Entries": senders}}})
         return {"unblocked": senders}
+
+
+EXO = "https://outlook.office365.com"
+
+
+def _live(s: dict[str, Any]) -> RoutingTransport:
+    """Graph for mail/alerts; the Exchange Online admin API needs its own token audience."""
+    exo = HttpTransport(EXO, entra_app_auth(s["tenant_id"], s["client_id"], s["client_secret"], f"{EXO}/.default"))
+    return RoutingTransport(graph_transport(s), {EXO: exo})
 
 
 def _email_targets(params: dict, targets: list) -> list[str]:
@@ -285,7 +295,7 @@ MANIFEST = ConnectorManifest(
     dimension="email",
     description="User-reported mail, email alerts, message trace & campaign hunting, click telemetry, remediation.",
     factory=lambda s, t: DefenderOffice365Connector(s, t, rate_per_sec=2, burst=5),
-    live_transport=graph_transport,
+    live_transport=_live,
     config=APP_FIELDS + [ConfigField("reporting_mailbox", "Mailbox receiving user-reported messages / SOC mailbox")],
     actions=_actions, confidence="High",
     to_confirm="Licence tier for advanced hunting and Safe Links click telemetry; Graph app permissions; "

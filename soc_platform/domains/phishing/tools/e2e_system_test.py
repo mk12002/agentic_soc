@@ -2,7 +2,6 @@ from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 #!/usr/bin/env python3
 """Comprehensive E2E system test — ingest 5 diverse emails and collect full analysis."""
 
-import json
 import sys
 import time
 import requests

@@ -98,54 +98,19 @@ def cmd_fixtures() -> None:
     subprocess.run([sys.executable, str(ROOT / "scripts" / "build_email_corpus.py")], check=True)
 
 
-JOBS = {  # name -> (interval seconds env var, default seconds)
-    "incident": ("SOC_JOB_INCIDENT_SECONDS", 300),
-    "phishing": ("SOC_JOB_PHISHING_SECONDS", 120),
-    "vulnerability": ("SOC_JOB_VM_SECONDS", 6 * 3600),
-    "follow_up": ("SOC_JOB_FOLLOWUP_SECONDS", 24 * 3600),
-    "daily_report": ("SOC_JOB_DAILY_REPORT_SECONDS", 24 * 3600),
-    "intelligence": ("SOC_JOB_INTELLIGENCE_SECONDS", 600),
-}
-
-
 def cmd_scheduler(once: bool = False) -> None:
-    from soc_platform.api.app import _services
-    from soc_platform.reporting.reports import ReportService
-    from soc_platform.config import get_settings
+    """Run due jobs forever (or once). Each run is leased, retried, recorded and dead-lettered (see jobs.py)."""
+    from soc_platform import jobs
 
     last: dict[str, float] = {}
     while True:
-        for name, (env, default) in JOBS.items():
-            every = int(os.environ.get(env, default))
-            if time.time() - last.get(name, 0) < every:
-                continue
+        for name in jobs.due(time.time(), last):
             last[name] = time.time()
-            try:
-                with _db().session() as s:
-                    sv = _services(s)
-                    if name == "incident":
-                        sv["incident"].ingest()
-                        for c in sv["incident"].cluster():
-                            if c.status != "closed":
-                                sv["incident"].investigate(c.id)
-                    elif name == "phishing":
-                        for sub in sv["phishing"].ingest_reported():
-                            if sub.status == "new":
-                                sv["phishing"].process(sub.id)
-                    elif name == "vulnerability":
-                        sv["vulnerability"].refresh()
-                    elif name == "follow_up":
-                        sv["vulnerability"].follow_up()
-                        sv["vulnerability"].expire_exceptions()
-                    elif name == "intelligence":
-                        from soc_platform.api.app import _intel
-
-                        _intel(s).refresh()
-                    elif name == "daily_report":
-                        ReportService(s, get_settings().report_output_dir).daily_exposure(sv["vulnerability"])
-                print(json.dumps({"job": name, "status": "ok", "at": time.time()}), flush=True)
-            except Exception as exc:  # a failing job must not stop the scheduler
-                print(json.dumps({"job": name, "status": "error", "error": str(exc)[:300]}), flush=True)
+            run = jobs.run_job(name)
+            print(json.dumps({"job": name, "status": run.status if run else "skipped (lease held elsewhere)",
+                              "attempts": run.attempts if run else 0,
+                              "error": (run.error or "").splitlines()[0] if run and run.error else None,
+                              "at": time.time()}), flush=True)
         if once:
             return
         time.sleep(15)

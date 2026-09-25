@@ -61,6 +61,8 @@ class IntelligenceAnalyst:
             ToolSpec("vulnerability_query", "question", "Vulnerability findings in natural language.", self._vm_query),
             ToolSpec("affected_devices", "cve", "Assets affected by a CVE with owners.", self._affected),
             ToolSpec("pending_approvals", "", "Actions waiting for analyst approval.", self._pending),
+            ToolSpec("entity_context", "entity_id", "Cases, correlated findings and pending actions for a user/host.",
+                     self._entity_context),
         ]}
 
     # ------------------------------------------------------------------ tools (read-only)
@@ -136,6 +138,24 @@ class IntelligenceAnalyst:
                 "assets": [{k: a[k] for k in ("asset", "platform_team", "priority", "status", "internet_exposed")}
                            for a in r["assets"]]}
 
+    def _entity_context(self, entity_id: str = "") -> Any:
+        """Cases, correlated findings and pending actions that involve one user/host."""
+        from soc_platform.core.models import CaseEntity
+
+        case_ids = list(dict.fromkeys(ce.case_id for ce in self.s.execute(
+            select(CaseEntity).where(CaseEntity.entity_id == entity_id)).scalars()))
+        cases = [c for c in (self.s.get(Case, i) for i in case_ids) if c is not None]
+        ins = [i for i in self.s.execute(select(Insight).where(Insight.status != "dismissed")
+                                         .order_by(Insight.score.desc())).scalars() if entity_id in (i.entity_ids or [])]
+        acts = self.s.execute(select(ActionRequest).where(ActionRequest.case_id.in_(case_ids or ["-"]),
+                                                          ActionRequest.status.in_(("recommended", "pending_approval")))
+                              ).scalars().all()
+        return {"cases": [{"case_id": c.id, "title": c.title, "severity": c.severity, "verdict": c.verdict,
+                           "status": c.status, "domain": c.domain} for c in cases],
+                "insights": [{"insight_id": i.id, "title": i.title, "severity": i.severity, "rule": i.rule,
+                              "next_steps": i.next_steps} for i in ins[:5]],
+                "pending_actions": [{"action_id": a.id, "action": a.action_type, "rationale": a.rationale} for a in acts]}
+
     def _pending(self) -> Any:
         rows = self.s.execute(select(ActionRequest).where(ActionRequest.status.in_(("recommended", "pending_approval")))
                               .limit(30)).scalars().all()
@@ -202,6 +222,8 @@ class IntelligenceAnalyst:
                         r["tool"] in {"find_entity", "search_entities"}:
                     results.append({"tool": "entity_risk", "args": {"entity_id": it["entity_id"]},
                                     "result": self._entity_risk(it["entity_id"])})
+                    results.append({"tool": "entity_context", "args": {"entity_id": it["entity_id"]},
+                                    "result": self._entity_context(it["entity_id"])})
         return results
 
     @staticmethod
@@ -222,8 +244,10 @@ class IntelligenceAnalyst:
         if self.llm is not None:
             answer = self.llm.grounded("intelligence.answer", question, evidence)
         else:
-            answer = deterministic_grounded(evidence, limit=12)
-            answer["summary"] = _facts_summary(results)
+            answer = {"summary": _facts_summary(results), "claims": _readable_claims(results),
+                      "source": "deterministic", "insufficient_evidence": not any(
+                          r["result"] and not (isinstance(r["result"], dict) and r["result"].get("not_found"))
+                          for r in results)}
         return {"question": question, "planner": planner, "tool_calls": [{"tool": r["tool"], "args": r["args"]}
                                                                         for r in results],
                 "answer": answer["summary"], "claims": answer.get("claims", []),
@@ -272,27 +296,94 @@ class IntelligenceAnalyst:
         return {"summary": g["summary"], "claims": g.get("claims", []), "source": g.get("source"), "facts": facts}
 
 
+def _ref(results: list[dict[str, Any]], r: dict[str, Any]) -> str:
+    return f"R{results.index(r) + 1}"
+
+
 def _facts_summary(results: list[dict[str, Any]]) -> str:
-    parts = []
+    """Plain-language answer built only from tool results (no model); every sentence is backed by a claim."""
+    parts: list[str] = []
+    ctx = {r["args"].get("entity_id"): r["result"] for r in results if r["tool"] == "entity_context"}
     for r in results:
         res = r["result"]
         if r["tool"] == "entity_risk" and isinstance(res, dict) and "score" in res:
-            top = ", ".join(f["signal"] for f in res["factors"][:4])
-            parts.append(f"{res['name']} risk {res['score']:.0f}/100 ({res['band']}) from {top}")
+            drivers = [f["signal"].replace("_", " ") for f in res["factors"][:4]]
+            parts.append(f"{res['name']} is at {res['band'].upper()} risk ({res['score']:.0f}/100)"
+                         + (f"; main drivers: {', '.join(drivers)}" if drivers else "; no risk signals in the window"))
+            c = ctx.get(res.get("entity_id")) or {}
+            if c.get("cases") or c.get("insights"):
+                open_cases = [x for x in c.get("cases", []) if x["status"] != "closed"]
+                parts.append(f"involved in {len(open_cases)} open case(s) and {len(c.get('insights', []))} correlated "
+                             f"finding(s)" + (f", the most serious being \"{c['insights'][0]['title']}\"" if c.get("insights") else ""))
+            steps = [st for i in (c.get("insights") or []) for st in (i.get("next_steps") or [])]
+            if steps:
+                parts.append(f"recommended first step: {steps[0]}")
+            elif c.get("pending_actions"):
+                first = c["pending_actions"][0]
+                parts.append(f"recommended first step: review and approve the pending {first['action']} "
+                             f"({first['rationale'][:120]})")
+            if c.get("pending_actions"):
+                parts.append(f"{len(c['pending_actions'])} containment action(s) for this entity are waiting for approval ("
+                             + ", ".join(a["action"] for a in c["pending_actions"][:3]) + ")")
+        elif r["tool"] == "find_entity" and isinstance(res, dict) and res.get("not_found"):
+            parts.append(f"no record found for {res['not_found']}")
         elif r["tool"] == "affected_devices" and isinstance(res, dict) and "affected" in res:
-            parts.append(f"{res['cve']} affects {res['affected']} asset(s): "
-                         + ", ".join(a["asset"] for a in res.get("assets", [])[:5]))
+            parts.append(f"{res['cve']} affects {res['affected']} asset(s)"
+                         + (": " + ", ".join(a["asset"] for a in res.get("assets", [])[:5]) if res.get("assets") else ""))
         elif r["tool"] == "list_insights" and isinstance(res, list):
-            parts.append(f"{len(res)} active insight(s): " + "; ".join(i["title"] for i in res[:3]))
+            parts.append(f"{len(res)} active correlated finding(s)" + (": " + "; ".join(i["title"] for i in res[:3]) if res else ""))
         elif r["tool"] == "top_risky" and isinstance(res, list):
-            parts.append("riskiest: " + ", ".join(f"{x['name']} ({x['score']:.0f})" for x in res[:5]))
+            parts.append("highest-risk users/hosts: " + ", ".join(f"{x['name']} ({x['score']:.0f}, {x['band']})" for x in res[:5]))
         elif r["tool"] == "vulnerability_query" and isinstance(res, dict) and "answer" in res:
             parts.append(res["answer"])
         elif r["tool"] == "pending_approvals" and isinstance(res, list):
             parts.append(f"{len(res)} action(s) awaiting approval")
         elif r["tool"] == "search_cases" and isinstance(res, list):
-            parts.append(f"{len(res)} case(s) found")
-    return ". ".join(parts) + "." if parts else "No matching data found."
+            parts.append(f"{len(res)} matching case(s)")
+    if not parts:
+        return "No matching data found."
+    def cap(p: str) -> str:  # never capitalise an address or host name that opens a sentence
+        first = p.split(" ", 1)[0]
+        return p if ("@" in first or "." in first or first[:1].isdigit()) else p[0].upper() + p[1:]
+
+    text = ". ".join(cap(p) for p in parts)
+    return text + "."
+
+
+def _readable_claims(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One fact per piece of evidence, in words, citing the tool result (R#) it came from."""
+    claims: list[dict[str, Any]] = []
+
+    def add(text: str, r: dict[str, Any], kind: str = "fact") -> None:
+        claims.append({"text": text, "kind": kind, "evidence_ids": [_ref(results, r)]})
+
+    for r in results:
+        res = r["result"]
+        if isinstance(res, dict) and res.get("error"):
+            add(f"{r['tool']} could not run: {res['error']}", r, "inference")
+        elif r["tool"] == "find_entity" and isinstance(res, dict) and res.get("entity_id"):
+            add(f"Resolved {res['name']} as one {res['kind']} across tools (keys: "
+                + ", ".join(f"{k}={v}" for k, v in list(res.get("keys", {}).items())[:4]) + ")", r)
+        elif r["tool"] == "entity_risk" and isinstance(res, dict) and "factors" in res:
+            for f in res["factors"][:6]:
+                add(f"{f['signal'].replace('_', ' ')} (+{f['decayed']:.0f}): {f['detail']} "
+                    f"[{f['source']}, {str(f.get('when') or '')[:16]}]", r)
+        elif r["tool"] == "entity_context" and isinstance(res, dict):
+            for c in res.get("cases", [])[:5]:
+                add(f"Case \"{c['title']}\" ({c['domain']}, {c['severity']}, verdict {c['verdict'] or 'pending'}, {c['status']})", r)
+            for i in res.get("insights", [])[:3]:
+                add(f"Correlated finding ({i['severity']}): {i['title']}", r)
+            for a in res.get("pending_actions", [])[:3]:
+                add(f"Awaiting approval: {a['action']} - {a['rationale']}", r)
+        elif r["tool"] == "affected_devices" and isinstance(res, dict):
+            for a in res.get("assets", [])[:8]:
+                add(f"{a['asset']}: priority {a['priority']}, owner {a.get('platform_team') or 'unknown'}, "
+                    f"{'internet-exposed' if a.get('internet_exposed') else 'internal'}", r)
+        elif r["tool"] in {"list_insights", "top_risky", "search_cases", "pending_approvals"} and isinstance(res, list):
+            for x in res[:5]:
+                add(x.get("title") or f"{x.get('name')} risk {x.get('score', 0):.0f} ({x.get('band')})"
+                    if "title" in x or "name" in x else f"{x.get('action')}: {x.get('rationale')}", r)
+    return claims[:20]
 
 
 def _brief_text(f: dict[str, Any]) -> str:

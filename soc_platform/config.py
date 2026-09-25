@@ -41,6 +41,15 @@ class Settings(BaseModel):
     entra_tenant_id: str | None = None
     entra_audience: str | None = None
     dev_jwt_secret: str | None = None
+    require_mfa: bool = False             # step-up MFA for approvals/policy/access (default on in prod)
+    mfa_auth_context: str | None = None   # Entra Conditional Access auth-context id accepted as MFA (acrs claim)
+    break_glass_sha256: str | None = None  # SHA-256 of the sealed break-glass secret; unset = disabled
+
+    # Data protection
+    data_keys: list[str] = Field(default_factory=list)   # Fernet keys; first encrypts, all decrypt (rotation)
+    raw_retention_days: int = 180
+    access_log_retention_days: int = 400
+    llm_log_retention_days: int = 180
 
     # Autonomy (section 5.2). Global kill switch halts every automated action.
     kill_switch: bool = False
@@ -75,6 +84,13 @@ def get_settings() -> Settings:
         entra_tenant_id=env.get("SOC_ENTRA_TENANT_ID"),
         entra_audience=env.get("SOC_ENTRA_AUDIENCE"),
         dev_jwt_secret=secret("SOC_DEV_JWT_SECRET"),
+        require_mfa=_env_bool("SOC_REQUIRE_MFA", env.get("SOC_ENVIRONMENT", "dev") == "prod"),
+        mfa_auth_context=env.get("SOC_MFA_AUTH_CONTEXT"),
+        break_glass_sha256=(secret("SOC_BREAKGLASS_SHA256") or "").strip().lower() or None,
+        data_keys=[k.strip() for k in (secret("SOC_DATA_KEY") or "").split(",") if k.strip()],
+        raw_retention_days=int(env.get("SOC_RAW_RETENTION_DAYS", "180")),
+        access_log_retention_days=int(env.get("SOC_ACCESS_LOG_RETENTION_DAYS", "400")),
+        llm_log_retention_days=int(env.get("SOC_LLM_LOG_RETENTION_DAYS", "180")),
         kill_switch=_env_bool("SOC_KILL_SWITCH", False),
         connector_mode=env.get("SOC_CONNECTOR_MODE", "fake"),
         fixtures_dir=env.get("SOC_FIXTURES_DIR", str(Path(__file__).parent / "fixtures")),

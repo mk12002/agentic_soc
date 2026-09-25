@@ -166,3 +166,20 @@ def test_policy_change_needs_different_approver(session, automation_admin, lead,
         store.approve(v.id, automation_admin)
     store.approve(v.id, lead)
     assert store.active()["actions"]["canary.escalate"]["level"] == 4
+
+
+def test_same_containment_from_two_cases_is_one_approval(session, registry):
+    """The phishing case and the incident case both recommend blocking the same host: the analyst decides once."""
+    from soc_platform.core.cases import CaseService
+
+    cs = CaseService(session)
+    c1, c2 = cs.create("phishing", "p", actor="agent:x"), cs.create("incident", "i", actor="agent:x")
+    svc = ActionService(session, registry, PolicyEngine())
+    t = [{"type": "asset", "id": "jane-lt01"}]
+    a = svc.request("endpoint.isolate", targets=t, requested_by=agent_principal("ph"), case_id=c1.id)
+    b = svc.request("endpoint.isolate", targets=t, requested_by=agent_principal("im"), case_id=c2.id)
+    assert a.id == b.id and c2.id in a.result["linked_cases"]
+    assert any(x["id"] == a.id for x in cs.view(c2.id)["actions"])        # visible from both cases
+    t1 = svc.request("email.tag", targets=[{"type": "email", "id": "m1"}], requested_by=agent_principal("p"), case_id=c1.id)
+    t2 = svc.request("email.tag", targets=[{"type": "email", "id": "m2"}], requested_by=agent_principal("p"), case_id=c2.id)
+    assert t1.id != t2.id                                                    # different targets stay separate

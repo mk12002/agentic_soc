@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     )
 
     # --- API Server ---
-    api_host: str = Field(default="0.0.0.0", description="API server host")
+    api_host: str = Field(default="127.0.0.1", description="API server host (set API_HOST=0.0.0.0 inside a container)")
     api_port: int = Field(default=8000, description="API server port")
     api_workers: int = Field(default=4, description="Number of API workers")
     api_auth_enabled: bool = Field(

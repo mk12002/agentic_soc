@@ -1,7 +1,5 @@
 """Tests for the email deduplication system."""
 
-import pytest
-import json
 from soc_platform.domains.phishing.engine.orchestrator.deduplication import (
     compute_email_fingerprint,
     DeduplicationCache,

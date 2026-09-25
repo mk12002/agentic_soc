@@ -8,7 +8,7 @@ per threat type (BEC, ransomware, credential phishing, etc.).
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("playbook_engine")

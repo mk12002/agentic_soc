@@ -1347,7 +1347,7 @@ The `campaign_detector` service identifies coordinated phishing campaigns by clu
 *   Recipient correlation (same target departments, geographic regions).
 *   Automated campaign tagging and alerting to SOC.
 
-**Source Reference:** `src/services/campaign_detector.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/services/campaign_detector.py`
 
 ### 7.8.2 OCR & Image Text Extraction
 
@@ -1359,7 +1359,7 @@ The `ocr_service` extracts text and URLs from image attachments (JPEG, PNG, PDF)
 *   URL regex extraction from OCR output.
 *   Confidence scoring for extracted text.
 
-**Source Reference:** `src/services/ocr_service.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/services/ocr_service.py`
 
 ### 7.8.3 Deduplication Engine
 
@@ -1377,7 +1377,7 @@ The `deduplication` module prevents re-analysis of duplicate emails by computing
 *   Reduces RabbitMQ queue pressure by ~40-60% in high-volume campaigns.
 *   Deduplication metadata stored for forensic correlation.
 
-**Source Reference:** `src/orchestrator/deduplication.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/orchestrator/deduplication.py`
 
 ### 7.8.4 Counterfactual Reasoning Engine
 
@@ -1402,7 +1402,7 @@ The `counterfactual_engine` answers: "What minimum evidence change would flip th
 }
 ```
 
-**Source Reference:** `src/orchestrator/counterfactual_engine.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/orchestrator/counterfactual_engine.py`
 
 ### 7.8.5 Threat Storyline Engine
 
@@ -1430,7 +1430,7 @@ The `storyline_engine` synthesizes agent signals into a chronological attack nar
 }
 ```
 
-**Source Reference:** `src/orchestrator/storyline_engine.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/orchestrator/storyline_engine.py`
 
 ### 7.8.6 LLM Reasoner & Narrative Generation
 
@@ -1450,7 +1450,7 @@ and requests credential updates. The attached .exe file is flagged as potentiall
 Recommended action: Quarantine and alert SOC team."
 ```
 
-**Source Reference:** `src/orchestrator/llm_reasoner.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/orchestrator/llm_reasoner.py`
 
 ### 7.8.7 Trust Signals System
 
@@ -1464,7 +1464,7 @@ The `trust_signals` module encodes domain and entity reputation signals used acr
 *   `in_custom_allowlist` — From org-approved sender list.
 *   `mfa_enforced_recipient` — Recipient has MFA active.
 
-**Source Reference:** `src/agents/trust_signals.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/agents/trust_signals.py`
 
 ### 7.8.8 Model Lifecycle & Warmup
 
@@ -1480,7 +1480,7 @@ The `model_warmup` and calibration utilities handle model loading, type caching,
 *   URL agent includes Platt scaling calibration to convert raw XGBoost scores into probabilistic risk [0, 1].
 *   Calibration curves precomputed on holdout validation set.
 
-**Source Reference:** `src/agents/model_warmup.py`, `src/agents/url_agent/calibration.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/agents/model_warmup.py`, `soc_platform/domains/phishing/engine/agents/url_agent/calibration.py`
 
 ### 7.8.9 Database Schema & Persistence
 
@@ -1496,7 +1496,7 @@ The `database.py` service manages PostgreSQL connections and schema. Final repor
 *   psycopg2 with connection pooling to prevent exhaustion under load.
 *   Automatic retry on transient failures (connection timeouts, temp unavailability).
 
-**Source Reference:** `src/services/database.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/services/database.py`
 
 ### 7.8.10 Dead-Letter Queue Handling
 
@@ -1513,7 +1513,7 @@ The `dlq_handler` service consumes messages from RabbitMQ dead-letter queues to 
 *   Alert on repeated failures (after 3 retries).
 *   Move to archive queue for forensic review.
 
-**Source Reference:** `src/services/dlq_handler.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/services/dlq_handler.py`
 
 ### 7.8.11 Threat Intelligence Sync Worker
 
@@ -1525,7 +1525,7 @@ The `intel_sync_worker` background service continuously refreshes threat intelli
 *   Update SQLite cache and Redis index.
 *   Log staleness metrics for alerting if sync fails > 24 hours.
 
-**Source Reference:** `src/services/intel_sync_worker.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/services/intel_sync_worker.py`
 
 ### 7.8.12 Parser Worker & Ingestion Pipeline
 
@@ -1538,7 +1538,7 @@ The `parser_worker` service consumes raw email files from RabbitMQ and converts 
 4. Save attachments to storage volume with SHA256 hash.
 5. Publish normalized payload to central results queue.
 
-**Source Reference:** `src/services/parser_worker.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/services/parser_worker.py`
 
 ### 7.8.13 Configuration Management
 
@@ -1559,7 +1559,7 @@ The `settings.py` module uses Pydantic to load and validate all deployment-time 
 *   Provides sensible defaults for optional settings.
 *   Logs warnings for missing non-critical settings.
 
-**Source Reference:** `src/configs/settings.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/configs/settings.py`
 
 ### 7.8.14 GARUDA Integration & Endpoint Response
 
@@ -1575,7 +1575,7 @@ The `garuda_integration` module bridges from high-confidence malicious verdicts 
 *   Risk score >= 0.85 → "Trigger GARUDA for Critical Alert"
 *   Includes email sender, recipient, subject, attachments, URLs.
 
-**Source Reference:** `src/garuda_integration/bridge.py`, `src/garuda_integration/retry_queue.py`, `src/action_layer/response_engine.py`
+**Source Reference:** `soc_platform/domains/phishing/engine/garuda_integration/bridge.py`, `soc_platform/domains/phishing/engine/garuda_integration/retry_queue.py`, `soc_platform/domains/phishing/engine/action_layer/response_engine.py`
 
 ---
 
@@ -3345,19 +3345,19 @@ pytest -q
 
 **5. Bring up the Dockerized stack**
 ```bash
-cd /home/LabsKraft/new_work/email_security/docker
+cd /home/LabsKraft/new_work/deploy
 docker compose -f docker-compose.yml up -d --build
 ```
 
 **6. View service logs**
 ```bash
-cd /home/LabsKraft/new_work/email_security/docker
+cd /home/LabsKraft/new_work/deploy
 docker compose -f docker-compose.yml logs -f
 ```
 
 **7. Tear down the stack**
 ```bash
-cd /home/LabsKraft/new_work/email_security/docker
+cd /home/LabsKraft/new_work/deploy
 docker compose -f docker-compose.yml down
 ```
 

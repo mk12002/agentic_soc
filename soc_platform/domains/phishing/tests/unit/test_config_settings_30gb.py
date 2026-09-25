@@ -1,6 +1,5 @@
 """Tests for 30GB RAM optimization configuration fields."""
 
-import pytest
 from soc_platform.domains.phishing.engine.configs.settings import Settings
 
 def test_30gb_optimization_fields_present():

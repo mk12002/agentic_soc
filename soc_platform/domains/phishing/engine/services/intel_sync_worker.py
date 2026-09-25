@@ -7,10 +7,8 @@ and updates the local SQLite store independently of email analysis traffic.
 import time
 import signal
 import sys
-from datetime import datetime, timezone
 
 # Add parent directory to path for imports
-from pathlib import Path
 pass  # (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent.agent import _refresh_ioc_store_if_needed
 from soc_platform.domains.phishing.engine.configs.settings import settings

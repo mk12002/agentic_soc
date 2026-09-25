@@ -11,7 +11,6 @@ import statistics
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 import httpx
 

@@ -14,7 +14,6 @@ from __future__ import annotations
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
-import sys
 from pathlib import Path
 
 import pandas as pd

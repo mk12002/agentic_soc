@@ -14,17 +14,14 @@ from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
+from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 SENSITIVE_ACTIONS = {"VIEW", "COPY PASSWORD", "LAUNCH", "CHECK OUT", "PASSWORD DISPLAYED", "EXPORT"}
 
 
 def _uref(username: str | None, domain: str | None) -> EntityRef | None:
-    if not username:
-        return None
-    u = username.split("\\")[-1]
-    keys = {"upn": u.lower()} if "@" in u else ({"upn": f"{u}@{domain}".lower()} if domain else {})
-    return EntityRef(kind="identity", role="user", keys=keys, attributes={"display_name": u})
+    return user_ref(username, default_domain=domain)
 
 
 class SecretServerConnector(ToolConnector):
@@ -38,7 +35,7 @@ class SecretServerConnector(ToolConnector):
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
         skip = int(cursor or 0)
-        body = self.get("/api/v1/secret-audits", params={"skip": skip, "take": 500,
+        body = self.get((self.settings.get("audit_path") or "/api/v1/secret-audits"), params={"skip": skip, "take": 500,
                                                          "filter.startDate": self.settings.get("sync_from", "")})
         rows = body.get("records") or []
         return Page(rows, str(skip + len(rows)), source_total=body.get("total"), has_more=bool(body.get("hasNext")))
@@ -61,11 +58,11 @@ class SecretServerConnector(ToolConnector):
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:
             user = value.split("@")[0]
-            body = self.get("/api/v1/secret-audits", params={"filter.userName": user, "take": 100})
+            body = self.get((self.settings.get("audit_path") or "/api/v1/secret-audits"), params={"filter.userName": user, "take": 100})
             rows = body.get("records") or []
             recs = [r for row in rows for r in self.normalize("secret_audits", row)]
             sensitive = [r for r in rows if str(r.get("action", "")).upper() in SENSITIVE_ACTIONS]
-            sessions = self.get("/api/v1/launched-sessions", params={"filter.userName": user}).get("records") or []
+            sessions = self.get((self.settings.get("sessions_path") or "/api/v1/launched-sessions"), params={"filter.userName": user}).get("records") or []
             standing = self.get("/api/v1/users", params={"filter.searchText": user}).get("records") or []
             admin = any(u.get("isApplicationAccount") is False and u.get("adminRoles") for u in standing)
             return ok_lookup(self, recs, f"{len(rows)} secret audit event(s), {len(sensitive)} credential access(es) "
@@ -91,7 +88,7 @@ class PrivilegeManagerConnector(ToolConnector):
     lookups = ("user", "host")
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
-        body = self.get("/Tms/api/v1/events/elevation", params={"after": cursor or "", "take": 500})
+        body = self.get((self.settings.get("events_path") or "/Tms/api/v1/events/elevation"), params={"after": cursor or "", "take": 500})
         rows = body.get("items") or []
         return Page(rows, str(body.get("lastId") or cursor or ""), has_more=bool(body.get("hasMore")))
 
@@ -110,7 +107,7 @@ class PrivilegeManagerConnector(ToolConnector):
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:
             key = "userName" if entity_type == "user" else "computerName"
-            rows = self.get("/Tms/api/v1/events/elevation", params={key: value.split("@")[0], "take": 100}).get("items") or []
+            rows = self.get((self.settings.get("events_path") or "/Tms/api/v1/events/elevation"), params={key: value.split("@")[0], "take": 100}).get("items") or []
             recs = [r for row in rows for r in self.normalize("elevation_events", row)]
             denied = [r for r in rows if str(r.get("outcome", "")).lower() in {"denied", "blocked"}]
             return ok_lookup(self, recs, f"{len(rows)} elevation event(s), {len(denied)} denied",
@@ -144,7 +141,9 @@ MANIFESTS = [
         factory=lambda s, t: SecretServerConnector(s, t, rate_per_sec=2, burst=4), live_transport=_ss_live,
         config=[ConfigField("base_url", "Secret Server URL"), ConfigField("username", "API user", secret=True),
                 ConfigField("password", "API user password", secret=True),
-                ConfigField("user_domain", "UPN suffix", required=False)],
+                ConfigField("user_domain", "UPN suffix", required=False),
+                ConfigField("audit_path", "Secret audit endpoint (default /api/v1/secret-audits)", required=False),
+                ConfigField("sessions_path", "Launched sessions endpoint (default /api/v1/launched-sessions)", required=False)],
         actions=_ss_actions, confidence="Medium",
         to_confirm="API access approval - privileged access data needs extra governance",
         fake_settings={"user_domain": "cci-demo.com", "base_url": "https://pam.cci-demo.com/SecretServer"},
@@ -155,7 +154,8 @@ MANIFESTS = [
         factory=lambda s, t: PrivilegeManagerConnector(s, t, rate_per_sec=2, burst=4), live_transport=_pm_live,
         config=[ConfigField("base_url", "Privilege Manager URL"), ConfigField("client_id", "API client id", secret=True),
                 ConfigField("client_secret", "API client secret", secret=True),
-                ConfigField("user_domain", "UPN suffix", required=False)],
+                ConfigField("user_domain", "UPN suffix", required=False),
+                ConfigField("events_path", "Elevation events endpoint (default /Tms/api/v1/events/elevation)", required=False)],
         confidence="Medium", to_confirm="API access approval and available event granularity",
         fake_settings={"user_domain": "cci-demo.com", "base_url": "https://pam.cci-demo.com/SecretServer"},
         focus_areas=("incident",)),

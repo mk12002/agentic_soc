@@ -3,9 +3,7 @@ Dead Letter Queue (DLQ) Handler Service.
 Consumes failed messages, attempts retries with backoff, and routes to poison queue.
 """
 
-import json
 import time
-from typing import Any
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.messaging_service import RabbitMQClient

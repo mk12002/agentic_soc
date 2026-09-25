@@ -9,20 +9,20 @@ From: "Microsoft Account Team" <security@rnicrosoft-alerts.com>
 To: jane.doe@cci-demo.com
 Subject: Unusual sign-in activity detected on your account
 Date: Sun, 20 Sep 2026 08:01:00 +0000
-Message-ID: <179026443124.13628.3822290616590582194@rnicrosoft-alerts.com>
+Message-ID: <179028143801.25860.12311095992203442339@rnicrosoft-alerts.com>
 X-Test-Label: malicious
 MIME-Version: 1.0
 Content-Type: multipart/alternative;
- boundary="===============4200642645437985841=="
+ boundary="===============0530704824246014673=="
 
---===============4200642645437985841==
+--===============0530704824246014673==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 
 We detected unusual sign-in activity. Verify your account within 24 hours or =
 it will be locked.
 
---===============4200642645437985841==
+--===============0530704824246014673==
 Content-Type: text/html; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 MIME-Version: 1.0
@@ -32,4 +32,4 @@ r account <b>within 24 hours</b> or it will be locked.</p><p><a href=3D"https=
 ://account-verify.rnicrosoft-alerts.com/login?id=3D88231">https://account.mic=
 rosoft.com/security</a></p>
 
---===============4200642645437985841==--
+--===============0530704824246014673==--

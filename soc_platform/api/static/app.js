@@ -1,13 +1,15 @@
+function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.className='warn';t.style.cssText='position:fixed;right:16px;bottom:16px;max-width:480px;z-index:9';document.body.appendChild(t)}t.textContent=String(m);t.hidden=false;clearTimeout(window._tt);window._tt=setTimeout(()=>t.hidden=true,6000)}
 const safeUrl=u=>/^https?:\/\//i.test(String(u||''))?String(u):'#';
-let TOKEN=localStorage.getItem('soc_token')||'';const TABS=['Intelligence','Cases','Approvals','Vulnerabilities','Phishing','Connectors','Policy','Audit'];let tab='Intelligence';
+let TOKEN=localStorage.getItem('soc_token')||'';const TABS=['Overview','Intelligence','Cases','Approvals','Vulnerabilities','Phishing','Coverage','Shadow IT','Connectors','Policy','Access','Audit'];let tab='Overview';
 const $=s=>document.querySelector(s);const esc=v=>String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(p,o={}){const r=await fetch(p,{...o,headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json',...(o.headers||{})}});
- if(!r.ok){const t=await r.text();alert(r.status+': '+t);throw new Error(t)}return r.headers.get('content-type')?.includes('json')?r.json():r}
-async function login(){const r=await fetch(`/api/v1/dev/token?user=${encodeURIComponent($('#user').value)}&roles=${$('#role').value}`);if(!r.ok){alert('dev tokens disabled');return}
+ if(!r.ok){const t=await r.text();let d=t;try{d=JSON.parse(t).detail||t}catch(e){}toast(r.status+': '+d);throw new Error(t)}return r.headers.get('content-type')?.includes('json')?r.json():r}
+async function login(){const r=await fetch(`/api/v1/dev/token?user=${encodeURIComponent($('#user').value)}&roles=${$('#role').value}`);if(!r.ok){toast('dev tokens disabled');return}
  TOKEN=(await r.json()).token;localStorage.setItem('soc_token',TOKEN);boot()}
-async function boot(){if(!TOKEN)return;const me=await api('/api/v1/me');$('#who').textContent=me.name+' ('+me.roles.join(',')+')';
+async function boot(){if(!TOKEN)return;const me=await api('/api/v1/me');window.ME=me;$('#who').textContent=me.name+' ('+me.roles.join(',')+')';
  $('#nav').innerHTML=TABS.map(t=>`<button class="${t==tab?'on':''}" data-fn="show" data-args="[&quot;${esc(t)}&quot;]">${t}</button>`).join('');show(tab)}
-function show(t){tab=t;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.textContent==t));({Intelligence,Cases,Approvals,Vulnerabilities,Phishing,Connectors,Policy,Audit})[t]()}
+function show(t){tab=t;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.textContent==t));const v=Object.assign({Intelligence,Cases,Approvals,Vulnerabilities,Phishing,Connectors,Policy,Audit},window.VIEWS||{})[t];if(v)v()}
+const cite=x=>`<span class="muted">[${(x.evidence||[]).map(e=>`<abbr title="${esc(e.source+': '+e.summary)}">${esc(e.ref)}</abbr>`).join(', ')||(x.evidence_ids||[]).map(esc).join(', ')}]</span>`;
 const sev=s=>`<span class="pill ${esc(s)}">${esc(s)}</span>`;
 
 async function Cases(){const cs=await api('/api/v1/cases');$('#main').innerHTML=`<div class="card"><h2>Cases</h2>
@@ -19,8 +21,8 @@ async function runPh(){await api('/api/v1/phishing/ingest',{method:'POST'});Case
 async function caseView(id){const v=await api('/api/v1/cases/'+id);const c=v.case,a=v.assessment||{};
  const inc=v.completeness&&v.completeness.unavailable&&v.completeness.unavailable.length?`<div class="warn">Incomplete: unavailable sources ${v.completeness.unavailable.map(u=>esc(u.source)).join(', ')}</div>`:'';
  $('#main').innerHTML=`<div class="card"><h2>${esc(c.title)} ${sev(c.severity)}</h2><div class="muted">${esc(c.domain)} · ${esc(c.status)} · verdict <b>${esc(c.verdict)}</b> · confidence ${esc(c.confidence)} · mode ${esc(c.autonomy_mode)}</div>${inc}
- <p>${esc(c.summary)}</p><h3>Facts</h3>${(a.facts||[]).map(x=>`<div class="fact">${esc(x.text)} <span class="muted">[${x.evidence_ids.join(', ')}]</span></div>`).join('')}
- ${(a.inferences||[]).length?'<h3>Inferences</h3>'+a.inferences.map(x=>`<div class="inf">${esc(x.text)} [${x.evidence_ids.join(', ')}]</div>`).join(''):''}
+ <p>${esc(c.summary)}</p><h3>Facts</h3>${(a.facts||[]).map(x=>`<div class="fact">${esc(x.text)} ${cite(x)}</div>`).join('')}
+ ${(a.inferences||[]).length?'<h3>Inferences</h3>'+a.inferences.map(x=>`<div class="inf">${esc(x.text)} ${cite(x)}</div>`).join(''):''}
  <h3>MITRE ATT&CK</h3>${(a.mitre||[]).map(m=>`<span class="pill">${esc(m.technique)} ${esc(m.name||'')}</span> `).join('')}
  <p><a href="#" data-fn="dl" data-args="[&quot;/api/v1/cases/${esc(id)}/report&quot;]">Download investigation record (.docx)</a></p></div>
  ${intelPanel(v.intelligence)}
@@ -28,9 +30,9 @@ async function caseView(id){const v=await api('/api/v1/cases/'+id);const c=v.cas
  ${v.actions.sort((x,y)=>(x.priority||99)-(y.priority||99)).map(x=>`<tr><td>${esc(x.priority)}</td><td><b>${esc(x.action_type)}</b><br><span class="muted">L${x.level}</span></td><td>${x.targets.map(t=>esc(t.id)).slice(0,4).join('<br>')}${x.targets.length>4?'<br>+'+(x.targets.length-4):''}</td>
  <td>${esc(x.status)}${x.approver?'<br><span class="muted">by '+esc(x.approver)+'</span>':''}</td><td>${esc(x.rationale)}<br><span class="muted">${esc(x.blast_radius||'')} ${x.reversible===false?'· not reversible':''}</span><br><span class="muted">${(x.policy_reasons||[]).slice(1).map(esc).join('; ')}</span></td>
  <td>${['recommended','pending_approval'].includes(x.status)?`<button class="b" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;approve&quot;,&quot;${esc(id)}&quot;]">Approve</button> <button class="g b" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;reject&quot;,&quot;${esc(id)}&quot;]">Reject</button>`:x.status=='executed'?`<button class="g b" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;rollback&quot;,&quot;${esc(id)}&quot;]">Rollback</button>`:''}</td></tr>`).join('')}</table></div></div>
- <div class="row"><div class="card"><h2>Entities</h2><table>${v.entities.map(e=>`<tr><td>${esc(e.kind)}</td><td>${esc(e.role)}</td><td>${esc(e.name)}</td><td class="muted">${e.seen_by.join(', ')}</td></tr>`).join('')}</table></div>
+ <div class="row"><div class="card"><h2>Entities</h2><table>${v.entities.map(e=>`<tr><td>${esc(e.kind)}</td><td>${esc(e.role)}</td><td>${['asset','identity'].includes(e.kind)?`<a href="#" data-fn="entity360" data-args="[&quot;${esc(e.id)}&quot;]">${esc(e.name)}</a>`:esc(e.name)}</td><td class="muted">${e.seen_by.map(esc).join(', ')}</td></tr>`).join('')}</table></div>
  <div class="card"><h2>Timeline</h2><table>${v.timeline.map(t=>`<tr><td class="muted">${esc(t.ts.slice(0,19))}</td><td>${esc(t.tool)}</td><td>${esc(t.title)}</td></tr>`).join('')}</table></div></div>
- <div class="card"><h2>Evidence by dimension</h2>${Object.entries(v.evidence).map(([d,items])=>`<h3>${esc(d)}</h3>${items.map(i=>`<div class="${i.type=='fact'?'fact':'inf'}">${esc(i.source)}: ${esc(i.summary)} ${i.deep_link?`<a target=_blank rel="noopener noreferrer" href="${esc(safeUrl(i.deep_link))}">open</a>`:''}</div>`).join('')}`).join('')}</div>
+ <div class="card"><h2>Evidence by dimension</h2>${Object.entries(v.evidence).map(([d,items])=>`<h3>${esc(d)}</h3>${items.map(i=>`<div class="${i.type=='fact'?'fact':'inf'}" id="ev-${esc(i.ref||i.id)}"><b class="muted">${esc(i.ref||'')}</b> ${esc(i.source)}: ${esc(i.summary)} ${i.deep_link?`<a target=_blank rel="noopener noreferrer" href="${esc(safeUrl(i.deep_link))}">open</a>`:''}</div>`).join('')}`).join('')}</div>
  <div class="card"><h2>Analyst decision</h2><select id="dv"><option>true_positive</option><option>malicious</option><option>false_positive</option><option>benign</option></select>
  <input id="dr" size="60" placeholder="reasoning"> <button class="b" data-fn="decide" data-args="[&quot;${esc(id)}&quot;]">Record decision</button>
  ${v.dispositions.map(d=>`<div class="muted">${esc(d.at.slice(0,16))} ${esc(d.analyst)}: ${esc(d.verdict)} - ${esc(d.reasoning)}</div>`).join('')}</div>
@@ -48,14 +50,14 @@ async function Vulnerabilities(){const [m,f,cov]=await Promise.all([api('/api/v1
  <div class="card"><h2>Findings</h2><table><tr><th>P</th><th>CVE</th><th>Asset</th><th>Team</th><th>SLA due</th><th>Seen by</th><th>Status</th><th></th></tr>${f.map(x=>`<tr><td>${esc(x.priority)}</td><td>${esc(x.cve)}</td><td>${esc(x.asset)}${x.internet_exposed?' 🌐':''}</td><td>${esc(x.team)}</td><td>${esc((x.sla_due||'').slice(0,10))}</td><td class="muted">${Object.keys(x.sources).join(', ')}</td><td>${esc(x.status)}</td><td>${x.campaign_id?'<span class="muted">in campaign</span>':`<button class="b" data-fn="camp" data-args="[&quot;${esc(x.cve)}&quot;]">Campaign</button>`}</td></tr>`).join('')}</table></div>
  <div class="card"><h2>Coverage</h2><div>Missing EDR: ${esc(cov.missing_edr.join(', ')||'none')}</div><div>Not in CMDB: ${esc(cov.not_in_cmdb.join(', ')||'none')}</div><div>Unresolved identity queue: ${cov.unresolved_queue}</div></div>`}
 async function vmRefresh(){await api('/api/v1/vm/refresh',{method:'POST'});Vulnerabilities()}
-async function camp(cve){const r=await api('/api/v1/vm/campaigns',{method:'POST',body:JSON.stringify({cve,notify_via:'ticket'})});alert('Campaign '+r.campaign_id+' created; notifications await approval');Vulnerabilities()}
+async function camp(cve){const r=await api('/api/v1/vm/campaigns',{method:'POST',body:JSON.stringify({cve,notify_via:'ticket'})});toast('Campaign '+r.campaign_id+' created; notifications await approval');Vulnerabilities()}
 async function ask(){const r=await api('/api/v1/vm/query',{method:'POST',body:JSON.stringify({question:$('#q').value})});$('#qa').innerHTML=`<p>${esc(r.answer)} <span class="muted">filter: <code>${esc(JSON.stringify(r.generated_filter))}</code></span></p>
  <table>${r.records.map(x=>`<tr><td>${esc(x.cve)}</td><td>${esc(x.asset)}</td><td>${esc(x.priority)}</td><td>${esc(x.team)}</td><td class="muted">${x.sources.join(', ')}</td></tr>`).join('')}</table>`}
 async function rep(k){const r=await api('/api/v1/reports/'+k,{method:'POST'});dl('/api/v1/reports/'+r.id+'/download')}
 async function Phishing(){const m=await api('/api/v1/phishing/metrics');$('#main').innerHTML=`<div class="row">${[['Reported',m.reported],['Auto-closed',m.auto_closed],['QA-sampled',m.sampled_for_qa],['Campaigns',m.campaigns],['Repeat clickers',m.repeat_clickers.length]].map(([k,v])=>`<div class="card"><div class="muted">${k}</div><div class="kpi">${v}</div></div>`).join('')}</div>
  <div class="card"><h2>Submit a reported email (.eml)</h2><input type="file" id="f" accept=".eml"> <button class="b" data-fn="upl" data-args="[]">Analyse</button><button class="b g" data-fn="runPh" data-args="[]">Pull reporting mailbox</button>
  <h3>Verdict mix</h3><pre>${esc(JSON.stringify(m.verdict_mix,null,1))}</pre><h3>Clickers</h3><pre>${esc(JSON.stringify(m.clickers,null,1))}</pre></div>`}
-async function upl(){const fd=new FormData();fd.append('file',$('#f').files[0]);const r=await fetch('/api/v1/phishing/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});if(!r.ok){alert(await r.text());return}const v=await r.json();caseView(v.case.id)}
+async function upl(){const fd=new FormData();fd.append('file',$('#f').files[0]);const r=await fetch('/api/v1/phishing/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});if(!r.ok){toast(await r.text());return}const v=await r.json();caseView(v.case.id)}
 async function Connectors(){const cs=await api('/api/v1/connectors');$('#main').innerHTML=`<div class="card"><h2>Connectors (${cs.filter(c=>c.enabled).length} enabled)</h2><table><tr><th>Tool</th><th>Category</th><th>Mode</th><th>Health</th><th>Streams / lookups</th><th>Confidence</th><th>To confirm</th></tr>
  ${cs.map(c=>`<tr><td><b>${esc(c.tool)}</b><br><span class="muted">${esc(c.name)}</span></td><td>${esc(c.category)}</td><td>${c.enabled?esc(c.mode):'<span class="muted">disabled</span>'}</td><td>${c.health?(c.health.ok?'ok':'<span style="color:var(--crit)">'+esc(c.health.error)+'</span>'):''}${(c.config_problems||[]).map(p=>'<div style="color:var(--high)">'+esc(p)+'</div>').join('')}</td>
  <td class="muted">${(c.streams||[]).join(', ')}<br>${(c.lookups||[]).join(', ')}</td><td>${esc(c.confidence)}</td><td class="muted">${esc(c.to_confirm)}</td></tr>`).join('')}</table></div>`}
@@ -67,7 +69,7 @@ async function kill(on){await api('/api/v1/kill-switch?on='+on,{method:'POST'});
 async function apol(id){await api(`/api/v1/policy/proposals/${id}/approve`,{method:'POST'});Policy()}
 async function Audit(){const [v,xs]=await Promise.all([api('/api/v1/audit/verify'),api('/api/v1/audit?limit=300')]);$('#main').innerHTML=`<div class="card"><h2>Audit log ${v.ok?'<span class="pill low">chain verified</span>':'<span class="pill critical">CHAIN BROKEN at '+v.first_bad_seq+'</span>'}</h2>
  <table><tr><th>#</th><th>Time</th><th>Actor</th><th>Event</th><th>Subject</th></tr>${xs.map(x=>`<tr><td>${x.seq}</td><td class="muted">${esc(x.ts.slice(0,19))}</td><td>${esc(x.actor_type)}:${esc(x.actor_id)}</td><td>${esc(x.event_type)}</td><td class="muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td></tr>`).join('')}</table></div>`}
-boot();
+window.addEventListener('DOMContentLoaded',boot);
 
 function intelPanel(x){if(!x)return'';return `<div class="card"><h2>Cross-domain intelligence</h2>
  ${(x.entity_risk||[]).map(r=>`<span class="pill ${esc(r.band)}">${esc(r.name)} ${Math.round(r.score)}/100</span> `).join('')}
@@ -87,4 +89,4 @@ async function insightAct(id,verb){await api(`/api/v1/intelligence/insights/${id
 // Delegated click handling: no inline handlers, so the page runs under a strict Content-Security-Policy.
 const ALLOWED={act,apol,ask,askIntel,camp,caseView,decide,dl,insightAct,kill,login,refreshIntel,rep,runInc,runPh,show,upl,vmRefresh};
 document.addEventListener('click',ev=>{const el=ev.target.closest('[data-fn]');if(!el)return;ev.preventDefault();
- const fn=ALLOWED[el.dataset.fn];if(!fn)return;let args=[];try{args=JSON.parse(el.dataset.args||'[]')}catch(e){return}fn(...args)});
+ const fn=ALLOWED[el.dataset.fn];if(!fn)return;let args=[];try{args=JSON.parse(el.dataset.args||'[]')}catch(e){return}Promise.resolve().then(()=>fn(...args)).catch(()=>{/* already reported via toast */})});

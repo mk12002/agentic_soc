@@ -20,7 +20,6 @@ from __future__ import annotations
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import sys
-from pathlib import Path
 
 import joblib
 import numpy as np

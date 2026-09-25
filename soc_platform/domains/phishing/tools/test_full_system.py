@@ -10,11 +10,7 @@ Tests every layer of the Agentic Email Security System:
 
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import os
-import sys
-import json
 import traceback
-from pathlib import Path
-from datetime import datetime, timezone
 
 # Ensure email_security is importable
 REPO_ROOT = PHISHING_HOME
@@ -121,7 +117,7 @@ print("  SECTION 4: Graph Client (Action Bot)")
 print("=" * 70)
 
 try:
-    from soc_platform.domains.phishing.engine.action_layer.graph_client import GraphActionBot, get_graph_client
+    from soc_platform.domains.phishing.engine.action_layer.graph_client import get_graph_client
 
     bot = get_graph_client()
     record("GraphActionBot init", PASS)
@@ -392,13 +388,13 @@ total = len(results)
 print(f"\n  Total: {total}  |  {PASS}: {passes}  |  {WARN}: {warns}  |  {FAIL}: {fails}")
 
 if fails > 0:
-    print(f"\n  ❌ FAILURES:")
+    print("\n  ❌ FAILURES:")
     for section, status, detail in results:
         if status == FAIL:
             print(f"    • {section}: {detail}")
 
 if warns > 0:
-    print(f"\n  ⚠️  WARNINGS:")
+    print("\n  ⚠️  WARNINGS:")
     for section, status, detail in results:
         if status == WARN:
             print(f"    • {section}: {detail}")

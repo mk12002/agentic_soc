@@ -10,7 +10,7 @@ import re
 import shlex
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -141,33 +141,33 @@ def _generate_console_screenshot(behavior: dict[str, Any], target_name: str) -> 
     base_time = int(time.time())
     
     screens.append({
-        "timestamp": f"T+0s",
+        "timestamp": "T+0s",
         "text": f"[INIT] Detonating sample: {target_name}\\n[INFO] Setting up virtual container environment..."
     })
     
     if behavior.get("exec_chain"):
         screens.append({
-            "timestamp": f"T+2s",
+            "timestamp": "T+2s",
             "text": f"[EXEC] Process spawned:\\n  -> {str(behavior['exec_chain'][0])[:60]}..."
         })
     
     if behavior.get("remote_ips"):
         ips = ", ".join(behavior["remote_ips"][:2])
         screens.append({
-            "timestamp": f"T+4s",
+            "timestamp": "T+4s",
             "text": f"[NET] Outbound connection attempted:\\n  -> SYN sent to {ips}"
         })
         
     if behavior.get("sensitive_writes"):
         writes = "\\n  -> ".join(behavior["sensitive_writes"][:2])
         screens.append({
-            "timestamp": f"T+5s",
+            "timestamp": "T+5s",
             "text": f"[FS] Sensitive file modification:\\n  -> {writes}"
         })
         
     screens.append({
-        "timestamp": f"T+8s",
-        "text": f"[TERM] Execution timeout reached. Terminating container."
+        "timestamp": "T+8s",
+        "text": "[TERM] Execution timeout reached. Terminating container."
     })
     return screens
 

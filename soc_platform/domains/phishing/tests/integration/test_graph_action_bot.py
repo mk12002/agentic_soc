@@ -1,6 +1,5 @@
 """Tests for the Graph Action Bot."""
 
-import pytest
 from soc_platform.domains.phishing.engine.action_layer.graph_client import GraphActionBot, GraphActionResult
 
 class MockGraphActionBot(GraphActionBot):

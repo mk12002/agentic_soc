@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
@@ -152,7 +152,11 @@ class EnrichmentOrchestrator:
 
 
 def evidence_for_llm(evidence: list[Evidence]) -> list[dict[str, Any]]:
-    """Stable E-numbered evidence list for grounded reasoning (ids map back to Evidence rows)."""
+    """Stable E-numbered evidence list for grounded reasoning (ids map back to Evidence rows).
+
+    Numbering is deterministic (collection time, then row id) so the case view can show the same E-numbers
+    that the explanation cites, whatever order the caller loaded the rows in."""
+    evidence = sorted(evidence, key=lambda e: (e.collected_at.replace(tzinfo=None) if e.collected_at else datetime.min, e.id))
     return [{"id": f"E{i + 1}", "evidence_row": e.id, "claim": e.summary, "source": e.source_tool,
              "dimension": e.dimension, "deep_link": e.deep_link, "is_inference": e.is_inference}
             for i, e in enumerate(evidence) if e.summary]

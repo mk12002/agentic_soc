@@ -4,7 +4,6 @@ Trains the contextual vulnerability model on the corporate social graph simulati
 """
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import json
-from pathlib import Path
 from datetime import datetime
 import warnings
 
@@ -14,8 +13,7 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import (
-    roc_auc_score, brier_score_loss, confusion_matrix, roc_curve,
-    accuracy_score, precision_score, recall_score, f1_score, average_precision_score,
+    roc_auc_score, brier_score_loss, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, average_precision_score,
     PrecisionRecallDisplay, RocCurveDisplay
 )
 from sklearn.model_selection import train_test_split
@@ -102,7 +100,7 @@ def run_training():
     
     best_iteration = model.best_iteration
 
-    print(f"\n--- Detailed Results ---")
+    print("\n--- Detailed Results ---")
     print(f"Accuracy:  {acc:.4f}")
     print(f"Precision: {prec:.4f}")
     print(f"Recall:    {rec:.4f}")

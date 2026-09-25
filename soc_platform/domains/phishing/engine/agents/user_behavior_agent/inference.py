@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 import xgboost as xgb
-import numpy as np
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 

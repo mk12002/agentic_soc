@@ -121,6 +121,14 @@ class PolicyEngine:
         self.document = copy.deepcopy(document or DEFAULT_POLICY)
         self.kill_switch = kill_switch
 
+    @classmethod
+    def for_session(cls, session: Session) -> "PolicyEngine":
+        """The approved active policy + the durable kill switch (what every service must use by default)."""
+        from soc_platform.config import get_settings
+        from soc_platform.core.access import kill_switch_on
+
+        return cls(PolicyStore(session).active(), kill_switch=kill_switch_on(session, get_settings()))
+
     def view(self, action_type: str) -> ActionPolicyView:
         doc = self.document
         cfg = doc.get("actions", {}).get(action_type, {})

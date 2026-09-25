@@ -118,6 +118,18 @@ class ActionService:
             existing.idempotency_key = f"{existing.idempotency_key}#superseded:{existing.id}"
             self.s.flush()
 
+        shared = self._open_for_same_targets(action_type, targets, case_id)
+        if shared is not None:
+            # Same containment already awaiting a decision from another case: link, don't duplicate the approval.
+            res = dict(shared.result or {})
+            res["linked_cases"] = sorted({*res.get("linked_cases", []), case_id})
+            shared.result = res
+            self.s.flush()
+            self.audit.append(actor_type=requested_by.actor_type, actor_id=requested_by.id, event_type="action.linked",
+                              subject_type="action", subject_id=shared.id,
+                              payload={"case_id": case_id, "rationale": rationale})
+            return shared
+
         failures = spec.preconditions(params, targets)
         decision = self.policy.decide(action_type, targets, destructive=spec.destructive,
                                       precondition_failures=failures)
@@ -264,6 +276,22 @@ class ActionService:
         if req is None:
             raise KeyError(f"unknown action request {request_id}")
         return req
+
+    PER_CASE_ACTIONS = {"ticket.create", "ticket.update", "notify.email", "email.reporter_feedback"}
+
+    def _open_for_same_targets(self, action_type: str, targets: list[dict[str, Any]],
+                               case_id: str | None) -> ActionRequest | None:
+        if action_type in self.PER_CASE_ACTIONS or not case_id or not targets:
+            return None
+        ids = sorted(str(t.get("id") or t.get("value") or "") for t in targets)
+        if not all(ids):
+            return None
+        for r in self.s.execute(select(ActionRequest).where(
+                ActionRequest.action_type == action_type, ActionRequest.case_id != case_id,
+                ActionRequest.status.in_(("recommended", "pending_approval")))).scalars():
+            if sorted(str(t.get("id") or t.get("value") or "") for t in (r.targets or [])) == ids:
+                return r
+        return None
 
     def _by_key(self, key: str) -> ActionRequest | None:
         return self.s.execute(select(ActionRequest).where(ActionRequest.idempotency_key == key)).scalars().first()

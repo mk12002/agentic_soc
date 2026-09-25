@@ -6,7 +6,6 @@ from soc_platform.domains.phishing.engine.agents.attachment_agent import analyze
 from soc_platform.domains.phishing.engine.agents.sandbox_agent import analyze as sandbox_analyze
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent import analyze as threat_intel_analyze
 from soc_platform.domains.phishing.engine.agents.user_behavior_agent.agent import analyze as user_behavior_analyze
-from soc_platform.domains.phishing.engine.configs.settings import settings
 
 import warnings
 warnings.filterwarnings("ignore")

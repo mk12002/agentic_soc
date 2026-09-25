@@ -26,8 +26,11 @@ Q_VULNS = """query VulnerabilityFindings($first: Int, $after: String) {
             vulnerableAsset { ... on VulnerableAssetVirtualMachine { id name type providerUniqueId ipAddresses
                               operatingSystem hasWideInternetExposure } } }
     pageInfo { hasNextPage endCursor } } }"""
+Q_VULNS_BY_CVE = Q_VULNS.replace("VulnerabilityFindings($first: Int, $after: String)",
+                                 "VulnerabilityFindingsByCve($first: Int, $after: String, $cve: [String!])") \
+    .replace("filterBy: {status: [OPEN]}", "filterBy: {status: [OPEN], vulnerabilityExternalId: $cve}")
 Q_ISSUES = """query Issues($first: Int, $after: String) {
-  issues(first: $first, after: $after, filterBy: {status: [OPEN, IN_PROGRESS]}) {
+  issuesV2(first: $first, after: $after, filterBy: {status: [OPEN, IN_PROGRESS]}) {
     nodes { id severity status createdAt type sourceRule { name } entitySnapshot { id name type providerId region
             cloudPlatform subscriptionExternalId } }
     pageInfo { hasNextPage endCursor } } }"""
@@ -49,7 +52,7 @@ class WizConnector(ToolConnector):
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
         q, key = {"resources": (Q_RESOURCES, "cloudResources"), "vulnerabilities": (Q_VULNS, "vulnerabilityFindings"),
-                  "issues": (Q_ISSUES, "issues")}[stream]
+                  "issues": (Q_ISSUES, "issuesV2")}[stream]
         data = self.gql(q, {"first": 500, "after": cursor})[key]
         info = data.get("pageInfo") or {}
         return Page(data.get("nodes") or [], info.get("endCursor") or cursor, source_total=data.get("totalCount"),
@@ -97,20 +100,37 @@ class WizConnector(ToolConnector):
                         "subscription": es.get("subscriptionExternalId")},
             deep_link=f"https://app.wiz.io/issues#~(issue~'{raw['id']})")]
 
+    def _all(self, query: str, key: str, variables: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], bool]:
+        """Follow pageInfo cursors up to ``lookup_max_pages``; returns (nodes, truncated)."""
+        nodes: list[dict[str, Any]] = []
+        after = None
+        for _ in range(int(self.settings.get("lookup_max_pages") or 20)):
+            data = self.gql(query, {"first": 500, "after": after, **(variables or {})}).get(key) or {}
+            nodes += data.get("nodes") or []
+            info = data.get("pageInfo") or {}
+            if not info.get("hasNextPage"):
+                return nodes, False
+            after = info.get("endCursor")
+        return nodes, True
+
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:
             if entity_type == "host":
-                data = self.gql(Q_VULNS, {"first": 200, "after": None})["vulnerabilityFindings"]["nodes"]
+                data, truncated = self._all(Q_VULNS, "vulnerabilityFindings")
                 mine = [n for n in data if str((n.get("vulnerableAsset") or {}).get("name", "")).lower().split(".")[0]
                         == value.lower().split(".")[0]]
                 recs = [r for n in mine for r in self.normalize("vulnerabilities", n)]
                 exposed = any((n.get("vulnerableAsset") or {}).get("hasWideInternetExposure") for n in mine)
                 return ok_lookup(self, recs, f"Wiz: {len(mine)} open vulnerability finding(s); "
-                                             f"internet-exposed={exposed}", findings=len(mine), internet_exposed=exposed)
+                                             f"internet-exposed={exposed}" + (" (partial: page limit)" if truncated else ""),
+                                 findings=len(mine), internet_exposed=exposed, truncated=truncated)
             if entity_type == "cve":
-                data = self.gql(Q_VULNS, {"first": 500, "after": None})["vulnerabilityFindings"]["nodes"]
-                hits = [n for n in data if n.get("name") == value]
-                return ok_lookup(self, [], f"{value}: {len(hits)} Wiz finding(s)")
+                data, truncated = self._all(Q_VULNS_BY_CVE, "vulnerabilityFindings", {"cve": [value.upper()]})
+                hits = [n for n in data if str(n.get("name", "")).upper() == value.upper()]
+                assets = sorted({(n.get("vulnerableAsset") or {}).get("name") for n in hits} - {None})
+                return ok_lookup(self, [r for n in hits for r in self.normalize("vulnerabilities", n)],
+                                 f"{value}: {len(hits)} Wiz finding(s) on {len(assets)} asset(s)",
+                                 findings=len(hits), assets=assets, truncated=truncated)
             raise ValueError(entity_type)
 
         return self.timed_lookup(run)
@@ -129,7 +149,8 @@ MANIFEST = ConnectorManifest(
     config=[ConfigField("api_url", "Tenant API endpoint, e.g. https://api.eu1.app.wiz.io"),
             ConfigField("client_id", "Service account client id", secret=True),
             ConfigField("client_secret", "Service account secret", secret=True),
-            ConfigField("auth_url", "Token URL", required=False)],
+            ConfigField("auth_url", "Token URL", required=False),
+            ConfigField("lookup_max_pages", "Max GraphQL pages per lookup (default 20)", required=False)],
     confidence="High", to_confirm="Service account provisioning; scope of cloud coverage",
     focus_areas=("vulnerability", "incident"),
 )

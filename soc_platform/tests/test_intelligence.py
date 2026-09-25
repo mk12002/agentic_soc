@@ -72,7 +72,10 @@ def test_ask_without_llm_uses_deterministic_planner(session, world):
     a = IntelligenceService(session, vm=world).analyst
     r = a.ask("Is jane.doe@cci-demo.com compromised?")
     assert r["planner"] == "deterministic" and {"find_entity", "entity_risk"} <= {c["tool"] for c in r["tool_calls"]}
-    assert "jane.doe@cci-demo.com risk" in r["answer"]
+    assert "jane.doe@cci-demo.com is at CRITICAL risk" in r["answer"] and "Recommended first step" in r["answer"]
+    ids = {f"R{i + 1}" for i in range(len(r["results"]))}
+    assert r["claims"] and all(set(c["evidence_ids"]) <= ids for c in r["claims"])        # every claim is cited
+    assert not any("{" in c["text"] for c in r["claims"])                                  # no raw JSON shown
     r2 = a.ask("which hosts are exposed to CVE-2021-44228?")
     assert "web01" in r2["answer"]
 
@@ -168,3 +171,31 @@ def test_openai_compatible_provider(monkeypatch):
     p = oc.OpenAICompatibleProvider(Settings(llm_endpoint="http://llm:8000", llm_deployment="qwen"))
     out = p.complete("s", "u", tier="large")
     assert out.text == '{"ok": true}' and seen["url"] == "http://llm:8000/v1/chat/completions"
+
+
+def test_drift_monitor_flags_agreement_drop_and_verdict_shift(session):
+    from datetime import timedelta
+
+    from soc_platform.core.models import Case, Disposition, utcnow
+    from soc_platform.intelligence.drift import drift_insights, drift_report
+
+    now = utcnow()
+    for i in range(30):  # baseline: mostly malicious verdicts, analysts agree
+        t = now - timedelta(days=10 + i % 20)
+        session.add(Case(domain="phishing", title=f"b{i}", verdict="malicious" if i % 5 else "safe", confidence=0.9,
+                         created_at=t))
+        session.add(Disposition(domain="phishing", subject_type="case", subject_id=f"b{i}", created_at=t,
+                                system_verdict="malicious" if i % 5 else "safe",
+                                analyst_verdict="malicious" if i % 5 else "safe", analyst="a"))
+    for i in range(30):  # recent: model calls most things safe, analysts disagree
+        t = now - timedelta(days=i % 6)
+        session.add(Case(domain="phishing", title=f"r{i}", verdict="safe", confidence=0.55, created_at=t))
+        session.add(Disposition(domain="phishing", subject_type="case", subject_id=f"r{i}", created_at=t,
+                                system_verdict="safe", analyst_verdict="malicious" if i % 2 else "safe", analyst="a"))
+    session.flush()
+    d = drift_report(session)["domains"]["phishing"]
+    assert d["status"] == "drift" and d["agreement"]["baseline"] == 1.0 and d["agreement"]["recent"] == 0.5
+    assert d["psi_verdicts"] > 0.2
+    ins = drift_insights(session)
+    assert ins and ins[0].rule == "model_drift" and "R14" in ins[0].requirement_refs
+    assert drift_report(session)["domains"]["incident"]["status"] == "insufficient_data"

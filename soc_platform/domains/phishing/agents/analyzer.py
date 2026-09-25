@@ -38,6 +38,9 @@ URGENCY = re.compile(r"\b(urgent|immediately|expires? today|within 24 hours|susp
                      r"unusual (sign-in|activity)|final notice|action required|password expir\w*|confirm your|"
                      r"wire transfer|gift cards?|invoice attached|payment (is )?overdue|kindly)\b", re.I)
 CRED_WORDS = re.compile(r"\b(log ?in|sign ?in|verify|password|credential|account|mfa|authenticate|sso|enrol\w*)\b", re.I)
+BANK_CHANGE = re.compile(r"\b(bank (account )?details (have|has) (changed|been (updated|changed))|new bank (account|details)|"
+                         r"change of bank|update(d)? (our |the )?bank (account|details)|old (bank )?account is "
+                         r"(frozen|closed|blocked|under audit))\b", re.I)
 PAYMENT = re.compile(r"\b(wire transfer|bank transfer|remittance|new (vendor|bank) (details|account)|change of bank|"
                      r"gift cards?|payment (today|urgently)|INR [\d,]+|USD [\d,]+)\b", re.I)
 SECRECY = re.compile(r"\b(confidential|keep this (between us|quiet)|do not (call|discuss)|reply by email only|"
@@ -103,8 +106,11 @@ def lookalike(domain: str, protected: list[str]) -> tuple[str, str] | None:
 class HeuristicAnalyzer:
     name = "heuristic"
 
-    def __init__(self, *, org_domains: list[str] | None = None, threat_intel: Any = None) -> None:
+    def __init__(self, *, org_domains: list[str] | None = None, threat_intel: Any = None,
+                 partner_domains: list[str] | None = None) -> None:
         self.org_domains = [d.lower() for d in (org_domains or [])]
+        # key suppliers / partners (U18): their look-alikes are impersonation, like look-alikes of our own domains
+        self.partner_domains = [d.lower() for d in (partner_domains or [])]
         self.ti = threat_intel
 
     def analyze(self, em: DecomposedEmail, raw: bytes | None = None) -> AnalysisResult:
@@ -119,7 +125,7 @@ class HeuristicAnalyzer:
             add("dkim_missing", 0.05, f"DKIM {auth['dkim']}", "header")
         if auth.get("compauth") == "fail":
             add("compauth_fail", 0.1, "Microsoft composite authentication failed", "header")
-        protected = self.org_domains + [d for ds in BRANDS.values() for d in ds]
+        protected = self.org_domains + self.partner_domains + [d for ds in BRANDS.values() for d in ds]
         la = lookalike(em.sender_domain, protected) if em.sender_domain else None
         if la:
             add("lookalike_sender_domain", 0.3, f"sender domain {em.sender_domain} imitates {la[0]} ({la[1]})", "header")
@@ -155,6 +161,10 @@ class HeuristicAnalyzer:
             secrecy = bool(SECRECY.search(em.body_text))
             add("bec_payment_request", 0.3 if secrecy else 0.2, "external sender requests a payment/transfer"
                 + (" with secrecy/unavailability pressure" if secrecy else ""), "content")
+        if BANK_CHANGE.search(em.subject + " " + em.body_text) and em.sender_domain not in self.org_domains:
+            # Vendor email compromise: authentic-looking mail from a real partner changing where money goes.
+            add("bank_detail_change", 0.3, "external sender asks to change bank / payment details - verify out of "
+                                           "band on a known number before any change", "content")
         fee_hits = sorted({m.group(0).lower() for m in ADVANCE_FEE.finditer(em.subject + " " + em.body_text)})
         if len(fee_hits) >= 2:
             add("advance_fee_fraud", min(0.6, 0.2 * len(fee_hits)), f"advance-fee fraud language: {fee_hits[:5]}", "content")
@@ -197,7 +207,7 @@ class HeuristicAnalyzer:
                    "suspicious" if score >= 0.35 else
                    "spam" if (bulk or urgency) and not names & {"lookalike_sender_domain", "lookalike_url_domain",
                                                                "credential_lure", "bec_payment_request",
-                                                               "advance_fee_fraud"}
+                                                               "advance_fee_fraud", "bank_detail_change"}
                    and (bulk or score >= 0.15) else "safe")
         if verdict == "spam":
             add("bulk_marketing", 0.0, "bulk/promotional mail characteristics (unsubscribe link, offers)", "content")

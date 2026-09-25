@@ -7,7 +7,6 @@ import threading
 import gzip
 import time
 import io
-import traceback
 from threading import Event
 from typing import Any, Callable
 

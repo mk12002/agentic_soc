@@ -11,7 +11,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-import requests
 try:
     from PIL import Image, ImageFile
     ImageFile.LOAD_TRUNCATED_IMAGES = True

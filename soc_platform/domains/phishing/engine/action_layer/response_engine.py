@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from soc_platform.domains.phishing.engine.action_layer.graph_client import get_graph_client, GraphActionResult
+from soc_platform.domains.phishing.engine.action_layer.graph_client import get_graph_client
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
@@ -260,7 +260,6 @@ class ResponseEngine:
     def _execute_local_routing(self, source_path: str, verdict: str, analysis_id: str) -> None:
         """Route the locally ingested file to its final destination."""
         import shutil
-        from pathlib import Path
         
         src = Path(source_path)
         if not src.exists():

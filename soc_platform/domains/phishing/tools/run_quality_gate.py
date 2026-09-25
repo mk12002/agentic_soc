@@ -13,7 +13,6 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 REPO_ROOT = PHISHING_HOME
 ANALYSIS_ROOT = REPO_ROOT / "analysis_reports"

@@ -1,0 +1,13 @@
+# Key suppliers / partners monitored for vendor email compromise (U18).
+# criticality: high suppliers escalate findings one severity level.
+# Replace these demo entries with CCI's supplier master list (finance / procurement own it).
+suppliers:
+  - name: Krishna Logistics
+    domains: [krishna-logistics.com]
+    criticality: high
+  - name: Global Freight Ltd
+    domains: [global-freight-ltd.com]
+    criticality: medium
+  - name: Microsoft (cloud provider)
+    domains: [microsoft.com, azure.microsoft.com]
+    criticality: high

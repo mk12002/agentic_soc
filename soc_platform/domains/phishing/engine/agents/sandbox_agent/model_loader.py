@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 from soc_platform.domains.phishing.engine.agents.ml_runtime import load_model_bundle, resolve_model_path

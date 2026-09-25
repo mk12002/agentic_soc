@@ -426,6 +426,322 @@
         }
        }
       ]
+     },
+     {
+      "timestamp": "2026-09-20T10:02:11Z",
+      "domain": "wetransfer.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.41",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "File Storage",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "ARUN-LT05",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "arun.k@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T10:04:37Z",
+      "domain": "wetransfer.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.41",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "File Storage",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "ARUN-LT05",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "arun.k@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T11:15:02Z",
+      "domain": "wetransfer.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.44",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "File Storage",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "MEERA-LT06",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "meera.s@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T10:30:00Z",
+      "domain": "chat.deepseek.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.52",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Generative AI",
+        "type": "application"
+       }
+      ],
+      "identities": [
+       {
+        "label": "LI-DEV08",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "li.chen@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T10:31:12Z",
+      "domain": "chat.deepseek.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.52",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Generative AI",
+        "type": "application"
+       }
+      ],
+      "identities": [
+       {
+        "label": "LI-DEV08",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "li.chen@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T12:01:40Z",
+      "domain": "chat.deepseek.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.47",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Generative AI",
+        "type": "application"
+       }
+      ],
+      "identities": [
+       {
+        "label": "TOM-LT07",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "tom.w@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T13:20:05Z",
+      "domain": "nordvpn.com",
+      "verdict": "blocked",
+      "internalip": "10.20.1.52",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Personal VPN",
+        "type": "content"
+       },
+       {
+        "label": "Proxy/Anonymizer",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "LI-DEV08",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "li.chen@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T13:21:44Z",
+      "domain": "mega.nz",
+      "verdict": "blocked",
+      "internalip": "10.20.1.52",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "File Storage",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "LI-DEV08",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "li.chen@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T14:05:09Z",
+      "domain": "anydesk.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.44",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Remote Access",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "MEERA-LT06",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "meera.s@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T14:40:31Z",
+      "domain": "teams.microsoft.com",
+      "verdict": "allowed",
+      "internalip": "10.20.1.47",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Business Services",
+        "type": "content"
+       }
+      ],
+      "identities": [
+       {
+        "label": "TOM-LT07",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "tom.w@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
+     },
+     {
+      "timestamp": "2026-09-20T15:02:18Z",
+      "domain": "update-flash-player.xyz",
+      "verdict": "blocked",
+      "internalip": "10.20.1.41",
+      "externalip": "203.0.113.10",
+      "querytype": "A",
+      "categories": [
+       {
+        "label": "Malware",
+        "type": "security"
+       },
+       {
+        "label": "Newly Seen Domains",
+        "type": "security"
+       }
+      ],
+      "identities": [
+       {
+        "label": "ARUN-LT05",
+        "type": {
+         "type": "roaming"
+        }
+       },
+       {
+        "label": "arun.k@cci-demo.com",
+        "type": {
+         "type": "directory_user"
+        }
+       }
+      ]
      }
     ]
    },

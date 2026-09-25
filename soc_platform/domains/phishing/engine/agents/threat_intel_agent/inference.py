@@ -4,7 +4,7 @@ Inference engine for the Threat Intelligence Agent.
 Runs the loaded XGBoost model against extracted features to produce predictions.
 """
 
-from typing import Any, Optional
+from typing import Any
 import pandas as pd
 
 from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import MESSAGE_FEATURE_COLUMNS, get_zero_features

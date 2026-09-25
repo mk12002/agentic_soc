@@ -15,6 +15,7 @@ from soc_platform.connectors.base import Page
 from soc_platform.connectors.http import HttpTransport, NoAuth, entra_app_auth
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ToolConnector, parse_ts, sev_name
+from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 
@@ -66,10 +67,9 @@ class GenericSiemConnector(ToolConnector):
         refs = []
         if g("host"):
             refs.append(EntityRef(kind="asset", role="host", attributes={"hostname": g("host")}))
-        if g("user"):
-            u = str(g("user"))
-            refs.append(EntityRef(kind="identity", role="user", keys={"upn": u.lower()} if "@" in u else {},
-                                  attributes={"display_name": u}))
+        u = user_ref(g("user"), default_domain=self.settings.get("user_domain"))
+        if u is not None:
+            refs.append(u)
         for k, t in (("src_ip", "ip"), ("dst_ip", "ip"), ("domain", "domain"), ("url", "url"), ("hash", "sha256")):
             if g(k):
                 refs.append(EntityRef(kind="indicator", role=k, keys={"value": str(g(k))}, attributes={"type": t}))

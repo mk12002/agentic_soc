@@ -266,7 +266,9 @@ class ConnectorRegistry:
             reg.register(specs[0] if len(specs) == 1 else RoutedAction(action_type, specs))
         return reg
 
-    def status(self) -> list[dict[str, Any]]:
+    def status(self, *, probe: bool = False) -> list[dict[str, Any]]:
+        """Connector inventory. ``probe=True`` also runs each enabled connector's live health check (one API read
+        per connector) - use it deliberately, not on every page load."""
         out = []
         for n in sorted(self.manifests):
             m = self.manifests[n]
@@ -276,7 +278,8 @@ class ConnectorRegistry:
             if row["enabled"] and not row["config_problems"]:
                 try:
                     c = self.get(n)
-                    row.update({"streams": list(c.streams), "lookups": list(c.lookups), "health": c.health()})
+                    row.update({"streams": list(c.streams), "lookups": list(c.lookups),
+                                "health": c.health() if probe else {"ok": None, "detail": "not probed"}})
                 except Exception as exc:
                     row["health"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             out.append(row)

@@ -7,17 +7,26 @@ investigation package, custom indicators (block URL / domain / IP / file) with r
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ok_lookup, parse_ts, sev_name, targets_of
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, kql_str, mde_transport
+from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 PORTAL = "https://security.microsoft.com"
 INDICATOR_TYPES = {"domain": "DomainName", "url": "Url", "ip": "IpAddress", "sha256": "FileSha256", "sha1": "FileSha1"}
 
+
+
+def _ts(at: Any) -> str:
+    """findbyip needs an ISO-8601 UTC timestamp: the IP owner is looked up +-15 min around it."""
+    if isinstance(at, datetime):
+        return at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return str(at) if at else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 class DefenderEndpointConnector(MicrosoftConnector):
     name = "defender_endpoint"
@@ -56,10 +65,10 @@ class DefenderEndpointConnector(MicrosoftConnector):
                                       "fqdn": a.get("computerDnsName")})] if a.get("machineId") else []
         ru = a.get("relatedUser") or {}
         if ru.get("userName"):
-            dom = ru.get("domainName") or self.settings.get("user_domain")
-            refs.append(EntityRef(kind="identity", role="user",
-                                  keys={"upn": f"{ru['userName']}@{self.settings.get('user_domain') or dom}".lower()},
-                                  attributes={"display_name": ru["userName"]}))
+            raw_user = f"{ru['domainName']}\\{ru['userName']}" if ru.get("domainName") else ru["userName"]
+            u = user_ref(raw_user, default_domain=self.settings.get("user_domain"))
+            if u is not None:
+                refs.append(u)
         for ev in a.get("evidence") or []:
             if ev.get("sha256"):
                 refs.append(EntityRef(kind="indicator", role="observable", keys={"value": ev["sha256"]},
@@ -107,7 +116,7 @@ class DefenderEndpointConnector(MicrosoftConnector):
                 return ok_lookup(self, recs + alerts, summary, recs[0].deep_link if recs else None, found=bool(ms),
                                  endpoint_alerts=len(alerts), risk=[m.get("riskScore") for m in ms])
             if entity_type == "ip":
-                ms = self.get("/api/machines/findbyip", params={"ip": value, "timestamp": context.get("at", "")}).get("value", [])
+                ms = self.get("/api/machines/findbyip", params={"ip": value, "timestamp": _ts(context.get("at"))}).get("value", [])
                 return ok_lookup(self, [self._machine(m) for m in ms], f"{len(ms)} device(s) used IP {value}")
             if entity_type == "hash":
                 f = self.get(f"/api/files/{value}")
@@ -207,7 +216,7 @@ MANIFEST = ConnectorManifest(
     name="defender_endpoint", tool="Microsoft Defender for Endpoint", vendor="Microsoft", category="edr",
     dimension="endpoint",
     description="Alerts, device inventory, TVM vulnerabilities, advanced hunting, isolation, scans, custom indicators.",
-    factory=lambda s, t: DefenderEndpointConnector(s, t, rate_per_sec=1.5, burst=5),  # MDE: 100 calls/min
+    factory=lambda s, t: DefenderEndpointConnector(s, t, rate_per_sec=1.5, burst=20),  # MDE: 100 calls/min per app
     live_transport=mde_transport,
     config=APP_FIELDS + [ConfigField("user_domain", "UPN suffix for alert users", required=False),
                          ConfigField("mde_base", "API base (regional endpoints)", required=False)],

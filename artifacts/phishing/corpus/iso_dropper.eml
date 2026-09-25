@@ -9,18 +9,18 @@ From: "DHL Express" <dispatch@dhl-parcel-notice.top>
 To: meera.s@cci-demo.com
 Subject: Your parcel is on hold - customs fee required
 Date: Sun, 20 Sep 2026 08:06:00 +0000
-Message-ID: <179026443137.13628.11164944433398365952@dhl-parcel-notice.top>
+Message-ID: <179028143810.25860.5988595087743499409@dhl-parcel-notice.top>
 X-Test-Label: malicious
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============5071451696041706694=="
+Content-Type: multipart/mixed; boundary="===============2810645112192168408=="
 
---===============5071451696041706694==
+--===============2810645112192168408==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Your parcel could not be delivered. Open the attached label to reschedule.
 
---===============5071451696041706694==
+--===============2810645112192168408==
 Content-Type: application/x-iso9660-image
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="label_8841.iso"
@@ -29,4 +29,4 @@ MIME-Version: 1.0
 Q0QwMDEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAAAAAAA
 
---===============5071451696041706694==--
+--===============2810645112192168408==--

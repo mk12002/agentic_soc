@@ -12,7 +12,6 @@ import random
 import statistics
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent

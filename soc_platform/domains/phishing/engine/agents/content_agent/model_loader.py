@@ -5,7 +5,6 @@ from __future__ import annotations
 import pickle
 
 from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
-from pathlib import Path
 from typing import Any, Optional
 
 import joblib

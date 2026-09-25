@@ -15,12 +15,9 @@ from __future__ import annotations
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import csv
-import hashlib
 import json
-import math
 import random
 import string
-from pathlib import Path
 
 
 SEED = 42

@@ -7,11 +7,10 @@ enabling analysts to visualize detected techniques on the official ATT&CK matrix
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any
 
-from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import map_agent_results_to_attack, TECHNIQUE_CATALOG
+from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import map_agent_results_to_attack
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("attack_navigator")

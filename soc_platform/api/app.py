@@ -7,7 +7,6 @@ Every state change goes through the policy-gated ActionService and lands in the 
 
 from __future__ import annotations
 
-import copy
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -28,12 +27,13 @@ from soc_platform.connectors.base import SyncRunner
 from soc_platform.connectors.registry import ConnectorRegistry
 from soc_platform.core.actions import ActionService
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.auth import AuthError, Perm, Principal, Role, issue_dev_token, principal_from_token
+from soc_platform.core.access import AccessService, kill_switch_on, permissions_matrix
+from soc_platform.core.auth import AuthError, Perm, Principal, issue_dev_token, principal_from_token
 from soc_platform.core.cases import CaseService, agreement_report, detection_quality
 from soc_platform.core.context_store import ContextStore
-from soc_platform.core.db import Database, get_database
+from soc_platform.core.db import get_database
 from soc_platform.core.entity_resolution import EntityResolver
-from soc_platform.core.models import ActionRequest, Case, Entity, PolicyVersion, UnresolvedItem
+from soc_platform.core.models import AccessLogRecord, ActionRequest, Case, Entity, PolicyVersion, UnresolvedItem
 from soc_platform.core.policy import PolicyEngine, PolicyStore
 from soc_platform.llm.gateway import LLMGateway
 
@@ -87,10 +87,15 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         cl = request.headers.get("content-length")
         if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
             return JSONResponse({"detail": "request too large"}, status_code=413)
-        client = request.headers.get("authorization", "")[-24:] or (request.client.host if request.client else "anon")
+        cred = request.headers.get("authorization") or request.headers.get("x-api-key") or ""
+        client = (__import__("hashlib").sha256(cred.encode()).hexdigest()[:24] if cred
+                  else (request.client.host if request.client else "anon"))
         if not _limiter.allow(client):
             return JSONResponse({"detail": "rate limit exceeded"}, status_code=429, headers={"Retry-After": "5"})
+        t0 = __import__("time").perf_counter()
         response = await call_next(request)
+        if request.url.path.startswith("/api/") or request.url.path == "/metrics":
+            _log_access(request, response.status_code, (__import__("time").perf_counter() - t0) * 1000)
         for k, v in SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)
         if request.url.scheme == "https":
@@ -99,6 +104,78 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityMiddleware)
+
+
+class _AccessLogWriter:
+    """Append-only access log without slowing requests: rows are queued and written in batches by one
+    background thread (retrying while the request's own transaction still holds the database)."""
+
+    def __init__(self) -> None:
+        import queue
+        import threading
+
+        self.q: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=100_000)
+        self.dropped = 0
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def put(self, row: dict[str, Any]) -> None:
+        import queue
+        import threading
+
+        try:
+            self.q.put_nowait(row)
+        except queue.Full:
+            self.dropped += 1
+            return
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name="access-log", daemon=True)
+                self._thread.start()
+
+    def _run(self) -> None:
+        import queue
+        import time as _t
+
+        while True:
+            try:
+                batch = [self.q.get(timeout=30)]
+            except queue.Empty:
+                return
+            while len(batch) < 500:
+                try:
+                    batch.append(self.q.get_nowait())
+                except queue.Empty:
+                    break
+            for attempt in range(20):
+                try:
+                    with get_database().session() as s:
+                        s.add_all([AccessLogRecord(**r) for r in batch])
+                    break
+                except Exception:  # noqa: BLE001 - database busy/unavailable: back off, never crash
+                    _t.sleep(min(2.0, 0.1 * (attempt + 1)))
+            else:
+                self.dropped += len(batch)
+
+    def flush(self, timeout: float = 10.0) -> None:
+        import time as _t
+
+        end = _t.monotonic() + timeout
+        while not self.q.empty() and _t.monotonic() < end:
+            _t.sleep(0.05)
+        _t.sleep(0.1)
+
+
+ACCESS_LOG = _AccessLogWriter()
+
+
+def _log_access(request: Request, status: int, latency_ms: float) -> None:
+    ACCESS_LOG.put({"ts": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                    "principal_id": getattr(request.state, "principal_id", None),
+                    "auth_method": getattr(request.state, "auth_method", None),
+                    "method": request.method[:8], "path": request.url.path[:512], "status": int(status),
+                    "client_ip": request.client.host if request.client else None,
+                    "user_agent": (request.headers.get("user-agent") or "")[:256], "latency_ms": round(latency_ms, 1)})
 
 
 # ----------------------------------------------------------------------------- dependencies
@@ -114,33 +191,55 @@ def db_session() -> Iterator[Session]:
         yield s
 
 
-def current_user(authorization: str | None = Header(default=None), settings: Settings = Depends(get_settings)) -> Principal:
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "bearer token required")
+def current_user(request: Request, authorization: str | None = Header(default=None),
+                 x_api_key: str | None = Header(default=None), x_break_glass: str | None = Header(default=None),
+                 settings: Settings = Depends(get_settings), s: Session = Depends(db_session)) -> Principal:
+    """Bearer token (Entra / dev), service-account API key, or sealed break-glass credential."""
+    acc = AccessService(s, settings)
+    client = request.client.host if request.client else "unknown"
     try:
-        return principal_from_token(authorization.split(" ", 1)[1], settings)
-    except AuthError as exc:
+        if x_break_glass:
+            p = acc.break_glass(x_break_glass, client=client, path=request.url.path)
+        elif x_api_key:
+            p = acc.authenticate_api_key(x_api_key.strip())
+        elif authorization and authorization.lower().startswith("bearer "):
+            p = acc.effective(principal_from_token(authorization.split(" ", 1)[1].strip(), settings))
+        else:
+            raise HTTPException(401, "authentication required (Bearer token or X-API-Key)")
+    except (AuthError, PermissionError) as exc:
+        s.commit()  # keep the audit trail of failed break-glass attempts
         raise HTTPException(401, str(exc)) from exc
+    request.state.principal_id, request.state.auth_method = p.id, p.auth_method
+    return p
 
 
-def need(perm: Perm):
+def need(perm: Perm, domain: str | None = None):
     def dep(p: Principal = Depends(current_user)) -> Principal:
         if not p.can(perm):
-            raise HTTPException(403, f"{perm.value} permission required")
+            raise HTTPException(403, p.why_not(perm))
+        if not p.in_domain(domain):
+            raise HTTPException(403, f"not authorised for {domain} data")
         return p
     return dep
 
 
+def _case_in_scope(s: Session, p: Principal, cid: str | None) -> Case | None:
+    """Out-of-scope cases are reported as missing (no existence oracle)."""
+    if cid is None:
+        return None
+    case = s.get(Case, cid)
+    if case is None or not p.in_domain(case.domain):
+        raise HTTPException(404, "unknown case")
+    return case
+
+
 def policy_engine(s: Session) -> PolicyEngine:
-    return PolicyEngine(PolicyStore(s).active(), kill_switch=get_settings().kill_switch or _KILL["on"])
+    return PolicyEngine(PolicyStore(s).active(), kill_switch=kill_switch_on(s, get_settings()))
 
 
 def llm(s: Session) -> LLMGateway | None:
     st = get_settings()
     return LLMGateway(s, st) if st.llm_provider != "none" else None
-
-
-_KILL = {"on": False}
 
 
 def _services(s: Session):
@@ -173,7 +272,7 @@ def _err(exc: Exception) -> HTTPException:
 @app.get("/health")
 def health(s: Session = Depends(db_session)) -> dict[str, Any]:
     return {"status": "ok", "version": __version__, "audit_chain": AuditLog(s).verify()["ok"],
-            "connectors_enabled": len(registry().enabled_names()), "kill_switch": _KILL["on"] or get_settings().kill_switch}
+            "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings())}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -182,17 +281,20 @@ def ui() -> HTMLResponse:
 
 
 @app.get("/api/v1/dev/token")
-def dev_token(user: str = "analyst@cci-demo.com", roles: str = "analyst") -> dict[str, str]:
+def dev_token(user: str = "analyst@cci-demo.com", roles: str = "analyst", mfa: bool = True,
+              domains: str = "") -> dict[str, str]:
     st = get_settings()
     if st.auth_mode != "dev" or st.environment == "prod" or not st.dev_jwt_secret:
         raise HTTPException(404, "not available")
-    return {"token": issue_dev_token(st.dev_jwt_secret, user, [r.strip() for r in roles.split(",")])}
+    return {"token": issue_dev_token(st.dev_jwt_secret, user, [r.strip() for r in roles.split(",")], mfa=mfa,
+                                     domains=[d.strip() for d in domains.split(",") if d.strip()] or None)}
 
 
 @app.get("/api/v1/me")
 def me(p: Principal = Depends(current_user)) -> dict[str, Any]:
     return {"id": p.id, "name": p.name, "roles": sorted(r.value for r in p.roles),
-            "permissions": sorted(x.value for x in Perm if p.can(x))}
+            "permissions": sorted(x.value for x in Perm if p.can(x)), "domains": sorted(p.domains),
+            "mfa": p.mfa, "auth_method": p.auth_method, "service_account": p.is_service, "break_glass": p.break_glass}
 
 
 # ----------------------------------------------------------------------------- connectors
@@ -210,6 +312,153 @@ def connector_sync(name: str, stream: str, full: bool = False, p: Principal = De
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="connector.sync", subject_type="connector",
                        subject_id=name, payload={"stream": stream, "ingested": rep.ingested, "failed": rep.failed})
     return rep.__dict__ | {"reconciled": rep.reconciled}
+
+
+@app.post("/api/v1/connectors/{name}/test")
+def connector_test(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
+                   s: Session = Depends(db_session)) -> dict[str, Any]:
+    """Authenticate against the tool and read one page (NFR-13): proves credentials, scopes and reachability."""
+    try:
+        conn = registry().get(name)
+    except KeyError:
+        raise HTTPException(404, "unknown connector") from None
+    res = conn.health()
+    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="connector.test", subject_type="connector",
+                       subject_id=name, payload={"ok": res.get("ok"), "error": res.get("error")})
+    return {"connector": name} | res
+
+
+# ----------------------------------------------------------------------------- access management (NFR-09)
+
+
+class GrantBody(BaseModel):
+    principal_id: str = Field(min_length=3, max_length=256)
+    role: str
+    domains: list[str] = Field(default_factory=lambda: ["*"])
+    days: int | None = Field(default=None, ge=1, le=366)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class ApiKeyBody(BaseModel):
+    name: str = Field(min_length=2, max_length=128)
+    roles: list[str]
+    domains: list[str] = Field(default_factory=lambda: ["*"])
+    days: int = Field(default=90, ge=1, le=365)
+
+
+class RevokeBody(BaseModel):
+    principal_id: str
+    reason: str = ""
+
+
+def _access(s: Session) -> AccessService:
+    return AccessService(s, get_settings())
+
+
+@app.get("/api/v1/admin/permissions")
+def admin_permissions(_: Principal = Depends(need(Perm.READ_AUDIT))) -> dict[str, Any]:
+    return permissions_matrix()
+
+
+@app.get("/api/v1/admin/roles")
+def admin_roles(all: bool = False, _: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+    return _access(s).list_grants(include_inactive=all)
+
+
+@app.post("/api/v1/admin/roles")
+def admin_grant(body: GrantBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+    try:
+        g = _access(s).grant(p, body.principal_id, body.role, domains=body.domains, days=body.days, reason=body.reason)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"id": g.id, "principal_id": g.principal_id, "role": g.role, "domains": g.domains}
+
+
+@app.delete("/api/v1/admin/roles/{gid}")
+def admin_revoke(gid: str, reason: str = "", p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                 s: Session = Depends(db_session)):
+    try:
+        g = _access(s).revoke_grant(p, gid, reason)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"id": g.id, "revoked": True}
+
+
+@app.get("/api/v1/admin/api-keys")
+def admin_keys(_: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+    return _access(s).list_api_keys()
+
+
+@app.post("/api/v1/admin/api-keys")
+def admin_key_create(body: ApiKeyBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+    try:
+        key, secret = _access(s).create_api_key(p, body.name, body.roles, domains=body.domains, days=body.days)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"id": key.id, "name": key.name, "roles": key.roles, "domains": key.domains,
+            "expires_at": key.expires_at.isoformat(), "api_key": secret,
+            "note": "Shown once. Store it in the calling system's vault; send it as the X-API-Key header."}
+
+
+@app.delete("/api/v1/admin/api-keys/{kid}")
+def admin_key_revoke(kid: str, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+    try:
+        _access(s).revoke_api_key(p, kid)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"id": kid, "revoked": True}
+
+
+@app.post("/api/v1/admin/revoke-sessions")
+def admin_revoke_sessions(body: RevokeBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                          s: Session = Depends(db_session)):
+    _access(s).revoke_sessions(p, body.principal_id, body.reason)
+    return {"principal_id": body.principal_id, "sessions_revoked": True}
+
+
+@app.post("/api/v1/auth/logout")
+def logout(p: Principal = Depends(current_user), s: Session = Depends(db_session)) -> dict[str, Any]:
+    """Revoke the presented token (its jti) server-side."""
+    if p.is_service or p.break_glass or not p.token_id:
+        raise HTTPException(400, "only bearer tokens with a jti can be revoked this way")
+    _access(s).revoke_token(p, p.token_id)
+    return {"revoked": True}
+
+
+@app.get("/api/v1/admin/access-log")
+def admin_access_log(principal_id: str | None = None, status_min: int = 0, limit: int = Query(200, le=2000),
+                     _: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session)):
+    ACCESS_LOG.flush(2.0)
+    q = select(AccessLogRecord).order_by(AccessLogRecord.seq.desc()).limit(limit)
+    if principal_id:
+        q = q.where(AccessLogRecord.principal_id == principal_id)
+    if status_min:
+        q = q.where(AccessLogRecord.status >= status_min)
+    return [{"ts": r.ts.isoformat(), "principal_id": r.principal_id, "auth": r.auth_method, "method": r.method,
+             "path": r.path, "status": r.status, "ip": r.client_ip, "latency_ms": r.latency_ms}
+            for r in s.execute(q).scalars()]
+
+
+@app.post("/api/v1/admin/retention/run")
+def admin_retention(dry_run: bool = True, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                    s: Session = Depends(db_session)) -> dict[str, Any]:
+    from soc_platform.core.retention import run_retention
+
+    return run_retention(s, get_settings(), actor=p.id, dry_run=dry_run)
+
+
+@app.get("/api/v1/audit/export")
+def audit_export(since_seq: int = 0, p: Principal = Depends(need(Perm.EXPORT_EVIDENCE)), s: Session = Depends(db_session)):
+    """JSON Lines export of the hash-chained audit log for external archiving / SIEM (NFR-04)."""
+    from fastapi.responses import PlainTextResponse
+
+    from soc_platform.core.retention import export_audit
+
+    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="audit.export", subject_type="audit",
+                       subject_id="audit_log", payload={"since_seq": since_seq})
+    body = "".join(export_audit(s, since_seq=since_seq))
+    return PlainTextResponse(body, media_type="application/x-ndjson",
+                             headers={"Content-Disposition": 'attachment; filename="audit_log.jsonl"'})
 
 
 class PushedAlerts(BaseModel):
@@ -267,10 +516,11 @@ def approve_policy(vid: int, p: Principal = Depends(current_user), s: Session = 
 
 @app.post("/api/v1/kill-switch")
 def kill_switch(on: bool, p: Principal = Depends(need(Perm.KILL_SWITCH)), s: Session = Depends(db_session)):
-    _KILL["on"] = on
+    """Durable (DB-backed) so every API replica and the scheduler stop together, and it survives restarts."""
+    AccessService(s, get_settings()).set_flag(p, "kill_switch", bool(on), perm=Perm.KILL_SWITCH)
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="policy.kill_switch", subject_type="policy",
                        subject_id="kill_switch", payload={"on": on})
-    return {"kill_switch": on}
+    return {"kill_switch": kill_switch_on(s, get_settings())}
 
 
 # ----------------------------------------------------------------------------- actions / approvals
@@ -319,6 +569,7 @@ def _action_service(s: Session) -> ActionService:
 
 @app.post("/api/v1/actions")
 def request_action(body: ActionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+    _case_in_scope(s, p, body.case_id)
     try:
         return _action(_action_service(s).request(body.action_type, params=body.params, targets=body.targets,
                                                   requested_by=p, case_id=body.case_id, rationale=body.rationale))
@@ -330,6 +581,9 @@ def request_action(body: ActionBody, p: Principal = Depends(current_user), s: Se
 def decide_action(aid: str, verb: str, body: Decision, p: Principal = Depends(current_user),
                   s: Session = Depends(db_session)):
     svc = _action_service(s)
+    ar = s.get(ActionRequest, aid)
+    if ar is not None:
+        _case_in_scope(s, p, ar.case_id)
     try:
         fn = {"approve": svc.approve, "reject": svc.reject, "rollback": svc.rollback}[verb]
         return _action(fn(aid, p, note=body.note))
@@ -410,11 +664,13 @@ def match_rate(kind: str = "asset", _: Principal = Depends(need(Perm.READ)), s: 
 
 
 @app.get("/api/v1/cases")
-def list_cases(domain: str | None = None, status: str | None = None, _: Principal = Depends(need(Perm.READ)),
+def list_cases(domain: str | None = None, status: str | None = None, p: Principal = Depends(need(Perm.READ)),
                s: Session = Depends(db_session)):
     q = select(Case).order_by(Case.created_at.desc()).limit(500)
     if domain:
         q = q.where(Case.domain == domain)
+    if "*" not in p.domains:
+        q = q.where(Case.domain.in_(sorted(p.domains)))
     if status:
         q = q.where(Case.status.in_(status.split(",")))
     return [{"id": c.id, "domain": c.domain, "title": c.title, "status": c.status, "severity": c.severity,
@@ -423,7 +679,8 @@ def list_cases(domain: str | None = None, status: str | None = None, _: Principa
 
 
 @app.get("/api/v1/cases/{cid}")
-def get_case(cid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def get_case(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    _case_in_scope(s, p, cid)
     try:
         view = CaseService(s).view(cid)
     except KeyError as exc:
@@ -456,9 +713,7 @@ class DispositionBody(BaseModel):
 
 @app.post("/api/v1/cases/{cid}/disposition")
 def case_disposition(cid: str, body: DispositionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
-    case = s.get(Case, cid)
-    if case is None:
-        raise HTTPException(404, "unknown case")
+    case = _case_in_scope(s, p, cid)
     try:
         if case.domain == "phishing":
             return _services(s)["phishing"].confirm(cid, p, verdict=body.verdict, reasoning=body.reasoning)
@@ -470,6 +725,7 @@ def case_disposition(cid: str, body: DispositionBody, p: Principal = Depends(cur
 
 @app.get("/api/v1/cases/{cid}/report")
 def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    _case_in_scope(s, p, cid)
     from soc_platform.reporting.reports import ReportService
 
     run = ReportService(s, get_settings().report_output_dir, llm=llm(s)).investigation_report(CaseService(s).view(cid), by=p.id)
@@ -477,8 +733,19 @@ def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = 
 
 
 @app.get("/api/v1/metrics/shadow")
-def shadow(domain: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def shadow(domain: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    if not p.in_domain(domain):
+        raise HTTPException(403, f"not authorised for {domain} data")
     return {"agreement": agreement_report(s, domain), "detection_quality": detection_quality(s, domain, min_count=2)}
+
+
+@app.get("/api/v1/metrics/drift")
+def drift(recent_days: int = Query(7, ge=1, le=90), baseline_days: int = Query(28, ge=7, le=365),
+          _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    """Verdict-quality drift per domain (R14, NFR-13)."""
+    from soc_platform.intelligence.drift import drift_report
+
+    return drift_report(s, recent_days=recent_days, baseline_days=baseline_days)
 
 
 @app.get("/api/v1/llm/budget")
@@ -490,7 +757,7 @@ def llm_budget(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_
 
 
 @app.post("/api/v1/phishing/ingest")
-def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session)):
     svc = _services(s)["phishing"]
     subs = svc.ingest_reported()
     out = []
@@ -504,7 +771,7 @@ def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVES
 
 @app.post("/api/v1/phishing/submit")
 async def phishing_submit(file: UploadFile = File(...), reporter: str | None = None, process: bool = True,
-                          p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+                          p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session)):
     raw = await file.read()
     if len(raw) > 25 * 1024 * 1024:
         raise HTTPException(413, "message too large")
@@ -513,8 +780,17 @@ async def phishing_submit(file: UploadFile = File(...), reporter: str | None = N
     return svc.process(sub.id) if process and sub.status == "new" else {"submission": sub.id, "status": sub.status}
 
 
+@app.get("/api/v1/phishing/suppliers")
+def phishing_suppliers(days: int = Query(90, ge=1, le=730), _: Principal = Depends(need(Perm.READ, "phishing")),
+                       s: Session = Depends(db_session)):
+    """Third-party / vendor email risk (U18)."""
+    from soc_platform.domains.phishing.supplier import SupplierMonitor
+
+    return SupplierMonitor(s).assess(days=days)
+
+
 @app.get("/api/v1/phishing/metrics")
-def phishing_metrics(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def phishing_metrics(_: Principal = Depends(need(Perm.READ, "phishing")), s: Session = Depends(db_session)):
     return _services(s)["phishing"].metrics()
 
 
@@ -522,7 +798,7 @@ def phishing_metrics(_: Principal = Depends(need(Perm.READ)), s: Session = Depen
 
 
 @app.post("/api/v1/incidents/run")
-def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")), s: Session = Depends(db_session)):
     svc = _services(s)["incident"]
     ing = svc.ingest()
     cases = svc.cluster()
@@ -532,12 +808,12 @@ def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INV
 
 
 @app.post("/api/v1/incidents/{cid}/investigate")
-def incident_investigate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def incident_investigate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")), s: Session = Depends(db_session)):
     return _services(s)["incident"].investigate(cid)
 
 
 @app.get("/api/v1/incidents/handover")
-def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ, "incident")), s: Session = Depends(db_session)):
     return _services(s)["incident"].handover(hours=hours)
 
 
@@ -545,19 +821,26 @@ def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ)), 
 
 
 @app.post("/api/v1/vm/refresh")
-def vm_refresh(p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def vm_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
     out = _services(s)["vulnerability"].refresh()
+    out["misconfigurations"] = _misconfig(s).refresh()
     _intel(s).refresh()
     return out
 
 
+def _misconfig(s: Session):
+    from soc_platform.domains.vulnerability.misconfig import MisconfigurationService
+
+    return MisconfigurationService(s, registry(), policy=policy_engine(s))
+
+
 @app.get("/api/v1/vm/metrics")
-def vm_metrics(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def vm_metrics(_: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     return _services(s)["vulnerability"].metrics()
 
 
 @app.get("/api/v1/vm/findings")
-def vm_findings(priority: str | None = None, status: str = "open,reopened", _: Principal = Depends(need(Perm.READ)),
+def vm_findings(priority: str | None = None, status: str = "open,reopened", _: Principal = Depends(need(Perm.READ, "vulnerability")),
                 s: Session = Depends(db_session)):
     from soc_platform.domains.vulnerability.models import ConsolidatedFinding
 
@@ -572,7 +855,7 @@ def vm_findings(priority: str | None = None, status: str = "open,reopened", _: P
 
 
 @app.get("/api/v1/vm/affected/{cve}")
-def vm_affected(cve: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def vm_affected(cve: str, _: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     return _services(s)["vulnerability"].affected_devices(cve.upper())
 
 
@@ -583,7 +866,7 @@ class CampaignBody(BaseModel):
 
 
 @app.post("/api/v1/vm/campaigns")
-def vm_campaign(body: CampaignBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def vm_campaign(body: CampaignBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     try:
         c = _services(s)["vulnerability"].create_campaign(body.cve.upper(), p, notify_via=body.notify_via,
                                                           team_contacts=body.team_contacts)
@@ -600,19 +883,19 @@ class AckBody(BaseModel):
 
 
 @app.post("/api/v1/vm/plans/{pid}/acknowledge")
-def vm_ack(pid: str, body: AckBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def vm_ack(pid: str, body: AckBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     plan = _services(s)["vulnerability"].acknowledge(pid, p, committed_date=body.committed_date, owner=body.owner,
                                                      dependencies=body.dependencies, response=body.response)
     return {"plan_id": plan.id, "status": plan.status}
 
 
 @app.post("/api/v1/vm/follow-up")
-def vm_follow(p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def vm_follow(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
     return _services(s)["vulnerability"].follow_up()
 
 
 @app.post("/api/v1/vm/campaigns/{cid}/validate")
-def vm_validate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def vm_validate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
     return _services(s)["vulnerability"].validate_campaign(cid)
 
 
@@ -624,14 +907,14 @@ class ExceptionBody(BaseModel):
 
 
 @app.post("/api/v1/vm/exceptions")
-def vm_exception(body: ExceptionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def vm_exception(body: ExceptionBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     ex = _services(s)["vulnerability"].request_exception(body.finding_id, p, justification=body.justification,
                                                          compensating_control=body.compensating_control, days=body.days)
     return {"exception_id": ex.id, "status": ex.status}
 
 
 @app.post("/api/v1/vm/exceptions/{eid}/decision")
-def vm_exception_decision(eid: str, approve: bool, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def vm_exception_decision(eid: str, approve: bool, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     try:
         ex = _services(s)["vulnerability"].decide_exception(eid, p, approve=approve)
     except Exception as exc:
@@ -640,13 +923,13 @@ def vm_exception_decision(eid: str, approve: bool, p: Principal = Depends(curren
 
 
 @app.post("/api/v1/vm/risk-register/propose")
-def vm_rr(p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def vm_rr(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
     return [{"id": e.id, "cve": e.cve, "rating": e.rating, "risk_statement": e.risk_statement, "status": e.status}
             for e in _services(s)["vulnerability"].propose_risk_register()]
 
 
 @app.post("/api/v1/vm/risk-register/{eid}/decision")
-def vm_rr_decide(eid: str, approve: bool, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def vm_rr_decide(eid: str, approve: bool, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     try:
         e = _services(s)["vulnerability"].decide_risk_entry(eid, p, approve=approve)
     except Exception as exc:
@@ -659,28 +942,119 @@ class QueryBody(BaseModel):
 
 
 @app.post("/api/v1/vm/query")
-def vm_query(body: QueryBody, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def vm_query(body: QueryBody, _: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     return _services(s)["vulnerability"].query(body.question)
 
 
 @app.get("/api/v1/vm/new-kev")
-def vm_new_kev(since: str = Query(..., description="YYYY-MM-DD"), _: Principal = Depends(need(Perm.READ)),
+def vm_new_kev(since: str = Query(..., description="YYYY-MM-DD"), _: Principal = Depends(need(Perm.READ, "vulnerability")),
                s: Session = Depends(db_session)):
     return _services(s)["vulnerability"].new_cve_assessment(since=since)
 
 
 @app.get("/api/v1/vm/coverage")
-def vm_coverage(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def vm_coverage(_: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
     return _services(s)["vulnerability"].coverage()
+
+
+@app.get("/api/v1/jobs")
+def job_history(job: str | None = None, limit: int = Query(100, le=1000), _: Principal = Depends(need(Perm.READ)),
+                s: Session = Depends(db_session)):
+    """Scheduled job runs, retries and dead letters (VM-T11)."""
+    from soc_platform import jobs
+
+    return {"jobs": {n: {"interval_env": e, "default_seconds": d} for n, (e, d) in jobs.JOBS.items()},
+            "runs": jobs.history(s, job=job, limit=limit)}
+
+
+@app.post("/api/v1/jobs/{name}/run")
+def job_replay(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)), s: Session = Depends(db_session)):
+    """Replay / run a job now. Jobs are idempotent, so a replay never duplicates work or actions."""
+    from soc_platform import jobs
+
+    if name not in jobs.JOBS:
+        raise HTTPException(404, "unknown job")
+    AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="job.replay", subject_type="job",
+                       subject_id=name, payload={})
+    s.commit()
+    run = jobs.run_job(name, trigger=f"manual:{p.id}")
+    if run is None:
+        raise HTTPException(409, "job is running on another replica")
+    return {"job": name, "status": run.status, "attempts": run.attempts,
+            "error": (run.error or "").splitlines()[0] if run.error else None,
+            "summary": run.summary}
+
+
+@app.post("/api/v1/vm/tickets/sync")
+def vm_ticket_sync(_: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
+    """Pull ticket state from ITSM; resolved tickets trigger closure validation (VM-T10, VM-F10)."""
+    return _services(s)["vulnerability"].sync_tickets()
+
+
+@app.get("/api/v1/vm/misconfigurations")
+def vm_misconfigs(status: str | None = None, _: Principal = Depends(need(Perm.READ, "vulnerability")),
+                  s: Session = Depends(db_session)):
+    svc = _misconfig(s)
+    return {"metrics": svc.metrics(), "items": svc.list(status)}
+
+
+@app.post("/api/v1/vm/misconfigurations/route")
+def vm_misconfig_route(p: Principal = Depends(need(Perm.REQUEST_ACTION, "vulnerability")), s: Session = Depends(db_session)):
+    try:
+        return _misconfig(s).route(p)
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+@app.post("/api/v1/vm/misconfigurations/{mid}/{verb}")
+def vm_misconfig_verb(mid: str, verb: str, note: str = "", p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")),
+                      s: Session = Depends(db_session)):
+    svc = _misconfig(s)
+    try:
+        if verb == "fixed":
+            m = svc.mark_fixed(mid, p, note)
+            return {"id": m.id, "status": m.status}
+        if verb == "validate":
+            return svc.validate(mid)
+    except Exception as exc:
+        raise _err(exc) from exc
+    raise HTTPException(404, "unknown operation")
 
 
 # ----------------------------------------------------------------------------- reports
 
 
+REPORT_DOMAIN = {"daily_exposure": "vulnerability", "weekly_vm": "vulnerability", "weekly_mgmt": "*",
+                 "compliance": "*"}
+
+
+def _report_allowed(p: Principal, kind: str) -> bool:
+    dom = REPORT_DOMAIN.get(kind, "*")
+    if kind == "compliance" and not p.can(Perm.EXPORT_EVIDENCE):
+        return False
+    return "*" in p.domains if dom == "*" else p.in_domain(dom)
+
+
 @app.post("/api/v1/reports/{kind}")
-def make_report(kind: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def make_report(kind: str, period_days: int = Query(90, ge=1, le=730), p: Principal = Depends(need(Perm.READ)),
+                s: Session = Depends(db_session)):
     from soc_platform.reporting.reports import ReportService
 
+    if kind not in REPORT_DOMAIN:
+        raise HTTPException(404, f"unknown report {kind}")
+    if not _report_allowed(p, kind):
+        raise HTTPException(403, "not authorised for this report")
+    if kind == "compliance":
+        from soc_platform.domains.vulnerability.models import ReportRun
+        from soc_platform.reporting.compliance import build_pack
+
+        path, ev = build_pack(s, get_settings(), get_settings().report_output_dir, period_days=period_days)
+        run = ReportRun(kind="compliance", path=str(path), metrics=ev["summary"], generated_by=p.id)
+        s.add(run)
+        s.flush()
+        AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="report.compliance_pack",
+                           subject_type="report", subject_id=run.id, payload=ev["summary"])
+        return {"id": run.id, "kind": run.kind, "path": run.path, "summary": ev["summary"]}
     sv = _services(s)
     rs = ReportService(s, get_settings().report_output_dir, llm=llm(s))
     fn = {"daily_exposure": lambda: rs.daily_exposure(sv["vulnerability"], by=p.id),
@@ -693,13 +1067,73 @@ def make_report(kind: str, p: Principal = Depends(need(Perm.READ)), s: Session =
 
 
 @app.get("/api/v1/reports/{rid}/download")
-def download_report(rid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def download_report(rid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
     from soc_platform.domains.vulnerability.models import ReportRun
 
     run = s.get(ReportRun, rid)
     if run is None:
         raise HTTPException(404, "unknown report")
+    if run.kind == "investigation":
+        _case_in_scope(s, p, (run.metrics or {}).get("case_id"))
+    elif not _report_allowed(p, run.kind):
+        raise HTTPException(404, "unknown report")
+    root = Path(get_settings().report_output_dir).resolve()
+    if root not in Path(run.path).resolve().parents:
+        raise HTTPException(404, "unknown report")
     return FileResponse(run.path, filename=Path(run.path).name)
+
+
+# ----------------------------------------------------------------------------- dashboards
+
+
+@app.get("/api/v1/dashboard/overview")
+def dash_overview(days: int = Query(14, ge=1, le=90), p: Principal = Depends(need(Perm.READ)),
+                  s: Session = Depends(db_session)):
+    from soc_platform.api.dashboards import overview
+
+    return overview(s, p.domains, days=days)
+
+
+@app.get("/api/v1/dashboard/connectors")
+def dash_connectors(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    from soc_platform.api.dashboards import connector_freshness
+
+    return connector_freshness(s, registry())
+
+
+@app.get("/api/v1/dashboard/attack-coverage")
+def dash_attack(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    from soc_platform.intelligence.attack_coverage import coverage
+
+    return coverage(s, registry().enabled_names())
+
+
+@app.get("/api/v1/dashboard/shadow-it")
+def dash_shadow_it(since: str = Query("-7days", pattern=r"^-\d{1,3}(days|hours)$"),
+                   _: Principal = Depends(need(Perm.READ, "incident"))):
+    from soc_platform.intelligence.shadow_it import shadow_it_report
+
+    return shadow_it_report(registry(), since=since)
+
+
+@app.get("/api/v1/entities/{eid}/360")
+def entity360(eid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+    from soc_platform.api.dashboards import entity_360
+
+    out = entity_360(s, eid)
+    if out is None:
+        raise HTTPException(404, "not found")
+    return out
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session)):
+    """Prometheus scrape endpoint; authenticate with an auditor service-account key (X-API-Key)."""
+    from fastapi.responses import PlainTextResponse
+
+    from soc_platform.api.dashboards import prometheus
+
+    return PlainTextResponse(prometheus(s, registry()), media_type="text/plain; version=0.0.4")
 
 
 # ----------------------------------------------------------------------------- intelligence layer

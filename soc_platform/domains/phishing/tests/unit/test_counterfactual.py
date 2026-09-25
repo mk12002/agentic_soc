@@ -1,4 +1,3 @@
-import pytest
 from soc_platform.domains.phishing.engine.orchestrator.counterfactual_engine import calculate_counterfactual, threshold_for_verdict
 
 def test_counterfactual_finding():

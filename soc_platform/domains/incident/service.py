@@ -31,6 +31,7 @@ from soc_platform.llm.gateway import LLMGateway, deterministic_grounded
 
 AGENT = "incident"
 ALERT_STREAMS = {"alerts", "incidents", "risk_detections", "email_alerts"}
+INVENTORY_STREAMS = {"entra": ("users",), "crowdstrike": ("hosts",), "defender_endpoint": ("machines",)}
 ALERT_KINDS = {"alert", "deception"}
 SEV = ["informational", "low", "medium", "high", "critical"]
 URL_RE = re.compile(r"https?://[^\s'\"<>)]+")
@@ -52,7 +53,7 @@ class IncidentService:
                  llm: LLMGateway | None = None, actions: ActionRegistry | None = None) -> None:
         self.s = session
         self.registry = registry
-        self.policy = policy or PolicyEngine()
+        self.policy = policy or PolicyEngine.for_session(session)
         self.llm = llm
         self.actions = actions or registry.action_registry()
         self.store = ContextStore(session)
@@ -64,6 +65,12 @@ class IncidentService:
         runner = SyncRunner(self.s, self.store)
         synced: dict[str, int] = {}
         errors: dict[str, list[str]] = {}
+        # Directory and inventory first, so alert references resolve against known users/hosts (order independence).
+        for c in self.registry.enabled():
+            for stream in c.streams:
+                if stream in INVENTORY_STREAMS.get(c.name, ()):
+                    rep = runner.sync(c, stream)
+                    synced[f"{c.name}.{stream}"] = rep.ingested
         for c in self.registry.enabled():
             for stream in c.streams:
                 if stream not in ALERT_STREAMS:

@@ -13,10 +13,8 @@ from __future__ import annotations
 from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
-import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 REPO_ROOT = PHISHING_HOME

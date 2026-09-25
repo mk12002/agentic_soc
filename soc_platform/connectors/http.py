@@ -159,6 +159,23 @@ class HttpTransport:
         return Response(r.status_code, body, dict(r.headers))
 
 
+class RoutingTransport:
+    """Sends absolute URLs under a prefix to a dedicated transport (own base URL + token audience).
+
+    Used where one vendor product spans APIs with different OAuth resources, e.g. Graph
+    (``graph.microsoft.com``) and the Exchange Online admin API (``outlook.office365.com``)."""
+
+    def __init__(self, default: Any, routes: dict[str, Any]) -> None:
+        self.default = default
+        self.routes = sorted(routes.items(), key=lambda kv: -len(kv[0]))
+
+    def request(self, method, path, **kw) -> Response:
+        for prefix, transport in self.routes:
+            if path.startswith(prefix):
+                return transport.request(method, path, **kw)
+        return self.default.request(method, path, **kw)
+
+
 class FixtureTransport:
     """Serves vendor-shaped fixture responses; records every call (writes included) for inspection.
 

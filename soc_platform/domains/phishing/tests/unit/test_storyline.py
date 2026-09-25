@@ -1,4 +1,3 @@
-import pytest
 from soc_platform.domains.phishing.engine.orchestrator.storyline_engine import generate_storyline
 
 def test_storyline_generation():

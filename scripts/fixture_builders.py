@@ -56,7 +56,7 @@ def defender_endpoint() -> None:
         route("GET", r"^/api/machines/mde-jane01/alerts$", {"value": [alerts[0]]}),
         route("GET", r"^/api/machines/mde-db01/alerts$", {"value": [alerts[1]]}),
         route("GET", r"^/api/machines/[^/]+/alerts$", {"value": []}),
-        route("GET", r"^/api/machines/findbyip$", {"value": by_fqdn(j["fqdn"])}, params={"ip": j["ip"]}),
+        route("GET", r"^/api/machines/findbyip$", {"value": by_fqdn(j["fqdn"])}, params={"ip": j["ip"], "timestamp": r"~^\d{4}-\d\d-\d\dT"}),
         route("GET", r"^/api/machines/findbyip$", {"value": []}),
         route("GET", r"^/api/alerts$", {"value": alerts}),
         route("GET", r"^/api/vulnerabilities/machinesVulnerabilities$", {"value": vulns}),
@@ -244,9 +244,12 @@ def rapid7() -> None:
             "severity": meta["sev"], "exploits": 2 if meta["kev"] else 0,
             "malwareKits": 1 if c == "CVE-2021-44228" else 0, "solution": {"summary": f"Upgrade {meta['product']}"}}))
     routes += [
-        route("GET", r"^/api/3/vulnerabilities$", {"resources": [{"id": "r7-cve-2021-44228", "affected_assets": 1}]},
-              params={"cves": "CVE-2021-44228"}),
-        route("GET", r"^/api/3/vulnerabilities$", {"resources": []}),
+    ]
+    for c in CVES:  # asset search with the "cve" filter -> assets where Rapid7 reports that CVE
+        hit = [a for a, k in zip(assets, order) if c in EXPOSURE.get(k, []) and not (k == "web01" and c == "CVE-2023-44487")]
+        routes.append(route("POST", r"^/api/3/assets/search$", {"resources": hit}, body_contains=['"cve"', c]))
+    routes += [
+        route("POST", r"^/api/3/assets/search$", {"resources": []}, body_contains='"cve"'),
         route("POST", r"^/api/3/assets/search$", {"resources": [assets[0]]}, body_contains="web01"),
         route("POST", r"^/api/3/assets/search$", {"resources": [assets[1]]}, body_contains="db01"),
         route("POST", r"^/api/3/assets/search$", {"resources": [assets[3]]}, body_contains="jane"),
@@ -285,9 +288,14 @@ def wiz() -> None:
     write("wiz", [
         route("POST", r"^/graphql$", {"data": {"cloudResources": {"nodes": resources, "pageInfo": pi, "totalCount": 1}}},
               body_contains="cloudResources"),
+        *[route("POST", r"^/graphql$", {"data": {"vulnerabilityFindings": {
+            "nodes": [v for v in vulns if v["name"] == c], "pageInfo": pi}}}, body_contains=["vulnerabilityExternalId", f'"{c}"'])
+          for c in CVES],
+        route("POST", r"^/graphql$", {"data": {"vulnerabilityFindings": {"nodes": [], "pageInfo": pi}}},
+              body_contains="vulnerabilityExternalId"),
         route("POST", r"^/graphql$", {"data": {"vulnerabilityFindings": {"nodes": vulns, "pageInfo": pi}}},
               body_contains="vulnerabilityFindings"),
-        route("POST", r"^/graphql$", {"data": {"issues": {"nodes": issues, "pageInfo": pi}}}, body_contains="issues("),
+        route("POST", r"^/graphql$", {"data": {"issuesV2": {"nodes": issues, "pageInfo": pi}}}, body_contains="issuesV2("),
     ])
 
 
@@ -306,6 +314,23 @@ def umbrella() -> None:
             row("09:11:03", "PRIYA-LT07", u("priya")["upn"], "10.20.1.31", PHISH["url_domain"], "blocked", phish_cat),
             row("09:30:00", "JANE-LT01", u("jane")["upn"], HOSTS["jane"]["ip"], "outlook.office365.com", "allowed",
                 [{"label": "Business Services", "type": "content"}])]
+    fs, ai, vpn = ([{"label": "File Storage", "type": "content"}], [{"label": "Generative AI", "type": "application"}],
+                   [{"label": "Personal VPN", "type": "content"}, {"label": "Proxy/Anonymizer", "type": "content"}])
+    shadow = [("10:02:11", "ARUN-LT05", u("arun")["upn"], "10.20.1.41", "wetransfer.com", "allowed", fs),
+              ("10:04:37", "ARUN-LT05", u("arun")["upn"], "10.20.1.41", "wetransfer.com", "allowed", fs),
+              ("11:15:02", "MEERA-LT06", u("meera")["upn"], "10.20.1.44", "wetransfer.com", "allowed", fs),
+              ("10:30:00", "LI-DEV08", u("li")["upn"], "10.20.1.52", "chat.deepseek.com", "allowed", ai),
+              ("10:31:12", "LI-DEV08", u("li")["upn"], "10.20.1.52", "chat.deepseek.com", "allowed", ai),
+              ("12:01:40", "TOM-LT07", u("tom")["upn"], "10.20.1.47", "chat.deepseek.com", "allowed", ai),
+              ("13:20:05", "LI-DEV08", u("li")["upn"], "10.20.1.52", "nordvpn.com", "blocked", vpn),
+              ("13:21:44", "LI-DEV08", u("li")["upn"], "10.20.1.52", "mega.nz", "blocked", fs),
+              ("14:05:09", "MEERA-LT06", u("meera")["upn"], "10.20.1.44", "anydesk.com", "allowed",
+               [{"label": "Remote Access", "type": "content"}]),
+              ("14:40:31", "TOM-LT07", u("tom")["upn"], "10.20.1.47", "teams.microsoft.com", "allowed",
+               [{"label": "Business Services", "type": "content"}]),
+              ("15:02:18", "ARUN-LT05", u("arun")["upn"], "10.20.1.41", "update-flash-player.xyz", "blocked",
+               [{"label": "Malware", "type": "security"}, {"label": "Newly Seen Domains", "type": "security"}])]
+    data += [row(*r) for r in shadow]
     phish_rows = [d for d in data if d["domain"] == PHISH["url_domain"]]
     write("umbrella", [
         route("GET", r"^/reports/v2/activity/dns$", {"data": phish_rows}, params={"domains": PHISH["url_domain"]}),
@@ -478,7 +503,7 @@ def servicenow() -> None:
 
 def jira() -> None:
     write("jira", [route("POST", r"^/rest/api/3/issue$", {"id": "10001", "key": "SEC-101"}),
-                   route("GET", r"^/rest/api/3/search$", {"issues": [], "total": 0})])
+                   route("GET", r"^/rest/api/3/search/jql$", {"issues": [], "isLast": True})])
 
 
 def cmdb_csv() -> None:
@@ -490,7 +515,9 @@ def cmdb_csv() -> None:
         {"hostname": "fs*", "owner": "Sunita Iyer", "platform_team": "Windows Server Team", "environment": "Production",
          "criticality": "high"},
         {"hostname": "*-lt*", "owner": "", "platform_team": "End User Computing", "environment": "Corporate",
-         "criticality": "medium"}]})])
+         "criticality": "medium"},
+        {"hostname": "", "subscription": "sub-001", "owner": "Ravi Nair", "platform_team": "Cloud Platform",
+         "environment": "Production", "criticality": "high"}]})])
 
 
 def sentinel() -> None:

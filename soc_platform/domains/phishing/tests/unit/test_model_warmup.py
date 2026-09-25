@@ -1,6 +1,5 @@
 """Tests for the model warmup system."""
 
-import pytest
 from soc_platform.domains.phishing.engine.agents.model_warmup import ModelWarmup
 
 class MockModelWarmup(ModelWarmup):

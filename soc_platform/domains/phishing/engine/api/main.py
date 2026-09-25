@@ -9,6 +9,8 @@ import base64
 import binascii
 import asyncio
 import hashlib
+import hmac
+import io
 import ipaddress
 import re
 import uuid
@@ -58,7 +60,6 @@ from soc_platform.domains.phishing.engine.services.logging_service import setup_
 from soc_platform.domains.phishing.engine.services.messaging_service import RabbitMQClient
 from soc_platform.domains.phishing.engine.services.email_validator import EmailValidator
 from soc_platform.domains.phishing.engine.services.audit_logger import AuditLogger
-from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 import json
@@ -1931,7 +1932,6 @@ async def ingest_raw_email(request: Request, file: UploadFile = File(...), _auth
         )
 
     if getattr(settings, "local_routing_enabled", False):
-        import shutil
         from soc_platform.domains.phishing.engine.services.gdrive_client import get_gdrive_client
         
         gdrive = get_gdrive_client()

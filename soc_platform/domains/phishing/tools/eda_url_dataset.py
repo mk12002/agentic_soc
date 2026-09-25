@@ -7,7 +7,6 @@ import json
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from urllib.parse import urlsplit
 
 import matplotlib.pyplot as plt

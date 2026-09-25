@@ -1,6 +1,5 @@
 """Tests for the Azure Search Client."""
 
-import pytest
 from soc_platform.domains.phishing.engine.action_layer.azure_search_client import AzureSearchClient, is_azure_search_available
 
 class MockAzureSearchClientSDK:

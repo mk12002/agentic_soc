@@ -140,16 +140,28 @@ class CaseService:
                              "attributes": attrs, "seen_by": sorted(by_tool), "confidence": e.confidence})
         evidence = self.s.execute(select(Evidence).where(Evidence.case_id == case_id)
                                   .order_by(Evidence.collected_at)).scalars().all()
+        from soc_platform.core.enrichment import evidence_for_llm
+
+        ref_of = {x["evidence_row"]: x["id"] for x in evidence_for_llm(list(evidence))}
+        row_of = {v: k for k, v in ref_of.items()}
         by_dim: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for ev in evidence:
-            by_dim[ev.dimension].append({"id": ev.id, "source": ev.source_tool, "summary": ev.summary,
+            by_dim[ev.dimension].append({"id": ev.id, "ref": ref_of.get(ev.id), "source": ev.source_tool, "summary": ev.summary,
                                          "deep_link": ev.deep_link, "type": "inference" if ev.is_inference else "fact",
                                          "observed_at": ev.observed_at.isoformat() if ev.observed_at else None})
-        actions = self.s.execute(select(ActionRequest).where(ActionRequest.case_id == case_id)
-                                 .order_by(ActionRequest.created_at)).scalars().all()
+        actions = list(self.s.execute(select(ActionRequest).where(ActionRequest.case_id == case_id)
+                                      .order_by(ActionRequest.created_at)).scalars())
+        actions += [a for a in self.s.execute(select(ActionRequest).where(
+            ActionRequest.case_id != case_id, ActionRequest.status.in_(("recommended", "pending_approval", "approved",
+                                                                         "executed")))).scalars()
+                    if case_id in (a.result or {}).get("linked_cases", [])]  # shared with another case
         dispositions = self.s.execute(select(Disposition).where(Disposition.subject_id == case_id)).scalars().all()
         timeline = self.store.timeline([x["id"] for x in entities if x["kind"] in {"asset", "identity", "indicator"}])
-        claims = (case.assessment or {}).get("claims", [])
+        summaries = {ev.id: (ev.summary, ev.source_tool, ev.deep_link) for ev in evidence}
+        claims = [{**c, "evidence": [{"ref": r, "id": row_of.get(r), "summary": summaries.get(row_of.get(r), ("",))[0],
+                                      "source": summaries.get(row_of.get(r), ("", ""))[1]}
+                                     for r in (c.get("evidence_ids") or [])]}
+                  for c in (case.assessment or {}).get("claims", [])]
         return {
             "case": {"id": case.id, "domain": case.domain, "title": case.title, "status": case.status,
                      "severity": case.severity, "confidence": case.confidence, "verdict": case.verdict,

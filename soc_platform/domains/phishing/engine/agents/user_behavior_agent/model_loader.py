@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 import xgboost as xgb
 
 from soc_platform.domains.phishing.engine.agents.ml_runtime import resolve_model_path

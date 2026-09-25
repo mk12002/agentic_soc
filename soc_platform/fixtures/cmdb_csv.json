@@ -32,6 +32,14 @@
       "platform_team": "End User Computing",
       "environment": "Corporate",
       "criticality": "medium"
+     },
+     {
+      "hostname": "",
+      "subscription": "sub-001",
+      "owner": "Ravi Nair",
+      "platform_team": "Cloud Platform",
+      "environment": "Production",
+      "criticality": "high"
      }
     ]
    },

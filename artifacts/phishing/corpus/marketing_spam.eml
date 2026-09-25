@@ -9,19 +9,19 @@ From: "Deals Weekly" <offers@deals-weekly.example>
 To: jane.doe@cci-demo.com
 Subject: 70% off laptops this weekend only!
 Date: Sun, 20 Sep 2026 08:07:00 +0000
-Message-ID: <179026443137.13628.14773288852504261965@deals-weekly.example>
+Message-ID: <179028143810.25860.5352065969245039382@deals-weekly.example>
 X-Test-Label: spam
 MIME-Version: 1.0
 Content-Type: multipart/alternative;
- boundary="===============3537680019434102398=="
+ boundary="===============2812551254446345216=="
 
---===============3537680019434102398==
+--===============2812551254446345216==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Huge savings this weekend only. Unsubscribe any time.
 
---===============3537680019434102398==
+--===============2812551254446345216==
 Content-Type: text/html; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 MIME-Version: 1.0
@@ -30,4 +30,4 @@ MIME-Version: 1.0
 -weekly.example/laptops?utm=3Dmail">Shop now</a> | <a href=3D"https://deals-w=
 eekly.example/unsubscribe">Unsubscribe</a></p>
 
---===============3537680019434102398==--
+--===============2812551254446345216==--

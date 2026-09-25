@@ -52,7 +52,10 @@ def main() -> None:
     from soc_platform.domains.phishing.agents.analyzer import EngineAnalyzer, HeuristicAnalyzer
     from soc_platform.domains.phishing.agents.decompose import decompose
 
-    heur = HeuristicAnalyzer(org_domains=["cci-demo.com"], threat_intel=ConnectorRegistry.all_fake().get("threat_intel"))
+    from soc_platform.domains.phishing.supplier import load_suppliers
+
+    heur = HeuristicAnalyzer(org_domains=["cci-demo.com"], threat_intel=ConnectorRegistry.all_fake().get("threat_intel"),
+                             partner_domains=[d for sup in load_suppliers() for d in sup.domains])
     eng = EngineAnalyzer(offline=True) if a.engine else None
     rows = []
     t_load = time.perf_counter()
@@ -80,9 +83,10 @@ def main() -> None:
             continue
         def bucket(v):
             return "malicious" if v in {"malicious", "suspicious"} else "benign"
-        tp = sum(1 for r in lab if bucket(r[backend]) == "malicious" and r["label"] == "malicious")
-        fn = sum(1 for r in lab if bucket(r[backend]) == "benign" and r["label"] == "malicious")
-        fp = sum(1 for r in lab if bucket(r[backend]) == "malicious" and r["label"] != "malicious")
+        # "suspicious" labels are positives too: a miss on them must count as a false negative
+        tp = sum(1 for r in lab if bucket(r[backend]) == "malicious" and bucket(r["label"]) == "malicious")
+        fn = sum(1 for r in lab if bucket(r[backend]) == "benign" and bucket(r["label"]) == "malicious")
+        fp = sum(1 for r in lab if bucket(r[backend]) == "malicious" and bucket(r["label"]) != "malicious")
         tn = len(lab) - tp - fn - fp
         exact = sum(1 for r in lab if r[backend] == r["label"])
         summary[backend] = {"labelled": len(lab), "exact_verdict_match": exact, "tp": tp, "fn": fn, "fp": fp, "tn": tn,
