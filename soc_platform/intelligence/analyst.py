@@ -304,7 +304,8 @@ class IntelligenceAnalyst:
                                   f"Explain this correlated finding to a SOC analyst in 3-5 sentences: "
                                   f"{_SCORE_IN_TITLE.sub('', insight.title)}. Do not state numeric risk scores (the UI "
                                   "shows the live score). "
-                                  "What happened, in what order, why it matters, and what is uncertain.", evidence)
+                                  "What happened, in what order, why it matters, and what is uncertain.", evidence,
+                                  tier="small")      # routine, high-volume narrative: the small-tier deployment
             if g.get("source") == "llm":
                 insight.narrative = g["summary"] + ("\n" + "\n".join(f"- {c['text']} [{', '.join(c['evidence_ids'])}]"
                                                                      for c in g["claims"]) if g["claims"] else "")
@@ -332,13 +333,30 @@ class IntelligenceAnalyst:
                                                           "by_priority")} if vm else {}}
         evidence = [{"id": f"B{i + 1}", "claim": f"{k}: {json.dumps(v, default=str)[:1800]}", "source": k}
                     for i, (k, v) in enumerate(facts.items())]
+        # the brief is re-read on every visit to the Intelligence screen: reuse it while its facts are unchanged
+        import hashlib
+        import os
+        import time
+
+        key = hashlib.sha256((("llm" if self.llm else "det") + json.dumps(facts, sort_keys=True, default=str)).encode()).hexdigest()
+        ttl = float(os.environ.get("SOC_BRIEF_CACHE_SECONDS", "900"))
+        hit = _BRIEF_CACHE.get(key)
+        if hit and time.monotonic() - hit[0] < ttl:
+            return {**hit[1], "cached": True}
         if self.llm is not None:
             g = self.llm.grounded("intelligence.brief", "Write the SOC situation brief: top threats and why, "
                                   "which users/hosts need attention first, what is waiting on analysts, and "
                                   "exposure posture. Lead with what matters most.", evidence)
         else:
             g = {"summary": _brief_text(facts), "claims": [], "source": "deterministic"}
-        return {"summary": g["summary"], "claims": g.get("claims", []), "source": g.get("source"), "facts": facts}
+        out = {"summary": g["summary"], "claims": g.get("claims", []), "source": g.get("source"), "facts": facts}
+        if len(_BRIEF_CACHE) > 64:
+            _BRIEF_CACHE.clear()
+        _BRIEF_CACHE[key] = (time.monotonic(), out)
+        return out
+
+
+_BRIEF_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _ref(results: list[dict[str, Any]], r: dict[str, Any]) -> str:

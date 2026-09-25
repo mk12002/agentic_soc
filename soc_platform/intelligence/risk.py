@@ -178,7 +178,20 @@ class RiskEngine:
         band = next(b for t, b in BANDS if score >= t)
         return RiskProfile(entity_id, ent.kind, ent.display_name, score, band, factors)
 
+    def candidates(self) -> set[str]:
+        """Entities with at least one risk source (a relation to an event, a case link or an open finding). Every
+        other entity scores 0 and can raise no finding, so ranking and correlation profile only these."""
+        from soc_platform.core.models import CaseEntity, Relation
+        from soc_platform.domains.vulnerability.models import ConsolidatedFinding
+
+        return (set(self.s.execute(select(Relation.src_id)).scalars()) | set(self.s.execute(select(Relation.dst_id)).scalars())
+                | set(self.s.execute(select(CaseEntity.entity_id)).scalars())
+                | set(self.s.execute(select(ConsolidatedFinding.asset_id).where(
+                    ConsolidatedFinding.status.in_(("open", "reopened")))).scalars()))
+
     def top(self, kind: str | None = None, limit: int = 10) -> list[RiskProfile]:
+        """Highest-risk users / hosts (profiles only entities with a risk source: fast on large tenants)."""
+        candidates = self.candidates()
         q = select(Entity.id).where(Entity.kind.in_([kind] if kind else ["asset", "identity"]))
-        out = [p for eid in self.s.execute(q).scalars() if (p := self.profile(eid)) and p.score > 0]
+        out = [p for eid in self.s.execute(q).scalars() if eid in candidates and (p := self.profile(eid)) and p.score > 0]
         return sorted(out, key=lambda p: -p.score)[:limit]

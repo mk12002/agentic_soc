@@ -353,6 +353,13 @@ attack story, supplier risk, shadow IT, ATT&CK coverage, the analyst assistant a
 and requires structurally identical results, and **no original name** in any output about the new organisation.
 The same script can produce a client-branded demo estate (`SOC_FIXTURES_DIR=<out>/fixtures`).
 
+Beyond renaming, `scripts/build_estate_variant.py` generates **seeded variants with different volumes**: another
+organisation, other people, a different machine-naming scheme and IP plan, other suppliers, extra staff, extra
+laptops (some with no EDR or missing from the CMDB), extra vulnerable machines, a larger phishing campaign, more
+shadow-IT activity and extra benign or bulk mail. The consistency suite, re-run and LLM-parity tests, the self-check,
+the browser tour (screen values cross-checked against the API) and the token measurement all run on these variants.
+Every API response on a variant is checked to contain no name from the built-in estate.
+
 ---
 
 ## 9. How it was verified

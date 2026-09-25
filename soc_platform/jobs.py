@@ -82,10 +82,13 @@ def _body(name: str, s: Session) -> dict[str, Any]:
     if name == "self_check":
         from soc_platform.core.selfcheck import raise_or_resolve, run_self_check
 
-        result = run_self_check(s)
+        from soc_platform.core.selfcheck import confirm, llm_budget_alert
+
+        result = confirm(s, run_self_check(s))            # alert only on checks that fail twice (no false alarms)
         raise_or_resolve(s, result)
+        budget = llm_budget_alert(s, get_settings())
         return {"passed": result["passed"], "total": result["total"],
-                "failing": [c["check"] for c in result["checks"] if not c["ok"]]}
+                "failing": [c["check"] for c in result["checks"] if not c["ok"]], "llm_budget": budget}
     raise KeyError(f"unknown job {name}")
 
 

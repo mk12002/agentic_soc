@@ -66,7 +66,9 @@ class CorrelationEngine:
 
     def run(self, entity_ids: list[str] | None = None) -> list[Insight]:
         if entity_ids is None:
-            entity_ids = list(self.s.execute(select(Entity.id).where(Entity.kind.in_(("asset", "identity")))).scalars())
+            candidates = self.risk.candidates()          # entities without any risk source can raise no finding
+            entity_ids = [e for e in self.s.execute(select(Entity.id).where(Entity.kind.in_(("asset", "identity")))).scalars()
+                          if e in candidates]
         profiles = {eid: p for eid in entity_ids if (p := self.risk.profile(eid)) is not None}
         found: list[Insight] = []
         for p in profiles.values():

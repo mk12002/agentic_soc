@@ -122,3 +122,51 @@ def raise_or_resolve(s: Session, result: dict[str, Any]) -> None:
                       requirement_refs=["NFR-13", "R02"]))
     else:
         cur.title, cur.evidence, cur.status, cur.last_seen = title, evidence, "new", utcnow()
+
+
+def confirm(s: Session, first: dict[str, Any], *, wait: float | None = None) -> dict[str, Any]:
+    """A figure can differ for a moment while another transaction commits between two counts. Re-run once and keep
+    as failing only the checks that failed both times."""
+    import os
+    import time
+
+    if first["ok"]:
+        return first
+    time.sleep(float(os.environ.get("SOC_SELF_CHECK_CONFIRM_SECONDS", "2")) if wait is None else wait)
+    s.expire_all()
+    second = run_self_check(s)
+    still = {c["check"] for c in second["checks"] if not c["ok"]}
+    checks = [c if c["check"] in still else {**c, "ok": True} for c in first["checks"]]
+    return {**first, "ok": not still, "passed": sum(c["ok"] for c in checks), "checks": checks}
+
+
+def llm_budget_alert(s: Session, settings: Any) -> dict[str, Any] | None:
+    """Raise a finding before the monthly token budget runs out (80 %) and when it has (100 %): after that the
+    platform silently falls back to deterministic text for the rest of the month."""
+    from soc_platform.intelligence.correlation import _key
+    from soc_platform.intelligence.models import Insight
+    from soc_platform.llm.gateway import LLMGateway
+
+    if (settings.llm_provider or "none") == "none" or not settings.llm_monthly_token_budget:
+        return None
+    b = LLMGateway(s, settings).budget_status()
+    key = _key("platform", "llm_budget")
+    cur = s.execute(select(Insight).where(Insight.dedupe_key == key)).scalars().first()
+    if not b["alert"]:
+        if cur is not None and cur.status in {"new", "acknowledged"}:
+            cur.status, cur.decided_by = "resolved", "system:self_check"
+        return b
+    pct = round(100 * b["fraction"])
+    title = (f"LLM token budget exhausted ({b['used']:,} of {b['budget']:,} tokens): narratives fall back to deterministic text"
+             if b["exceeded"] else f"LLM token budget at {pct}% ({b['used']:,} of {b['budget']:,} tokens this month)")
+    fields = {"title": title, "severity": "high" if b["exceeded"] else "medium", "score": 60.0 if b["exceeded"] else 40.0,
+              "evidence": [{"ref": "llm_budget", "signal": "llm_budget", "source": "platform", "summary": title}],
+              "next_steps": ["Raise SOC_LLM_MONTHLY_TOKEN_BUDGET (see docs/LLM_TOKENS_AND_COST.md for sizing)",
+                             "Or reduce spend: a cheaper SOC_LLM_DEPLOYMENT_SMALL for routine narratives"]}
+    if cur is None:
+        s.add(Insight(rule="llm_budget", dedupe_key=key, entity_ids=[], domains=[], requirement_refs=["R10"], **fields))
+    else:
+        for k, v in fields.items():
+            setattr(cur, k, v)
+        cur.status, cur.last_seen = "new", utcnow()
+    return b

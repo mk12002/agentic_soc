@@ -10,7 +10,13 @@ const path = require('path');
 const REPO = path.resolve(__dirname, '..', '..');
 const BASE = process.env.SOC_BASE || 'http://127.0.0.1:8765';
 const OUT = process.env.SOC_SHOTS || path.join(REPO, 'docs', 'screenshots');
-const CORPUS = path.join(REPO, 'artifacts', 'phishing', 'corpus');
+// SOC_TOUR_ESTATE=<estate.json from scripts/build_estate_variant.py> runs the tour on another sample estate
+const EST = process.env.SOC_TOUR_ESTATE ? JSON.parse(fs.readFileSync(process.env.SOC_TOUR_ESTATE, 'utf8')) : {
+  org: 'acme-demo.com', lead: 'lena@acme-demo.com', focus_upn: 'jane.doe@acme-demo.com', campaign_cve: 'CVE-2021-44228',
+  phish_subject_token: 'password expires', corpus_dir: path.join(REPO, 'artifacts', 'phishing', 'corpus'),
+  uploads: ['supplier_bank_change.eml', 'supplier_lookalike_payment.eml', 'bec_ceo_fraud.eml', 'quishing_qr.eml',
+            'legit_vendor_invoice.eml', 'marketing_spam.eml']};
+const CORPUS = EST.corpus_dir;
 const BROWSER = process.env.SOC_BROWSER || ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/google-chrome', '/usr/bin/chromium',
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find(p => fs.existsSync(p));
@@ -79,22 +85,22 @@ async function visit(page, hash, name, full = true) {
 
 (async () => {
   // ---------- sample data through the real API, as the scheduler would load it
-  const lead = await token('lena@acme-demo.com', 'lead');
+  const lead = await token(EST.lead, 'lead');
   console.log('loading samples...');
   await call(lead, 'POST', '/api/v1/vm/refresh');
   await call(lead, 'POST', '/api/v1/incidents/run');
   await call(lead, 'POST', '/api/v1/phishing/ingest');
-  for (const f of ['supplier_bank_change.eml', 'supplier_lookalike_payment.eml', 'bec_ceo_fraud.eml', 'quishing_qr.eml', 'legit_vendor_invoice.eml', 'marketing_spam.eml'])
+  for (const f of EST.uploads)
     await upload(lead, f);
-  await call(lead, 'POST', '/api/v1/vm/campaigns', {cve: 'CVE-2021-44228', notify_via: 'ticket'});
+  await call(lead, 'POST', '/api/v1/vm/campaigns', {cve: EST.campaign_cve, notify_via: 'ticket'});
   await call(lead, 'POST', '/api/v1/vm/misconfigurations/route');
   await call(lead, 'POST', '/api/v1/intelligence/refresh');
-  const ops = await token('otto@acme-demo.com', 'automation_admin');
+  const ops = await token(`otto@${EST.org}`, 'automation_admin');
   for (const j of ['intelligence', 'follow_up', 'retention']) await call(ops, 'POST', `/api/v1/jobs/${j}/run`);
   const cases = await call(lead, 'GET', '/api/v1/cases');
-  const phishCase = cases.find(c => c.domain === 'phishing' && c.title.includes('password expires')) || cases.find(c => c.domain === 'phishing');
+  const phishCase = cases.find(c => c.domain === 'phishing' && c.title.includes(EST.phish_subject_token)) || cases.find(c => c.domain === 'phishing');
   const incCase = cases.find(c => c.domain === 'incident' && c.severity === 'critical') || cases.find(c => c.domain === 'incident');
-  const jane = await call(lead, 'GET', '/api/v1/entities/find?kind=identity&key=upn&value=jane.doe@acme-demo.com');
+  const jane = await call(lead, 'GET', `/api/v1/entities/find?kind=identity&key=upn&value=${encodeURIComponent(EST.focus_upn)}`);
 
   const browser = await chromium.launch({executablePath: BROWSER, headless: true, ignoreDefaultArgs: ['--hide-scrollbars']});
   const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, deviceScaleFactor: 1, bypassCSP: true}); // harness only: CSP blocks Playwright's eval-based waits
@@ -107,7 +113,7 @@ async function visit(page, hash, name, full = true) {
   await page.goto(BASE + '/');
   await page.waitForSelector('#si-user');
   await shot(page, '00-sign-in', false);
-  await page.fill('#si-user', 'lena@acme-demo.com');
+  await page.fill('#si-user', EST.lead);
   await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]');
   await page.waitForSelector('.sidebar');
@@ -115,7 +121,7 @@ async function visit(page, hash, name, full = true) {
 
   await visit(page, 'overview', '01-overview');
   await page.goto(`${BASE}/#/intelligence`); await settle(page);
-  await page.fill('#iq', 'Is jane.doe@acme-demo.com compromised and what should we do first?');
+  await page.fill('#iq', `Is ${EST.focus_upn} compromised and what should we do first?`);
   await page.click('[data-fn="askIntel"]');
   await page.waitForFunction(() => !document.querySelector('#ia .spin') && document.querySelector('#ia').textContent.length > 40, null, {timeout: 120000});
   await shot(page, '02-intelligence');
@@ -223,7 +229,7 @@ async function visit(page, hash, name, full = true) {
 
   // ---------- admin: access management, with a service-account key created in the UI
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
-  await page.fill('#si-user', 'ada@acme-demo.com'); await page.selectOption('#si-role', 'admin');
+  await page.fill('#si-user', `ada@${EST.org}`); await page.selectOption('#si-role', 'admin');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   await page.goto(`${BASE}/#/access`); await settle(page);
   await page.fill('#kn', 'prometheus'); await page.click('[data-fn="newKey"]'); await page.waitForTimeout(1200);
@@ -232,7 +238,7 @@ async function visit(page, hash, name, full = true) {
   await shot(page, '18-access');
   // auditor: compliance pack
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
-  await page.fill('#si-user', 'audrey@acme-demo.com'); await page.selectOption('#si-role', 'auditor');
+  await page.fill('#si-user', `audrey@${EST.org}`); await page.selectOption('#si-role', 'auditor');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   await page.goto(`${BASE}/#/reports`); await settle(page);
   await page.click('[data-fn="compliancePack"]');
@@ -243,7 +249,7 @@ async function visit(page, hash, name, full = true) {
 
   // ---------- layout audit at narrower widths, every screen, both themes
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
-  await page.fill('#si-user', 'lena@acme-demo.com'); await page.selectOption('#si-role', 'lead');
+  await page.fill('#si-user', EST.lead); await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'reports', 'access', 'audit'];

@@ -17,22 +17,25 @@ from pathlib import Path
 
 import pytest
 
+from soc_platform.tests.conftest import ESTATES, estate_env
+
 ROOT = Path(__file__).resolve().parents[2]
-UPLOADS = ["supplier_bank_change.eml", "supplier_lookalike_payment.eml", "bec_ceo_fraud.eml", "quishing_qr.eml",
-           "legit_vendor_invoice.eml", "marketing_spam.eml"]
 
 
 # --------------------------------------------------------------------------------------------- HTTP estate
-@pytest.fixture(scope="module")
-def api(tmp_path_factory):
-    """The demo estate loaded over HTTP exactly as the console does it (restores the environment afterwards)."""
-    tmp = tmp_path_factory.mktemp("consistency")
+@pytest.fixture(scope="module", params=ESTATES)
+def api(request, tmp_path_factory, estate_configs):
+    """One estate (built-in or seeded variant) loaded over HTTP exactly as the console does it."""
+    cfg = estate_configs[request.param]
+    tmp = tmp_path_factory.mktemp(f"consistency-{cfg['name']}")
     env = {"SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": "c" * 40, "SOC_ENVIRONMENT": "test",
            "SOC_DATABASE_URL": f"sqlite:///{tmp / 'c.db'}", "SOC_REPORT_OUTPUT_DIR": str(tmp / "rep"),
-           "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"), "SOC_ORG_DOMAINS": "acme-demo.com", "SOC_LLM_PROVIDER": "none",
+           "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"), "SOC_LLM_PROVIDER": "none",
            "SOC_RATE_LIMIT_RPS": "100000", "SOC_RATE_LIMIT_BURST": "100000"}
     saved = {k: os.environ.get(k) for k in env}
     os.environ.update(env)
+    scope = estate_env(cfg)
+    scope.__enter__()
     from soc_platform.config import get_settings
     from soc_platform.core import db as dbm
 
@@ -50,19 +53,20 @@ def api(tmp_path_factory):
     def H(user, roles, domains=""):
         return {"Authorization": "Bearer " + c.get(f"/api/v1/dev/token?user={user}&roles={roles}&domains={domains}").json()["token"]}
 
-    lead, ops = H("lena@acme-demo.com", "lead"), H("otto@acme-demo.com", "automation_admin")
+    lead, ops = H(cfg["lead"], "lead"), H(f"ops@{cfg['org']}", "automation_admin")
     for step in ("/api/v1/vm/refresh", "/api/v1/incidents/run", "/api/v1/phishing/ingest"):
         assert c.post(step, headers=lead).status_code == 200, step
-    for f in UPLOADS:
-        r = c.post("/api/v1/phishing/submit", headers=lead, files={"file": (f, (ROOT / "artifacts/phishing/corpus" / f).read_bytes())})
+    for f in cfg["uploads"]:
+        r = c.post("/api/v1/phishing/submit", headers=lead, files={"file": (f, (Path(cfg["corpus_dir"]) / f).read_bytes())})
         assert r.status_code == 200, f
-    assert c.post("/api/v1/vm/campaigns", headers=lead, json={"cve": "CVE-2021-44228", "notify_via": "ticket"}).status_code == 200
+    assert c.post("/api/v1/vm/campaigns", headers=lead, json={"cve": cfg["campaign_cve"], "notify_via": "ticket"}).status_code == 200
     assert c.post("/api/v1/vm/misconfigurations/route", headers=lead).status_code == 200
     assert c.post("/api/v1/intelligence/refresh", headers=lead).status_code == 200
     for j in ("intelligence", "follow_up", "retention"):
         assert c.post(f"/api/v1/jobs/{j}/run", headers=ops).status_code == 200
-    yield {"c": c, "H": H, "lead": lead, "app": appmod.app}
+    yield {"c": c, "H": H, "lead": lead, "app": appmod.app, "cfg": cfg}
     appmod._limiter = limiter
+    scope.__exit__(None, None, None)
     for k, v in saved.items():
         if v is None:
             os.environ.pop(k, None)
@@ -85,7 +89,7 @@ def _aware(iso: str) -> datetime:
 # --------------------------------------------------------------------------------------------- 1. same figure everywhere
 def test_every_figure_agrees_across_every_surface(api):
     c, lead = api["c"], api["lead"]
-    aud = api["H"]("audrey@acme-demo.com", "auditor")
+    aud = api["H"](f"audrey@{api['cfg']['org']}", "auditor")
     ov = J(c.get("/api/v1/dashboard/overview", headers=lead))
     cases = J(c.get("/api/v1/cases", headers=lead))
     csum = J(c.get("/api/v1/cases/summary", headers=lead))
@@ -148,7 +152,7 @@ def test_every_figure_agrees_across_every_surface(api):
         assert len(scores) == 1 and isinstance(r["score"], int), (r["name"], scores)
 
     # attack story: summary, assessment, KPIs and plan agree with each other
-    pc = next(x for x in cases if x["domain"] == "phishing" and "password expires" in x["title"])
+    pc = next(x for x in cases if x["domain"] == "phishing" and api["cfg"]["phish_subject_token"] in x["title"])
     st = J(c.get(f"/api/v1/cases/{pc['id']}/story", headers=lead))
     pending = sum(1 + len(a.get("duplicate_ids", [])) for p in st["response_plan"] for a in p["actions"] if a["approvable"])
     assert f"({pending} action(s) awaiting approval)" in st["summary"]
@@ -197,12 +201,16 @@ def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
     cases = J(c.get("/api/v1/cases", headers=lead))
     rep = J(c.post("/api/v1/reports/build", headers=lead, json={"template_id": "vm_weekly"}))
     ids = {"cid": next(x["id"] for x in cases if x["domain"] == "phishing"),
-           "eid": J(c.get("/api/v1/intelligence/risk/top", headers=lead))[0]["entity_id"], "rid": rep["id"], "cve": "CVE-2021-44228"}
+           "eid": J(c.get("/api/v1/intelligence/risk/top", headers=lead))[0]["entity_id"], "rid": rep["id"], "cve": api["cfg"]["campaign_cve"]}
     by_domain = {d: {x["id"] for x in cases if x["domain"] == d} for d in ("phishing", "incident", "vulnerability")}
-    roles = {"lead": lead, "analyst": H("alice@acme-demo.com", "analyst"), "auditor": H("audrey@acme-demo.com", "auditor"),
-             "admin": H("ada@acme-demo.com", "admin"), "phishing_only": H("pia@acme-demo.com", "analyst", "phishing"),
-             "vulnerability_only": H("vic@acme-demo.com", "analyst", "vulnerability"), "anonymous": {}}
-    extra = {"/api/v1/entities/find": "?kind=identity&key=upn&value=jane.doe@acme-demo.com", "/api/v1/metrics/shadow": "?domain=phishing"}
+    org = api["cfg"]["org"]
+    roles = {"lead": lead, "analyst": H(f"alice@{org}", "analyst"), "auditor": H(f"audrey@{org}", "auditor"),
+             "admin": H(f"ada@{org}", "admin"), "phishing_only": H(f"pia@{org}", "analyst", "phishing"),
+             "vulnerability_only": H(f"vic@{org}", "analyst", "vulnerability"), "anonymous": {}}
+    extra = {"/api/v1/entities/find": f"?kind=identity&key=upn&value={api['cfg']['focus_upn']}", "/api/v1/metrics/shadow": "?domain=phishing"}
+    # on a variant estate, no response may mention the built-in estate: nothing in the code is tied to its names
+    toks = api["cfg"]["original_tokens"]
+    leak = re.compile("|".join(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])" for t in toks), re.I) if toks else None
     iso = re.compile(r'"(ts_utc|[a-z_]*(?:_at|_due|_seen|since|until|when|start|end|date))":\s*"(\d{4}-\d{2}-\d{2}T[\d:.]+)(Z|[+-]\d{2}:\d{2})?"')
     problems = []
     gets = sorted({r.path for r in app.routes if hasattr(r, "methods") and "GET" in r.methods and r.path.startswith("/api")}
@@ -222,6 +230,9 @@ def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
                 for m in iso.finditer(r.text):
                     if not m.group(3):
                         problems.append(f"timestamp without UTC offset: {path} {m.group(1)}")
+                m = leak.search(r.text) if leak else None
+                if m:
+                    problems.append(f"built-in estate name '{m.group(0)}' in {name} response at {path}")
                 if name.endswith("_only"):
                     mine = name.split("_")[0]
                     for d, idset in by_domain.items():
@@ -239,6 +250,8 @@ def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
 
 
 def test_malformed_input_never_crashes_any_write_route(api):
+    if api["cfg"]["name"] != "demo":
+        pytest.skip("input fuzzing does not depend on the data set: run once, on the built-in estate")
     c, H, app = api["c"], api["H"], api["app"]
     last = ("/api/v1/admin/revoke-sessions", "/api/v1/auth/logout", "/api/v1/kill-switch")
     routes = sorted({(m, r.path) for r in app.routes if hasattr(r, "methods") and r.path.startswith("/api")
@@ -247,7 +260,7 @@ def test_malformed_input_never_crashes_any_write_route(api):
     bogus = ["does-not-exist", "0" * 32, "' OR 1=1 --"]
     problems = []
     for method, path in routes:
-        roles = {"lead": H("lena@acme-demo.com", "lead"), "admin": H("ada@acme-demo.com", "admin")}  # fresh: revoke-sessions
+        roles = {"lead": H(api["cfg"]["lead"], "lead"), "admin": H(f"ada@{api['cfg']['org']}", "admin")}  # fresh: revoke-sessions
         params = re.findall(r"{(\w+)}", path)
         for idv in (bogus if params else [""]):
             url = path
@@ -267,7 +280,7 @@ def test_malformed_input_never_crashes_any_write_route(api):
 
 
 # --------------------------------------------------------------------------------------------- 3. re-running changes nothing
-def _estate(s, reg, llm=None):
+def _estate(s, reg, cfg, llm=None):
     from soc_platform.core.auth import Principal, Role
     from soc_platform.domains.incident.service import IncidentService
     from soc_platform.domains.phishing.service import PhishingService
@@ -275,7 +288,7 @@ def _estate(s, reg, llm=None):
     from soc_platform.domains.vulnerability.service import VulnerabilityService
     from soc_platform.intelligence.analyst import IntelligenceService
 
-    lead = Principal("lena@acme-demo.com", "Lena", frozenset({Role.LEAD}))
+    lead = Principal(cfg["lead"], "Lead", frozenset({Role.LEAD}))
     VulnerabilityService(s, reg, llm=llm).refresh()
     mis = MisconfigurationService(s, reg)
     mis.refresh()
@@ -283,13 +296,13 @@ def _estate(s, reg, llm=None):
     inc.ingest()
     for c in inc.cluster():
         inc.investigate(c.id)
-    ph = PhishingService(s, reg, org_domains=["acme-demo.com"], llm=llm)
+    ph = PhishingService(s, reg, org_domains=[cfg["org"]], llm=llm)
     for sub in ph.ingest_reported():
         ph.process(sub.id)
-    for f in UPLOADS:
-        sub = ph.submit_raw((ROOT / "artifacts/phishing/corpus" / f).read_bytes(), source="upload", reporter="lena@acme-demo.com")
+    for f in cfg["uploads"]:
+        sub = ph.submit_raw((Path(cfg["corpus_dir"]) / f).read_bytes(), source="upload", reporter=cfg["lead"])
         ph.process(sub.id)
-    VulnerabilityService(s, reg, llm=llm).create_campaign("CVE-2021-44228", lead, notify_via="ticket")
+    VulnerabilityService(s, reg, llm=llm).create_campaign(cfg["campaign_cve"], lead, notify_via="ticket")
     mis.route(lead)
     IntelligenceService(s, llm).refresh()
 
@@ -309,7 +322,8 @@ def _state(s):
             "findings": sorted(s.execute(text("select cve || '|' || asset_name || '|' || priority_band || '|' || round(priority_score, 3) from vm_findings")).scalars())}
 
 
-def test_rerunning_every_pipeline_and_job_changes_nothing():
+@pytest.mark.parametrize("estate", ESTATES)
+def test_rerunning_every_pipeline_and_job_changes_nothing(estate, estate_configs):
     from soc_platform.connectors.registry import ConnectorRegistry
     from soc_platform.core.db import Database
     from soc_platform.jobs import JOBS, run_job
@@ -318,21 +332,23 @@ def test_rerunning_every_pipeline_and_job_changes_nothing():
     db.create_all()
     reg = ConnectorRegistry.all_fake()
     snaps = []
-    for _ in range(2):
-        with db.session() as s:
-            _estate(s, reg)
-        for name in JOBS:
-            r = run_job(name, db=db, sleep=lambda _x: None)
-            assert r is None or r.status == "ok", (name, r.error)
-        with db.session() as s:
-            snaps.append(_state(s))
+    with estate_env(estate_configs[estate]) as cfg:
+        for _ in range(2):
+            with db.session() as s:
+                _estate(s, reg, cfg)
+            for name in JOBS:
+                r = run_job(name, db=db, sleep=lambda _x: None)
+                assert r is None or r.status == "ok", (name, r.error)
+            with db.session() as s:
+                snaps.append(_state(s))
     diffs = {k: (snaps[0][k], snaps[1][k]) for k in snaps[0] if snaps[0][k] != snaps[1][k]}
     assert not diffs, {k: v if not isinstance(v[0], dict) else {n: (v[0].get(n), v[1].get(n)) for n in set(v[0]) | set(v[1])
                                                                 if v[0].get(n) != v[1].get(n)} for k, v in diffs.items()}
 
 
 # --------------------------------------------------------------------------------------------- 4. LLM never changes a figure
-def test_llm_on_or_off_gives_identical_figures_verdicts_and_actions():
+@pytest.mark.parametrize("estate", ESTATES)
+def test_llm_on_or_off_gives_identical_figures_verdicts_and_actions(estate, estate_configs):
     from soc_platform.config import Settings
     from soc_platform.connectors.registry import ConnectorRegistry
     from soc_platform.core.db import Database
@@ -356,9 +372,9 @@ def test_llm_on_or_off_gives_identical_figures_verdicts_and_actions():
     for with_llm in (False, True):
         db = Database("sqlite://")
         db.create_all()
-        with db.session() as s:
-            llm = LLMGateway(s, Settings(org_domains=["acme-demo.com"]), provider=Talkative()) if with_llm else None
-            _estate(s, reg, llm)
+        with estate_env(estate_configs[estate]) as cfg, db.session() as s:
+            llm = LLMGateway(s, Settings(org_domains=[cfg["org"]]), provider=Talkative()) if with_llm else None
+            _estate(s, reg, cfg, llm)
             st = _state(s)
             from soc_platform.core.models import Case
             texts = [c.summary or "" for c in s.query(Case)] + [cl["text"] for c in s.query(Case) for cl in (c.assessment or {}).get("claims", [])]
@@ -417,7 +433,8 @@ def test_every_stored_reference_resolves(api):
 
 
 # --------------------------------------------------------------------------------------------- 6. self-check (in product)
-def test_self_check_passes_on_a_consistent_platform_and_catches_corruption():
+@pytest.mark.parametrize("estate", ESTATES)
+def test_self_check_passes_on_a_consistent_platform_and_catches_corruption(estate, estate_configs):
     from soc_platform.connectors.registry import ConnectorRegistry
     from soc_platform.core.db import Database
     from soc_platform.core.models import Case, Evidence
@@ -426,8 +443,8 @@ def test_self_check_passes_on_a_consistent_platform_and_catches_corruption():
 
     db = Database("sqlite://")
     db.create_all()
-    with db.session() as s:
-        _estate(s, ConnectorRegistry.all_fake())
+    with estate_env(estate_configs[estate]) as cfg, db.session() as s:
+        _estate(s, ConnectorRegistry.all_fake(), cfg)
         r = run_self_check(s)
         assert r["ok"] and r["passed"] == r["total"] >= 14, [c for c in r["checks"] if not c["ok"]]
 
@@ -455,7 +472,39 @@ def test_self_check_passes_on_a_consistent_platform_and_catches_corruption():
 
 def test_self_check_endpoint_is_for_all_domain_auditors(api):
     c, H = api["c"], api["H"]
-    r = J(c.get("/api/v1/admin/self-check", headers=H("audrey@acme-demo.com", "auditor")))
+    org = api["cfg"]["org"]
+    r = J(c.get("/api/v1/admin/self-check", headers=H(f"audrey@{org}", "auditor")))
     assert r["ok"], [x for x in r["checks"] if not x["ok"]]
-    assert c.get("/api/v1/admin/self-check", headers=H("pia@acme-demo.com", "analyst", "phishing")).status_code == 403
+    assert c.get("/api/v1/admin/self-check", headers=H(f"pia@{org}", "analyst", "phishing")).status_code == 403
     assert c.get("/api/v1/admin/self-check").status_code == 401
+
+
+def test_budget_alert_and_confirmed_self_check_alerts():
+    from soc_platform.config import Settings
+    from soc_platform.core.db import Database
+    from soc_platform.core.models import LLMCall
+    from soc_platform.core.selfcheck import confirm, llm_budget_alert, run_self_check
+    from soc_platform.intelligence.models import Insight
+
+    db = Database("sqlite://")
+    db.create_all()
+    with db.session() as s:
+        st = Settings(llm_provider="openai_compatible", llm_monthly_token_budget=1000)
+        assert llm_budget_alert(s, st)["alert"] is False and s.query(Insight).count() == 0
+        s.add(LLMCall(workflow="t", provider="x", model="m", prompt_redacted="", response="", prompt_tokens=700,
+                      completion_tokens=150, status="ok", grounded=True))
+        s.flush()
+        llm_budget_alert(s, st)
+        a = s.query(Insight).filter(Insight.rule == "llm_budget").one()
+        assert a.severity == "medium" and "85%" in a.title
+        s.add(LLMCall(workflow="t", provider="x", model="m", prompt_redacted="", response="", prompt_tokens=200,
+                      completion_tokens=0, status="ok", grounded=True))
+        s.flush()
+        llm_budget_alert(s, st)
+        assert a.severity == "high" and "exhausted" in a.title
+        assert llm_budget_alert(s, Settings()) is None                                # no LLM configured: nothing to watch
+
+        # a check that fails once but not on the confirming re-run never alerts
+        first = run_self_check(s)
+        flaky = {**first, "ok": False, "checks": [{**first["checks"][0], "ok": False}] + first["checks"][1:]}
+        assert confirm(s, flaky, wait=0)["ok"] is True

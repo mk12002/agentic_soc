@@ -171,6 +171,16 @@ class RoutedAction(ActionSpec):
         return None
 
 
+def _estate_settings() -> dict[str, dict[str, Any]]:
+    """A sample estate can ship its own tenant settings (reporting mailbox, user domain...) next to its fixtures."""
+    f = Path(os.environ.get("SOC_FIXTURES_DIR") or FIXTURES_DIR) / "settings.json"
+    if not f.is_file():
+        return {}
+    import json
+
+    return json.loads(f.read_text(encoding="utf-8"))
+
+
 class ConnectorRegistry:
     def __init__(self, config: dict[str, Any] | None = None, *, default_mode: str = "fake",
                  manifests: dict[str, ConnectorManifest] | None = None) -> None:
@@ -204,7 +214,7 @@ class ConnectorRegistry:
         m = self.manifests[name]
         raw = interpolate((self.config.get(name) or {}).get("settings") or {})
         if self.mode_of(name) == "fake":
-            raw = {**m.fake_settings, **{k: v for k, v in raw.items() if v not in (None, "")}}
+            raw = {**m.fake_settings, **_estate_settings().get(name, {}), **{k: v for k, v in raw.items() if v not in (None, "")}}
         out = {f.name: raw.get(f.name) if raw.get(f.name) not in (None, "") else f.default for f in m.config}
         out.update({k: v for k, v in raw.items() if k not in out})
         return out

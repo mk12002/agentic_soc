@@ -144,3 +144,23 @@ def test_intelligence_endpoints(client, seeded):
     assert "Top correlated threats" in client.get("/api/v1/intelligence/brief", headers=a).json()["summary"]
     case = client.get("/api/v1/cases?domain=phishing", headers=a).json()[0]
     assert "intelligence" in client.get(f"/api/v1/cases/{case['id']}", headers=a).json()
+
+
+def test_health_reports_a_stopped_scheduler(client):
+    """Failure point: if the scheduler dies, no job runs - so none can fail or alert. /health watches it."""
+    from datetime import timedelta
+
+    from soc_platform.core import db as dbm
+    from soc_platform.core.models import JobRun, utcnow
+
+    with dbm.get_database().session() as s:
+        s.query(JobRun).delete()
+    assert client.get("/health").json()["scheduler"]["state"] == "never"
+    with dbm.get_database().session() as s:
+        s.add(JobRun(job="intelligence", trigger="schedule", status="ok", attempts=1, ordinal=1,
+                     started_at=utcnow() - timedelta(hours=3), finished_at=utcnow() - timedelta(hours=3)))
+    h = client.get("/health").json()["scheduler"]
+    assert h["state"] == "stale" and h["age_seconds"] > 3600
+    with dbm.get_database().session() as s:
+        s.add(JobRun(job="intelligence", trigger="schedule", status="ok", attempts=1, ordinal=2, started_at=utcnow(), finished_at=utcnow()))
+    assert client.get("/health").json()["scheduler"]["state"] == "running"

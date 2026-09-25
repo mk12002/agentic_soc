@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import os
 
-import httpx
+import httpx  # noqa: F401 - kept importable here: tests patch httpx.post through this module
 
 from soc_platform.config import Settings, secret
-from soc_platform.llm.gateway import Completion, Provider
+from soc_platform.llm.gateway import Completion, Provider, post_with_retry
 
 
 class OpenAICompatibleProvider(Provider):
@@ -39,10 +39,9 @@ class OpenAICompatibleProvider(Provider):
             return None
         url = self.base + ("/chat/completions" if self.base.endswith("/v1") else "/v1/chat/completions")
         headers = self._headers()
-        resp = httpx.post(url, headers=headers, timeout=120, json={
+        resp = post_with_retry(url, headers=headers, json={
             "model": model, "temperature": 0.1, "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
-        resp.raise_for_status()
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}, tier=tier)
         body = resp.json()
         usage = body.get("usage") or {}
         return Completion(body["choices"][0]["message"]["content"], int(usage.get("prompt_tokens", 0) or 0),

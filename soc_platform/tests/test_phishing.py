@@ -164,3 +164,36 @@ def test_supplier_email_risk_u18(session):
     assert ms["findings"] == [] and ms["status"] == "ok"  # authentic, clean vendor mail raises nothing
     ins = [i for i in CorrelationEngine(session).run() if i.rule == "supplier_risk"]
     assert ins and all("U18" in i.requirement_refs for i in ins)
+
+
+def test_auto_closed_reports_do_not_spend_llm_tokens(session, ph, monkeypatch):
+    """Cost at volume: clear-benign / clear-spam reports that auto-close get the deterministic, cited explanation."""
+    import json as _json
+
+    from soc_platform.config import Settings
+    from soc_platform.llm.gateway import Completion, LLMGateway, Provider
+
+    class Counting(Provider):
+        name = "scripted"
+
+        def __init__(self):
+            self.workflows = []
+
+        def complete(self, system, user, *, tier):
+            import re as _re
+            self.workflows.append(tier)
+            ids = _re.findall(r"^\[([A-Z]\d+)\]", user, _re.M) or ["E1"]
+            return Completion(_json.dumps({"summary": "s", "claims": [{"text": "x", "kind": "fact", "evidence_ids": ids[:1]}]}), 5, 5, "m")
+
+    prov = Counting()
+    ph.llm = LLMGateway(session, Settings(), provider=prov)
+    benign = ph.submit_raw((ROOT / "artifacts/phishing/corpus/legit_vendor_invoice.eml").read_bytes(), source="test")
+    v = ph.process(benign.id)
+    assert v["case"]["verdict"] == "safe" and prov.workflows == []                    # no model call, still cited
+    bad = ph.submit_raw((ROOT / "artifacts/phishing/corpus/bec_ceo_fraud.eml").read_bytes(), source="test")
+    ph.process(bad.id)
+    assert prov.workflows == ["small"]                                                # routine narrative -> small tier
+    monkeypatch.setenv("SOC_LLM_EXPLAIN_AUTO_CLOSED", "1")
+    again = ph.submit_raw((ROOT / "artifacts/phishing/corpus/marketing_spam.eml").read_bytes(), source="test")
+    ph.process(again.id)
+    assert len(prov.workflows) == 2                                                   # opt back in

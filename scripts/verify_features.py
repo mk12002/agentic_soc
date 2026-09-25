@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -206,12 +207,29 @@ FEATURES: list[tuple[str, str, list[str]]] = [
     ("Consistency", "Platform self-check in product: hourly job + endpoint; catches corruption, raises and resolves a finding",
      ["test_consistency.py::test_self_check_passes_on_a_consistent_platform_and_catches_corruption",
       "test_consistency.py::test_self_check_endpoint_is_for_all_domain_auditors"]),
+    # ---------------------------------------------------------------- resilience and cost
+    ("Resilience", "LLM endpoint slow or down: bounded timeout, one retry on throttling, circuit breaker with instant deterministic fallback",
+     ["test_intelligence.py::test_failing_model_endpoint_trips_the_breaker_and_screens_fall_back_instantly",
+      "test_intelligence.py::test_throttled_model_call_is_retried_once"]),
+    ("Resilience", "Token budget findings at 80 % / 100 %; self-check alerts only on checks that fail twice; stopped scheduler reported",
+     ["test_consistency.py::test_budget_alert_and_confirmed_self_check_alerts", "test_api.py::test_health_reports_a_stopped_scheduler"]),
+    ("Resilience", "Scale: ranking and correlation profile only users/hosts with a risk source (same results, orders of magnitude faster)",
+     ["test_intelligence.py::test_risk_ranking_only_profiles_entities_with_risk_sources"]),
+    ("Cost", "Brief reused while its facts are unchanged; auto-closed reports spend no tokens; routine narrative on the small tier",
+     ["test_intelligence.py::test_brief_is_reused_while_its_facts_are_unchanged",
+      "test_phishing.py::test_auto_closed_reports_do_not_spend_llm_tokens"]),
     # ---------------------------------------------------------------- generalisation
     ("Generalisation", "Whole platform on a renamed organisation (other domain, people, hosts, IPs, suppliers): identical results",
      ["test_generalisation.py::test_renamed_estate_gives_structurally_identical_results",
       "test_generalisation.py::test_every_feature_produced_real_output_on_the_new_organisation"]),
     ("Generalisation", "No sample-estate names leak into outputs about the new organisation (stories, insights, answers, reports)",
      ["test_generalisation.py::test_no_original_names_leak_into_the_new_organisation"]),
+    ("Generalisation", "Seeded variant estates (other organisations, people, machines, volumes) really differ and every feature follows the data",
+     ["test_variants.py::test_variants_really_differ_from_the_built_in_estate", "test_variants.py::test_attack_story_follows_the_data",
+      "test_variants.py::test_vulnerability_coverage_tracks_the_generated_gaps"]),
+    ("Generalisation", "Phishing verdicts match labels on every estate's corpus; reports and answers never mention another estate",
+     ["test_variants.py::test_phishing_verdicts_match_labels_on_every_corpus",
+      "test_variants.py::test_reports_and_answers_never_mention_another_estate"]),
 ]
 
 NOT_AUTOMATED = [
@@ -234,7 +252,7 @@ def run_pytest(tests: list[str], extra_env: dict[str, str] | None = None) -> dic
     subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={xml}", *ids],
                    cwd=ROOT, env=env, check=False)
     res: dict[str, list[str]] = defaultdict(list)
-    for tc in ET.parse(xml).getroot().iter("testcase"):
+    for tc in ET.parse(xml).getroot().iter("testcase"):  # nosec B314 - our own pytest junit output, local temp file
         cls, name = tc.get("classname", ""), tc.get("name", "").split("[")[0]
         key = cls.replace("soc_platform.tests.", "").split(".")[0] + ".py::" + name
         outcome = "fail" if tc.find("failure") is not None or tc.find("error") is not None else \
@@ -278,7 +296,10 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
     """Tour into a temporary folder (docs/screenshots is only refreshed deliberately, via SOC_SHOTS)."""
     tour = ROOT / "scripts" / "ui_tour"
     if not (tour / "node_modules").exists():
-        subprocess.run(["npm", "install", "--silent", "--no-audit", "--no-fund"], cwd=tour, check=True, shell=os.name == "nt")
+        npm = shutil.which("npm") or shutil.which("npm.cmd")
+        if npm is None:
+            raise RuntimeError("npm is required for the browser tour")
+        subprocess.run([npm, "install", "--silent", "--no-audit", "--no-fund"], cwd=tour, check=True)  # nosec B603 - fixed argv
     tmp = Path(tempfile.mkdtemp())
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -293,7 +314,7 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
     try:
         for _ in range(60):
             try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2)
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2)  # nosec B310 - fixed local http URL
                 break
             except OSError:
                 time.sleep(1)

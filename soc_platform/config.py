@@ -65,7 +65,7 @@ class Settings(BaseModel):
     llm_api_version: str = "2024-10-21"
     llm_model_version: str | None = None  # pinned; change-controlled
     llm_approved_endpoints: list[str] = Field(default_factory=list)
-    llm_monthly_token_budget: int = 5_000_000
+    llm_monthly_token_budget: int = 50_000_000   # sized for a small-to-mid SOC (docs/LLM_TOKENS_AND_COST.md)
     llm_redact_pii: bool = True
     # Internal mail domains: identities in these domains are pseudonymised before any LLM call (PH-T06, R10)
     org_domains: list[str] = Field(default_factory=list)
@@ -100,7 +100,7 @@ def get_settings() -> Settings:
         llm_api_version=env.get("SOC_LLM_API_VERSION", "2024-10-21"),
         llm_model_version=env.get("SOC_LLM_MODEL_VERSION"),
         llm_approved_endpoints=approved,
-        llm_monthly_token_budget=int(env.get("SOC_LLM_MONTHLY_TOKEN_BUDGET", "5000000")),
+        llm_monthly_token_budget=int(env.get("SOC_LLM_MONTHLY_TOKEN_BUDGET", "50000000")),
         llm_redact_pii=_env_bool("SOC_LLM_REDACT_PII", True),
         org_domains=[d.strip().lower() for d in env.get("SOC_ORG_DOMAINS", "").split(",") if d.strip()],
     )

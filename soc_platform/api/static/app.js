@@ -175,6 +175,7 @@ function shell() {
     <div class="main">
       <header class="topbar">
         <div class="crumbs" id="crumbs"></div><div class="spacer"></div>
+        <span class="status-pill halt" id="sched-status" hidden><span class="dot"></span>Scheduler stopped</span>
         <span class="status-pill" id="kill-status" title="Automated action status"><span class="dot"></span>Automation active</span>
         <button class="icon-btn" data-fn="toggleTheme" data-args="[]" title="Toggle light / dark" aria-label="Toggle theme" id="theme-btn"></button>
         <div class="user" data-fn="toggleMenu" data-args="[]"><div class="avatar">${esc(initials)}</div><div class="who">${esc(me.name)}<small>${esc(me.roles.join(', '))}${me.mfa ? ' · MFA' : ''}</small></div>
@@ -196,6 +197,8 @@ async function refreshStatus() {
     const h = await (await fetch('/health')).json();
     const el = $('#kill-status');
     if (el) { el.className = 'status-pill' + (h.kill_switch ? ' halt' : ''); el.innerHTML = `<span class="dot"></span>${h.kill_switch ? 'Automation halted' : 'Automation active'}`; }
+    const sch = $('#sched-status');   // a stopped scheduler cannot alert on its own: say so on every screen
+    if (sch) { sch.hidden = !(h.scheduler && h.scheduler.state === 'stale'); sch.title = h.scheduler && h.scheduler.last_run ? 'Last job run ' + h.scheduler.last_run.slice(0, 16).replace('T', ' ') + ' UTC' : ''; }
     if (can('approve_action') || can('request_action')) {
       const sm = await api('/api/v1/actions/summary?status=recommended,pending_approval');
       const b = $('#nav-approvals'); if (b) { b.hidden = !sm.total; b.textContent = sm.total; }

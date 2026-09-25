@@ -137,6 +137,8 @@ python scripts/eval_resolution_at_scale.py 400 7     # asset resolution stress t
 python scripts/eval_identity_resolution.py 300 5     # identity resolution stress test
 python scripts/verify_features.py --browser          # every feature -> its tests, evaluations, browser tour -> docs/FEATURE_VERIFICATION.md
 python scripts/rename_estate.py out/                 # the sample estate as another organisation (generalisation / client demo)
+python scripts/build_estate_variant.py out/ --seed 23 --scale 2   # a different organisation with different volumes
+python scripts/measure_llm_usage.py                  # tokens per component with your configured model
 ```
 
 Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
@@ -147,6 +149,8 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 |---|---|
 | [docs/PRESENTER_GUIDE.md](docs/PRESENTER_GUIDE.md) | Everything needed to present, demo and defend the platform: walkthroughs, formulas, guardrails, hard questions, limits |
 | [docs/FEATURES.md](docs/FEATURES.md) | Complete feature list with screenshots |
+| [docs/LLM_TOKENS_AND_COST.md](docs/LLM_TOKENS_AND_COST.md) | Measured tokens per component, unit costs, monthly cost by SOC size, budget sizing |
+| [docs/FAILURE_MODES.md](docs/FAILURE_MODES.md) | What can fail in production, how it is detected, how the platform behaves |
 | [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | 25-minute client walkthrough, what a demo proves |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
 | [docs/CONNECTORS.md](docs/CONNECTORS.md) | Per-tool setup, scopes, configuration (generated from the code) |

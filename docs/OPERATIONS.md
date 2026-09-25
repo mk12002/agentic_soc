@@ -24,7 +24,7 @@ SOC_LLM_API_KEY=<key>                      # or SOC_LLM_API_KEY_FILE=/run/secret
 SOC_LLM_DEPLOYMENT=gpt-4.1-mini            # SOC_LLM_DEPLOYMENT_SMALL for a cheaper routine tier
 SOC_LLM_APPROVED_ENDPOINTS=https://<resource>.services.ai.azure.com/openai/v1   # anything else is refused
 SOC_LLM_MODEL_VERSION=gpt-4.1-mini         # responses from another model are logged as a mismatch
-SOC_LLM_MONTHLY_TOKEN_BUDGET=5000000       # alert at 80 %, deterministic fallback when exhausted
+SOC_LLM_MONTHLY_TOKEN_BUDGET=50000000      # finding at 80 % and 100 %; deterministic fallback when exhausted
 ```
 
 Check: `GET /api/v1/llm/status`; live test: `SOC_LIVE_LLM=1 pytest soc_platform/tests/test_live_llm.py` (costs
@@ -45,6 +45,27 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 Intervals: `SOC_JOB_<NAME>_SECONDS`. Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
 failing 3 runs in a row is marked **dead_letter** and raises a high insight; fix the cause and use
 *Run now* / `POST /api/v1/jobs/{name}/run`. Jobs are idempotent, so replays never duplicate incidents or actions.
+
+## Resilience settings
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` / `SOC_LLM_CONNECT_TIMEOUT_SECONDS` | 30 / 120 / 10 | Read timeout for small-tier (short) and large-tier (long answers, ~2,000 tokens) calls; connect timeout. One retry on 429 / 5xx |
+| `SOC_LLM_BREAKER_FAILURES` / `SOC_LLM_BREAKER_SECONDS` | 3 / 60 | Circuit breaker: skip the model after repeated failures, answer from the deterministic path |
+| `SOC_BRIEF_CACHE_SECONDS` | 900 | Reuse an unchanged situation brief |
+| `SOC_LLM_EXPLAIN_AUTO_CLOSED` | 0 | 1 = the model also explains reports that auto-close |
+| `SOC_SCHEDULER_STALE_SECONDS` | 1800 | `/health` reports the scheduler as stopped (banner on every screen) |
+| `SOC_SELF_CHECK_CONFIRM_SECONDS` | 2 | The self-check re-runs a failing check before alerting |
+
+Failure behaviour for each dependency: [FAILURE_MODES.md](FAILURE_MODES.md). Cost and budget sizing:
+[LLM_TOKENS_AND_COST.md](LLM_TOKENS_AND_COST.md).
+
+## Sample estates
+
+`scripts/build_estate_variant.py OUT --seed N [--scale X]` generates a different organisation (names, machines, IP
+plan, suppliers, volumes) with its own tenant connector settings (`fixtures/settings.json`). Run the platform on it
+with `SOC_FIXTURES_DIR=OUT/fixtures SOC_SUPPLIERS_FILE=OUT/suppliers.yaml SOC_ORG_DOMAINS=<org>`, and the browser tour
+with `SOC_TOUR_ESTATE=OUT/estate.json`.
 
 ## Platform self-check
 

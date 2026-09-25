@@ -27,10 +27,14 @@ def actions_for_case(session: Session, case_id: str) -> list[ActionRequest]:
     cover several cases). Used by the case page and the actions API, so both always list the same actions."""
     own = list(session.execute(select(ActionRequest).where(ActionRequest.case_id == case_id)
                                .order_by(ActionRequest.created_at)).scalars())
-    shared = [a for a in session.execute(select(ActionRequest).where(
-        ActionRequest.case_id != case_id, ActionRequest.status.in_(("recommended", "pending_approval", "approved",
-                                                                     "executed")))).scalars()
-              if case_id in (a.result or {}).get("linked_cases", [])]
+    # shared actions can cross domains (one isolation approval covers the phishing and the incident case). The
+    # database narrows by the case id inside the JSON (ids are 32 random hex chars); Python confirms exactly.
+    from sqlalchemy import String, cast
+
+    q = select(ActionRequest).where(ActionRequest.case_id != case_id,
+                                    ActionRequest.status.in_(("recommended", "pending_approval", "approved", "executed")),
+                                    cast(ActionRequest.result, String).like(f"%{case_id}%"))
+    shared = [a for a in session.execute(q).scalars() if case_id in (a.result or {}).get("linked_cases", [])]
     return own + shared
 
 

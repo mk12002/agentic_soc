@@ -45,6 +45,57 @@ class Completion:
     model: str
 
 
+def llm_timeout(tier: str = "large") -> httpx.Timeout:
+    """Connect fast (a down endpoint is known in seconds); allow the read to match the answer's length: routine
+    small-tier narrative is short, large-tier reviews and reports can be ~2,000 tokens (~30 s at ~70 tokens/s)."""
+    read = float(os.environ.get("SOC_LLM_TIMEOUT_SECONDS", "30") if tier == "small"
+                 else os.environ.get("SOC_LLM_TIMEOUT_LARGE_SECONDS", "120"))
+    return httpx.Timeout(read, connect=float(os.environ.get("SOC_LLM_CONNECT_TIMEOUT_SECONDS", "10")))
+
+
+def post_with_retry(url: str, *, headers: dict[str, str], json: dict[str, Any], tier: str = "large") -> Any:
+    """POST to a model endpoint: bounded timeouts, one retry on throttling / transient server errors."""
+    import time as _time
+
+    resp = httpx.post(url, headers=headers, json=json, timeout=llm_timeout(tier))
+    code = getattr(resp, "status_code", 200)
+    if code in (429, 500, 502, 503, 504):
+        wait = getattr(resp, "headers", {}).get("retry-after", "2") if hasattr(resp, "headers") else "2"
+        try:
+            wait_s = min(5.0, max(0.5, float(wait)))
+        except ValueError:
+            wait_s = 2.0
+        _time.sleep(wait_s)
+        resp = httpx.post(url, headers=headers, json=json, timeout=llm_timeout(tier))
+    resp.raise_for_status()
+    return resp
+
+
+class _Breaker:
+    """After repeated failures stop calling the model for a while: screens fall back to the deterministic path at
+    once instead of each waiting for a timeout (per process; resets on the first success)."""
+
+    failures = 0
+    open_until = 0.0
+
+    @classmethod
+    def is_open(cls) -> bool:
+        import time as _time
+
+        return _time.monotonic() < cls.open_until
+
+    @classmethod
+    def record(cls, ok: bool) -> None:
+        import time as _time
+
+        if ok:
+            cls.failures, cls.open_until = 0, 0.0
+            return
+        cls.failures += 1
+        if cls.failures >= int(os.environ.get("SOC_LLM_BREAKER_FAILURES", "3")):
+            cls.open_until = _time.monotonic() + float(os.environ.get("SOC_LLM_BREAKER_SECONDS", "60"))
+
+
 class Provider(ABC):
     name = "none"
 
@@ -79,14 +130,13 @@ class AzureOpenAIProvider(Provider):
         if not (self.endpoint and deployment and self.key):
             return None
         url = f"{self.endpoint}/openai/deployments/{deployment}/chat/completions?api-version={self.api_version}"
-        resp = httpx.post(
+        resp = post_with_retry(
             url,
             headers={"api-key": self.key},
             json={"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                   "temperature": 0.1, "response_format": {"type": "json_object"}},
-            timeout=45,
+            tier=tier,
         )
-        resp.raise_for_status()
         body = resp.json()
         usage = body.get("usage") or {}
         return Completion(body["choices"][0]["message"]["content"], int(usage.get("prompt_tokens", 0)),
@@ -155,13 +205,19 @@ class LLMGateway:
         if self.budget_status()["exceeded"]:
             self._log(workflow, prompt, "", 0, 0, "none", status="budget_exceeded")
             raise BudgetExceeded(f"monthly LLM token budget exhausted ({workflow})")
+        if _Breaker.is_open():
+            self._log(workflow, prompt, "model endpoint failing - circuit open, deterministic path used", 0, 0, "none",
+                      status="circuit_open")
+            return None
         try:
             out = self.provider.complete(system, prompt, tier=tier)
         except Exception as exc:
+            _Breaker.record(False)
             self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error")
             return None
         if out is None:
             return None
+        _Breaker.record(True)
         pinned = self.settings.llm_model_version
         status = "ok" if not pinned or pinned in out.model else "model_version_mismatch"
         self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status)

@@ -14,6 +14,7 @@ until an analyst approves or an action type is promoted in the autonomy policy.
 from __future__ import annotations
 
 import hashlib
+import os
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -197,7 +198,11 @@ class PhishingService:
         redactor = Redactor(internal_domains=set(self.org_domains))
         q = ("Explain whether this reported email is phishing, what makes it so, who else received it, who interacted "
              "with it and whether any account or device shows compromise. Separate facts from inferences.")
-        grounded = (self.llm.grounded("phishing.explanation", q, ev_llm, redactor=redactor) if self.llm
+        # Clear-benign / clear-spam reports that will auto-close get the deterministic, cited explanation: at volume they
+        # are most reported mail, and the model adds nothing to a closed report (SOC_LLM_EXPLAIN_AUTO_CLOSED=1 to change).
+        explain = self.llm is not None and (not self._auto_close_eligible(result, impact, rec)
+                                            or os.environ.get("SOC_LLM_EXPLAIN_AUTO_CLOSED", "0") == "1")
+        grounded = (self.llm.grounded("phishing.explanation", q, ev_llm, redactor=redactor, tier="small") if explain
                     else deterministic_grounded(ev_llm, limit=10))
         severity = SEVERITY[result.verdict]
         if impact["identity_compromise"] or impact["endpoint_impact"]:
@@ -360,13 +365,18 @@ class PhishingService:
 
     # ------------------------------------------------------------------ PH-F13 auto-close with sampling
 
+    def _auto_close_eligible(self, r: AnalysisResult, impact: dict, rec: dict) -> bool:
+        """PH-F13: clear benign / spam, confident, nobody clicked, no gateway saying it is worse (one rule, used twice)."""
+        p = self.auto_close
+        gateway_flagged = any(d["type"] == "platform_less_severe" for d in rec["disagreements"])
+        return (p.enabled and r.verdict in p.verdicts and r.confidence >= p.min_confidence and not impact["clicked"]
+                and not gateway_flagged)
+
     def _apply_auto_close(self, case: Case, sub: Submission, r: AnalysisResult, camp: dict, impact: dict,
                           rec: dict) -> None:
         p = self.auto_close
         gateway_flagged = any(d["type"] == "platform_less_severe" for d in rec["disagreements"])
-        eligible = (p.enabled and r.verdict in p.verdicts and r.confidence >= p.min_confidence and not impact["clicked"]
-                    and not gateway_flagged)
-        if not eligible:
+        if not self._auto_close_eligible(r, impact, rec):
             sub.status = "escalated" if r.verdict in {"malicious", "suspicious"} or gateway_flagged else "analysed"
             return
         sub.auto_closed = True

@@ -508,8 +508,11 @@ self-check* finding. **Say:** "The platform doesn't just show numbers; it proves
 Also supported: Azure OpenAI deployments, Anthropic Claude, any OpenAI-compatible endpoint (including self-hosted
 vLLM or Ollama for tenant-resident processing).
 
-**Cost in practice:** the complete demo tour with the LLM on made 38 model calls totalling about 48,000 tokens.
-The default monthly budget is 5 million tokens.
+**Cost in practice (measured, gpt-4.1-mini):** an incident summary costs about $0.002, a phishing explanation $0.001,
+an analyst question $0.001 and a deep analysis $0.004. Per month that is about **$5** for a small SOC, **$26** for a
+mid-size SOC and **$150** for a large one. Tokens grow with the number of incidents, reports and questions, not with
+organisation size. Auto-closed benign mail costs nothing, and the brief is cached. The default budget is 50 M tokens
+a month, with a finding raised at 80 % and 100 %. Full detail: [LLM_TOKENS_AND_COST.md](LLM_TOKENS_AND_COST.md).
 
 **Say:** "The AI makes the platform easier to read, not more authoritative. Turn it off and every number, verdict
 and recommendation is identical."
@@ -552,11 +555,11 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 179 passed (plus 12 opt-in live tests) |
+| Platform test suite | 211 passed (plus 12 opt-in live tests) |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 162 passed |
-| Feature → test mapping | **76 of 76** features verified, each mapped to the tests that prove it, run with the live LLM and live feeds ([FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md)) |
+| Feature → test mapping | **89 of 89** features verified, each mapped to the tests that prove it, run with the live LLM and live feeds ([FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md)) |
 | Generalisation | whole platform on a renamed organisation: identical results, 0 leaked names |
 | Browser tour | real server + Chrome, 4 roles, every screen, light and dark, layout audited at 1440/1280/1024 px: 0 errors, 0 clipped or overflowing elements, and no table needing sideways scroll at desktop width |
 | Stress tests | 0 false merges (400 hosts; 300 people) |
@@ -645,7 +648,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | What data goes to the model? | Only the evidence needed for that task, with internal identities pseudonymised and restored afterwards. Only to an approved endpoint (fail closed), on a pinned model, every prompt logged. Nothing leaves without an LLM configured. |
 | Why gpt-4.1-mini, not a bigger model? | It's cheap and fast, and the guardrails do the heavy lifting on trust. A bigger model can be used per tier (small/large) by changing a deployment name. The platform is provider-agnostic. |
 | Could we run the model inside our tenant? | Yes: Azure AI Foundry in the client's subscription, or an OpenAI-compatible self-hosted model (vLLM, Ollama). |
-| What does it cost? | A full demo run: 38 calls, about 48k tokens. A monthly token budget with an 80 % alert caps spend; beyond it the platform falls back to deterministic output. |
+| What does it cost? | Measured: about $5 / month for a small SOC, $26 mid-size, $150 large at gpt-4.1-mini (LLM_TOKENS_AND_COST.md). A cheaper small-tier model cuts another ~25 %. A monthly token budget with findings at 80 % and 100 % caps spend; beyond it the platform falls back to deterministic output. |
 
 ### About automation and control
 
@@ -681,7 +684,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | 179 platform tests, 162 engine tests, live tests (public feeds, the LLM), stress tests, a consistency suite (every figure on every surface, re-runs, LLM on/off, every route × role, fuzzing, integrity), a browser tour that audits layout and cross-checks screen values against the API, and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | 211 platform tests, 162 engine tests, live tests (public feeds, the LLM), stress tests, a consistency suite (every figure on every surface, re-runs, LLM on/off, every route × role, fuzzing, integrity), a browser tour that audits layout and cross-checks screen values against the API, and a feature-by-feature verification report. The platform also self-checks hourly. |
+| What happens if the LLM or a tool goes down? | Nothing breaks: calls time out after 30 s, and after 3 failures a circuit breaker answers from the deterministic path instantly. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
+| Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
 | What didn't you test? | Section 10. |
 
@@ -699,14 +704,14 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 179 (+12 opt-in live) / 162 |
-| Features verified | 76 of 76 |
+| Platform tests / engine tests | 211 (+12 opt-in live) / 162 |
+| Features verified | 89 of 89 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
 | Risk half-life / bands | 7 days / critical ≥ 80, high ≥ 60, medium ≥ 30 |
 | VM SLAs | P1 7 d, P2 15 d, P3 30 d, P4 90 d (KEV → P1 SLA) |
 | Phishing thresholds | malicious ≥ 0.70 (≥ 0.50 with malicious intel), suspicious ≥ 0.35; auto-close ≥ 0.7 confidence, 10 % QA sample |
-| LLM cost of a full demo run | 38 calls, ~48k tokens |
+| LLM cost | ~$0.002 per incident summary, ~$0.001 per question; ~$5 / $26 / $150 a month (small / mid / large SOC) |
 
 ---
 

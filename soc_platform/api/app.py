@@ -347,7 +347,25 @@ def health(s: Session = Depends(db_session)) -> dict[str, Any]:
     if now - _CHAIN_CACHE["at"] > 300:  # full verification at most every 5 min; /api/v1/audit/verify is on demand
         _CHAIN_CACHE.update(at=now, ok=AuditLog(s).verify()["ok"])
     return {"status": "ok", "version": __version__, "audit_chain": _CHAIN_CACHE["ok"],
-            "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings())}
+            "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings()),
+            "scheduler": _scheduler_heartbeat(s)}
+
+
+def _scheduler_heartbeat(s: Session) -> dict[str, Any]:
+    """If the scheduler process dies no job runs, so none can fail or alert: watch it from the API side."""
+    import os
+
+    from sqlalchemy import func
+
+    from soc_platform.core.models import JobRun
+
+    last = s.execute(select(func.max(JobRun.finished_at))).scalar()
+    if last is None:
+        return {"state": "never", "last_run": None}
+    last = last if last.tzinfo else last.replace(tzinfo=__import__("datetime").timezone.utc)
+    age = (__import__("soc_platform.core.models", fromlist=["x"]).utcnow() - last).total_seconds()
+    stale = age > float(os.environ.get("SOC_SCHEDULER_STALE_SECONDS", "1800"))
+    return {"state": "stale" if stale else "running", "last_run": last.isoformat(), "age_seconds": round(age)}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

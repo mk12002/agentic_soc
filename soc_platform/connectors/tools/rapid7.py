@@ -158,7 +158,7 @@ MANIFEST = ConnectorManifest(
     name="rapid7", tool="Rapid7 InsightVM / Nexpose", vendor="Rapid7", category="vuln", dimension="exposure",
     description="Asset inventory and vulnerability findings from the Security Console API (or CSV export fallback).",
     factory=lambda s, t: Rapid7Connector(s, t, rate_per_sec=4, burst=8), live_transport=_live,
-    config=[ConfigField("console_url", "Security Console URL, e.g. https://ivm.acme.local:3780"),
+    config=[ConfigField("console_url", "Security Console URL, e.g. https://ivm.example.local:3780"),
             ConfigField("username", "Read-only API user", secret=True),
             ConfigField("password", "API user password", secret=True),
             ConfigField("verify_tls", "Verify console TLS certificate", required=False, default=True),

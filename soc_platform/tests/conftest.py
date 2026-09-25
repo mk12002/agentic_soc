@@ -78,3 +78,85 @@ def registry() -> ActionRegistry:
     r.register(RecordingSpec("email.soft_delete", destructive=True))
     r.register(RecordingSpec("email.tag"))
     return r
+
+
+# ------------------------------------------------------------------------------------------------ sample estates
+# The built-in estate plus seeded variants (different organisation, people, machines, IP plan, suppliers,
+# volumes). Tests that assert relationships run on all of them, so nothing can depend on one data set.
+ESTATES = ["demo", "seed7", "seed23"]
+
+
+@pytest.fixture(scope="session")
+def estate_configs(tmp_path_factory) -> dict[str, dict[str, Any]]:
+    import importlib.util
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    corpus = root / "artifacts" / "phishing" / "corpus"
+    out = {"demo": {"name": "demo", "org": "acme-demo.com", "fixtures_dir": None, "corpus_dir": str(corpus),
+                    "suppliers_file": str(root / "config" / "suppliers.yaml"), "focus_upn": "jane.doe@acme-demo.com",
+                    "campaign_cve": "CVE-2021-44228", "phish_subject_token": "password expires", "lead": "lena@acme-demo.com",
+                    "uploads": ["supplier_bank_change.eml", "supplier_lookalike_payment.eml", "bec_ceo_fraud.eml", "quishing_qr.eml",
+                                "legit_vendor_invoice.eml", "marketing_spam.eml"], "original_tokens": []}}
+    spec = importlib.util.spec_from_file_location("build_estate_variant", root / "scripts" / "build_estate_variant.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for name in ESTATES[1:]:
+        d = mod.main(str(tmp_path_factory.mktemp(name)), seed=int(name[4:]))
+        out[name] = {**json.loads((d / "estate.json").read_text()), "name": name}
+    return out
+
+
+class estate_env:
+    """Point the platform at one estate (fixtures, tenant settings, suppliers, org domain) for a block of code."""
+
+    KEYS = ("SOC_FIXTURES_DIR", "SOC_SUPPLIERS_FILE", "SOC_ORG_DOMAINS")
+
+    def __init__(self, cfg: dict[str, Any]) -> None:
+        self.cfg = cfg
+
+    def __enter__(self):
+        import os
+
+        self.saved = {k: os.environ.get(k) for k in self.KEYS}
+        if self.cfg.get("fixtures_dir"):
+            os.environ["SOC_FIXTURES_DIR"] = self.cfg["fixtures_dir"]
+        else:
+            os.environ.pop("SOC_FIXTURES_DIR", None)
+        os.environ["SOC_SUPPLIERS_FILE"] = self.cfg["suppliers_file"]
+        os.environ["SOC_ORG_DOMAINS"] = self.cfg["org"]
+        self._reset()
+        return self.cfg
+
+    @staticmethod
+    def _reset():
+        """The API caches its connector registry (and connectors keep their fixture transport): rebuild on switch."""
+        import sys
+
+        app = sys.modules.get("soc_platform.api.app")
+        if app is not None:
+            app.registry.cache_clear()
+        from soc_platform.config import get_settings
+
+        get_settings.cache_clear()
+
+    def __exit__(self, *exc):
+        import os
+
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_llm_breaker():
+    """The model circuit breaker is per process: never let one test's failures leak into the next."""
+    from soc_platform.llm import gateway
+
+    gateway._Breaker.failures, gateway._Breaker.open_until = 0, 0.0
+    yield
+    gateway._Breaker.failures, gateway._Breaker.open_until = 0, 0.0
