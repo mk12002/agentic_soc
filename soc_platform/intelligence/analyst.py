@@ -23,7 +23,7 @@ from soc_platform.core.models import ActionRequest, Case, Entity
 from soc_platform.intelligence.correlation import CorrelationEngine
 from soc_platform.intelligence.models import Insight
 from soc_platform.intelligence.risk import RiskEngine
-from soc_platform.llm.gateway import BudgetExceeded, LLMGateway, deterministic_grounded
+from soc_platform.llm.gateway import BudgetExceeded, LLMGateway
 
 PLANNER_SYSTEM = (
     "You are a SOC investigation planner. Choose read-only tools to answer the analyst's question. "
@@ -307,7 +307,7 @@ def _facts_summary(results: list[dict[str, Any]]) -> str:
     for r in results:
         res = r["result"]
         if r["tool"] == "entity_risk" and isinstance(res, dict) and "score" in res:
-            drivers = [f["signal"].replace("_", " ") for f in res["factors"][:4]]
+            drivers = list(dict.fromkeys(f["signal"].replace("_", " ") for f in res["factors"]))[:4]
             parts.append(f"{res['name']} is at {res['band'].upper()} risk ({res['score']:.0f}/100)"
                          + (f"; main drivers: {', '.join(drivers)}" if drivers else "; no risk signals in the window"))
             c = ctx.get(res.get("entity_id")) or {}

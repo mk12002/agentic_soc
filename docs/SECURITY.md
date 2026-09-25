@@ -9,8 +9,13 @@ responsibility of the hosting environment.
 
 | Threat | Control | Where |
 |---|---|---|
-| Stolen / forged API tokens | Entra ID RS256 tokens validated against tenant JWKS (issuer + audience); dev HS256 tokens refused in `prod`; unknown role claims grant nothing | `core/auth.py` |
-| Insider abuse / over-privilege | RBAC (analyst, lead, admin, automation_admin, auditor); separation of duties: requester cannot approve own action; policy proposer cannot approve own policy; high-impact / four-eyes actions need a lead | `core/auth.py`, `core/actions.py`, `core/policy.py` |
+| Stolen / forged API tokens | Entra ID RS256 tokens validated against tenant JWKS (issuer + audience); dev HS256 tokens refused in `prod` and served only to the local machine in dev; unknown role claims grant nothing; per-token (jti) and per-user (not-before) revocation | `core/auth.py`, `core/access.py` |
+| Stolen session used for high-impact decisions | Step-up MFA (`amr` = mfa or Conditional Access auth context) required for approvals, rollback, policy, kill switch and access management | `core/auth.py` |
+| Insider abuse / over-privilege | RBAC (analyst, lead, admin, automation_admin, auditor) + **domain scoping** (phishing / incident / vulnerability; cross-domain views require all-domain access; out-of-scope records answer 404); separation of duties: no self-approval of four-eyes actions, policies, exceptions or access grants; time-bound, justified platform grants | `core/auth.py`, `core/access.py`, `api/app.py` |
+| Compromised integration credential | Service-account API keys: SHA-256 stored, expiry ≤ 365 days, roles limited to analyst / auditor / automation admin, **never** approval, policy or access permissions | `core/access.py` |
+| Identity-provider outage | Break-glass: sealed secret, only its hash configured, every use and failure audited and raised as a critical insight | `core/access.py` |
+| Repudiation of who did what | Append-only access log (ORM refuses update/delete; pruned only by the audited retention job) in addition to the audit chain | `api/app.py`, `core/models.py` |
+| Data at rest exposure | Raw payloads and reported emails encrypted with Fernet (`SOC_DATA_KEY`, rotation supported; mandatory in prod); retention with legal hold | `core/crypto.py`, `core/retention.py` |
 | Over-automation (R04) | Autonomy levels L0–L4 per action; destructive actions never autonomous; VIP / critical assets and blast radius force approval; hard blast-radius limit blocks; global kill switch | `core/policy.py` |
 | Tampering with evidence / history | Append-only audit table (ORM refuses UPDATE/DELETE) with SHA-256 hash chain; `/api/v1/audit/verify` detects any edit; grant the DB role INSERT/SELECT only | `core/audit.py` |
 | Duplicate / replayed actions | Idempotency keys, compare-and-set status transitions, pre-conditions re-checked at execution | `core/actions.py` |
@@ -20,7 +25,7 @@ responsibility of the hosting environment.
 | Malicious attachments (R12) | Hardened detonation (below); Windows payloads to CAPEv2 on an isolated analysis network | `engine/agents/sandbox_agent/agent.py` |
 | Tampered ML models (pickle = code execution) | SHA-256 manifest verified before any joblib/pickle artifact is deserialised; unlisted artifacts refused | `engine/integrity.py`, `artifacts/phishing/models/MANIFEST.sha256` |
 | Web attacks on the console | Strict CSP (`script-src 'self'`, no inline script or handlers, `frame-ancestors 'none'`), all dynamic values HTML-escaped, deep links restricted to http(s), no-store caching, nosniff, DENY framing | `api/app.py`, `api/static/` |
-| Abuse / DoS | Per-client rate limiting, 30 MB request cap, 25 MB email cap, connector request budgets so enrichment cannot degrade source tools (R06) | `api/app.py`, `connectors/base.py` |
+| Abuse / DoS | Per-client-address rate limiting (X-Forwarded-For only from configured proxies), 30 MB request cap enforced on the byte stream (chunked uploads included), 25 MB email cap, cached /health, connector request budgets so enrichment cannot degrade source tools (R06) | `api/app.py`, `connectors/base.py` |
 | Secret exposure | No secrets in the repository; `.env` git-ignored; `<NAME>_FILE` vault mounts supported; per-tool least-privilege service principals, read scopes by default | `config.py`, `config/connectors.yaml` |
 | Supply chain | `pip-audit` clean (setuptools pinned ≥ 83, unused packages removed incl. `nltk` with an unfixed advisory); detonation image built locally and pinned by digest in prod | `requirements/`, `deploy/sandbox/Dockerfile` |
 
@@ -64,11 +69,27 @@ responsibility of the hosting environment.
 | Database outage stalled every analysis ~45 s (retry ladder per call) | Medium | Circuit breaker |
 | Cloned-VM serial numbers merged unrelated hosts in asset resolution | High (data integrity) | Vendor ids as conflict keys; hardware keys need name corroboration |
 | Bidirectional-override characters in source | Low | Replaced by escapes |
+| Engine API key check referenced an unimported `hmac` (every authenticated call would fail) | High | Import added; covered by lint in CI |
+| No MFA / domain scope / service accounts / revocation / break-glass | High (NFR-09) | Implemented (see threat model) |
+| Kill switch held in process memory (lost on restart, not shared by replicas) | High | Durable DB flag read by every replica and the scheduler |
+| Services defaulted to a bare policy (ignored approved policy and kill switch) outside the API | High | `PolicyEngine.for_session` default everywhere |
+| Cross-domain data readable by domain-scoped users (intelligence, entities, action list, case-less actions) | High | Cross-domain endpoints require all-domain scope; lists filtered; decisions scope-checked |
+| Rate limit keyed on the presented credential (random tokens bypassed it) | Medium | Keyed on client address |
+| Request cap only checked `Content-Length` (chunked bodies unbounded) | Medium | ASGI stream-level limit |
+| Unauthenticated `/health` verified the whole audit chain per call | Medium | Verification cached (5 min); on-demand endpoint for auditors |
+| Dev sign-in reachable from any host in dev mode | Medium | Loopback only unless `SOC_DEV_TOKENS_REMOTE=1`; never in prod |
+| Access-log writes blocked requests for 5 s on SQLite and were silently lost | Medium | Background batched writer |
+| Raw payloads and emails stored in plaintext | Medium | Encryption at rest |
+| Concurrent first-use DB initialisation race | Low | Locked, publish-after-create |
+| Identity records silently dropping keys owned by another person | Low (data integrity) | Queued as key collisions for analyst review |
 | Dependency advisories (setuptools, nltk) | Low | Upgraded / removed |
 
 ## Operator responsibilities (cannot be solved in code)
 
 * Rotate every credential that was present in the old `.env`, and the GCP service-account key.
+* Set `SOC_ENVIRONMENT=prod`, `SOC_AUTH_MODE=entra`, `SOC_DATA_KEY`, and (optionally) `SOC_BREAKGLASS_SHA256`;
+  keep `SOC_DEV_TOKENS_REMOTE` unset. Configure `SOC_TRUSTED_PROXIES` for the reverse proxy.
+* Create Entra app roles `SOC.<Role>` / `SOC.<Role>.<Domain>` and require MFA via Conditional Access.
 * Run behind TLS (reverse proxy / App Gateway) and restrict network access to the API and executor.
 * Provision per-tool service principals with read scopes first; add write scopes per approved action.
 * Grant the audit-log database role INSERT/SELECT only; back up and retain per CCI policy.

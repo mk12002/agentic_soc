@@ -58,8 +58,8 @@ def test_full_client_demo(client, tmp_path):
     an, lead = H(client, "alice@cci-demo.com", "analyst"), H(client, "lena@cci-demo.com", "lead")
     aud, adm = H(client, "audrey@cci-demo.com", "auditor"), H(client, "ada@cci-demo.com", "admin")
     ui = ok(client.get("/")).text
-    assert "/static/app.js" in ui and "/static/dash.js" in ui
-    for f in ("app.js", "dash.js"):
+    assert "/static/app.js" in ui and "/static/views.js" in ui and "/static/styles.css" in ui
+    for f in ("app.js", "views.js", "styles.css", "theme.js", "favicon.svg"):
         ok(client.get(f"/static/{f}"))
 
     # 1. data in: all three domains + the supplier / BEC scenarios
@@ -144,7 +144,7 @@ def test_full_client_demo(client, tmp_path):
     sup = ok(client.get("/api/v1/phishing/suppliers", headers=an)).json()
     assert sup["suppliers"]["Krishna Logistics"]["status"] in {"at_risk", "critical"}
     conns = ok(client.get("/api/v1/dashboard/connectors", headers=an)).json()
-    assert {c["state"] for c in conns if c["enabled"]} <= {"healthy", "stale", "never_synced"}
+    assert {c["state"] for c in conns if c["enabled"]} <= {"healthy", "stale", "on_demand"}
     assert all(ok(client.post(f"/api/v1/connectors/{c['name']}/test", headers=H(client, "aa", "automation_admin"))).json()["ok"]
                for c in conns if c["enabled"])
 

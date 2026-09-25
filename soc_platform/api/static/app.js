@@ -1,92 +1,299 @@
-function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.className='warn';t.style.cssText='position:fixed;right:16px;bottom:16px;max-width:480px;z-index:9';document.body.appendChild(t)}t.textContent=String(m);t.hidden=false;clearTimeout(window._tt);window._tt=setTimeout(()=>t.hidden=true,6000)}
-const safeUrl=u=>/^https?:\/\//i.test(String(u||''))?String(u):'#';
-let TOKEN=localStorage.getItem('soc_token')||'';const TABS=['Overview','Intelligence','Cases','Approvals','Vulnerabilities','Phishing','Coverage','Shadow IT','Connectors','Policy','Access','Audit'];let tab='Overview';
-const $=s=>document.querySelector(s);const esc=v=>String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-async function api(p,o={}){const r=await fetch(p,{...o,headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json',...(o.headers||{})}});
- if(!r.ok){const t=await r.text();let d=t;try{d=JSON.parse(t).detail||t}catch(e){}toast(r.status+': '+d);throw new Error(t)}return r.headers.get('content-type')?.includes('json')?r.json():r}
-async function login(){const r=await fetch(`/api/v1/dev/token?user=${encodeURIComponent($('#user').value)}&roles=${$('#role').value}`);if(!r.ok){toast('dev tokens disabled');return}
- TOKEN=(await r.json()).token;localStorage.setItem('soc_token',TOKEN);boot()}
-async function boot(){if(!TOKEN)return;const me=await api('/api/v1/me');window.ME=me;$('#who').textContent=me.name+' ('+me.roles.join(',')+')';
- $('#nav').innerHTML=TABS.map(t=>`<button class="${t==tab?'on':''}" data-fn="show" data-args="[&quot;${esc(t)}&quot;]">${t}</button>`).join('');show(tab)}
-function show(t){tab=t;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.textContent==t));const v=Object.assign({Intelligence,Cases,Approvals,Vulnerabilities,Phishing,Connectors,Policy,Audit},window.VIEWS||{})[t];if(v)v()}
-const cite=x=>`<span class="muted">[${(x.evidence||[]).map(e=>`<abbr title="${esc(e.source+': '+e.summary)}">${esc(e.ref)}</abbr>`).join(', ')||(x.evidence_ids||[]).map(esc).join(', ')}]</span>`;
-const sev=s=>`<span class="pill ${esc(s)}">${esc(s)}</span>`;
+// Agentic SOC console - core: auth, API client, router, shell, shared components.
+// No inline handlers anywhere: clicks are delegated through data-fn / data-go so the page runs under a strict CSP.
+'use strict';
 
-async function Cases(){const cs=await api('/api/v1/cases');$('#main').innerHTML=`<div class="card"><h2>Cases</h2>
- <button class="b" data-fn="runInc" data-args="[]">Run incident pipeline</button> <button class="b" data-fn="runPh" data-args="[]">Pull reported emails</button>
- <table><tr><th>Domain</th><th>Title</th><th>Severity</th><th>Verdict</th><th>Status</th><th>Opened</th></tr>${cs.map(c=>`<tr class="click" data-fn="caseView" data-args="[&quot;${esc(c.id)}&quot;]">
- <td>${esc(c.domain)}</td><td>${esc(c.title)}</td><td>${sev(c.severity)}</td><td>${esc(c.verdict)}</td><td>${esc(c.status)}</td><td class="muted">${esc(c.created_at.slice(0,16))}</td></tr>`).join('')}</table></div>`}
-async function runInc(){await api('/api/v1/incidents/run',{method:'POST'});Cases()}
-async function runPh(){await api('/api/v1/phishing/ingest',{method:'POST'});Cases()}
-async function caseView(id){const v=await api('/api/v1/cases/'+id);const c=v.case,a=v.assessment||{};
- const inc=v.completeness&&v.completeness.unavailable&&v.completeness.unavailable.length?`<div class="warn">Incomplete: unavailable sources ${v.completeness.unavailable.map(u=>esc(u.source)).join(', ')}</div>`:'';
- $('#main').innerHTML=`<div class="card"><h2>${esc(c.title)} ${sev(c.severity)}</h2><div class="muted">${esc(c.domain)} · ${esc(c.status)} · verdict <b>${esc(c.verdict)}</b> · confidence ${esc(c.confidence)} · mode ${esc(c.autonomy_mode)}</div>${inc}
- <p>${esc(c.summary)}</p><h3>Facts</h3>${(a.facts||[]).map(x=>`<div class="fact">${esc(x.text)} ${cite(x)}</div>`).join('')}
- ${(a.inferences||[]).length?'<h3>Inferences</h3>'+a.inferences.map(x=>`<div class="inf">${esc(x.text)} ${cite(x)}</div>`).join(''):''}
- <h3>MITRE ATT&CK</h3>${(a.mitre||[]).map(m=>`<span class="pill">${esc(m.technique)} ${esc(m.name||'')}</span> `).join('')}
- <p><a href="#" data-fn="dl" data-args="[&quot;/api/v1/cases/${esc(id)}/report&quot;]">Download investigation record (.docx)</a></p></div>
- ${intelPanel(v.intelligence)}
- <div class="row"><div class="card"><h2>Recommended actions</h2><table><tr><th>#</th><th>Action</th><th>Targets</th><th>Status</th><th>Why / blast radius</th><th></th></tr>
- ${v.actions.sort((x,y)=>(x.priority||99)-(y.priority||99)).map(x=>`<tr><td>${esc(x.priority)}</td><td><b>${esc(x.action_type)}</b><br><span class="muted">L${x.level}</span></td><td>${x.targets.map(t=>esc(t.id)).slice(0,4).join('<br>')}${x.targets.length>4?'<br>+'+(x.targets.length-4):''}</td>
- <td>${esc(x.status)}${x.approver?'<br><span class="muted">by '+esc(x.approver)+'</span>':''}</td><td>${esc(x.rationale)}<br><span class="muted">${esc(x.blast_radius||'')} ${x.reversible===false?'· not reversible':''}</span><br><span class="muted">${(x.policy_reasons||[]).slice(1).map(esc).join('; ')}</span></td>
- <td>${['recommended','pending_approval'].includes(x.status)?`<button class="b" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;approve&quot;,&quot;${esc(id)}&quot;]">Approve</button> <button class="g b" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;reject&quot;,&quot;${esc(id)}&quot;]">Reject</button>`:x.status=='executed'?`<button class="g b" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;rollback&quot;,&quot;${esc(id)}&quot;]">Rollback</button>`:''}</td></tr>`).join('')}</table></div></div>
- <div class="row"><div class="card"><h2>Entities</h2><table>${v.entities.map(e=>`<tr><td>${esc(e.kind)}</td><td>${esc(e.role)}</td><td>${['asset','identity'].includes(e.kind)?`<a href="#" data-fn="entity360" data-args="[&quot;${esc(e.id)}&quot;]">${esc(e.name)}</a>`:esc(e.name)}</td><td class="muted">${e.seen_by.map(esc).join(', ')}</td></tr>`).join('')}</table></div>
- <div class="card"><h2>Timeline</h2><table>${v.timeline.map(t=>`<tr><td class="muted">${esc(t.ts.slice(0,19))}</td><td>${esc(t.tool)}</td><td>${esc(t.title)}</td></tr>`).join('')}</table></div></div>
- <div class="card"><h2>Evidence by dimension</h2>${Object.entries(v.evidence).map(([d,items])=>`<h3>${esc(d)}</h3>${items.map(i=>`<div class="${i.type=='fact'?'fact':'inf'}" id="ev-${esc(i.ref||i.id)}"><b class="muted">${esc(i.ref||'')}</b> ${esc(i.source)}: ${esc(i.summary)} ${i.deep_link?`<a target=_blank rel="noopener noreferrer" href="${esc(safeUrl(i.deep_link))}">open</a>`:''}</div>`).join('')}`).join('')}</div>
- <div class="card"><h2>Analyst decision</h2><select id="dv"><option>true_positive</option><option>malicious</option><option>false_positive</option><option>benign</option></select>
- <input id="dr" size="60" placeholder="reasoning"> <button class="b" data-fn="decide" data-args="[&quot;${esc(id)}&quot;]">Record decision</button>
- ${v.dispositions.map(d=>`<div class="muted">${esc(d.at.slice(0,16))} ${esc(d.analyst)}: ${esc(d.verdict)} - ${esc(d.reasoning)}</div>`).join('')}</div>
- <div class="card"><h2>Audit</h2>${v.audit.map(x=>`<div class="muted">#${x.seq} ${esc(x.ts.slice(0,19))} ${esc(x.actor)} ${esc(x.event)}</div>`).join('')}</div>`}
-async function act(aid,verb,cid){await api(`/api/v1/actions/${aid}/${verb}`,{method:'POST',body:JSON.stringify({note:'via console'})});cid?caseView(cid):Approvals()}
-async function decide(id){await api(`/api/v1/cases/${id}/disposition`,{method:'POST',body:JSON.stringify({verdict:$('#dv').value,reasoning:$('#dr').value})});caseView(id)}
-async function dl(p){const r=await api(p);const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=(r.headers.get('content-disposition')||'').split('filename=')[1]?.replace(/"/g,'')||'report';a.click()}
-async function Approvals(){const xs=await api('/api/v1/actions?status=recommended,pending_approval');$('#main').innerHTML=`<div class="card"><h2>Awaiting approval (${xs.length})</h2><table><tr><th>Action</th><th>Domain</th><th>Targets</th><th>Rationale</th><th>Policy</th><th></th></tr>
- ${xs.map(x=>`<tr><td><b>${esc(x.action_type)}</b><br><span class="muted">L${x.level} · ${esc(x.requested_by)}</span></td><td>${esc(x.domain)}</td><td>${x.targets.map(t=>esc(t.id)).slice(0,3).join('<br>')}</td><td>${esc(x.rationale)}</td><td class="muted">${x.policy_reasons.map(esc).join('<br>')}</td>
- <td><button class="b" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;approve&quot;]">Approve</button> <button class="b g" data-fn="act" data-args="[&quot;${esc(x.id)}&quot;,&quot;reject&quot;]">Reject</button> ${x.case_id?`<a href="#" data-fn="caseView" data-args="[&quot;${esc(x.case_id)}&quot;]">case</a>`:''}</td></tr>`).join('')}</table></div>`}
-async function Vulnerabilities(){const [m,f,cov]=await Promise.all([api('/api/v1/vm/metrics'),api('/api/v1/vm/findings'),api('/api/v1/vm/coverage')]);
- $('#main').innerHTML=`<div class="row">${[['Open',m.open],['KEV open',m.kev_open],['Internet-exposed',m.internet_exposed_open],['Past SLA',m.sla_breached],['Asset match rate',((m.asset_match_rate||0)*100).toFixed(1)+'%']].map(([k,v])=>`<div class="card"><div class="muted">${k}</div><div class="kpi">${v}</div></div>`).join('')}</div>
- <div class="card"><button class="b" data-fn="vmRefresh" data-args="[]">Refresh from scanners</button> <button class="b g" data-fn="rep" data-args="[&quot;daily_exposure&quot;]">Daily exposure report</button> <button class="b g" data-fn="rep" data-args="[&quot;weekly_vm&quot;]">Weekly VM report</button> <button class="b g" data-fn="rep" data-args="[&quot;weekly_mgmt&quot;]">Management deck</button>
- <h3>Ask</h3><input id="q" size="70" placeholder="e.g. which KEV vulnerabilities are internet exposed?"> <button class="b" data-fn="ask" data-args="[]">Query</button><div id="qa"></div></div>
- <div class="card"><h2>Findings</h2><table><tr><th>P</th><th>CVE</th><th>Asset</th><th>Team</th><th>SLA due</th><th>Seen by</th><th>Status</th><th></th></tr>${f.map(x=>`<tr><td>${esc(x.priority)}</td><td>${esc(x.cve)}</td><td>${esc(x.asset)}${x.internet_exposed?' 🌐':''}</td><td>${esc(x.team)}</td><td>${esc((x.sla_due||'').slice(0,10))}</td><td class="muted">${Object.keys(x.sources).join(', ')}</td><td>${esc(x.status)}</td><td>${x.campaign_id?'<span class="muted">in campaign</span>':`<button class="b" data-fn="camp" data-args="[&quot;${esc(x.cve)}&quot;]">Campaign</button>`}</td></tr>`).join('')}</table></div>
- <div class="card"><h2>Coverage</h2><div>Missing EDR: ${esc(cov.missing_edr.join(', ')||'none')}</div><div>Not in CMDB: ${esc(cov.not_in_cmdb.join(', ')||'none')}</div><div>Unresolved identity queue: ${cov.unresolved_queue}</div></div>`}
-async function vmRefresh(){await api('/api/v1/vm/refresh',{method:'POST'});Vulnerabilities()}
-async function camp(cve){const r=await api('/api/v1/vm/campaigns',{method:'POST',body:JSON.stringify({cve,notify_via:'ticket'})});toast('Campaign '+r.campaign_id+' created; notifications await approval');Vulnerabilities()}
-async function ask(){const r=await api('/api/v1/vm/query',{method:'POST',body:JSON.stringify({question:$('#q').value})});$('#qa').innerHTML=`<p>${esc(r.answer)} <span class="muted">filter: <code>${esc(JSON.stringify(r.generated_filter))}</code></span></p>
- <table>${r.records.map(x=>`<tr><td>${esc(x.cve)}</td><td>${esc(x.asset)}</td><td>${esc(x.priority)}</td><td>${esc(x.team)}</td><td class="muted">${x.sources.join(', ')}</td></tr>`).join('')}</table>`}
-async function rep(k){const r=await api('/api/v1/reports/'+k,{method:'POST'});dl('/api/v1/reports/'+r.id+'/download')}
-async function Phishing(){const m=await api('/api/v1/phishing/metrics');$('#main').innerHTML=`<div class="row">${[['Reported',m.reported],['Auto-closed',m.auto_closed],['QA-sampled',m.sampled_for_qa],['Campaigns',m.campaigns],['Repeat clickers',m.repeat_clickers.length]].map(([k,v])=>`<div class="card"><div class="muted">${k}</div><div class="kpi">${v}</div></div>`).join('')}</div>
- <div class="card"><h2>Submit a reported email (.eml)</h2><input type="file" id="f" accept=".eml"> <button class="b" data-fn="upl" data-args="[]">Analyse</button><button class="b g" data-fn="runPh" data-args="[]">Pull reporting mailbox</button>
- <h3>Verdict mix</h3><pre>${esc(JSON.stringify(m.verdict_mix,null,1))}</pre><h3>Clickers</h3><pre>${esc(JSON.stringify(m.clickers,null,1))}</pre></div>`}
-async function upl(){const fd=new FormData();fd.append('file',$('#f').files[0]);const r=await fetch('/api/v1/phishing/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});if(!r.ok){toast(await r.text());return}const v=await r.json();caseView(v.case.id)}
-async function Connectors(){const cs=await api('/api/v1/connectors');$('#main').innerHTML=`<div class="card"><h2>Connectors (${cs.filter(c=>c.enabled).length} enabled)</h2><table><tr><th>Tool</th><th>Category</th><th>Mode</th><th>Health</th><th>Streams / lookups</th><th>Confidence</th><th>To confirm</th></tr>
- ${cs.map(c=>`<tr><td><b>${esc(c.tool)}</b><br><span class="muted">${esc(c.name)}</span></td><td>${esc(c.category)}</td><td>${c.enabled?esc(c.mode):'<span class="muted">disabled</span>'}</td><td>${c.health?(c.health.ok?'ok':'<span style="color:var(--crit)">'+esc(c.health.error)+'</span>'):''}${(c.config_problems||[]).map(p=>'<div style="color:var(--high)">'+esc(p)+'</div>').join('')}</td>
- <td class="muted">${(c.streams||[]).join(', ')}<br>${(c.lookups||[]).join(', ')}</td><td>${esc(c.confidence)}</td><td class="muted">${esc(c.to_confirm)}</td></tr>`).join('')}</table></div>`}
-async function Policy(){const [p,cat]=await Promise.all([api('/api/v1/policy'),api('/api/v1/actions/catalog')]);$('#main').innerHTML=`<div class="card"><h2>Autonomy policy (version ${esc(p.active_version||'default')})</h2>
- <button class="b r" data-fn="kill" data-args="[true]">Engage kill switch</button> <button class="b g" data-fn="kill" data-args="[false]">Release kill switch</button>
- <table><tr><th>Action type</th><th>Tool(s)</th><th>Level</th><th>Destructive</th><th>Reversible</th></tr>${cat.map(a=>`<tr><td>${esc(a.action_type)}</td><td class="muted">${esc(a.tool)}</td><td>L${a.level}</td><td>${a.destructive?'yes':''}</td><td>${a.reversible?'yes':''}</td></tr>`).join('')}</table>
- <h3>Pending proposals</h3>${p.proposals.map(x=>`<div>#${x.id} by ${esc(x.proposed_by)}: ${esc(x.note)} <button class="b" data-fn="apol" data-args="[${esc(x.id)}]">Approve</button></div>`).join('')||'<span class="muted">none</span>'}</div>`}
-async function kill(on){await api('/api/v1/kill-switch?on='+on,{method:'POST'});Policy()}
-async function apol(id){await api(`/api/v1/policy/proposals/${id}/approve`,{method:'POST'});Policy()}
-async function Audit(){const [v,xs]=await Promise.all([api('/api/v1/audit/verify'),api('/api/v1/audit?limit=300')]);$('#main').innerHTML=`<div class="card"><h2>Audit log ${v.ok?'<span class="pill low">chain verified</span>':'<span class="pill critical">CHAIN BROKEN at '+v.first_bad_seq+'</span>'}</h2>
- <table><tr><th>#</th><th>Time</th><th>Actor</th><th>Event</th><th>Subject</th></tr>${xs.map(x=>`<tr><td>${x.seq}</td><td class="muted">${esc(x.ts.slice(0,19))}</td><td>${esc(x.actor_type)}:${esc(x.actor_id)}</td><td>${esc(x.event_type)}</td><td class="muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td></tr>`).join('')}</table></div>`}
-window.addEventListener('DOMContentLoaded',boot);
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const safeUrl = u => /^https?:\/\//i.test(String(u || '')) ? String(u) : '#';
+const arg = (...a) => esc(JSON.stringify(a));
+const nf = n => (n == null || n === '') ? '–' : Number(n).toLocaleString();
+const pct = (x, d = 0) => x == null ? '–' : (x * 100).toFixed(d) + '%';
+const cap = s => { const t = String(s || '').replace(/_/g, ' ').trim(); return t.charAt(0).toUpperCase() + t.slice(1); };
+const dt = s => s ? String(s).slice(0, 16).replace('T', ' ') : '–';
+const day = s => s ? String(s).slice(0, 10) : '–';
 
-function intelPanel(x){if(!x)return'';return `<div class="card"><h2>Cross-domain intelligence</h2>
- ${(x.entity_risk||[]).map(r=>`<span class="pill ${esc(r.band)}">${esc(r.name)} ${Math.round(r.score)}/100</span> `).join('')}
- ${(x.insights||[]).map(i=>`<div class="fact"><b>${sev(i.severity)} ${esc(i.title)}</b><div class="muted">${esc(i.narrative)}</div><div>${(i.next_steps||[]).map(n=>'• '+esc(n)).join('<br>')}</div></div>`).join('')||'<span class="muted">no correlated findings</span>'}</div>`}
-async function Intelligence(){const [b,ins,top]=await Promise.all([api('/api/v1/intelligence/brief'),api('/api/v1/intelligence/insights'),api('/api/v1/intelligence/risk/top?limit=10')]);
- $('#main').innerHTML=`<div class="card"><h2>Situation brief <span class="muted">(${esc(b.source)})</span></h2><div style="white-space:pre-wrap">${esc(b.summary)}</div>
- <h3>Ask the analyst</h3><input id="iq" size="80" placeholder="e.g. Is jane.doe@cci-demo.com compromised and what should we do first?"> <button class="b" data-fn="askIntel" data-args="[]">Ask</button> <button class="b g" data-fn="refreshIntel" data-args="[]">Re-correlate</button><div id="ia"></div></div>
- <div class="row"><div class="card" style="flex:2"><h2>Correlated findings (${ins.length})</h2>${ins.map(i=>`<div class="fact"><b>${sev(i.severity)} ${esc(i.title)}</b> <span class="muted">${esc(i.rule)} · ${esc((i.requirements||[]).join(', '))}</span>
-  <div class="muted">${esc(i.narrative)}</div><div>${(i.next_steps||[]).map(n=>'• '+esc(n)).join('<br>')}</div>
-  <button class="b g" data-fn="insightAct" data-args="[&quot;${esc(i.id)}&quot;,&quot;acknowledge&quot;]">Acknowledge</button> <button class="b g" data-fn="insightAct" data-args="[&quot;${esc(i.id)}&quot;,&quot;dismiss&quot;]">Dismiss</button></div>`).join('')}</div>
- <div class="card"><h2>Highest risk users &amp; hosts</h2><table>${top.map(p=>`<tr><td>${sev(p.band)}</td><td>${esc(p.name)}<br><span class="muted">${esc(p.dimensions.join(', '))}</span></td><td class="kpi" style="font-size:18px">${Math.round(p.score)}</td></tr>`).join('')}</table></div></div>`}
-async function askIntel(){const q=$('#iq').value;if(!q)return;$('#ia').innerHTML='<p class="muted">analysing…</p>';const r=await api('/api/v1/intelligence/ask',{method:'POST',body:JSON.stringify({question:q})});
- $('#ia').innerHTML=`<p>${esc(r.answer)}</p>${(r.claims||[]).map(c=>`<div class="${c.kind=='fact'?'fact':'inf'}">${esc(c.text)} <span class="muted">[${c.evidence_ids.map(esc).join(', ')}]</span></div>`).join('')}
- <p class="muted">planner: ${esc(r.planner)} · tools: ${r.tool_calls.map(t=>esc(t.tool)).join(' → ')}</p>`}
-async function refreshIntel(){await api('/api/v1/intelligence/refresh',{method:'POST'});Intelligence()}
-async function insightAct(id,verb){await api(`/api/v1/intelligence/insights/${id}/${verb}`,{method:'POST'});Intelligence()}
-// Delegated click handling: no inline handlers, so the page runs under a strict Content-Security-Policy.
-const ALLOWED={act,apol,ask,askIntel,camp,caseView,decide,dl,insightAct,kill,login,refreshIntel,rep,runInc,runPh,show,upl,vmRefresh};
-document.addEventListener('click',ev=>{const el=ev.target.closest('[data-fn]');if(!el)return;ev.preventDefault();
- const fn=ALLOWED[el.dataset.fn];if(!fn)return;let args=[];try{args=JSON.parse(el.dataset.args||'[]')}catch(e){return}Promise.resolve().then(()=>fn(...args)).catch(()=>{/* already reported via toast */})});
+let TOKEN = '';
+try { TOKEN = localStorage.getItem('soc_token') || ''; } catch (e) { /* storage blocked */ }
+window.ME = null;
+
+// ---------------------------------------------------------------- feedback
+function toast(msg, err = false) {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+  t.className = 'toast' + (err ? ' err' : '');
+  t.textContent = String(msg);
+  t.hidden = false;
+  clearTimeout(window._tt);
+  window._tt = setTimeout(() => { t.hidden = true; }, err ? 8000 : 5000);
+}
+
+// ---------------------------------------------------------------- API
+async function api(path, opts = {}) {
+  const headers = {'Content-Type': 'application/json', ...(opts.headers || {})};
+  if (TOKEN) headers.Authorization = 'Bearer ' + TOKEN;
+  const r = await fetch(path, {...opts, headers});
+  if (r.status === 401 && TOKEN) { signOut(true); throw new Error('session expired'); }
+  if (!r.ok) {
+    const t = await r.text(); let d = t;
+    try { d = JSON.parse(t).detail || t; } catch (e) { /* not JSON */ }
+    toast((typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 300), true);
+    throw new Error(t);
+  }
+  return (r.headers.get('content-type') || '').includes('json') ? r.json() : r;
+}
+const post = (p, body) => api(p, {method: 'POST', body: body === undefined ? undefined : JSON.stringify(body)});
+const can = p => ((window.ME && window.ME.permissions) || []).includes(p);
+const inDomain = d => { const ds = (window.ME && window.ME.domains) || []; return ds.includes('*') || (d !== '*' && ds.includes(d)); };
+
+async function dl(path) {
+  const r = await api(path);
+  const b = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(b);
+  a.download = ((r.headers.get('content-disposition') || '').split('filename=')[1] || 'download').replace(/"/g, '');
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('Downloaded ' + a.download);
+}
+
+// ---------------------------------------------------------------- icons (hand-drawn 24px line set)
+const I = {
+  overview: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM13 3v6h8V3zM3 21h8v-6H3z"/>',
+  intel: '<path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.4 4.8.8.8 1.1 1.6 1.1 2.7V18h5v-1.5c0-1.1.3-1.9 1.1-2.7C16.8 12.6 18 11.2 18 9a6 6 0 0 0-6-6zM10 21h4"/>',
+  cases: '<path d="M4 7h16v12H4zM9 7V5h6v2M4 12h16"/>',
+  approvals: '<path d="M9 12l2 2 4-4M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/>',
+  phishing: '<path d="M4 6h16v12H4zM4 7l8 6 8-6"/>',
+  vuln: '<path d="M12 3l8 4v5c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V7zM12 8v5M12 16h.01"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.5 4.3 4.3 0 0 0 7 18z"/>',
+  coverage: '<path d="M4 4h4v4H4zM10 4h4v4h-4zM16 4h4v4h-4zM4 10h4v4H4zM10 10h4v4h-4zM4 16h4v4H4z"/>',
+  shadow: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/>',
+  supplier: '<path d="M3 21V9l6 3V9l6 3V6l6 3v12zM7 17h2M12 17h2M17 17h2"/>',
+  plug: '<path d="M9 2v5M15 2v5M7 7h10v4a5 5 0 0 1-10 0zM12 16v6"/>',
+  policy: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4"/>',
+  access: '<path d="M8 11V7a4 4 0 0 1 8 0v4M5 11h14v10H5zM12 15v2"/>',
+  audit: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7"/>',
+  reports: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  sun: '<path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  play: '<path d="M7 5l12 7-12 7z"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
+};
+const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${I[n] || ''}</svg>`;
+
+// ---------------------------------------------------------------- shared components
+const chip = (s, extra = '') => `<span class="chip ${esc(String(s || '').toLowerCase())} ${extra}">${esc(cap(s))}</span>`;
+const kpi = (label, value, foot = '', alert = false) =>
+  `<div class="card kpi${alert ? ' alert' : ''}"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div>${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+function card(title, body, o = {}) {
+  return `<section class="card ${o.cls || ''}"${o.id ? ` id="${esc(o.id)}"` : ''}>${title ? `<div class="card-h"><h2>${title}</h2>${o.sub ? `<span class="sub">${o.sub}</span>` : ''}${o.right ? `<div class="right">${o.right}</div>` : ''}</div>` : ''}
+    <div class="card-b${o.flush ? ' flush' : ''}">${body}</div></section>`;
+}
+function table(cols, rows, o = {}) {
+  if (!rows.length) return `<div class="empty">${esc(o.empty || 'Nothing to show yet.')}</div>`;
+  return `<div class="table-wrap"><table><thead><tr>${cols.map(c => `<th class="${c.num ? 'num' : ''}">${esc(c.h || c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.join('')}</tbody></table></div>`;
+}
+const btn = (label, fn, args = [], cls = '', ic = '') =>
+  `<button class="btn ${cls}" data-fn="${esc(fn)}" data-args="${arg(...args)}">${ic ? icon(ic) : ''}${esc(label)}</button>`;
+const go = (href, label, cls = '') => `<a href="${esc(href)}" class="${cls}">${esc(label)}</a>`;
+const empty = t => `<div class="empty">${esc(t)}</div>`;
+const skeleton = () => `<div class="card"><div class="card-b">${'<div class="skeleton"></div>'.repeat(6)}</div></div>`;
+const cite = x => {
+  const ev = x.evidence || [];
+  if (ev.length) return ev.map(e => `<abbr class="cite" title="${esc((e.source || '') + ': ' + (e.summary || ''))}">${esc(e.ref)}</abbr>`).join('');
+  return (x.evidence_ids || []).map(r => `<abbr class="cite">${esc(r)}</abbr>`).join('');
+};
+function page(title, sub, actions, body) {
+  return `<div class="page-head"><div><h1>${esc(title)}</h1>${sub ? `<p>${sub}</p>` : ''}</div>${actions ? `<div class="actions">${actions}</div>` : ''}</div>${body}`;
+}
+
+// charts (inline SVG coloured from theme tokens)
+function stackedBars(series, keys, h = 170) {
+  const n = series.length || 1, w = 720, pad = 22, bw = (w - pad) / n - 6;
+  const max = Math.max(1, ...series.map(d => keys.reduce((a, k) => a + (d[k] || 0), 0)));
+  let g = '';
+  for (let i = 0; i <= 2; i++) { const y = 8 + (h - 30) * i / 2; g += `<line x1="${pad}" x2="${w}" y1="${y}" y2="${y}" style="stroke:var(--border)"/>`; }
+  g += `<text x="0" y="12">${max}</text><text x="0" y="${h - 22}">0</text>`;
+  series.forEach((d, i) => {
+    let y = h - 22; const x = pad + i * (bw + 6);
+    keys.forEach(k => {
+      const v = d[k] || 0, bh = v / max * (h - 30);
+      if (v) g += `<rect x="${x}" y="${y - bh}" width="${bw}" height="${bh}" rx="2" style="fill:var(--c-${k})"><title>${esc(d.date)} · ${esc(k)}: ${v}</title></rect>`;
+      y -= bh;
+    });
+    if (i % 2 === 0 || n < 10) g += `<text x="${x}" y="${h - 6}">${esc(String(d.date).slice(5))}</text>`;
+  });
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="none" role="img" aria-label="daily volume">${g}</svg>
+    <div class="legend">${keys.map(k => `<span><i style="background:var(--c-${k})"></i>${esc(cap(k))}</span>`).join('')}</div>`;
+}
+function donut(counts, colors = {}) {
+  const e = Object.entries(counts || {}).filter(([, v]) => v > 0), total = e.reduce((a, [, v]) => a + v, 0);
+  if (!total) return empty('No data in this window');
+  const r = 46, c = 60, C = 2 * Math.PI * r; let off = 0, arcs = '';
+  e.forEach(([k, v]) => {
+    const len = v / total * C;
+    arcs += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke-width="14" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}"
+      style="stroke:${colors[k] || `var(--c-${k}, var(--c-other))`}" transform="rotate(-90 ${c} ${c})"><title>${esc(cap(k))}: ${v}</title></circle>`;
+    off += len;
+  });
+  return `<div class="inline" style="gap:20px"><svg class="chart" width="120" height="120" viewBox="0 0 120 120">
+      <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke-width="14" style="stroke:var(--surface-3)"/>${arcs}
+      <text x="${c}" y="${c + 5}" text-anchor="middle" style="fill:var(--text);font-size:18px;font-weight:650">${total}</text></svg>
+    <div class="stack" style="gap:6px">${e.map(([k, v]) => `<div class="small"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:8px;background:${colors[k] || `var(--c-${k}, var(--c-other))`}"></i>${esc(cap(k))} <b>${v}</b></div>`).join('')}</div></div>`;
+}
+const meter = (v, max = 100) => `<div class="bar"><span style="width:${Math.max(2, Math.min(100, v / max * 100))}%;background:${v >= 75 ? 'var(--c-critical)' : v >= 50 ? 'var(--c-high)' : v >= 25 ? 'var(--c-medium)' : 'var(--c-low)'}"></span></div>`;
+
+// ---------------------------------------------------------------- navigation model
+const NAV = [
+  ['Operate', [['overview', 'Overview', 'overview'], ['intelligence', 'Intelligence', 'intel', '*'], ['cases', 'Cases', 'cases'],
+    ['approvals', 'Approvals', 'approvals']]],
+  ['Domains', [['phishing', 'Phishing', 'phishing', 'phishing'], ['vulnerabilities', 'Vulnerabilities', 'vuln', 'vulnerability'],
+    ['cloud', 'Cloud posture', 'cloud', 'vulnerability']]],
+  ['Insight', [['coverage', 'ATT&CK coverage', 'coverage'], ['shadow-it', 'Shadow IT', 'shadow', 'incident'],
+    ['suppliers', 'Supplier risk', 'supplier', 'phishing']]],
+  ['Govern', [['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['reports', 'Reports', 'reports'],
+    ['access', 'Access', 'access'], ['audit', 'Audit log', 'audit']]],
+];
+const TITLES = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label])));
+
+function route() {
+  const parts = (location.hash.replace(/^#\/?/, '') || 'overview').split('/').map(decodeURIComponent);
+  return {name: parts[0], params: parts.slice(1)};
+}
+
+function shell() {
+  const me = window.ME;
+  const initials = (me.name || '?').split(/[@.\s]/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join('');
+  $('#app').innerHTML = `<div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations</div></div></div>
+      ${NAV.map(([g, items]) => `<div class="nav-group">${g}</div>` + items.filter(([, , , d]) => !d || inDomain(d)).map(([id, label, ic]) =>
+        `<a class="nav-item" href="#/${id}" data-nav="${id}">${icon(ic)}<span>${esc(label)}</span>${id === 'approvals' ? '<span class="count" id="nav-approvals" hidden></span>' : ''}</a>`).join('')).join('')}
+      <div class="sidebar-foot">Signed in as ${esc(me.auth_method === 'api_key' ? 'service account' : me.roles.join(', ') || 'no role')}<br>${esc(me.domains.includes('*') ? 'All domains' : me.domains.join(', '))}</div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <div class="crumbs" id="crumbs"></div><div class="spacer"></div>
+        <span class="status-pill" id="kill-status" title="Automated action status"><span class="dot"></span>Automation active</span>
+        <button class="icon-btn" data-fn="toggleTheme" data-args="[]" title="Toggle light / dark" aria-label="Toggle theme" id="theme-btn"></button>
+        <div class="user" data-fn="toggleMenu" data-args="[]"><div class="avatar">${esc(initials)}</div><div class="who">${esc(me.name)}<small>${esc(me.roles.join(', '))}${me.mfa ? ' · MFA' : ''}</small></div>
+          <div class="menu" id="user-menu" hidden>
+            <div class="row-i">Permissions: ${esc(me.permissions.length)}</div>
+            <div class="row-i">Data scope: ${esc(me.domains.includes('*') ? 'all domains' : me.domains.join(', '))}</div>
+            <div class="row-i act" data-fn="goTo" data-args="${arg('#/access')}">Access &amp; roles</div>
+            <div class="row-i act" data-fn="signOut" data-args="[]">Sign out</div>
+          </div></div>
+      </header>
+      <main class="content" id="main"></main>
+    </div></div>`;
+  paintThemeButton();
+  refreshStatus();
+}
+
+async function refreshStatus() {
+  try {
+    const h = await (await fetch('/health')).json();
+    const el = $('#kill-status');
+    if (el) { el.className = 'status-pill' + (h.kill_switch ? ' halt' : ''); el.innerHTML = `<span class="dot"></span>${h.kill_switch ? 'Automation halted' : 'Automation active'}`; }
+    if (can('approve_action') || can('request_action')) {
+      const xs = await api('/api/v1/actions?status=recommended,pending_approval');
+      const b = $('#nav-approvals'); if (b) { b.hidden = !xs.length; b.textContent = xs.length; }
+    }
+  } catch (e) { /* status is best-effort */ }
+}
+
+async function render() {
+  if (!window.ME) return;
+  const {name, params} = route();
+  document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === name));
+  const title = TITLES[name] || cap(name);
+  $('#crumbs').innerHTML = params.length ? `<a href="#/${esc(name)}">${esc(title)}</a> <span class="muted">/</span> <b>Detail</b>` : `<b>${esc(title)}</b>`;
+  document.title = title + ' · Agentic SOC';
+  const view = (window.VIEWS || {})[name];
+  const main = $('#main');
+  GEN += 1;
+  main.innerHTML = skeleton();
+  if (!view) { main.innerHTML = empty('Page not found'); return; }
+  try { await view(...params); } catch (e) { if (!main.innerHTML || main.querySelector('.skeleton')) main.innerHTML = empty('This page could not be loaded. ' + (e.message || '').slice(0, 160)); }
+  window.scrollTo(0, 0);
+}
+// Navigation generation: a slow page that finishes after the user moved on must not paint over the new page.
+let GEN = 0;
+const setMainG = (g, html) => { if (g === GEN && $('#main')) $('#main').innerHTML = html; };
+const setMain = html => setMainG(GEN, html);
+
+// ---------------------------------------------------------------- auth
+async function boot() {
+  if (!TOKEN) return signInScreen();
+  try { window.ME = await api('/api/v1/me'); } catch (e) { return signInScreen(); }
+  shell();
+  await render();
+}
+function signInScreen() {
+  window.ME = null;
+  $('#app').innerHTML = `<div class="auth"><section class="card auth-card"><div class="card-b">
+    <div class="brand" style="padding:0"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations platform</div></div></div>
+    <h1>Sign in</h1>
+    <div class="field"><label for="si-user">Work email</label><input class="input" id="si-user" value="lena@cci-demo.com" autocomplete="username"></div>
+    <div class="field"><label for="si-role">Role</label><select id="si-role">${['lead', 'analyst', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${cap(r)}</option>`).join('')}</select></div>
+    <button class="btn primary" data-fn="signIn" data-args="[]" style="justify-content:center;height:36px">Continue</button>
+    <div class="foot">Development sign-in. In production the console uses Microsoft Entra ID single sign-on with MFA; this form is only available when <code>SOC_AUTH_MODE=dev</code>.</div>
+    <button class="btn ghost sm" data-fn="toggleTheme" data-args="[]" id="theme-btn" style="align-self:flex-start"></button>
+  </div></section></div>`;
+  paintThemeButton();
+}
+async function signIn() {
+  const u = $('#si-user').value.trim(), role = $('#si-role').value;
+  const r = await fetch(`/api/v1/dev/token?user=${encodeURIComponent(u)}&roles=${encodeURIComponent(role)}`);
+  if (!r.ok) { toast('Development sign-in is disabled on this server. Use Entra ID SSO.', true); return; }
+  TOKEN = (await r.json()).token;
+  try { localStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
+  if (!location.hash) location.hash = '#/overview';
+  boot();
+}
+async function signOut(expired = false) {
+  if (!expired && TOKEN) { try { await fetch('/api/v1/auth/logout', {method: 'POST', headers: {Authorization: 'Bearer ' + TOKEN}}); } catch (e) { /* ignore */ } }
+  TOKEN = '';
+  try { localStorage.removeItem('soc_token'); } catch (e) { /* ignore */ }
+  signInScreen();
+  if (expired) toast('Your session has expired. Please sign in again.');
+}
+
+// ---------------------------------------------------------------- theme & menus
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('soc_theme', next); } catch (e) { /* ignore */ }
+  paintThemeButton();
+}
+function paintThemeButton() {
+  const b = $('#theme-btn'); if (!b) return;
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  b.innerHTML = b.classList.contains('icon-btn') ? icon(dark ? 'sun' : 'moon') : (dark ? 'Switch to light' : 'Switch to dark');
+}
+function toggleMenu() { const m = $('#user-menu'); if (m) m.hidden = !m.hidden; }
+function goTo(h) { location.hash = h; }
+
+// ---------------------------------------------------------------- delegation
+const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signOut, dl, refreshPage: () => render()};
+document.addEventListener('click', ev => {
+  const menu = $('#user-menu');
+  if (menu && !menu.hidden && !ev.target.closest('.user')) menu.hidden = true;
+  const el = ev.target.closest('[data-fn]');
+  if (!el) return;
+  ev.preventDefault();
+  const fn = ALLOWED[el.dataset.fn];
+  if (!fn) return;
+  let args = [];
+  try { args = JSON.parse(el.dataset.args || '[]'); } catch (e) { return; }
+  if (el.tagName === 'BUTTON') { el.disabled = true; setTimeout(() => { el.disabled = false; }, 400); }
+  Promise.resolve().then(() => fn(...args)).catch(() => { /* reported via toast */ });
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Enter' && ev.target.matches('input[data-enter]')) {
+    const fn = ALLOWED[ev.target.dataset.enter]; if (fn) fn();
+  }
+});
+window.addEventListener('hashchange', render);
+window.addEventListener('DOMContentLoaded', boot);

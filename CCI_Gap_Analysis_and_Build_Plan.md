@@ -40,6 +40,13 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | H | Engine API auth on by default + constant-time compare; model integrity manifest (pickle); DB circuit breaker; bidi chars removed; dependency CVEs fixed / unused deps removed | ✅ | bandit + pip-audit clean |
 | H | Entity resolution fixes found by stress test (clone-serial false merges, IP-only phantoms) | ✅ | 0 false merges |
 | I | Intelligence layer: entity risk (all streams), 10 cross-domain correlation rules (U02/U04/U06/U07/U08/U10/U16), LLM analyst (narrative, daily brief, tool-planning Q&A), providers: Azure OpenAI / Anthropic Claude / OpenAI-compatible | ✅ | `soc_platform/intelligence/`, console Intelligence tab |
+| R3 | Identity correlation across tools (UPN / SAM / aliases / former addresses / built-in accounts, authoritative merge, key-collision queue) | ✅ | 0 false merges, 0 % splits on 300-person stress test; `core/identity.py`, `test_identity_scale.py` |
+| R3 | Connector fixes: MDE findbyip timestamp, Exchange admin API token audience, Rapid7 CVE search, Wiz `issuesV2` + pagination + CVE filter, Jira enhanced search, Delinea configurable paths, real health probes + Test endpoint | ✅ | `test_connectors.py` |
+| R3 | Security: domain-scoped RBAC, step-up MFA, service-account keys, token/session revocation, break-glass, access log, durable kill switch, encryption at rest, retention, audit export; review fixes (scope bypasses, rate-limit key, stream body cap, /health DoS, dev-token exposure) | ✅ | `core/access.py`, `core/crypto.py`, `core/retention.py`, `test_access_security.py`, docs/SECURITY.md |
+| R3 | U03 cloud misconfiguration lifecycle, U09 ATT&CK coverage, U11 shadow IT, U17 compliance pack, U18 supplier email risk | ✅ | FEATURES.md §2, §4, §5, §7 |
+| R3 | Two-way ITSM sync with false-closure reopen (VM-T10 / IM-T10), durable jobs with dead letter + leases (VM-T11), drift monitoring (R14), measured latency (NFR-06) | ✅ | `test_vulnerability.py`, `test_jobs.py`, `test_intelligence.py` |
+| R3 | Premium console (light default + dark mode, 16 screens, entity 360, dashboards), verified in Chrome with screenshots | ✅ | docs/FEATURES.md, docs/screenshots/ |
+| R3 | Docs: FEATURES, ARCHITECTURE, CONNECTORS (generated), OPERATIONS, DEMO_GUIDE, REQUIREMENTS_TRACEABILITY | ✅ | docs/ |
 | — | Deploy images built and run | ⛔ | Docker not available on the build machine; compose validated statically |
 | — | Live connector validation against CCI tenants | ⛔ | needs CCI API access (A01, D01) |
 

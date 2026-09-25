@@ -111,7 +111,10 @@ class Principal:
         return f"{perm.value} permission required"
 
     def in_domain(self, domain: str | None) -> bool:
-        return domain is None or "*" in self.domains or domain in self.domains
+        """``None`` = no data scope needed; ``"*"`` = cross-domain data (only principals scoped to all domains)."""
+        if domain is None or "*" in self.domains:
+            return True
+        return domain != "*" and domain in self.domains
 
 
 def agent_principal(name: str) -> Principal:

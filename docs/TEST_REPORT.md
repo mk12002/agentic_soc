@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-09-24 · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-09-25 (round 3; rounds 1-2 on 2026-09-24) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,30 @@ evidence, not a statement of performance in CCI's environment. That is measured 
 CCI's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 1. Summary
+## 0. Round 3 (2026-09-25) - latest results
+
+| Area | Result |
+|---|---|
+| Platform test suite | **144 passed**, 3 live-API tests skipped by default |
+| Phishing ML engine unit suite | **162 passed**, 2 skipped |
+| Clean virtual environment (README install from scratch) | **142 passed**, 3 skipped (run before the last two tests were added) |
+| Client-demo walkthrough test (every screen's API calls, 5 roles, all reports downloaded) | passed, 0 server errors |
+| Browser tour (real server + Chrome, 24 screens, light + dark, 3 roles) | **0 browser errors, 0 HTTP 5xx, 0 horizontal overflow** - screenshots in `docs/screenshots/` |
+| Identity resolution stress test (300 people, 4 seeds) | **0 false merges, 0 % splits**, 0 phantom built-in accounts |
+| Asset resolution stress test (400 hosts) | 0 false merges |
+| Labelled phishing corpus (20 messages) | **100 % detection, 0 % false positives** (suspicious labels now counted as positives - an earlier eval bug hid one miss) |
+| Screen latency after fixes | dashboards 10-50 ms; incident pipeline 3.3 s (was 16 s); write actions no longer delayed 5 s |
+| bandit / pip-audit / secret scan | 0 high, 0 medium / no known vulnerabilities / no secrets |
+
+Found and fixed in this round (each with a regression test): identity splits and alias gaps; key collisions silently
+dropped; engine API `hmac` import missing (auth would crash); access-log writer blocking requests 5 s on SQLite;
+DB initialisation race; navigation race painting a stale page; cross-domain data readable by domain-scoped users
+(intelligence, entities, action list, case-less actions); rate limit bypass with random tokens; request cap
+bypass with chunked bodies; unauthenticated `/health` scanning the whole audit chain; dev sign-in reachable from
+other hosts; duplicate approvals for the same containment across cases (incl. differently named hosts); wildcard
+CMDB rows ingested as assets; flaky tests from clock resolution (boundary dates, job ordering).
+
+## 1. Summary (rounds 1-2)
 
 | Area | Result |
 |---|---|

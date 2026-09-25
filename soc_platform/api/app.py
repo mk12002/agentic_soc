@@ -82,14 +82,25 @@ _limiter = _RateLimiter(float(__import__("os").environ.get("SOC_RATE_LIMIT_RPS",
                         int(__import__("os").environ.get("SOC_RATE_LIMIT_BURST", "120")))
 
 
+_TRUSTED_PROXIES = {x.strip() for x in __import__("os").environ.get("SOC_TRUSTED_PROXIES", "").split(",") if x.strip()}
+
+
+def _client_ip(request: Request) -> str:
+    """Peer address; X-Forwarded-For is honoured only when the direct peer is a configured trusted proxy."""
+    peer = request.client.host if request.client else "unknown"
+    if peer in _TRUSTED_PROXIES:
+        fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if fwd:
+            return fwd
+    return peer
+
+
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         cl = request.headers.get("content-length")
         if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
             return JSONResponse({"detail": "request too large"}, status_code=413)
-        cred = request.headers.get("authorization") or request.headers.get("x-api-key") or ""
-        client = (__import__("hashlib").sha256(cred.encode()).hexdigest()[:24] if cred
-                  else (request.client.host if request.client else "anon"))
+        client = _client_ip(request)
         if not _limiter.allow(client):
             return JSONResponse({"detail": "rate limit exceeded"}, status_code=429, headers={"Retry-After": "5"})
         t0 = __import__("time").perf_counter()
@@ -104,6 +115,45 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityMiddleware)
+
+
+class BodyLimitMiddleware:
+    """Enforces MAX_BODY_BYTES on the actual byte stream (covers chunked uploads with no Content-Length)."""
+
+    def __init__(self, app_, limit: int) -> None:
+        self.app, self.limit = app_, limit
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+        seen, too_big = 0, False
+
+        async def limited():
+            nonlocal seen, too_big
+            msg = await receive()
+            if msg.get("type") == "http.request":
+                seen += len(msg.get("body") or b"")
+                if seen > self.limit:
+                    too_big = True
+                    raise HTTPException(413, "request too large")
+            return msg
+
+        done = False
+
+        async def send_(msg):
+            nonlocal done
+            if done:
+                return
+            if too_big and msg.get("type") == "http.response.start":  # parsers may wrap the error as 400
+                msg = {**msg, "status": 413, "headers": [(b"content-type", b"application/json")]}
+            elif too_big and msg.get("type") == "http.response.body":
+                msg, done = {"type": "http.response.body", "body": b'{"detail":"request too large"}', "more_body": False}, True
+            await send(msg)
+
+        return await self.app(scope, limited, send_)
+
+
+app.add_middleware(BodyLimitMiddleware, limit=MAX_BODY_BYTES)
 
 
 class _AccessLogWriter:
@@ -218,7 +268,8 @@ def need(perm: Perm, domain: str | None = None):
         if not p.can(perm):
             raise HTTPException(403, p.why_not(perm))
         if not p.in_domain(domain):
-            raise HTTPException(403, f"not authorised for {domain} data")
+            raise HTTPException(403, "cross-domain data requires all-domain access" if domain == "*"
+                                else f"not authorised for {domain} data")
         return p
     return dep
 
@@ -269,9 +320,15 @@ def _err(exc: Exception) -> HTTPException:
 # ----------------------------------------------------------------------------- system
 
 
+_CHAIN_CACHE: dict[str, Any] = {"at": 0.0, "ok": None}
+
+
 @app.get("/health")
 def health(s: Session = Depends(db_session)) -> dict[str, Any]:
-    return {"status": "ok", "version": __version__, "audit_chain": AuditLog(s).verify()["ok"],
+    now = __import__("time").monotonic()
+    if now - _CHAIN_CACHE["at"] > 300:  # full verification at most every 5 min; /api/v1/audit/verify is on demand
+        _CHAIN_CACHE.update(at=now, ok=AuditLog(s).verify()["ok"])
+    return {"status": "ok", "version": __version__, "audit_chain": _CHAIN_CACHE["ok"],
             "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings())}
 
 
@@ -281,11 +338,14 @@ def ui() -> HTMLResponse:
 
 
 @app.get("/api/v1/dev/token")
-def dev_token(user: str = "analyst@cci-demo.com", roles: str = "analyst", mfa: bool = True,
+def dev_token(request: Request, user: str = "analyst@cci-demo.com", roles: str = "analyst", mfa: bool = True,
               domains: str = "") -> dict[str, str]:
     st = get_settings()
     if st.auth_mode != "dev" or st.environment == "prod" or not st.dev_jwt_secret:
         raise HTTPException(404, "not available")
+    remote_ok = __import__("os").environ.get("SOC_DEV_TOKENS_REMOTE", "0") == "1"
+    if not remote_ok and _client_ip(request) not in {"127.0.0.1", "::1", "testclient", "localhost"}:
+        raise HTTPException(404, "not available")  # dev sign-in never served to other machines by default
     return {"token": issue_dev_token(st.dev_jwt_secret, user, [r.strip() for r in roles.split(",")], mfa=mfa,
                                      domains=[d.strip() for d in domains.split(",") if d.strip()] or None)}
 
@@ -308,7 +368,13 @@ def connectors(_: Principal = Depends(need(Perm.READ))) -> list[dict[str, Any]]:
 @app.post("/api/v1/connectors/{name}/sync")
 def connector_sync(name: str, stream: str, full: bool = False, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
                    s: Session = Depends(db_session)) -> dict[str, Any]:
-    rep = SyncRunner(s, ContextStore(s)).sync(registry().get(name), stream, full_backfill=full)
+    try:
+        conn = registry().get(name)
+    except KeyError:
+        raise HTTPException(404, "unknown connector") from None
+    if stream not in conn.streams:
+        raise HTTPException(400, f"unknown stream; available: {list(conn.streams)}")
+    rep = SyncRunner(s, ContextStore(s)).sync(conn, stream, full_backfill=full)
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="connector.sync", subject_type="connector",
                        subject_id=name, payload={"stream": stream, "ingested": rep.ingested, "failed": rep.failed})
     return rep.__dict__ | {"reconciled": rep.reconciled}
@@ -462,11 +528,11 @@ def audit_export(since_seq: int = 0, p: Principal = Depends(need(Perm.EXPORT_EVI
 
 
 class PushedAlerts(BaseModel):
-    alerts: list[dict[str, Any]]
+    alerts: list[dict[str, Any]] = Field(max_length=5000)
 
 
 @app.post("/api/v1/ingest/alerts")
-def ingest_alerts(body: PushedAlerts, p: Principal = Depends(need(Perm.INVESTIGATE)),
+def ingest_alerts(body: PushedAlerts, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")),
                   s: Session = Depends(db_session)) -> dict[str, int]:
     """Push endpoint for any SIEM/SOAR (IM-T02 webhook ingestion; duplicates suppressed on replay)."""
     reg = registry()
@@ -533,13 +599,16 @@ def action_catalog(_: Principal = Depends(need(Perm.READ)), s: Session = Depends
 
 
 @app.get("/api/v1/actions")
-def list_actions(status: str | None = None, case_id: str | None = None, _: Principal = Depends(need(Perm.READ)),
+def list_actions(status: str | None = None, case_id: str | None = None, p: Principal = Depends(need(Perm.READ)),
                  s: Session = Depends(db_session)):
     q = select(ActionRequest).order_by(ActionRequest.created_at.desc()).limit(500)
     if status:
         q = q.where(ActionRequest.status.in_(status.split(",")))
     if case_id:
+        _case_in_scope(s, p, case_id)
         q = q.where(ActionRequest.case_id == case_id)
+    if "*" not in p.domains:
+        q = q.where(ActionRequest.domain.in_(sorted(p.domains)))  # "platform" actions are cross-domain
     return [_action(a) for a in s.execute(q).scalars()]
 
 
@@ -570,6 +639,8 @@ def _action_service(s: Session) -> ActionService:
 @app.post("/api/v1/actions")
 def request_action(body: ActionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
     _case_in_scope(s, p, body.case_id)
+    if body.case_id is None and "*" not in p.domains:
+        raise HTTPException(403, "actions outside a case require all-domain access")
     try:
         return _action(_action_service(s).request(body.action_type, params=body.params, targets=body.targets,
                                                   requested_by=p, case_id=body.case_id, rationale=body.rationale))
@@ -584,6 +655,8 @@ def decide_action(aid: str, verb: str, body: Decision, p: Principal = Depends(cu
     ar = s.get(ActionRequest, aid)
     if ar is not None:
         _case_in_scope(s, p, ar.case_id)
+        if not p.in_domain(ar.domain if ar.domain in {"phishing", "incident", "vulnerability"} else "*"):
+            raise HTTPException(404, "unknown action")
     try:
         fn = {"approve": svc.approve, "reject": svc.reject, "rollback": svc.rollback}[verb]
         return _action(fn(aid, p, note=body.note))
@@ -612,7 +685,7 @@ def audit_verify(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Dep
 
 
 @app.get("/api/v1/entities/find")
-def find_entity(kind: str, key: str, value: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def find_entity(kind: str, key: str, value: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
     st = ContextStore(s)
     e = st.find(kind, key, value)
     if e is None:
@@ -621,7 +694,7 @@ def find_entity(kind: str, key: str, value: str, _: Principal = Depends(need(Per
 
 
 @app.get("/api/v1/entities/{eid}")
-def get_entity(eid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def get_entity(eid: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
     e = s.get(Entity, eid)
     if e is None:
         raise HTTPException(404, "not found")
@@ -636,7 +709,7 @@ def _entity(st: ContextStore, e: Entity) -> dict[str, Any]:
 
 
 @app.get("/api/v1/resolution/unresolved")
-def unresolved(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def unresolved(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
     return [{"id": u.id, "kind": u.kind, "reason": u.reason, "candidates": u.candidates, "source_record": u.source_record_id}
             for u in s.execute(select(UnresolvedItem).where(UnresolvedItem.status == "open")).scalars()]
 
@@ -647,7 +720,7 @@ class Override(BaseModel):
 
 
 @app.post("/api/v1/resolution/{uid}/override")
-def resolution_override(uid: str, body: Override, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def resolution_override(uid: str, body: Override, p: Principal = Depends(need(Perm.RESOLVE_ENTITIES, "*")), s: Session = Depends(db_session)):
     try:
         rec = EntityResolver(s).override(uid, body.entity_id, p, body.reason)
     except Exception as exc:
@@ -656,7 +729,7 @@ def resolution_override(uid: str, body: Override, p: Principal = Depends(current
 
 
 @app.get("/api/v1/resolution/match-rate")
-def match_rate(kind: str = "asset", _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def match_rate(kind: str = "asset", _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
     return EntityResolver(s).match_rate(kind)
 
 
@@ -685,7 +758,7 @@ def get_case(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Dep
         view = CaseService(s).view(cid)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
-    view["intelligence"] = _case_intelligence(s, view)
+    view["intelligence"] = _case_intelligence(s, view) if "*" in p.domains else {}
     return view
 
 
@@ -772,9 +845,11 @@ def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVES
 @app.post("/api/v1/phishing/submit")
 async def phishing_submit(file: UploadFile = File(...), reporter: str | None = None, process: bool = True,
                           p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session)):
-    raw = await file.read()
+    raw = await file.read(25 * 1024 * 1024 + 1)
     if len(raw) > 25 * 1024 * 1024:
         raise HTTPException(413, "message too large")
+    if not raw.strip():
+        raise HTTPException(400, "empty message")
     svc = _services(s)["phishing"]
     sub = svc.submit_raw(raw, source="upload", reporter=reporter or p.name)
     return svc.process(sub.id) if process and sub.status == "new" else {"submission": sub.id, "status": sub.status}
@@ -1117,12 +1192,17 @@ def dash_shadow_it(since: str = Query("-7days", pattern=r"^-\d{1,3}(days|hours)$
 
 
 @app.get("/api/v1/entities/{eid}/360")
-def entity360(eid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def entity360(eid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
     from soc_platform.api.dashboards import entity_360
 
     out = entity_360(s, eid)
     if out is None:
         raise HTTPException(404, "not found")
+    if "*" not in p.domains:
+        out["cases"] = [c for c in out["cases"] if p.in_domain(c["domain"])]
+        out["insights"] = []   # correlated findings are cross-domain
+        out["risk"] = None     # fused risk mixes every domain
+        out["timeline"], out["related"], out["per_tool"], out["activity_by_tool"] = [], {}, {}, {}
     return out
 
 
@@ -1153,7 +1233,7 @@ def _insight(i) -> dict[str, Any]:
 
 
 @app.get("/api/v1/intelligence/insights")
-def intel_insights(severity: str | None = None, status: str = "new,acknowledged", _: Principal = Depends(need(Perm.READ)),
+def intel_insights(severity: str | None = None, status: str = "new,acknowledged", _: Principal = Depends(need(Perm.READ, "*")),
                    s: Session = Depends(db_session)):
     from soc_platform.intelligence.models import Insight
 
@@ -1164,12 +1244,12 @@ def intel_insights(severity: str | None = None, status: str = "new,acknowledged"
 
 
 @app.post("/api/v1/intelligence/refresh")
-def intel_refresh(p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def intel_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "*")), s: Session = Depends(db_session)):
     return {"insights": len(_intel(s).refresh())}
 
 
 @app.post("/api/v1/intelligence/insights/{iid}/{verb}")
-def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGATE, "*")), s: Session = Depends(db_session)):
     from soc_platform.intelligence.models import Insight
 
     status = {"acknowledge": "acknowledged", "dismiss": "dismissed", "resolve": "resolved"}.get(verb)
@@ -1183,7 +1263,7 @@ def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGA
 
 
 @app.get("/api/v1/intelligence/risk/top")
-def intel_top(kind: str | None = None, limit: int = 10, _: Principal = Depends(need(Perm.READ)),
+def intel_top(kind: str | None = None, limit: int = 10, _: Principal = Depends(need(Perm.READ, "*")),
               s: Session = Depends(db_session)):
     from soc_platform.intelligence.risk import RiskEngine
 
@@ -1191,7 +1271,7 @@ def intel_top(kind: str | None = None, limit: int = 10, _: Principal = Depends(n
 
 
 @app.get("/api/v1/intelligence/entities/{eid}/risk")
-def intel_entity_risk(eid: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def intel_entity_risk(eid: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
     from soc_platform.intelligence.risk import RiskEngine
 
     p = RiskEngine(s).profile(eid)
@@ -1205,7 +1285,7 @@ class AskBody(BaseModel):
 
 
 @app.post("/api/v1/intelligence/ask")
-def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
     out = _intel(s).analyst.ask(body.question)
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="intelligence.ask", subject_type="question",
                        subject_id="ask", payload={"question": body.question, "planner": out["planner"],
@@ -1214,5 +1294,5 @@ def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ)), s: Session
 
 
 @app.get("/api/v1/intelligence/brief")
-def intel_brief(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def intel_brief(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
     return _intel(s).analyst.brief()

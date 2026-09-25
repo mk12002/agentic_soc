@@ -183,3 +183,30 @@ def test_same_containment_from_two_cases_is_one_approval(session, registry):
     t1 = svc.request("email.tag", targets=[{"type": "email", "id": "m1"}], requested_by=agent_principal("p"), case_id=c1.id)
     t2 = svc.request("email.tag", targets=[{"type": "email", "id": "m2"}], requested_by=agent_principal("p"), case_id=c2.id)
     assert t1.id != t2.id                                                    # different targets stay separate
+
+
+def test_same_host_described_differently_is_still_one_approval(session, registry):
+    from soc_platform.core.cases import CaseService
+
+    cs = CaseService(session)
+    c1, c2 = cs.create("phishing", "p", actor="agent:x"), cs.create("incident", "i", actor="agent:x")
+    svc = ActionService(session, registry, PolicyEngine())
+    a = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "jane-lt01"}], requested_by=agent_principal("ph"), case_id=c1.id)
+    b = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "jane-lt01.cci-demo.com", "crowdstrike_aid": "cs-1"}],
+                    requested_by=agent_principal("im"), case_id=c2.id)
+    assert a.id == b.id
+    c = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "bob-lt02.cci-demo.com"}], requested_by=agent_principal("im"), case_id=c2.id)
+    assert c.id != a.id
+
+
+def test_same_short_name_with_different_device_ids_is_not_merged(session, registry):
+    from soc_platform.core.cases import CaseService
+
+    cs = CaseService(session)
+    c1, c2 = cs.create("incident", "a", actor="agent:x"), cs.create("incident", "b", actor="agent:x")
+    svc = ActionService(session, registry, PolicyEngine())
+    a = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "web01.eu.corp", "crowdstrike_aid": "aid-1"}],
+                    requested_by=agent_principal("im"), case_id=c1.id)
+    b = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "web01.us.corp", "crowdstrike_aid": "aid-2"}],
+                    requested_by=agent_principal("im"), case_id=c2.id)
+    assert a.id != b.id

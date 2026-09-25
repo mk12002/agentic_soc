@@ -287,3 +287,53 @@ def test_http_domain_scoping_mfa_keys_logout_access_log(client):
     exp = client.get("/api/v1/audit/export", headers=_h(client, "aud", "auditor"))
     assert exp.status_code == 200 and json.loads(exp.text.strip().splitlines()[-1])["_verification"]["ok"]
     assert client.post("/api/v1/connectors/wiz/test", headers=_h(client, "aa", "automation_admin")).json()["ok"]
+
+
+def test_http_hardening_scope_body_limit_health_and_streams(client):
+    """Security review fixes: cross-domain scope, stream-level body cap, cheap /health, validated inputs."""
+    scoped = _h(client, "pam", "analyst", domains="phishing")
+    for path in ("/api/v1/intelligence/insights", "/api/v1/intelligence/brief", "/api/v1/intelligence/risk/top"):
+        assert client.get(path, headers=scoped).status_code == 403, path       # cross-domain data needs "*"
+    assert client.post("/api/v1/intelligence/ask", headers=scoped, json={"question": "incidents?"}).status_code == 403
+    assert client.post("/api/v1/ingest/alerts", headers=scoped, json={"alerts": []}).status_code == 403
+
+    def big():
+        for _ in range(35):
+            yield b"a" * (1024 * 1024)
+    full = _h(client, "lee", "lead")
+    r = client.post("/api/v1/intelligence/ask", headers={**full, "Content-Type": "application/json"}, content=big())
+    assert r.status_code == 413                                                # chunked, no Content-Length
+
+    def small():
+        yield b'{"question": "what is happening?"}'
+    assert client.post("/api/v1/intelligence/ask", headers={**full, "Content-Type": "application/json"},
+                       content=small()).status_code == 200
+    assert client.get("/health").json()["audit_chain"] is True
+    aa = _h(client, "ops", "automation_admin")
+    assert client.post("/api/v1/connectors/wiz/sync?stream=../../etc", headers=aa).status_code == 400
+    assert client.post("/api/v1/connectors/nope/sync?stream=x", headers=aa).status_code == 404
+
+
+def test_rate_limit_is_per_client_not_per_token():
+    from starlette.requests import Request
+
+    from soc_platform.api.app import _client_ip, _RateLimiter
+
+    lim = _RateLimiter(rate=0.0, burst=3)
+    assert [lim.allow("10.0.0.9") for _ in range(4)] == [True, True, True, False]
+    scope = {"type": "http", "headers": [(b"x-forwarded-for", b"1.2.3.4")], "client": ("10.0.0.9", 5555)}
+    assert _client_ip(Request(scope)) == "10.0.0.9"        # XFF ignored unless the peer is a trusted proxy
+
+
+def test_scoped_users_only_see_and_decide_their_domain_actions(client):
+    lead = _h(client, "lee2", "lead")
+    client.post("/api/v1/incidents/run", headers=lead)
+    client.post("/api/v1/vm/refresh", headers=lead)
+    client.post("/api/v1/vm/misconfigurations/route", headers=lead)
+    vm_only = _h(client, "val", "lead", domains="vulnerability")
+    mine = client.get("/api/v1/actions", headers=vm_only).json()
+    assert mine and {a["domain"] for a in mine} == {"vulnerability"}
+    other = next(a for a in client.get("/api/v1/actions?status=recommended,pending_approval", headers=lead).json()
+                 if a["domain"] == "incident")
+    assert client.post(f"/api/v1/actions/{other['id']}/approve", headers=vm_only, json={"note": "x"}).status_code == 404
+    assert client.get("/api/v1/entities/find?kind=asset&key=fqdn&value=web01.cci-demo.com", headers=vm_only).status_code == 403

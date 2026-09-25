@@ -1,47 +1,50 @@
 # Agentic SOC Platform
 
 AI-assisted investigation and automation layer for a Security Operations Centre, built against the
-*CCI SOC – AI & Automation Consolidated Requirements*. One platform serves three workflows over a
-shared, governed context store:
+*CCI SOC – AI & Automation Consolidated Requirements*. One platform serves three workflows over a shared,
+governed context store, with a cross-domain intelligence layer on top.
 
-| Domain | What it does | Requirements |
+![Overview](docs/screenshots/01-overview.png)
+
+| Module | What it does | Requirements |
 |---|---|---|
-| **Reported / phishing email** | Ingests user-reported mail, decomposes it (incl. QR codes), runs the 7-agent ML swarm and/or heuristic analyser, reconciles with Defender/Avanan verdicts, scopes the campaign tenant-wide, finds who clicked and whether any endpoint or identity was compromised, recommends gated remediation, answers the reporter, auto-closes clear benign reports with QA sampling | PH-F01…F16 |
-| **Incident management** | Ingests alerts from every tool, clusters them into incidents, enriches every entity in parallel across endpoint, identity, privileged access, DNS, deception, exposure, email and threat-intel dimensions, scores severity deterministically (exposure-informed), maps MITRE ATT&CK with evidence, recommends ranked guarded actions, similar-incident recall and shift handover | IM-F01…F16 |
-| **Vulnerability management** | Pulls findings from Rapid7, CrowdStrike, Wiz and Defender, resolves the same host across tools, deduplicates, prioritises with CVSS + EPSS + CISA KEV + exposure + criticality, routes to owners from the CMDB, drafts notifications, tracks plans, follows up, validates remediation (detects false closures), manages exceptions and the risk register, generates daily/weekly reports and the management deck | VM-F01…F18 |
+| **Phishing / reported email** | Ingests user-reported mail, decomposes it (incl. QR codes), analyses it with the 7-agent ML swarm and a deterministic analyser, reconciles with Defender/Avanan, scopes the campaign tenant-wide, finds who clicked and whether any endpoint or identity was compromised, monitors supplier email risk, recommends gated remediation, answers the reporter, auto-closes clear benign reports with QA sampling | PH-F01…F16, PH-T01…T09, U16, U18 |
+| **Incident management** | Ingests alerts from every tool, clusters them into incidents, enriches every entity in parallel across 8 dimensions, scores severity deterministically (exposure-informed), maps MITRE ATT&CK with evidence, recommends ranked guarded actions, recalls similar incidents, writes the shift handover | IM-F01…F16, IM-T01…T11, U04–U06, U13–U15 |
+| **Vulnerability management** | Pulls findings from Rapid7, CrowdStrike, Wiz and Defender, resolves the same host across tools, deduplicates, prioritises (CVSS + EPSS + KEV + exposure + criticality), routes to owners, tracks plans, syncs ITSM tickets both ways, validates remediation (catches false closures), manages exceptions, runs Wiz misconfigurations through the same lifecycle, generates reports | VM-F01…F18, VM-T01…T13, U01–U03, U12 |
+| **Intelligence layer** | Explainable per-user/host risk across all streams, 12 correlation rules, analyst assistant with cited answers, situation brief, ATT&CK coverage, shadow IT, drift monitoring | U02, U04, U06–U12, U16, U18, R14 |
 
-**Operating principle (NFR-01):** AI gathers and correlates; the analyst decides. Every action is
-policy-gated (autonomy levels L0–L4), nothing destructive runs autonomously, every step is in an
-append-only hash-chained audit log, and every figure in a report is computed in code.
+**Operating principle (NFR-01):** AI gathers and correlates; the analyst decides. Every action is policy-gated
+(autonomy levels L0–L4, default *recommend*), nothing destructive runs autonomously, every conclusion cites its
+evidence, every figure is computed in code, and every step lands in an append-only hash-chained audit log.
 
-See [`CCI_Gap_Analysis_and_Build_Plan.md`](CCI_Gap_Analysis_and_Build_Plan.md) for the requirement
-traceability and build status, and [`docs/TEST_REPORT.md`](docs/TEST_REPORT.md) for test results.
+**Full feature tour with screenshots: [docs/FEATURES.md](docs/FEATURES.md)**
 
 ---
 
 ## Quick start (local, no credentials needed)
 
-Every connector has a **fake mode** that replays vendor-shaped fixture data through the same code as
-the live API, so the whole platform runs end to end on a laptop.
+Every connector has a **fake mode** that replays vendor-shaped fixture data through the same code as the live API,
+so the whole platform runs end to end on a laptop.
 
 ```bash
 git clone https://github.com/mk12002/agentic_soc.git && cd agentic_soc
-git lfs pull                                   # trained phishing models (only needed for the ML engine)
 python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements/platform.txt -r requirements/dev.txt
 pip install -e .
 cp .env.example .env                           # set SOC_DEV_JWT_SECRET to a long random string
 
-python -m soc_platform demo                    # runs all three workflows on fixtures, writes reports to ./data/reports
-python -m soc_platform serve                   # API + analyst console on http://127.0.0.1:8080
+python -m soc_platform demo                    # runs all three workflows on the sample estate
+python -m soc_platform serve                   # API + console on http://127.0.0.1:8080
 ```
 
-In the console choose a role (analyst / lead / automation_admin / auditor) and *Sign in (dev)*.
-Dev tokens exist only when `SOC_AUTH_MODE=dev`; production uses Entra ID SSO (`SOC_AUTH_MODE=entra`).
+Open the console, choose a role and **Continue** (development sign-in; production uses Entra ID SSO). Then run the
+pipelines from *Cases* and *Vulnerabilities*, or follow the scripted walkthrough in
+[docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md). The console opens in light mode; the moon icon switches to dark.
 
 Optional – the full phishing ML swarm (TinyBERT content model, URL/header/attachment/sandbox/TI/behaviour models):
 
 ```bash
+git lfs pull
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements/phishing.txt
 export SOC_PHISHING_ENGINE=1
@@ -50,110 +53,108 @@ export SOC_PHISHING_ENGINE=1
 ### Docker
 
 ```bash
-cp .env.example .env    # set POSTGRES_PASSWORD, SOC_DEV_JWT_SECRET (or Entra settings)
-docker compose -f deploy/docker-compose.yml --env-file .env up -d --build            # platform
-docker compose -f deploy/docker-compose.yml --env-file .env --profile engine up -d   # + ML microservices
+cp .env.example .env    # set POSTGRES_PASSWORD, SOC_DATA_KEY, and Entra settings (or SOC_DEV_JWT_SECRET for dev)
+docker compose -f deploy/docker-compose.yml --env-file .env up -d --build            # api + scheduler + postgres
+docker compose -f deploy/docker-compose.yml --env-file .env --profile engine up -d   # + phishing ML microservices
 ```
 
-## Intelligence layer
+Requirements: Python 3.11+, SQLite (dev) or PostgreSQL 14+ (prod). The console is plain HTML/JS/CSS served by the
+API - no Node build step, no external CDNs - and works in current Chrome, Edge, Firefox and Safari.
 
-Above the three workflows sits a cross-domain intelligence layer (`soc_platform/intelligence/`):
+## Console
 
-* **Entity risk** - one explainable, time-decayed 0-100 score per user and host, fused from every stream
-  (EDR, identity, DNS, deception, privileged access, email, exposure, cloud, open cases); every point cites the
-  event, finding or case it came from.
-* **Correlation engine** - deterministic rules that surface what no single tool sees: phishing → endpoint →
-  identity compromise chains, privileged access after compromise, deception hits corroborated by other
-  telemetry, attacked hosts carrying KEV vulnerabilities (exploitation attempts called out), attacked hosts
-  without EDR, control gaps (malicious destinations still reachable), repeat clickers, newly KEV-listed CVEs on
-  exposed assets, shared attacker infrastructure. Insights are deduplicated, triaged (acknowledge / dismiss)
-  and re-opened only if they get worse.
-* **LLM analyst (when configured)** - narrates insights, writes the daily situation brief, and answers free-form
-  questions by *planning* calls to a catalogue of read-only tools that the platform executes; answers must cite
-  the tool results. The model never touches the database or any action, internal identities are pseudonymised
-  before every call, and tool calls are shown to the analyst. Without a model, a deterministic planner gives the
-  same interface.
-
-LLM providers (`SOC_LLM_PROVIDER`): `azure_openai`, `anthropic` (Claude via the official SDK; large tier
-`claude-opus-5` with server-side refusal fallback, small tier `claude-haiku-4-5`), or `openai_compatible` (OpenAI or a
-self-hosted vLLM / Ollama endpoint for tenant-resident processing). All go through the same governance:
-approved-endpoint allow-list, pseudonymisation, prompt/response log, monthly token budget, grounding.
+| Area | Screens |
+|---|---|
+| Operate | Overview · Intelligence (brief, cited Q&A, correlated findings, risk) · Cases (+ case detail, entity 360) · Approvals |
+| Domains | Phishing (+ supplier risk) · Vulnerabilities · Cloud posture |
+| Insight | ATT&CK coverage · Shadow IT · Supplier risk |
+| Govern | Integrations (connector health, freshness, jobs) · Automation policy (levels, kill switch, proposals) · Reports (incl. compliance pack) · Access · Audit log |
 
 ## Connecting real tools (plug and play)
 
-Connectors live in `soc_platform/connectors/tools/` and are listed with their required settings in
-`config/connectors.yaml`. To go live with a tool, set `mode: live` for it and provide its credentials
-as environment variables (or `<NAME>_FILE` vault mounts). Nothing else changes.
+Connectors live in `soc_platform/connectors/tools/`; each declares its streams, lookups, actions and settings in a
+manifest. To go live with a tool, set `mode: live` in `config/connectors.yaml` and provide its credentials as
+environment variables or `<NAME>_FILE` vault mounts, then press **Test** on the Integrations screen.
+Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md).
 
 | Category | Connectors |
 |---|---|
 | EDR | CrowdStrike Falcon, Microsoft Defender for Endpoint |
-| Email | Defender for Office 365 (+ SOC reporting mailbox), Avanan |
+| Email | Defender for Office 365 (+ reporting mailbox, Exchange admin API), Avanan |
 | Identity | Microsoft Entra ID / Identity Protection |
 | DNS / web | Cisco Umbrella |
 | Deception | Thinkst Canary |
 | Privileged access | Delinea Secret Server, Delinea Privilege Manager |
-| Exposure | Rapid7 InsightVM/Nexpose, Wiz, CrowdStrike Spotlight, Defender TVM |
+| Exposure / cloud | Rapid7 InsightVM/Nexpose, Wiz, CrowdStrike Spotlight, Defender TVM |
 | Vulnerability intel | NIST NVD, FIRST EPSS, CISA KEV |
 | Threat intel | VirusTotal, AbuseIPDB, OTX, URLhaus, ThreatFox, MalwareBazaar, GreyNoise, Shodan (fused) |
-| ITSM / CMDB | ServiceNow (tickets + CMDB), Jira, CSV ownership mapping |
+| ITSM / CMDB | ServiceNow (tickets + CMDB), Jira, CSV / cloud-subscription ownership mapping |
 | SIEM | Microsoft Sentinel, generic webhook (`POST /api/v1/ingest/alerts`) |
 
-**Adding a tool:** create `soc_platform/connectors/tools/<tool>.py` exporting a `ConnectorManifest`
-(streams → `NormalizedRecord`s, lookups → `LookupResult`s, optional `ActionSpec`s), add a fixture file,
-enable it in `connectors.yaml`. Third-party packages can register connectors through the
-`soc_platform.connectors` entry-point group. When two tools provide the same action (e.g.
-`endpoint.isolate` on CrowdStrike and Defender) the platform routes each target to the tool that manages it.
+**Adding a tool:** create `soc_platform/connectors/tools/<tool>.py` exporting a `ConnectorManifest`, add a fixture
+file, enable it in `connectors.yaml`. Third-party packages can register connectors through the
+`soc_platform.connectors` entry-point group.
 
-## Architecture
+LLM providers (`SOC_LLM_PROVIDER`): `azure_openai`, `anthropic` (Claude via the official SDK), or
+`openai_compatible` (OpenAI or a self-hosted vLLM / Ollama endpoint). All go through the same governance:
+approved-endpoint allow-list, pseudonymisation, prompt/response log, model pinning, token budget, grounding.
+Without an LLM every feature still works, with deterministic, cited answers.
 
-```
-connectors (20 tools, live | fake)  ──►  normalisation (canonical schema)  ──►  entity resolution
-        │                                                                          │
-        ▼                                                                          ▼
-  enrichment orchestrator (parallel, per-source timeouts, partial-result aware) ◄── context store
-        │                                              (entities, provenance, relations, evidence)
-        ▼
-  domain agents: phishing · incident · vulnerability
-        │
-        ▼
-  grounded reasoning (LLM optional; claims must cite evidence; figures computed in code)
-        │
-        ▼
-  policy engine (L0–L4, VIP / destructive / blast-radius gates, kill switch)  ──►  approvals
-        │
-        ▼
-  action layer (native tool APIs, pre-conditions, idempotency, rollback)  ──►  audit (hash chain)
-```
+## Security
 
-```
-soc_platform/
-  core/          schema, context store, entity resolution, policy, actions, audit, auth, cases, enrichment
-  connectors/    SDK (rate limits, backoff, checkpoints, reconciliation), registry, tools/
-  llm/           governed LLM gateway (redaction, budget, prompt log, grounding)
-  domains/
-    phishing/    workflow + new agents; engine/ = the original 7-agent ML system
-    incident/
-    vulnerability/
-  reporting/     docx / pptx reports
-  api/           FastAPI service + analyst console (static/index.html)
-  fixtures/      vendor-shaped fixture data for every connector (generated by scripts/build_fixtures.py)
-  tests/         platform test suite
-artifacts/phishing/   trained models (Git LFS), config, reference data, sample and corpus emails
-config/connectors.yaml  deploy/  scripts/  docs/
-```
+| Control | Summary |
+|---|---|
+| Identity | Entra ID SSO (RS256/JWKS); step-up MFA for approvals, policy, kill switch and access management; service-account API keys (hashed, expiring, can never approve); sealed break-glass access (audited + alerted); token and session revocation |
+| Authorisation | RBAC (analyst, lead, admin, automation admin, auditor) + domain scoping + separation of duties (no self-approval of four-eyes actions, policies, exceptions or grants) |
+| Automation safety | Autonomy L0–L4, destructive never autonomous, VIP / blast-radius / four-eyes gates, durable kill switch, idempotent actions with rollback |
+| Data | Raw payloads and emails encrypted at rest (Fernet, rotation); retention with legal hold; PII pseudonymised before any LLM call |
+| Audit | Append-only hash-chained audit log with verification and export; append-only access log; compliance evidence pack |
+| Web | Strict CSP, security headers, HSTS, per-client rate limiting, stream-level body cap, input validation |
+| Sandbox | Fail-closed hardened detonation, no Docker socket in the base deployment, CAPEv2 for Windows payloads |
+| Code | bandit 0 high / 0 medium, pip-audit clean, no secrets in git |
+
+Details, threat model and operator responsibilities: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Tests
 
 ```bash
-pytest soc_platform/tests                            # platform: core, connectors, 3 domains, API
+pytest soc_platform/tests                            # platform: core, connectors, 3 domains, API, security, scale, demo walkthrough
 pytest soc_platform/domains/phishing/tests/unit      # phishing ML engine (needs requirements/phishing.txt)
+python scripts/eval_phishing.py                      # labelled corpus accuracy
+python scripts/eval_resolution_at_scale.py 400 7     # asset resolution stress test
+python scripts/eval_identity_resolution.py 300 5     # identity resolution stress test
 ```
 
-## Security notes
+Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 
-* Secrets are never stored in the repository. `.env` is git-ignored; use a vault in production.
-* All connector write scopes should be provisioned separately from read scopes and enabled per action type.
-* The attachment sandbox must run on an isolated detonation host (`SANDBOX_EXECUTOR_URL`); the Docker
-  socket is mounted only by the dev-only `deploy/docker-compose.dev.yml`.
-* LLM calls pseudonymise internal users before leaving the platform and are logged with token budgets.
+## Documentation
+
+| Document | For |
+|---|---|
+| [docs/FEATURES.md](docs/FEATURES.md) | Complete feature list with screenshots |
+| [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | 25-minute client walkthrough, what a demo proves |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
+| [docs/CONNECTORS.md](docs/CONNECTORS.md) | Per-tool setup, scopes, configuration (generated from the code) |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Running, jobs, monitoring, access, break-glass, keys, retention, backups |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, controls, fixes, operator responsibilities |
+| [docs/REQUIREMENTS_TRACEABILITY.md](docs/REQUIREMENTS_TRACEABILITY.md) | Every requirement ID → code, test, status |
+| [docs/TEST_REPORT.md](docs/TEST_REPORT.md) | Test and evaluation results |
+| [CCI_Gap_Analysis_and_Build_Plan.md](CCI_Gap_Analysis_and_Build_Plan.md) | Original gap analysis and build tracker |
+
+## Repository layout
+
+```
+soc_platform/
+  core/          schema, context store, entity + identity resolution, policy, actions, audit, auth, access,
+                 crypto, retention, cases, enrichment
+  connectors/    SDK (rate limits, backoff, checkpoints, reconciliation), registry, tools/ (20 connectors)
+  llm/           governed LLM gateway (redaction, budget, prompt log, grounding)
+  domains/       phishing/ (workflow, supplier risk, engine/ = 7-agent ML system) · incident/ · vulnerability/ (+ misconfig)
+  intelligence/  risk, correlation, analyst, drift, ATT&CK coverage, shadow IT
+  reporting/     docx / pptx reports, compliance evidence pack
+  api/           FastAPI service, dashboards, console (static/)
+  jobs.py        durable scheduled jobs
+  fixtures/      vendor-shaped fixture data for every connector
+  tests/         platform test suite
+artifacts/phishing/   trained models (Git LFS), corpus emails     config/   deploy/   scripts/   docs/
+```

@@ -1,34 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOC Platform</title>
-<style>
-:root{--bg:#0f1419;--panel:#171d24;--line:#26303b;--text:#dbe2ea;--muted:#8a97a6;--acc:#4ea1ff;--crit:#ff5c5c;--high:#ff9f43;--med:#f7d154;--low:#6dd17c;--info:#8a97a6}
-*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
-header{display:flex;gap:16px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:2}
-header b{font-size:15px}nav button{background:none;border:0;color:var(--muted);padding:6px 10px;cursor:pointer;border-radius:6px;font:inherit}
-nav button.on{color:var(--text);background:#223043}main{padding:16px 20px;max-width:1400px;margin:auto}
-.row{display:flex;gap:16px;flex-wrap:wrap}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:14px;flex:1;min-width:280px}
-h2{font-size:15px;margin:0 0 10px}h3{font-size:13px;margin:12px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500}
-tr.click:hover{background:#1c2530;cursor:pointer}.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:#223043}
-.critical{background:var(--crit);color:#000}.high{background:var(--high);color:#000}.medium{background:var(--med);color:#000}.low{background:var(--low);color:#000}.informational{background:var(--info);color:#000}
-button.b{background:var(--acc);color:#000;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font:inherit}button.g{background:#2a3644;color:var(--text)}button.r{background:var(--crit)}
-input,select,textarea{background:#0b1015;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:inherit}
-.muted{color:var(--muted)}.kpi{font-size:26px;font-weight:600}.fact{border-left:3px solid var(--acc);padding-left:8px;margin:4px 0}.inf{border-left:3px dashed var(--muted);padding-left:8px;margin:4px 0;color:var(--muted)}
-.warn{background:#3a2a10;border:1px solid #7a5a1c;padding:8px;border-radius:6px;margin:8px 0}a{color:var(--acc)}code{color:#9fd0ff}
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Agentic SOC</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
-<header><b>CCI SOC Platform</b>
-<nav id="nav"></nav><span style="flex:1"></span>
-<span id="who" class="muted"></span>
-<select id="role"><option>analyst</option><option>lead</option><option>automation_admin</option><option>auditor</option></select>
-<input id="user" value="alice@cci-demo.com" size="18"><button class="b" data-fn="login" data-args="[]">Sign in (dev)</button>
-</header>
-<main id="main"><p class="muted">Sign in. In production the console uses Entra ID SSO; dev tokens are only served when SOC_AUTH_MODE=dev.</p></main>
+<div id="app"><div class="auth"><div class="skeleton" style="width:200px"></div></div></div>
 <script src="/static/app.js"></script>
-<script src="/static/dash.js"></script>
+<script src="/static/views.js"></script>
 </body>
 </html>

@@ -53,7 +53,7 @@ def overview(s: Session, domains: frozenset[str], *, days: int = 14) -> dict[str
 
     ins = list(s.execute(select(Insight).where(Insight.status.in_(("new", "acknowledged")))).scalars())
     if "*" not in domains:
-        ins = [i for i in ins if not i.domains or set(i.domains) & set(domains)]
+        ins = [i for i in ins if i.domains and set(i.domains) <= set(domains)]  # untagged = cross-domain
     vm: dict[str, Any] = {}
     if "*" in domains or "vulnerability" in domains:
         from soc_platform.domains.vulnerability.models import CloudMisconfiguration, ConsolidatedFinding
@@ -134,7 +134,7 @@ def connector_freshness(s: Session, registry: Any) -> list[dict[str, Any]]:
                             "fresh": age is not None and age <= limit, "last_error": c.last_error,
                             "ingested": c.ingested_count, "failed": c.failed_count})
         state = ("disabled" if not row["enabled"] else "misconfigured" if row.get("config_problems") else
-                 "never_synced" if row.get("streams") and not streams else
+                 "on_demand" if not streams else
                  "error" if any(x["last_error"] for x in streams) else
                  "stale" if any(not x["fresh"] for x in streams) else "healthy")
         out.append({"name": name, "tool": row.get("tool"), "category": row.get("category"), "mode": row.get("mode"),

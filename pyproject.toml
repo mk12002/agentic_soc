@@ -13,7 +13,7 @@ readme = "README.md"
 include = ["soc_platform*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.json", "*.yaml", "*.yml", "*.html", "*.css", "*.js", "*.j2", "*.eml"]
+"*" = ["*.json", "*.yaml", "*.yml", "*.html", "*.css", "*.js", "*.svg", "*.j2", "*.eml"]
 
 [tool.pytest.ini_options]
 testpaths = ["soc_platform/tests"]

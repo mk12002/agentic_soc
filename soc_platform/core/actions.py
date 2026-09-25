@@ -283,13 +283,13 @@ class ActionService:
                                case_id: str | None) -> ActionRequest | None:
         if action_type in self.PER_CASE_ACTIONS or not case_id or not targets:
             return None
-        ids = sorted(str(t.get("id") or t.get("value") or "") for t in targets)
-        if not all(ids):
+        if not all(_target_sig(t) for t in targets):
             return None
         for r in self.s.execute(select(ActionRequest).where(
                 ActionRequest.action_type == action_type, ActionRequest.case_id != case_id,
                 ActionRequest.status.in_(("recommended", "pending_approval")))).scalars():
-            if sorted(str(t.get("id") or t.get("value") or "") for t in (r.targets or [])) == ids:
+            theirs = r.targets or []
+            if len(theirs) == len(targets) and all(any(_same_target(m, t) for t in theirs) for m in targets):
                 return r
         return None
 
@@ -298,3 +298,24 @@ class ActionService:
 
 
 __all__ = ["ActionSpec", "ActionRegistry", "ActionService", "PolicyDecision", "idempotency_key"]
+
+
+_STRONG_TARGET_KEYS = ("crowdstrike_aid", "mde_device_id", "entra_object_id", "upn", "network_message_id", "wiz_id")
+
+
+def _target_sig(t: dict[str, Any]) -> set[str]:
+    """Identifiers that make two target descriptions the same object even when their display ids differ
+    (``jane-lt01`` vs ``jane-lt01.cci-demo.com``, or the same device seen by two EDRs)."""
+    sig = {f"{k}:{str(t[k]).lower()}" for k in _STRONG_TARGET_KEYS if t.get(k)}
+    ident = str(t.get("id") or t.get("value") or "").strip().lower()
+    if ident:
+        sig.add(f"host:{ident.split('.')[0]}" if t.get("type") == "asset" and "/" not in ident and "@" not in ident
+                else f"id:{ident}")
+    return sig
+
+
+def _same_target(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    if any(a.get(k) and b.get(k) and str(a[k]).lower() != str(b[k]).lower() for k in _STRONG_TARGET_KEYS):
+        return False  # different vendor ids = different objects, whatever their names say
+    return bool(_target_sig(a) & _target_sig(b))
+
