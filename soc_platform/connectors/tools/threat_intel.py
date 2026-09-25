@@ -173,6 +173,6 @@ MANIFEST = ConnectorManifest(
     config=[ConfigField(m["key"], f"{src} API key", secret=True, required=False) for src, m in SOURCES.items()
             if m["key"] != "abusech_auth_key"] + [ConfigField("abusech_auth_key", "abuse.ch Auth-Key (URLhaus/ThreatFox/"
                                                                                   "MalwareBazaar)", secret=True, required=False)],
-    confidence="High", to_confirm="CCI-approved intelligence sources and licensing",
+    confidence="High", to_confirm="client-approved intelligence sources and licensing",
     focus_areas=("phishing", "incident", "vulnerability"),
 )

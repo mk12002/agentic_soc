@@ -16,7 +16,7 @@ def client(tmp_path_factory):
     os.environ.update({"SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": "test-secret-0123456789abcdef0123456789",
                        "SOC_DATABASE_URL": f"sqlite:///{tmp / 'api.db'}", "SOC_CONNECTORS_CONFIG": str(ROOT / "config" / "connectors.yaml"),
                        "SOC_REPORT_OUTPUT_DIR": str(tmp / "reports"), "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"),
-                       "SOC_ORG_DOMAINS": "cci-demo.com", "SOC_ENVIRONMENT": "test"})
+                       "SOC_ORG_DOMAINS": "acme-demo.com", "SOC_ENVIRONMENT": "test"})
     from soc_platform.config import get_settings
     from soc_platform.core import db as dbm
 
@@ -116,7 +116,7 @@ def test_siem_push_and_ui(client):
     a = tok(client, "alice", "analyst")
     r = client.post("/api/v1/ingest/alerts", headers=a, json={"alerts": [
         {"id": "siem-1", "title": "Impossible travel", "severity": "high", "timestamp": "2026-09-20T10:00:00Z",
-         "user": "jane.doe@cci-demo.com", "src_ip": "185.220.101.4", "source": "sentinel"}]}).json()
+         "user": "jane.doe@acme-demo.com", "src_ip": "185.220.101.4", "source": "sentinel"}]}).json()
     assert r["ingested"] == 1
     assert "<title>Agentic SOC</title>" in client.get("/").text
 
@@ -138,7 +138,7 @@ def test_intelligence_endpoints(client, seeded):
     assert ins and ins[0]["evidence"] and ins[0]["narrative"]
     assert client.post(f"/api/v1/intelligence/insights/{ins[-1]['id']}/dismiss", headers=a).json()["status"] == "dismissed"
     top = client.get("/api/v1/intelligence/risk/top?limit=3", headers=a).json()
-    assert top[0]["name"] == "jane.doe@cci-demo.com"
+    assert top[0]["name"] == "jane.doe@acme-demo.com"
     r = client.post("/api/v1/intelligence/ask", headers=a, json={"question": "who is riskiest?"}).json()
     assert r["tool_calls"] and r["answer"]
     assert "Top correlated threats" in client.get("/api/v1/intelligence/brief", headers=a).json()["summary"]

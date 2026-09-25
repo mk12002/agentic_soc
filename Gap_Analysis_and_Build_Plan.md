@@ -1,6 +1,6 @@
-# CCI SOC — Gap Analysis of the Email Security Module and Build Plan
+# SOC — Gap Analysis of the Email Security Module and Build Plan
 
-Basis: `CCI_SOC_AI_Automation_Consolidated_Requirements.docx` (v0.1) checked against the code in `email security/email_security/` (~41k lines of Python, 35 API routes, 16 compose services, 7 trained agent models). Date of review: 2026-09-24.
+Basis: the *SOC – AI & Automation Consolidated Requirements* document (v0.1) checked against the code in `email security/email_security/` (~41k lines of Python, 35 API routes, 16 compose services, 7 trained agent models). Date of review: 2026-09-24.
 
 ---
 
@@ -31,7 +31,7 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | 1 | Platform API + analyst console (all 3 domains, approvals, policy, audit, reports) | ✅ | `soc_platform/api/` - strict CSP, rate limiting, RBAC; real-server smoke tested |
 | 1 | Repo cleanup, README, .gitignore, push to GitHub | ✅ | https://github.com/mk12002/agentic_soc - models via Git LFS, no secrets (scanned) |
 | 2 | Phishing: ingestion, decomposition incl. QR, analysis (engine + heuristic), reconciliation, campaign, user impact, recommendations, feedback, auto-close+sampling, propagation, metrics | ✅ | `domains/phishing/` - PH-F01..F16 covered; labelled corpus 10/10 (tuned on same corpus - see report) |
-| 3 | Reporting engine: daily exposure, weekly VM, management deck, investigation record | ✅ | `soc_platform/reporting/` - CCI templates plug in via `templates` (A08) |
+| 3 | Reporting engine: daily exposure, weekly VM, management deck, investigation record | ✅ | `soc_platform/reporting/` - your own templates plug in via `templates` (A08) |
 | 4 | Incident: ingestion, clustering+suppression, entity extraction, 8-dimension enrichment, exposure-informed severity, MITRE, grounded summary, recommendations, similar incidents, handover, Canary triage | ✅ | `domains/incident/service.py` - IM-F01..F16 |
 | 5 | Vulnerability: ingestion, consolidation, NVD/EPSS/KEV prioritisation, ownership, affected devices, campaigns, notifications, follow-up, validation+false closure, exceptions, risk register, metrics, NL query, new-KEV assessment, coverage | ✅ | `domains/vulnerability/` - VM-F01..F18 (report templates pending under phase 3) |
 | 6 | Guarded response: all actions via native APIs behind policy; promotion L2→L3/L4 by policy change | ✅ | promotion is a reviewed policy change; nothing auto-executes by default |
@@ -48,7 +48,7 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | R3 | Premium console (light default + dark mode, 16 screens, entity 360, dashboards), verified in Chrome with screenshots | ✅ | docs/FEATURES.md, docs/screenshots/ |
 | R3 | Docs: FEATURES, ARCHITECTURE, CONNECTORS (generated), OPERATIONS, DEMO_GUIDE, REQUIREMENTS_TRACEABILITY | ✅ | docs/ |
 | — | Deploy images built and run | ⛔ | Docker not available on the build machine; compose validated statically |
-| — | Live connector validation against CCI tenants | ⛔ | needs CCI API access (A01, D01) |
+| — | Live connector validation against client tenants | ⛔ | needs client API access (A01, D01) |
 
 Platform test suite: 108 passed + 3 live (opt-in). Phishing ML engine suite: 182 unit/top-level + 42 integration passed. Details: docs/TEST_REPORT.md.
 
@@ -81,7 +81,7 @@ Section 4.1 of the requirements doc describes the Multi-Agent Email Security Sys
 
 ### Things the doc does not say that matter
 
-1. **Automated actions run with no human approval.** `act` is a normal graph node, so live Graph actions fire as soon as a verdict exists (`response_engine.py:153`). `/api/override` also executes actions straight away. The doc marks "VIP approval gate" as Ready, but that gate belongs to the endpoint system. In the email system, VIP status (`org_context.py`) only multiplies the risk score. **This violates NFR-01**, which is the main operating principle CCI asked for.
+1. **Automated actions run with no human approval.** `act` is a normal graph node, so live Graph actions fire as soon as a verdict exists (`response_engine.py:153`). `/api/override` also executes actions straight away. The doc marks "VIP approval gate" as Ready, but that gate belongs to the endpoint system. In the email system, VIP status (`org_context.py`) only multiplies the risk score. **This violates NFR-01**, which is the main operating principle the client asked for.
 2. **The playbook engine only pretends to run.** `execute_playbook()` marks every step as `"executed"` with a timestamp but performs no action. No step has `requires_approval=True`. Anything reported from it overstates what happened.
 3. **The sandbox is not hardened.** The compose comment says *"Base compose is hardened and does not mount docker.sock"*, but both `sandbox_agent_service` and `sandbox_executor_service` do mount `/var/run/docker.sock`. PH-T04 and R12 are therefore still open.
 4. **Secrets are sitting in the working tree.** `.env` holds live keys: Azure OpenAI, Azure Search, the Graph client secret, VirusTotal, Shodan, AbuseIPDB, urlscan, Google Safe Browsing, Azure OCR, and the sandbox token. `gdrive_credentials.json` contains a GCP service-account private key. `API_AUTH_ENABLED=0`, and RabbitMQ uses the default guest credentials. `CRITICAL_SECURITY_ISSUES.md` already flags this, and it has not been fixed.
@@ -189,8 +189,8 @@ Roughly **5% is done, about 30% has usable foundations, and about 65% is new wor
 ### Guiding decisions
 
 1. **Build one platform, not three products.** Turn the email system into the first domain module of a shared platform with a connector layer, a canonical schema, a context store, a policy engine, an action layer and an audit layer. Incident and vulnerability management become new domain modules on top of it. This is the doc's recommendation #2, and it is also what the codebase needs.
-2. **Treat governance as core, not polish.** The approval queue, immutable audit, SSO/RBAC and the autonomy policy are the minimum needed to show anything to CCI. Build them first.
-3. **Make every connector mockable.** You will not have CCI tenant access for months. Each connector gets a real implementation and a fixture-backed fake with the same interface. Develop against a Microsoft 365 E5 developer or trial tenant for the Graph and Defender work, and against recorded fixtures for CrowdStrike, Rapid7, Wiz, Umbrella, Canary and Delinea.
+2. **Treat governance as core, not polish.** The approval queue, immutable audit, SSO/RBAC and the autonomy policy are the minimum needed to show anything to the client. Build them first.
+3. **Make every connector mockable.** You will not have client tenant access for months. Each connector gets a real implementation and a fixture-backed fake with the same interface. Develop against a Microsoft 365 E5 developer or trial tenant for the Graph and Defender work, and against recorded fixtures for CrowdStrike, Rapid7, Wiz, Umbrella, Canary and Delinea.
 4. **Default to shadow mode.** Out of the box the platform is at L0 or L1. Any action type must be promoted explicitly in policy.
 
 ### Target platform layout
@@ -263,7 +263,7 @@ platform/
 ### Phase 3: Reporting engine, the early VM value (3–4 weeks, can run alongside Phase 2)
 
 - Deterministic metrics layer: counts, ageing buckets, SLA breaches, MTTR, all computed in SQL or Python (VM-T08, VM-F14).
-- Template rendering to CCI's own docx/pptx formats. The LLM only writes commentary paragraphs, which must cite the computed figures.
+- Template rendering to the client's own docx/pptx formats. The LLM only writes commentary paragraphs, which must cite the computed figures.
 - Start from **file exports** (Rapid7 CSV, Defender TVM export) so no API access is needed. Deliver the Daily Exposure Report, the Weekly VM report and the management deck (VM-F13, U01).
 - Risk-register draft entries for approval (VM-F12).
 
@@ -300,7 +300,7 @@ platform/
 ```
 Week  1–2   Phase 0 (safety)                     ← mandatory before any demo
 Week  3–8   Phase 1 (foundation)
-Week  6–13  Phase 2 (phishing complete)          ← headline demo to CCI
+Week  6–13  Phase 2 (phishing complete)          ← headline demo to the client
 Week  9–12  Phase 3 (reporting, from exports)    ← parallel, low risk, weekly visible value
 Week 14–21  Phase 4 (incident context + Canary)
 Week 18–28  Phase 5 (VM: resolution first)
@@ -315,4 +315,4 @@ Week 22+    Phase 6
 2. A Microsoft 365 E5 (or Defender P2 + Entra P2) dev or trial tenant for Graph, advanced hunting and Safe Links development.
 3. The target runtime: Azure (Key Vault, Postgres Flexible Server, Container Apps or AKS) or on-premises. This decides the vault, storage and identity design.
 4. Whether to restructure into `platform/core` + `domains/*` now (recommended) or bolt new modules onto the current `src/` layout.
-5. The CCI discovery questions that change the architecture: Q01 (SIEM), Q03 (ITSM), Q13 (CMDB) and Q09 (Avanan API).
+5. The discovery questions that change the architecture: Q01 (SIEM), Q03 (ITSM), Q13 (CMDB) and Q09 (Avanan API).

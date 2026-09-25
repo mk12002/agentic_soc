@@ -19,7 +19,7 @@ from email.utils import format_datetime, make_msgid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ORG = "cci-demo.com"
+ORG = "acme-demo.com"
 T0 = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
 
 
@@ -99,9 +99,9 @@ def corpus() -> list[tuple[str, EmailMessage]]:
                      maintype="text", subtype="html", filename="Q3_Vendor_Agreement.html")
     out.append(("html_attachment_phish", m))
 
-    m = _base("malicious", "raj.mehta@cci-dem0.com", "Raj Mehta", f"priya.nair@{ORG}",
+    m = _base("malicious", "raj.mehta@acme-dem0.com", "Raj Mehta", f"priya.nair@{ORG}",
               "Urgent wire transfer - confidential", auth="spf=pass dkim=none dmarc=none",
-              relay="mail.cci-dem0.com", ip="102.165.48.90", minutes=4, reply_to="raj.mehta.ceo@proton.example")
+              relay="mail.acme-dem0.com", ip="102.165.48.90", minutes=4, reply_to="raj.mehta.ceo@proton.example")
     m.set_content("Priya,\nI need you to process an urgent wire transfer of INR 18,40,000 to a new vendor today. "
                   "I am in a board meeting so reply by email only. Keep this confidential.\nRaj")
     out.append(("bec_ceo_fraud", m))
@@ -129,12 +129,12 @@ def corpus() -> list[tuple[str, EmailMessage]]:
                       "Unsubscribe</a></p>", subtype="html")
     out.append(("marketing_spam", m))
 
-    m = _base("safe", "notifications@github.com", "GitHub", u, "[cci-demo/soc-platform] Pull request #412 merged",
+    m = _base("safe", "notifications@github.com", "GitHub", u, "[acme-demo/soc-platform] Pull request #412 merged",
               auth="spf=pass dkim=pass dmarc=pass", relay="out-21.smtp.github.com", ip="192.30.252.206", minutes=8)
-    m.set_content("Merged #412 into main.\n\nhttps://github.com/cci-demo/soc-platform/pull/412")
+    m.set_content("Merged #412 into main.\n\nhttps://github.com/acme-demo/soc-platform/pull/412")
     out.append(("legit_github", m))
 
-    m = _base("safe", f"hr@{ORG}", "CCI Human Resources", u, "Reminder: townhall on Friday at 4 pm",
+    m = _base("safe", f"hr@{ORG}", "Acme Human Resources", u, "Reminder: townhall on Friday at 4 pm",
               auth="spf=pass dkim=pass dmarc=pass", relay=f"exch01.{ORG}", ip="10.0.0.30", minutes=9)
     m.set_content("Hi all, reminder that the quarterly townhall is this Friday at 4 pm in the auditorium.")
     out.append(("legit_internal", m))

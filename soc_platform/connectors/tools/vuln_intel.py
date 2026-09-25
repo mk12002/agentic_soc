@@ -36,7 +36,8 @@ class NvdConnector(ToolConnector):
         return []
 
     def cve_detail(self, cve_id: str) -> dict[str, Any] | None:
-        body = self.get("/rest/json/cves/2.0", params={"cveId": cve_id})
+        # explicit page: NVD has answered single-CVE lookups with resultsPerPage=0 (totalResults 1, empty page)
+        body = self.get("/rest/json/cves/2.0", params={"cveId": cve_id, "resultsPerPage": 1, "startIndex": 0})
         items = body.get("vulnerabilities") or []
         if not items:
             return None

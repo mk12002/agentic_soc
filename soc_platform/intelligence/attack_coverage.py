@@ -26,7 +26,7 @@ TACTICS = [("TA0001", "Initial Access"), ("TA0002", "Execution"), ("TA0003", "Pe
            ("TA0007", "Discovery"), ("TA0008", "Lateral Movement"), ("TA0009", "Collection"),
            ("TA0011", "Command and Control"), ("TA0010", "Exfiltration"), ("TA0040", "Impact")]
 
-# technique -> (name, tactic, priority). Priority = commonly used in intrusions against organisations like CCI.
+# technique -> (name, tactic, priority). Priority = commonly used in intrusions against organisations like the client.
 TECHNIQUES: dict[str, tuple[str, str, bool]] = {
     "T1566.001": ("Spearphishing Attachment", "TA0001", True),
     "T1566.002": ("Spearphishing Link", "TA0001", True),

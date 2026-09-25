@@ -4,6 +4,7 @@ single tool can see. Each rule emits an ``Insight`` with the exact evidence it r
 
 Rules and the requirement / use case each serves:
   phishing_compromise_chain   U08 phishing -> endpoint -> identity chaining
+  privileged_after_compromise U07 privileged credential access after compromise indicators
   privileged_after_compromise U07 identity-centric risk (privileged access after compromise indicators)
   deception_corroborated      U04 / IM deception hit corroborated by other telemetry
   exposed_host_under_attack   U06 exposure-informed triage (KEV / P1 vuln on an attacked host)
@@ -18,6 +19,8 @@ Rules and the requirement / use case each serves:
 """
 
 from __future__ import annotations
+
+import json
 
 import hashlib
 import re
@@ -44,6 +47,13 @@ def _key(*parts: Any) -> str:
 def _ev(f) -> dict[str, Any]:
     return {"ref": f.ref, "signal": f.signal, "source": f.source, "dimension": f.dimension, "when": f.when,
             "summary": f.detail}
+
+
+def _basis(ins: Insight) -> str:
+    """What a narrative is written from: severity and the evidence itself (not the time-decayed score, which the
+    narrative is told not to state), so it is rewritten when the finding changes, not every scheduler tick."""
+    ev = sorted(f"{e.get('signal')}|{e.get('summary')}|{e.get('when')}" for e in (ins.evidence or []))
+    return json.dumps([ins.severity, ev])
 
 
 class CorrelationEngine:
@@ -314,6 +324,8 @@ class CorrelationEngine:
             return ins
         if cur.status == "dismissed" and SEV_RANK.get(ins.severity, 0) <= SEV_RANK.get(cur.severity, 0):
             return cur  # analyst dismissed it and nothing got worse
+        if cur.narrative_source == "llm" and _basis(cur) != _basis(ins):
+            cur.narrative_source = "stale"      # substance changed: the next refresh rewrites the narrative
         for f in ("title", "severity", "score", "entity_ids", "domains", "evidence", "next_steps", "requirement_refs"):
             setattr(cur, f, getattr(ins, f))
         cur.last_seen = utcnow()

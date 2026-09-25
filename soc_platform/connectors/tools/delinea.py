@@ -3,7 +3,7 @@
 Secret Server: secret access audit, privileged session activity, credential rotation.
 Privilege Manager: elevation / application-control events.
 Endpoints follow the documented REST APIs; exact report/event endpoints vary by
-version and must be verified against CCI's deployment (section 10: Medium).
+version and must be verified against the client's deployment (section 10: Medium).
 """
 
 from __future__ import annotations
@@ -69,7 +69,8 @@ class SecretServerConnector(ToolConnector):
                                          f"({sorted({r.get('secretName') for r in sensitive})}); "
                                          f"{len(sessions)} privileged session(s); standing admin role: {admin}",
                              sensitive_access=len(sensitive), standing_admin=admin,
-                             secrets=sorted({str(r.get("secretId")) for r in sensitive}))
+                             secrets=sorted({str(r.get("secretId")) for r in sensitive}),
+                             secret_names={str(r.get("secretId")): r.get("secretName") for r in sensitive if r.get("secretName")})
 
         return self.timed_lookup(run)
 
@@ -146,7 +147,7 @@ MANIFESTS = [
                 ConfigField("sessions_path", "Launched sessions endpoint (default /api/v1/launched-sessions)", required=False)],
         actions=_ss_actions, confidence="Medium",
         to_confirm="API access approval - privileged access data needs extra governance",
-        fake_settings={"user_domain": "cci-demo.com", "base_url": "https://pam.cci-demo.com/SecretServer"},
+        fake_settings={"user_domain": "acme-demo.com", "base_url": "https://pam.acme-demo.com/SecretServer"},
         focus_areas=("incident",)),
     ConnectorManifest(
         name="delinea_privilege_manager", tool="Delinea Privilege Manager", vendor="Delinea", category="pam",
@@ -157,6 +158,6 @@ MANIFESTS = [
                 ConfigField("user_domain", "UPN suffix", required=False),
                 ConfigField("events_path", "Elevation events endpoint (default /Tms/api/v1/events/elevation)", required=False)],
         confidence="Medium", to_confirm="API access approval and available event granularity",
-        fake_settings={"user_domain": "cci-demo.com", "base_url": "https://pam.cci-demo.com/SecretServer"},
+        fake_settings={"user_domain": "acme-demo.com", "base_url": "https://pam.acme-demo.com/SecretServer"},
         focus_areas=("incident",)),
 ]

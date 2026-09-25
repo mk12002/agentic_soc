@@ -19,7 +19,7 @@ responsibility of the hosting environment.
 | Over-automation (R04) | Autonomy levels L0–L4 per action; destructive actions never autonomous; VIP / critical assets and blast radius force approval; hard blast-radius limit blocks; global kill switch | `core/policy.py` |
 | Tampering with evidence / history | Append-only audit table (ORM refuses UPDATE/DELETE) with SHA-256 hash chain; `/api/v1/audit/verify` detects any edit; grant the DB role INSERT/SELECT only | `core/audit.py` |
 | Duplicate / replayed actions | Idempotency keys, compare-and-set status transitions, pre-conditions re-checked at execution | `core/actions.py` |
-| LLM hallucination / prompt injection (R02) | Model sees only retrieved evidence; claims must cite valid evidence ids or are dropped; verdicts, scores and all figures are computed in code; model output can never trigger an action | `llm/gateway.py`, domain services; tested in `test_resilience_security.py` |
+| LLM hallucination / prompt injection (R02) | Model sees only retrieved evidence; claims must cite valid evidence ids or are dropped; statements (and summary sentences) stating a figure absent from their cited evidence are dropped (numeric fidelity); time-decayed scores are not given to the model; verdicts, scores and all figures are computed in code; model output can never trigger an action | `llm/gateway.py`, domain services; tested in `test_resilience_security.py` |
 | LLM analyst misuse / prompt injection via data | Analyst can only request tools from a fixed read-only catalogue (unknown tools ignored); arguments type-checked; answers must cite tool results; every question and tool call audited | `intelligence/analyst.py` |
 | LLM deep analysis of an attack story | Only the story's stored evidence is sent (identities pseudonymised); statements must cite S#/G#/H#/B#/P#/X# ids or are removed (count shown); priorities may only reference real pending actions or "manual"; disagreement with the deterministic assessment is flagged; cached per evidence fingerprint; bundle approval still runs policy and four-eyes per action | `intelligence/deep_analysis.py`, `api/app.py` |
 | Report builder misuse (prompt-planned reports) | Planner may only choose sources from a fixed catalogue (unknown / case-bound sources dropped); specs validated and size-bounded; figures computed in code, narrative sentences must cite a figure (F#); sections outside the requester's data scope skipped and scope-dependent counts computed for the requester; download requires a scope covering both the report's domains and the builder's scope; case reports require access to the case; compliance data needs the evidence-export permission | `reporting/builder.py`, `api/app.py` |
@@ -83,6 +83,9 @@ responsibility of the hosting environment.
 | Access-log writes blocked requests for 5 s on SQLite and were silently lost | Medium | Background batched writer |
 | Raw payloads and emails stored in plaintext | Medium | Encryption at rest |
 | Generated reports and compliance packs stored in plaintext | Medium | Sealed on write, decrypted on authorised download |
+| A real phishing email received in a staff mailbox was tracked in the repository (`artifacts/phishing/samples`) | Medium (privacy) | Removed from the tree and kept locally under the git-ignored `test_reports/private/`; it remains in git history until history is rewritten (owner decision) |
+| Pseudonym tokens the model wrote without brackets (``USER_1``) were not restored and reached analysts | Low | Restore matches tokens with or without brackets, as whole words; live test asserts zero placeholders |
+| Service-account key visible in a documentation screenshot (ephemeral test server) | Low | Tour masks the key before capturing |
 | Report overview section computed across all domains for a domain-scoped requester (caught by test before release) | Medium | Overview computed with the requester's scope; download re-checks builder scope |
 | Concurrent first-use DB initialisation race | Low | Locked, publish-after-create |
 | Identity records silently dropping keys owned by another person | Low (data integrity) | Queued as key collisions for analyst review |
@@ -96,6 +99,6 @@ responsibility of the hosting environment.
 * Create Entra app roles `SOC.<Role>` / `SOC.<Role>.<Domain>` and require MFA via Conditional Access.
 * Run behind TLS (reverse proxy / App Gateway) and restrict network access to the API and executor.
 * Provision per-tool service principals with read scopes first; add write scopes per approved action.
-* Grant the audit-log database role INSERT/SELECT only; back up and retain per CCI policy.
+* Grant the audit-log database role INSERT/SELECT only; back up and retain per the organisation's policy.
 * Store secrets in a vault (Azure Key Vault) and mount them as `*_FILE`.
 * Operate CAPEv2 / the detonation host on an isolated network segment with no route to production.

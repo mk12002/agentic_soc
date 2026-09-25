@@ -300,6 +300,6 @@ MANIFEST = ConnectorManifest(
     actions=_actions, confidence="High",
     to_confirm="Licence tier for advanced hunting and Safe Links click telemetry; Graph app permissions; "
                "Exchange app-access policy scoping the SOC mailbox",
-    fake_settings={"reporting_mailbox": "soc-reports@cci-demo.com", "tenant_id": "demo-tenant"},
+    fake_settings={"reporting_mailbox": "soc-reports@acme-demo.com", "tenant_id": "demo-tenant"},
     focus_areas=("phishing", "incident"),
 )

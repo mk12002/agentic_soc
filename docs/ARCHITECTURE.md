@@ -13,7 +13,7 @@
 │ access log (async writer) · dashboards · reports · admin                                                       │
 └──────────┬───────────────────────┬──────────────────────────┬──────────────────────────┬──────────────────────┘
    Phishing domain          Incident domain          Vulnerability domain        Intelligence layer
-   (+ ML engine, supplier   (cluster, enrich,        (consolidate, prioritise,   (risk engine, 13 correlation
+   (+ ML engine, supplier   (cluster, enrich,        (consolidate, prioritise,   (risk engine, 12 correlation
     risk U18)                MITRE, recommend)        route, validate, U03)       rules, analyst Q&A, drift,
                                                                                   ATT&CK coverage, shadow IT)
            └───────────────────────┴─────────────┬────────────┴──────────────────────────┘

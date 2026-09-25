@@ -3,7 +3,7 @@
 All figures are computed deterministically by the domain services; this module only
 lays them out. Narrative commentary comes from the LLM gateway (grounded on the
 computed figures, which are passed as evidence) or from deterministic sentences when
-no model is configured. CCI's own templates can be supplied: a ``.docx`` template is
+no model is configured. the client's own templates can be supplied: a ``.docx`` template is
 used as the base document (its styles/header/footer are kept) and a ``.pptx``
 template supplies the slide master.
 """

@@ -54,7 +54,7 @@ def main() -> None:
 
     from soc_platform.domains.phishing.supplier import load_suppliers
 
-    heur = HeuristicAnalyzer(org_domains=["cci-demo.com"], threat_intel=ConnectorRegistry.all_fake().get("threat_intel"),
+    heur = HeuristicAnalyzer(org_domains=["acme-demo.com"], threat_intel=ConnectorRegistry.all_fake().get("threat_intel"),
                              partner_domains=[d for sup in load_suppliers() for d in sup.domains])
     eng = EngineAnalyzer(offline=True) if a.engine else None
     rows = []

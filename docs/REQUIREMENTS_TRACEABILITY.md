@@ -1,11 +1,11 @@
 # Requirements traceability
 
-Every requirement ID in *CCI SOC – AI & Automation Consolidated Requirements* mapped to where it is implemented and how it
+Every requirement ID in *SOC – AI & Automation Consolidated Requirements* mapped to where it is implemented and how it
 is verified. Test names refer to `soc_platform/tests/` unless stated.
 
-Legend: ✅ implemented and tested · 🟡 implemented; completion or validation needs CCI data, environment or a decision (named in the row) · ⛔ needs CCI input before any build.
+Legend: ✅ implemented and tested · 🟡 implemented; completion or validation needs client data, environment or a decision (named in the row) · ⛔ needs client input before any build.
 
-**Summary:** 102 requirements implemented and tested, 15 implemented but awaiting CCI data/environment for completion or validation, 0 blocked. Risks, assumptions, dependencies and open questions follow.
+**Summary:** 102 requirements implemented and tested, 15 implemented but awaiting client data/environment for completion or validation, 0 blocked. Risks, assumptions, dependencies and open questions follow.
 
 ## Vulnerability management – functional
 
@@ -22,8 +22,8 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | VM-F09 | Automated follow-up | ✅ | `follow_up` escalations for unacknowledged / overdue / SLA-breached, stalled summary; scheduled job | test_vulnerability, test_jobs |
 | VM-F10 | Remediation validation | ✅ | `validate` re-queries each source → verified / still present / decommissioned / unverifiable; false closures counted; ITSM-resolved tickets trigger validation | test_vulnerability (false closure, ITSM sync) |
 | VM-F11 | Exception and risk acceptance | ✅ | Exceptions with justification, compensating control, approver ≠ requester, expiry → auto-reopen | test_vulnerability::test_exception_separation... |
-| VM-F12 | Risk register updates | 🟡 | `propose_risk_register` + approval; format is generic until CCI's register schema is supplied (A08) | test_vulnerability |
-| VM-F13 | Recurring reporting | 🟡 | Daily exposure, weekly VM (docx), management deck (pptx) from one dataset; CCI templates plug in (A08) | test_demo_walkthrough (all reports download) |
+| VM-F12 | Risk register updates | 🟡 | `propose_risk_register` + approval; format is generic until the client's register schema is supplied (A08) | test_vulnerability |
+| VM-F13 | Recurring reporting | 🟡 | Daily exposure, weekly VM (docx), management deck (pptx) from one dataset; your own templates plug in (A08) | test_demo_walkthrough (all reports download) |
 | VM-F14 | Trend and SLA analytics | ✅ | `metrics`: open/closed, MTTR, ageing, SLA breach, reopen/regression, per team | test_vulnerability |
 | VM-F15 | Natural-language exposure query | ✅ | `query` NL → shown filter → records (no model needed; LLM optional) | test_vulnerability, test_demo_walkthrough |
 | VM-F16 | New-CVE exposure assessment | ✅ | `new_cve_assessment` + `new_kev_exposure` insight; live NVD/EPSS/KEV verified | test_vulnerability, test_live_public_feeds |
@@ -34,14 +34,14 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 
 | ID | Requirement | Status | Implementation | Verified by |
 |---|---|---|---|---|
-| VM-T01 | Connectors | 🟡 | All four connectors implemented against documented APIs; verified on vendor-shaped fixtures, not yet on CCI tenants | test_connectors |
+| VM-T01 | Connectors | 🟡 | All four connectors implemented against documented APIs; verified on vendor-shaped fixtures, not yet on client tenants | test_connectors |
 | VM-T02 | Ingestion mechanics | ✅ | Cursor checkpoints, delta, resumable backfill, token-bucket budget, exponential backoff, reconciliation | test_connectors, test_resilience_security |
 | VM-T03 | Canonical data model | ✅ | Asset/Finding/Vulnerability(VulnIntel)/Owner/Campaign/Exception/ValidationResult with provenance & first/last seen | test_vulnerability |
 | VM-T04 | Asset resolution engine | ✅ | Tunable thresholds, resolution audit, persisted overrides, match-rate metric | test_core_context, test_resolution_scale, test_identity_scale |
 | VM-T05 | Storage | ✅ | Relational store (SQLite dev / Postgres prod) + raw payload store (encrypted at rest) + report store; retention job | test_access_security (encryption, retention) |
 | VM-T06 | Enrichment services | ✅ | NVD, EPSS, KEV, 8 TI sources, cached with freshness and staleness shown | test_live_public_feeds, test_connectors |
 | VM-T07 | Constrained LLM usage | ✅ | LLM only for narrative; all facts/counts/scores computed in code; grounded JSON claims | test_resilience_security, test_intelligence |
-| VM-T08 | Reporting engine | 🟡 | Deterministic figures, LLM commentary only; CCI formats via template files (A08) | test_demo_walkthrough |
+| VM-T08 | Reporting engine | 🟡 | Deterministic figures, LLM commentary only; client formats via template files (A08) | test_demo_walkthrough |
 | VM-T09 | Notification dispatch | ✅ | `notify.email` (Graph, SOC mailbox) or `ticket.create`, behind approval, dispatch recorded | test_vulnerability |
 | VM-T10 | ITSM integration | ✅ | ServiceNow & Jira: create/update + ticket state pulled back into plans; resolved → validation → false closure reopens ticket | test_vulnerability::test_itsm_bidirectional_sync... |
 | VM-T11 | Workflow orchestration | ✅ | `soc_platform/jobs.py`: run records, retries+backoff, dead letter + alert, DB lease across replicas, replay API; idempotency keys on actions | test_jobs |
@@ -63,7 +63,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | IM-F09 | Guarded response execution | ✅ | CrowdStrike contain, MDE isolate/scan, Entra revoke/disable, Umbrella block… via policy-gated action layer with rollback | test_core_governance, test_incident |
 | IM-F10 | Forensic collection on demand | 🟡 | `endpoint.collect_forensics` (CrowdStrike RTR / MDE investigation package) behind approval; artefact analysis pipeline depends on IM-T09 | test_incident |
 | IM-F11 | Similar-incident retrieval | ✅ | Similar-incident retrieval with past dispositions and actions | test_incident |
-| IM-F12 | Incident documentation | 🟡 | Investigation record + evidence pack (docx) from case & audit; CCI's required format needs A08 | test_demo_walkthrough |
+| IM-F12 | Incident documentation | 🟡 | Investigation record + evidence pack (docx) from case & audit; the client's required format needs A08 | test_demo_walkthrough |
 | IM-F13 | Shift handover and queue summary | ✅ | `handover` open-incident brief; intelligence situation brief | test_incident, test_intelligence |
 | IM-F14 | Detection quality feedback | ✅ | `detection_quality` → tuning recommendations from dispositions | test_core_governance |
 | IM-F15 | Partial-result transparency | ✅ | `completeness` names unavailable sources in every case; UI shows it | test_resilience_security |
@@ -80,7 +80,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | IM-T05 | Grounded reasoning | ✅ | Evidence-only prompts, JSON schema, per-claim evidence ids, uncited claims dropped, insufficient-evidence flag | test_resilience_security, test_intelligence |
 | IM-T06 | Action abstraction layer | ✅ | `ActionSpec` preconditions, policy binding, execution record, reverse action | test_core_governance |
 | IM-T07 | Idempotency and concurrency control | ✅ | Idempotency keys + compare-and-set status transitions | test_core_governance |
-| IM-T08 | Performance targets | 🟡 | Latency measured per investigation and per tool (Overview → Enrichment latency); targets to be set on CCI baselines (A09) | test_demo_walkthrough |
+| IM-T08 | Performance targets | 🟡 | Latency measured per investigation and per tool (Overview → Enrichment latency); targets to be set on client baselines (A09) | test_demo_walkthrough |
 | IM-T09 | Re-platforming of forensic and containment capability | 🟡 | Collection via RTR / MDE is implemented; re-hosting the Volatility/Ghidra/YARA analysis over collected artefacts is not yet built | - |
 | IM-T10 | Case and ITSM integration | ✅ | Bidirectional ITSM (create/update + state sync back); target system per Q03 | test_vulnerability |
 | IM-T11 | Cost control | ✅ | Tiered routing (small/large), caching, token budget with alerting | test_resilience_security |
@@ -116,7 +116,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | PH-T04 | Sandbox hardening | ✅ | Hardened fail-closed detonation, no docker.sock, gVisor option, CAPEv2 for Windows payloads, authenticated executor | engine tests (sandbox), docs/SECURITY.md |
 | PH-T05 | Action layer | ✅ | Graph soft/hard delete & quarantine, Defender indicators, Umbrella destination lists, Entra revocation | test_connectors |
 | PH-T06 | Data handling | ✅ | Encrypted-at-rest .eml, retention job with legal hold, RBAC, PII pseudonymisation before any LLM call | test_access_security, test_resilience_security |
-| PH-T07 | Throughput | 🟡 | Heuristic path ~1 s/message end to end on fixtures; production sizing needs CCI volumes (A09/Q17) | timing in docs/TEST_REPORT.md |
+| PH-T07 | Throughput | 🟡 | Heuristic path ~1 s/message end to end on fixtures; production sizing needs client volumes (A09/Q17) | timing in docs/TEST_REPORT.md |
 | PH-T08 | Shadow-mode validation | ✅ | Shadow mode by default (all actions L2 = recommend); agreement metrics vs analyst dispositions | test_core_governance |
 | PH-T09 | Deployment model | ✅ | API-only alongside existing controls; no MX change | - |
 
@@ -129,16 +129,16 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | NFR-03 | Reversibility and evidence preservation | ✅ | Isolate/quarantine/block preferred; reverse actions; forensic collection before containment recommended | test_core_governance |
 | NFR-04 | Auditability | ✅ | Append-only hash-chained audit; verify endpoint; JSONL export with chain verification | test_core_governance, test_access_security |
 | NFR-05 | Resilience and partial-result tolerance | ✅ | Partial-result tolerance, circuit breakers, job retries/dead letter | test_resilience_security, test_jobs |
-| NFR-06 | Performance | 🟡 | Measured per workflow and tool (dashboard); targets pending CCI baselines | test_demo_walkthrough |
-| NFR-07 | Scalability | 🟡 | Stateless API + separate scheduler/workers + Postgres; job leases for multiple replicas. Not load-tested at CCI volume | - |
+| NFR-06 | Performance | 🟡 | Measured per workflow and tool (dashboard); targets pending client baselines | test_demo_walkthrough |
+| NFR-07 | Scalability | 🟡 | Stateless API + separate scheduler/workers + Postgres; job leases for multiple replicas. Not load-tested at client volume | - |
 | NFR-08 | Platform security | ✅ | Vault secrets, least privilege, encryption at rest, CSP/headers, rate limits, bandit/pip-audit clean, hardened sandbox | test_access_security, test_resilience_security |
 | NFR-09 | Identity and access management | ✅ | Entra SSO, RBAC with domain scope, step-up MFA, SoD, break-glass (sealed, audited, alerted), service-account keys, revocation | test_access_security |
-| NFR-10 | Data protection and residency | 🟡 | Retention periods configurable and enforced; classification/residency are CCI decisions (Q21, Q24) | test_access_security |
+| NFR-10 | Data protection and residency | 🟡 | Retention periods configurable and enforced; classification/residency are client decisions (Q21, Q24) | test_access_security |
 | NFR-11 | LLM governance | ✅ | Approved endpoints, prompt/response log, pinning, redaction, grounding, budget | test_resilience_security |
 | NFR-12 | Change management | ✅ | Versioned policy, propose ≠ approve, audited | test_core_governance |
 | NFR-13 | Observability | ✅ | Connector freshness, job health, reconciliation, drift monitor, Prometheus metrics | test_demo_walkthrough, test_jobs, test_intelligence |
 | NFR-14 | Portability and vendor neutrality | ✅ | Uniform connector SDK + manifest registry; swapping a tool is a connector change | test_connectors |
-| NFR-15 | Testability and validation | 🟡 | Golden corpora, regression suites (~300 tests), shadow agreement; accuracy in CCI's environment needs A07 data | all |
+| NFR-15 | Testability and validation | 🟡 | Golden corpora, regression suites (~300 tests), shadow agreement; accuracy in the client's environment needs A07 data | all |
 | NFR-16 | Documentation and handover | ✅ | README, ARCHITECTURE, CONNECTORS, OPERATIONS, SECURITY, DEMO_GUIDE, TEST_REPORT, this matrix | - |
 
 ## Use cases
@@ -173,7 +173,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | R03 | Analyst distrust and non-adoption | Explainable evidence with deep links, shadow mode + agreement metrics, analyst stays decision owner |
 | R04 | Over-automation causes business disruption | Autonomy policy, blast-radius limits, VIP gates, four-eyes, kill switch (durable), reversible actions |
 | R05 | Ownership data quality is poor or absent | Ownership exceptions surfaced (blocked plans), CMDB + CSV + subscription mapping, coverage report |
-| R06 | API rate limits and quota exhaustion at CCI volume | Per-tool token buckets sized under vendor limits, caching, backoff, reconciliation |
+| R06 | API rate limits and quota exhaustion at client volume | Per-tool token buckets sized under vendor limits, caching, backoff, reconciliation |
 | R07 | The platform itself becomes a high-value target | RBAC, MFA step-up, service accounts can't approve, revocation, encryption at rest, audit, hardened sandbox |
 | R08 | Tool licensing gaps block planned integrations | Connector manifests list licence-dependent capability; fake/live per connector; degraded operation |
 | R09 | Scope ambiguity against existing investment | Layer orchestrates existing tools through their APIs; no displacement |
@@ -182,26 +182,26 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | R12 | Sandbox execution risk in the current email build | Fail-closed hardened sandbox; no docker.sock in base deployment |
 | R13 | Forensic and evidential integrity | No destructive autonomous actions; forensic collection recommended before containment; append-only evidence |
 | R14 | Model and detection drift over time | Drift monitor (agreement, PSI, confidence) raising insights; golden evaluation scripts |
-| R15 | CCI's tooling changes during or after the engagement | Connector SDK: tool change = connector change |
+| R15 | The client's tooling changes during or after the engagement | Connector SDK: tool change = connector change |
 | R16 | Scope creep across three broad focus areas | Phased build tracked in the build plan; shared core across the three domains |
 
 ## Assumptions (A01–A12) and dependencies (D01–D12)
 
-These are CCI-side inputs. The platform is built so each can be plugged in without code changes:
+These are client-side inputs. The platform is built so each can be plugged in without code changes:
 
 | ID | Item | How the platform is ready |
 |---|---|---|
-| A01 | CCI will provide API access to the named security tools, with read scopes initially and dedicated service accounts per tool. | Per-tool service principals configured in `config/connectors.yaml`; read scopes first |
-| A02 | The tools named in the CCI deck represent the complete relevant estate for these three focus areas. | New tools = new connector module (SDK + manifest) |
+| A01 | The client will provide API access to the named security tools, with read scopes initially and dedicated service accounts per tool. | Per-tool service principals configured in `config/connectors.yaml`; read scopes first |
+| A02 | The tools named in the client's tooling deck represent the complete relevant estate for these three focus areas. | New tools = new connector module (SDK + manifest) |
 | A03 | Current licence tiers expose the APIs required — particularly Defender advanced hunting, Entra Identity Protection risk data, CrowdStrike exposure management, and Avanan's API. | Connectors degrade gracefully; missing licences show as unavailable sources |
 | A04 | An asset ownership mapping exists in a CMDB or maintained source, or one can be established. | ServiceNow CMDB, CSV mapping, cloud-subscription mapping |
 | A05 | The platform will run in an agreed environment with approved LLM endpoints and sufficient quota. | LLM optional; Azure OpenAI / Anthropic / OpenAI-compatible, approved-endpoint allow-list |
 | A06 | Analysts remain the decision authority; no autonomous destructive action is required at go-live. | Default policy: every action L2 (recommend) |
-| A07 | CCI will provide representative historical data — alerts, reported emails with analyst dispositions, and vulnerability exports — for tuning and validation. | Evaluation scripts ready for CCI's historical data (`scripts/eval_*`) |
+| A07 | The client will provide representative historical data — alerts, reported emails with analyst dispositions, and vulnerability exports — for tuning and validation. | Evaluation scripts ready for the client's historical data (`scripts/eval_*`) |
 | A08 | Existing report templates, the risk register schema and required output formats will be supplied. | Report templates (.docx/.pptx) plug in; risk-register mapping configurable |
 | A09 | Volume baselines (alerts per day, reported emails per day, open findings, assets under management) will be provided. | Latency/volume metrics measured; sizing awaits baselines |
-| A10 | The two existing internal systems are ITC Infotech intellectual property and are reusable in a client engagement, subject to internal IP and licensing clearance. | Commercial / IP question - not a software item |
-| A11 | CCI's SOC operates a defined incident handling process with documented severity definitions and escalation paths. | Severity/approval routing configurable in the versioned policy |
+| A10 | The two existing internal systems are the delivery team's intellectual property and are reusable in a client engagement, subject to internal IP and licensing clearance. | Commercial / IP question - not a software item |
+| A11 | The client's SOC operates a defined incident handling process with documented severity definitions and escalation paths. | Severity/approval routing configurable in the versioned policy |
 | A12 | Network connectivity is permitted between the platform and each tool's API endpoints, including any required allow-listing. | Outbound-only HTTPS to each tool API; proxy supported by httpx env |
 | D01 | API credentials and scopes | `connectors.yaml` + `*_FILE` vault secrets; per-connector Test button |
 | D02 | Network access | Connector test endpoint proves reachability per tool |
@@ -242,7 +242,7 @@ Answers change configuration, not code. Each row names the setting that absorbs 
 | Q18 | How many open vulnerability findings and how many assets are under management across the four exposure tools? | Sizing |
 | Q19 | What is the current analyst headcount, shift model and typical time spent per investigation type? | Success metrics baselines |
 | Q20 | Can we obtain historical alerts, reported emails and analyst dispositions for validation and tuning? | Evaluation scripts |
-| Q21 | Where must the platform run — CCI tenant, ITC-managed environment, or on-premise? What data residency constraints apply? | Deployment target & residency |
+| Q21 | Where must the platform run — the client's tenant, a managed-service environment, or on-premise? What data residency constraints apply? | Deployment target & residency |
 | Q22 | Which LLM endpoints are approved, and are there restrictions on sending email content, identity data or privileged access data to them? | LLM provider & redaction settings |
 | Q23 | Is there an existing internal AI governance policy the platform must comply with? | LLM governance settings |
 | Q24 | What retention is required for security evidence and for audit logs? | Retention settings (`SOC_*_RETENTION_DAYS`) |

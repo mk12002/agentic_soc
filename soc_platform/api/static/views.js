@@ -61,7 +61,7 @@ async function Intelligence() {
     `<div class="grid g-2">
       <div class="stack">
         ${card('Situation brief', `<div class="prose">${esc(b.summary)}</div>`, {right: chip(b.source === 'llm' ? 'LLM narrative' : 'Deterministic', 'plain')})}
-        ${card('Ask the analyst', `<div class="inline"><input class="input" style="flex:1;min-width:260px" id="iq" data-enter="askIntel" placeholder="e.g. Is jane.doe@cci-demo.com compromised and what should we do first?">
+        ${card('Ask the analyst', `<div class="inline"><input class="input" style="flex:1;min-width:260px" id="iq" data-enter="askIntel" placeholder="e.g. Is jane.doe@acme-demo.com compromised and what should we do first?">
           ${btn('Ask', 'askIntel', [], 'primary')}</div><div id="ia"></div>`)}
         ${card(`Correlated findings <span class="muted">(${ins.length})</span>`, shown.map(i => `
           <div class="list-row" style="align-items:flex-start;padding:14px 0">
@@ -124,12 +124,12 @@ async function CaseDetail(id) {
   const acts = [...v.actions].sort((x, y) => (x.priority || 99) - (y.priority || 99));
   const astat = x => status(x.status === 'executed' ? 'ok' : ['rejected', 'rolled_back'].includes(x.status) ? 'info' : x.status === 'failed' ? 'critical' : 'medium', cap(x.status));
   const actRow = x => `<tr><td class="num muted">${esc(x.priority ?? '')}</td>
-    <td style="min-width:320px"><div class="t-title mono">${esc(x.action_type)}</div><div class="small" style="margin-top:3px;color:var(--text-2)">${esc(x.rationale)}</div>
+    <td style="min-width:190px"><div class="t-title mono" style="overflow-wrap:anywhere">${esc(x.action_type)}</div><div class="small" style="margin-top:3px;color:var(--text-2);overflow-wrap:anywhere">${esc(x.rationale)}</div>
       <div class="t-sub">L${esc(x.level)}${x.blast_radius ? ' · blast radius: ' + esc(x.blast_radius) : ''}${x.reversible === false ? ' · not reversible' : ''}</div>
       ${(x.policy_reasons || []).slice(1).map(r => `<div class="t-sub">${esc(r)}</div>`).join('')}</td>
-    <td class="small wrap">${x.targets.slice(0, 3).map(t => esc(t.id)).join('<br>')}${x.targets.length > 3 ? `<br><span class="muted">+${x.targets.length - 3} more</span>` : ''}</td>
+    <td class="small wrap" style="min-width:110px">${x.targets.slice(0, 3).map(t => esc(t.name || t.recipient || t.id)).join('<br>')}${x.targets.length > 3 ? `<br><span class="muted">+${x.targets.length - 3} more</span>` : ''}</td>
     <td>${astat(x)}${x.approver ? `<div class="t-sub">${esc(x.approver)}</div>` : ''}</td>
-    <td><div class="inline" style="flex-wrap:nowrap">${['recommended', 'pending_approval'].includes(x.status) && can('approve_action') ? btn('Approve', 'act', [x.id, 'approve', id], 'sm primary') + btn('Reject', 'act', [x.id, 'reject', id], 'sm') :
+    <td><div class="inline" style="flex-wrap:wrap;gap:6px">${['recommended', 'pending_approval'].includes(x.status) && can('approve_action') ? btn('Approve', 'act', [x.id, 'approve', id], 'sm primary') + btn('Reject', 'act', [x.id, 'reject', id], 'sm') :
       x.status === 'executed' && can('rollback_action') ? btn('Roll back', 'act', [x.id, 'rollback', id], 'sm') : ''}</div></td></tr>`;
   const intel = v.intelligence || {};
   setMainG(__g, `<div class="page-head"><div>
@@ -205,9 +205,9 @@ async function Approvals() {
       `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}">${esc(cap(f))} <span class="muted">${f === 'all' ? all.length : all.filter(x => x.domain === f).length}</span></button>`).join('')}</div></div>` +
       table(['Action', 'Targets', 'Rationale', 'Policy', ''], xs.map(x => `<tr>
       <td class="nowrap"><div class="t-title mono">${esc(x.action_type)}</div><div class="t-sub">${esc(cap(x.domain))} · L${esc(x.level)}</div></td>
-      <td class="small wrap">${x.targets.slice(0, 3).map(t => esc(t.id)).join('<br>') || '<span class="muted">-</span>'}</td><td class="small">${esc(x.rationale)}</td>
+      <td class="small wrap">${x.targets.slice(0, 3).map(t => esc(t.name || t.recipient || t.id)).join('<br>') || '<span class="muted">-</span>'}</td><td class="small wrap">${esc(x.rationale)}</td>
       <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}</td>
-      <td><div class="inline" style="flex-wrap:nowrap">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}${x.case_id ? `<a class="btn sm ghost" href="#/cases/${encodeURIComponent(x.case_id)}">Case</a>` : ''}</div></td></tr>`),
+      <td><div class="inline" style="flex-wrap:wrap;gap:6px">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}${x.case_id ? `<a class="btn sm ghost" href="#/cases/${encodeURIComponent(x.case_id)}">Case</a>` : ''}</div></td></tr>`),
       {empty: 'Nothing is waiting for approval.'}), {flush: true})));
 }
 function approvalFilter(f) { APPROVAL_FILTER = f; Approvals(); }
@@ -221,7 +221,7 @@ async function Phishing() {
     (can('investigate') ? btn('Pull reporting mailbox', 'runPh', [], '', 'refresh') : '') + go('#/suppliers', 'Supplier risk', 'btn'),
     `<div class="grid g-kpi">${kpi('Reported', nf(m.reported))}${kpi('Auto-closed', nf(m.auto_closed), `${nf(m.sampled_for_qa)} sampled for QA`)}
       ${kpi('Campaigns', nf(m.campaigns))}${kpi('Repeat clickers', nf((m.repeat_clickers || []).length), '', (m.repeat_clickers || []).length > 0)}
-      ${kpi('Time to containment', m.time_to_containment_minutes && m.time_to_containment_minutes.median != null ? m.time_to_containment_minutes.median + ' min' : '–', 'median')}</div>
+      ${kpi('Time to containment', m.time_to_containment_minutes && m.time_to_containment_minutes.median != null ? Math.round(m.time_to_containment_minutes.median) + ' min' : '–', m.time_to_containment_minutes && m.time_to_containment_minutes.median != null ? 'median, report to first containment' : 'no containment executed yet')}</div>
     <div class="grid g-3 mt">
       ${card('Verdict mix', donut(m.verdict_mix, {malicious: 'var(--c-critical)', suspicious: 'var(--c-high)', spam: 'var(--c-medium)', safe: 'var(--c-low)'}))}
       ${card('Users who clicked', clickers.map(([u, n]) => `<div class="list-row"><span class="grow">${esc(u)}</span>${n >= 2 ? chip('repeat', 'plain') : ''}<span class="score">${n}</span></div>`).join('') || empty('No clicks recorded'))}
@@ -315,7 +315,7 @@ async function ShadowIt() {
     <div class="grid g-2 mt">
       ${card('Unsanctioned services', table(['Service', 'Categories', 'Risk', {h: 'Users', num: 1}, {h: 'Requests', num: 1}, {h: 'Blocked', num: 1}], r.unsanctioned_services.map(x => `<tr>
         <td class="t-title">${esc(x.service)}</td><td class="small muted">${esc(x.categories.join(', '))}</td><td>${chip(x.risk)}</td><td class="num" title="${esc(x.user_list.join(', '))}">${x.users}</td><td class="num">${x.requests}</td><td class="num">${x.blocked}</td></tr>`)), {flush: true})}
-      ${card('By category', Object.entries(r.by_category).map(([k, v]) => `<div class="list-row"><span class="grow">${esc(cap(k))}</span><span class="score">${v}</span></div>`).join('') || empty('None'))}
+      ${card('By category', Object.entries(r.by_category).map(([k, v]) => `<div class="list-row"><span class="grow">${esc(cap(k).replace(/\bai\b/i, 'AI').replace(/\bvpn\b/i, 'VPN'))}</span><span class="score">${v}</span></div>`).join('') || empty('None'), {sub: 'DNS requests'})}
     </div>
     <div class="mt">${card('Risky destinations', table(['Domain', 'Categories', 'Outcome', 'Users', 'Hosts'], r.risky_destinations.map(x => `<tr><td class="mono small">${esc(x.domain)}</td><td class="small">${esc(x.categories.join(', '))}</td>
       <td>${x.status === 'reached' ? status('critical', 'Reached') : status('ok', 'Blocked')}</td><td class="small">${esc(x.users.join(', '))}</td><td class="small">${esc(x.hosts.join(', '))}</td></tr>`)), {flush: true})}</div>`));
@@ -338,7 +338,7 @@ async function Integrations() {
     <div class="mt">${card('Scheduled jobs', table(['Job', 'Last run', 'Outcome', {h: 'Duration', num: 1}, 'Detail', ''], Object.keys(jr.jobs).map(j => { const r = last[j]; return `<tr>
       <td class="t-title">${esc(cap(j))}</td><td class="mono small muted">${r ? dt(r.started_at) : 'never'}</td>
       <td>${r ? status(jst[r.status], cap(r.status)) + `${r.attempts > 1 ? `<div class="t-sub">${r.attempts} attempts</div>` : ''}` : ''}</td>
-      <td class="num small">${r && r.duration_s != null ? r.duration_s + ' s' : ''}</td><td class="small muted">${r ? esc((r.error || JSON.stringify(r.summary)).slice(0, 140)) : ''}</td>
+      <td class="num small">${r && r.duration_s != null ? r.duration_s + ' s' : ''}</td><td class="small muted wrap">${r ? esc((r.error || JSON.stringify(r.summary)).slice(0, 140)) : ''}</td>
       <td>${can('manage_connectors') ? btn('Run now', 'runJob', [j], 'sm') : ''}</td></tr>`; })), {flush: true, sub: 'retried with backoff; dead-lettered after 3 failed runs'})}</div>`));
 }
 async function testConn(name) { const r = await post(`/api/v1/connectors/${name}/test`); toast(r.ok ? `${name}: connected (${r.latency_ms} ms, ${r.sample_records ?? 0} records)` : `${name}: ${r.error}`, !r.ok); }
@@ -545,7 +545,7 @@ async function Story(id) {
         <span class="small muted">${esc(a.confidence)} confidence · ${esc(a.reason)}</span></div>
       <h1>Attack story</h1><p>${esc(st.title)} · reconstructed from ${st.generated_from.length} case(s), ${st.tools.length} tools${st.span_minutes != null ? ` · ${st.span_minutes} min from first to last step` : ''}</p></div></div>
     ${card(null, `<div class="prose" style="font-size:14px">${esc(st.summary)}</div>`)}
-    <div class="grid g-kpi mt">${kpi('Kill-chain stages', st.stages_observed.length, 'observed')}${kpi('Steps', st.steps.length, `${st.steps.filter(s => s.outcome === 'blocked').length} blocked`)}
+    <div class="grid g-kpi mt">${kpi('Kill-chain stages', st.stages_observed.length, (() => { const r = new Set(st.steps.filter(s => s.outcome !== 'blocked').map(s => s.stage)); const b = new Set(st.steps.filter(s => s.outcome === 'blocked' && !r.has(s.stage)).map(s => s.stage)); return `${r.size} reached · ${b.size} blocked`; })())}${kpi('Steps', st.steps.length, `${st.steps.filter(s => s.outcome === 'blocked').length} blocked`)}
       ${kpi('Users reached', b.users_received ? `${b.users_interacted} / ${b.users_received}` : '0', 'interacted / received')}${kpi('Hosts', b.hosts)}
       ${kpi('Privileged secrets', b.privileged_secrets, esc(st.blast_radius.secrets.join(', ')), b.privileged_secrets > 0)}${kpi('Gaps checked', st.gaps.length, `${st.gaps.filter(g => g.status === 'blind_spot').length} blind spot(s)`)}</div>
     <div class="mt">${card('Kill chain', `<div class="chain">${kc}</div>`, {sub: 'MITRE ATT&CK tactics - observed, blocked, checked without evidence, or blind'})}</div>

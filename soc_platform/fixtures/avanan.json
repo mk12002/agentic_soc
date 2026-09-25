@@ -50,7 +50,7 @@
       "description": "Spam campaign from vendor.example",
       "senderAddress": "news@vendor.example",
       "recipients": [
-       "arun.k@cci-demo.com"
+       "arun.k@acme-demo.com"
       ],
       "actions": [
        {

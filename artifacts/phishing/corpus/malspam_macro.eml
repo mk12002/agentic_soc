@@ -1,12 +1,12 @@
 Received: from unknown.static.example (unknown.static.example [194.26.192.64])
- by mx1.cci-demo.com (Postfix) with ESMTPS id 4Xyz0005; Sun, 20 Sep 2026
+ by mx1.acme-demo.com (Postfix) with ESMTPS id 4Xyz0005; Sun, 20 Sep 2026
  08:05:00 +0000
-Received: from mx1.cci-demo.com (10.0.0.25) by exch01.cci-demo.com
+Received: from mx1.acme-demo.com (10.0.0.25) by exch01.acme-demo.com
  (10.0.0.30); Sun, 20 Sep 2026 08:05:00 +0000
-Authentication-Results: mx1.cci-demo.com; spf=fail dkim=none dmarc=fail
+Authentication-Results: mx1.acme-demo.com; spf=fail dkim=none dmarc=fail
  header.from=global-freight-ltd.com
 From: "Global Freight Accounts" <accounts@global-freight-ltd.com>
-To: arun.k@cci-demo.com
+To: arun.k@acme-demo.com
 Subject: Invoice INV-20931 payment overdue
 Date: Sun, 20 Sep 2026 08:05:00 +0000
 Message-ID: <179028143809.25860.7897608917783381401@global-freight-ltd.com>

@@ -222,6 +222,6 @@ MANIFEST = ConnectorManifest(
                          ConfigField("mde_base", "API base (regional endpoints)", required=False)],
     actions=_actions, confidence="High",
     to_confirm="Licence tier (P2 for advanced hunting/TVM); app permissions; hunting quota",
-    fake_settings={"user_domain": "cci-demo.com", "tenant_id": "demo-tenant"},
+    fake_settings={"user_domain": "acme-demo.com", "tenant_id": "demo-tenant"},
     focus_areas=("incident", "vulnerability", "phishing"),
 )

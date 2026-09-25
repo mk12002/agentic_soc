@@ -192,10 +192,10 @@ def test_same_host_described_differently_is_still_one_approval(session, registry
     c1, c2 = cs.create("phishing", "p", actor="agent:x"), cs.create("incident", "i", actor="agent:x")
     svc = ActionService(session, registry, PolicyEngine())
     a = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "jane-lt01"}], requested_by=agent_principal("ph"), case_id=c1.id)
-    b = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "jane-lt01.cci-demo.com", "crowdstrike_aid": "cs-1"}],
+    b = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "jane-lt01.acme-demo.com", "crowdstrike_aid": "cs-1"}],
                     requested_by=agent_principal("im"), case_id=c2.id)
     assert a.id == b.id
-    c = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "bob-lt02.cci-demo.com"}], requested_by=agent_principal("im"), case_id=c2.id)
+    c = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "bob-lt02.acme-demo.com"}], requested_by=agent_principal("im"), case_id=c2.id)
     assert c.id != a.id
 
 

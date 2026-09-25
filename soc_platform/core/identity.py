@@ -1,12 +1,12 @@
 """Cross-source user identity normalisation.
 
-Every tool names users differently: ``CCI\\jane.doe`` (CrowdStrike, Delinea), ``jane.doe`` + domain
-(Defender, Canary), ``jane.doe@cci.com`` (Entra, Umbrella, email), ``Jane Doe <jane@cci.com>`` (labels).
+Every tool names users differently: ``ACME\\jane.doe`` (CrowdStrike, Delinea), ``jane.doe`` + domain
+(Defender, Canary), ``jane.doe@acme.com`` (Entra, Umbrella, email), ``Jane Doe <jane@acme.com>`` (labels).
 ``user_ref`` turns any of them into an ``EntityRef`` with the strongest keys available:
 
 * ``upn``   - lower-cased user principal name / primary email (shares a namespace with ``email``)
 * ``sam``   - on-prem account name, matched against Entra ``onPremisesSamAccountName`` so that
-              ``CCI\\jdoe`` resolves to ``jane.doe@cci.com`` even when the UPN prefix differs
+              ``ACME\\jdoe`` resolves to ``jane.doe@acme.com`` even when the UPN prefix differs
 Built-in and machine accounts (SYSTEM, root, www-data, ``HOST$``...) are not people: ``user_ref`` returns
 ``None`` for them so they never become phantom identities; callers keep the raw name as an attribute.
 """

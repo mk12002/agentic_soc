@@ -11,9 +11,9 @@ Every connector runs in one of two modes, set per connector in `config/connector
 
 **Verification status.** Every connector is implemented against the vendor's documented API and verified end to end
 on fixtures shaped like the documented responses (`soc_platform/tests/test_connectors.py`). The public feeds (NVD,
-EPSS, CISA KEV) are also verified live. The vendor connectors have **not yet been run against CCI's tenants**: do
+EPSS, CISA KEV) are also verified live. The vendor connectors have **not yet been run against the client's tenants**: do
 that per connector with the *Test* button (Connectors screen) or `POST /api/v1/connectors/{name}/test`, which
-authenticates and reads one page. Items under *To confirm* are licence or permission questions for CCI (A01, A03).
+authenticates and reads one page. Items under *To confirm* are licence or permission questions for the client (A01, A03).
 
 **Onboarding a tool (live):**
 
@@ -57,7 +57,7 @@ Security events, per-message verdicts and actions for reconciliation; quarantine
 - Vendor: Check Point · focus areas: phishing
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): quarantine / restore
-- To confirm with CCI: API availability and scope under current licence (fallbacks: journaling, shared mailbox, export)
+- To confirm with the client: API availability and scope under current licence (fallbacks: journaling, shared mailbox, export)
 - Configuration:
   - `api_url` (optional): Smart API gateway URL (region specific)
   - `client_id` (secret): Infinity Portal API client id
@@ -71,7 +71,7 @@ Canary and Canarytoken incidents and device inventory; high-fidelity deception s
 - Vendor: Thinkst · focus areas: incident
 - Read scopes: API auth token (read-only where available)
 - Write scopes (only for approved actions): acknowledge incidents
-- To confirm with CCI: API token provisioning
+- To confirm with the client: API token provisioning
 - Configuration:
   - `domain_hash`: Console hash (<hash>.canary.tools)
   - `auth_token` (secret): API auth token
@@ -84,7 +84,7 @@ Known Exploited Vulnerabilities catalogue; additions trigger exposure assessment
 - Vendor: CISA · focus areas: vulnerability, incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: -
+- To confirm with the client: -
 - Configuration:
   - none
 
@@ -95,7 +95,7 @@ Maintained hostname-pattern to owner/platform-team/criticality mapping (fallback
 - Vendor: internal · focus areas: vulnerability, incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: -
+- To confirm with the client: -
 - Configuration:
   - `path`: CSV path: hostname,owner,platform_team,environment,criticality,serial_number
 
@@ -106,7 +106,7 @@ Detections, host inventory, Spotlight vulnerabilities, IOC lookup, containment a
 - Vendor: CrowdStrike · focus areas: incident, vulnerability, phishing
 - Read scopes: Alerts:read, Hosts:read, Spotlight vulnerabilities:read, IOCs:read
 - Write scopes (only for approved actions): Hosts:write, Real time response:write
-- To confirm with CCI: API client scopes; Spotlight/Exposure licence; RTR response policy
+- To confirm with the client: API client scopes; Spotlight/Exposure licence; RTR response policy
 - Configuration:
   - `base_url` (optional): API base (e.g. https://api.eu-1.crowdstrike.com)
   - `client_id` (secret): OAuth2 API client id
@@ -120,7 +120,7 @@ Alerts, device inventory, TVM vulnerabilities, advanced hunting, isolation, scan
 - Vendor: Microsoft · focus areas: incident, vulnerability, phishing
 - Read scopes: Alert.Read.All, Machine.Read.All, Vulnerability.Read.All, AdvancedQuery.Read.All, Ti.Read.All
 - Write scopes (only for approved actions): Machine.Isolate, Machine.Scan, Machine.CollectForensics, Ti.ReadWrite.All
-- To confirm with CCI: Licence tier (P2 for advanced hunting/TVM); app permissions; hunting quota
+- To confirm with the client: Licence tier (P2 for advanced hunting/TVM); app permissions; hunting quota
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
@@ -135,7 +135,7 @@ User-reported mail, email alerts, message trace & campaign hunting, click teleme
 - Vendor: Microsoft · focus areas: phishing, incident
 - Read scopes: Mail.Read (reporting mailbox, app-access-policy scoped), SecurityAlert.Read.All, ThreatHunting.Read.All
 - Write scopes (only for approved actions): SecurityAnalyzedMessage.ReadWrite.All, Mail.ReadWrite (scoped), Mail.Send (SOC mailbox), Exchange.ManageAsApp (tenant allow/block list)
-- To confirm with CCI: Licence tier for advanced hunting and Safe Links click telemetry; Graph app permissions; Exchange app-access policy scoping the SOC mailbox
+- To confirm with the client: Licence tier for advanced hunting and Safe Links click telemetry; Graph app permissions; Exchange app-access policy scoping the SOC mailbox
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
@@ -149,7 +149,7 @@ Elevation and application-control events.
 - Vendor: Delinea · focus areas: incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: API access approval and available event granularity
+- To confirm with the client: API access approval and available event granularity
 - Configuration:
   - `base_url`: Privilege Manager URL
   - `client_id` (secret): API client id
@@ -164,7 +164,7 @@ Secret access audit, privileged sessions, standing privilege; credential rotatio
 - Vendor: Delinea · focus areas: incident
 - Read scopes: View Secret Audit, View Launched Sessions
 - Write scopes (only for approved actions): Change Password Now on target secrets
-- To confirm with CCI: API access approval - privileged access data needs extra governance
+- To confirm with the client: API access approval - privileged access data needs extra governance
 - Configuration:
   - `base_url`: Secret Server URL
   - `username` (secret): API user
@@ -180,7 +180,7 @@ Users, sign-ins, risky users and detections, roles, MFA, inbox rules; session re
 - Vendor: Microsoft · focus areas: incident, phishing
 - Read scopes: User.Read.All, AuditLog.Read.All, IdentityRiskyUser.Read.All, IdentityRiskEvent.Read.All, RoleManagement.Read.Directory, UserAuthenticationMethod.Read.All, MailboxSettings.Read
 - Write scopes (only for approved actions): User.RevokeSessions.All, User.EnableDisableAccount.All, IdentityRiskyUser.ReadWrite.All, User-PasswordProfile.ReadWrite.All
-- To confirm with CCI: Entra ID P2 for Identity Protection risk data; write permissions for response actions
+- To confirm with the client: Entra ID P2 for Identity Protection risk data; write permissions for response actions
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
@@ -193,7 +193,7 @@ Exploit Prediction Scoring System probabilities per CVE.
 - Vendor: FIRST · focus areas: vulnerability
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: -
+- To confirm with the client: -
 - Configuration:
   - none
 
@@ -204,7 +204,7 @@ Normalises alerts pushed to /api/v1/ingest/alerts from any SIEM/SOAR.
 - Vendor: any · focus areas: incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: -
+- To confirm with the client: -
 - Configuration:
   - `field_map` (optional): Mapping of platform fields to payload keys
 
@@ -215,7 +215,7 @@ Remediation tickets as Jira issues with comments/status sync.
 - Vendor: Atlassian · focus areas: vulnerability, incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: Only if CCI uses Jira (Q03)
+- To confirm with the client: Only if the client uses Jira (Q03)
 - Configuration:
   - `base_url`: https://<site>.atlassian.net
   - `email`: Integration user email
@@ -229,7 +229,7 @@ CVE metadata (CVSS, CWE, references) from the NVD CVE API 2.0.
 - Vendor: NIST · focus areas: vulnerability
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: -
+- To confirm with the client: -
 - Configuration:
   - `api_key` (secret) (optional): Optional NVD API key (raises rate limit)
 
@@ -240,9 +240,9 @@ Asset inventory and vulnerability findings from the Security Console API (or CSV
 - Vendor: Rapid7 · focus areas: vulnerability, incident
 - Read scopes: Security Console: read-only user / API key
 - Write scopes (only for approved actions): -
-- To confirm with CCI: Authoritative product/version; live API availability
+- To confirm with the client: Authoritative product/version; live API availability
 - Configuration:
-  - `console_url`: Security Console URL, e.g. https://ivm.cci.local:3780
+  - `console_url`: Security Console URL, e.g. https://ivm.acme.local:3780
   - `username` (secret): Read-only API user
   - `password` (secret): API user password
   - `verify_tls` (optional): Verify console TLS certificate
@@ -250,12 +250,12 @@ Asset inventory and vulnerability findings from the Security Console API (or CSV
 
 ### Microsoft Sentinel (`sentinel`)
 
-Sentinel incidents (if Sentinel is CCI's SIEM).
+Sentinel incidents (if Sentinel is the client's SIEM).
 
 - Vendor: Microsoft · focus areas: incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: Whether a SIEM exists and which (Q01)
+- To confirm with the client: Whether a SIEM exists and which (Q01)
 - Configuration:
   - `tenant_id`: 
   - `client_id` (secret): 
@@ -271,7 +271,7 @@ Remediation/incident tickets with bidirectional status; CMDB ownership and criti
 - Vendor: ServiceNow · focus areas: vulnerability, incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: Which ITSM system; API access; workflow ownership (Q03)
+- To confirm with the client: Which ITSM system; API access; workflow ownership (Q03)
 - Configuration:
   - `instance_url`: https://<instance>.service-now.com
   - `client_id` (secret) (optional): OAuth client id
@@ -288,7 +288,7 @@ VirusTotal, AbuseIPDB, OTX, URLhaus, ThreatFox, MalwareBazaar, GreyNoise, Shodan
 - Vendor: multiple · focus areas: phishing, incident, vulnerability
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with CCI: CCI-approved intelligence sources and licensing
+- To confirm with the client: client-approved intelligence sources and licensing
 - Configuration:
   - `virustotal_api_key` (secret) (optional): virustotal API key
   - `abuseipdb_api_key` (secret) (optional): abuseipdb API key
@@ -304,7 +304,7 @@ DNS/proxy activity (did the user reach the site?), categories, domain blocking v
 - Vendor: Cisco · focus areas: phishing, incident
 - Read scopes: reports.aggregations:read, reports.customerDNS:read, policies.destinationLists:read
 - Write scopes (only for approved actions): policies.destinations:write
-- To confirm with CCI: API key provisioning; reporting retention window
+- To confirm with the client: API key provisioning; reporting retention window
 - Configuration:
   - `api_key` (secret): Umbrella API key
   - `api_secret` (secret): API secret
@@ -317,7 +317,7 @@ Cloud inventory, vulnerability findings, internet exposure and misconfiguration 
 - Vendor: Wiz · focus areas: vulnerability, incident
 - Read scopes: read:resources, read:vulnerabilities, read:issues
 - Write scopes (only for approved actions): -
-- To confirm with CCI: Service account provisioning; scope of cloud coverage
+- To confirm with the client: Service account provisioning; scope of cloud coverage
 - Configuration:
   - `api_url`: Tenant API endpoint, e.g. https://api.eu1.app.wiz.io
   - `client_id` (secret): Service account client id

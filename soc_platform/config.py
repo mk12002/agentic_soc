@@ -59,7 +59,7 @@ class Settings(BaseModel):
     fixtures_dir: str = str(Path(__file__).parent / "fixtures")
 
     # LLM governance (NFR-11)
-    llm_provider: str = "none"  # none | azure_openai | anthropic | openai_compatible
+    llm_provider: str = "none"  # none | azure_openai | azure_foundry | anthropic | openai_compatible
     llm_endpoint: str | None = None
     llm_deployment: str | None = None
     llm_api_version: str = "2024-10-21"

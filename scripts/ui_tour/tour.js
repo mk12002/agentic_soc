@@ -32,7 +32,7 @@ async function upload(tok, file) {
 }
 
 async function settle(page) {
-  await page.waitForFunction(() => !document.querySelector('#main .skeleton'), null, {timeout: 30000}).catch(() => problems.push('timeout ' + page.url()));
+  await page.waitForFunction(() => !document.querySelector('#main .skeleton'), null, {timeout: 90000}).catch(() => problems.push('timeout ' + page.url()));
   await page.waitForTimeout(350);
 }
 const AUDIT = () => {
@@ -53,6 +53,9 @@ const AUDIT = () => {
     if (!el.children.length && cs.display !== 'inline' && cs.overflowX === 'visible' && el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1 && !inScroller(el))
       out.push('text-overflow ' + desc(el));
   }
+  if (vw >= 1260)   // at desktop widths no table should need sideways scrolling (narrower screens may scroll)
+    for (const t of document.querySelectorAll('.table-wrap'))
+      if (t.scrollWidth > t.clientWidth + 1) out.push(`table needs sideways scroll (${t.scrollWidth - t.clientWidth}px) ` + desc(t.querySelector('th') || t));
   return [...new Set(out)].slice(0, 12);
 };
 async function audit(page, label) {
@@ -76,7 +79,7 @@ async function visit(page, hash, name, full = true) {
 
 (async () => {
   // ---------- sample data through the real API, as the scheduler would load it
-  const lead = await token('lena@cci-demo.com', 'lead');
+  const lead = await token('lena@acme-demo.com', 'lead');
   console.log('loading samples...');
   await call(lead, 'POST', '/api/v1/vm/refresh');
   await call(lead, 'POST', '/api/v1/incidents/run');
@@ -86,12 +89,12 @@ async function visit(page, hash, name, full = true) {
   await call(lead, 'POST', '/api/v1/vm/campaigns', {cve: 'CVE-2021-44228', notify_via: 'ticket'});
   await call(lead, 'POST', '/api/v1/vm/misconfigurations/route');
   await call(lead, 'POST', '/api/v1/intelligence/refresh');
-  const ops = await token('otto@cci-demo.com', 'automation_admin');
+  const ops = await token('otto@acme-demo.com', 'automation_admin');
   for (const j of ['intelligence', 'follow_up', 'retention']) await call(ops, 'POST', `/api/v1/jobs/${j}/run`);
   const cases = await call(lead, 'GET', '/api/v1/cases');
   const phishCase = cases.find(c => c.domain === 'phishing' && c.title.includes('password expires')) || cases.find(c => c.domain === 'phishing');
   const incCase = cases.find(c => c.domain === 'incident' && c.severity === 'critical') || cases.find(c => c.domain === 'incident');
-  const jane = await call(lead, 'GET', '/api/v1/entities/find?kind=identity&key=upn&value=jane.doe@cci-demo.com');
+  const jane = await call(lead, 'GET', '/api/v1/entities/find?kind=identity&key=upn&value=jane.doe@acme-demo.com');
 
   const browser = await chromium.launch({executablePath: BROWSER, headless: true, ignoreDefaultArgs: ['--hide-scrollbars']});
   const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, deviceScaleFactor: 1, bypassCSP: true}); // harness only: CSP blocks Playwright's eval-based waits
@@ -103,24 +106,8 @@ async function visit(page, hash, name, full = true) {
   // ---------- sign-in (light), then real UI sign-in as lead
   await page.goto(BASE + '/');
   await page.waitForSelector('#si-user');
-  if (process.env.SOC_TOUR_MODE === 'deep') {
-    // separate pass against a local STUB model (the model name on screen says so): shows the guardrails at work
-    await page.fill('#si-user', 'lena@cci-demo.com'); await page.selectOption('#si-role', 'lead');
-    await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
-    await page.goto(`${BASE}/#/story/${phishCase.id}`); await settle(page);
-    await page.click('[data-fn="runDeep"]');
-    await page.waitForFunction(() => document.querySelector('#deep .prose'), null, {timeout: 30000});
-    await settle(page);
-    await page.evaluate(() => { const t = document.querySelector('#toast'); if (t) t.remove(); });
-    await page.locator('#deep').locator('xpath=ancestor::section[1]').screenshot({path: `${OUT}/28-deep-analysis-stub-llm.png`});
-    console.log('saved 28-deep-analysis-stub-llm');
-    await audit(page, 'deep analysis');
-    await browser.close();
-    console.log('PROBLEMS:', problems.length ? problems.join(' | ') : 'none');
-    process.exit(problems.length ? 1 : 0);
-  }
   await shot(page, '00-sign-in', false);
-  await page.fill('#si-user', 'lena@cci-demo.com');
+  await page.fill('#si-user', 'lena@acme-demo.com');
   await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]');
   await page.waitForSelector('.sidebar');
@@ -128,9 +115,9 @@ async function visit(page, hash, name, full = true) {
 
   await visit(page, 'overview', '01-overview');
   await page.goto(`${BASE}/#/intelligence`); await settle(page);
-  await page.fill('#iq', 'Is jane.doe@cci-demo.com compromised and what should we do first?');
+  await page.fill('#iq', 'Is jane.doe@acme-demo.com compromised and what should we do first?');
   await page.click('[data-fn="askIntel"]');
-  await page.waitForFunction(() => !document.querySelector('#ia .spin') && document.querySelector('#ia').textContent.length > 40, null, {timeout: 20000});
+  await page.waitForFunction(() => !document.querySelector('#ia .spin') && document.querySelector('#ia').textContent.length > 40, null, {timeout: 120000});
   await shot(page, '02-intelligence');
   await visit(page, 'cases', '03-cases', false);
   await visit(page, `cases/${phishCase.id}`, '04-case-phishing');
@@ -139,6 +126,20 @@ async function visit(page, hash, name, full = true) {
   await visit(page, `entity/${jane.id}`, '06-entity-360');
   await visit(page, 'approvals', '07-approvals');
   await visit(page, `story/${phishCase.id}`, '24-attack-story');
+  const llmOn = (await call(lead, 'GET', '/api/v1/llm/status')).configured;
+  if (llmOn) {                                  // real model: the evidence-bound review, photographed as it renders
+    await page.click('[data-fn="runDeep"]');
+    await page.waitForFunction(() => document.querySelector('#deep .prose') || document.querySelector('#deep .callout'), null, {timeout: 180000});
+    await settle(page);
+    if (!(await page.$('#deep .prose'))) problems.push('deep analysis did not complete');
+    await page.evaluate(() => { const t = document.querySelector('#toast'); if (t) t.remove(); });
+    await page.setViewportSize({width: 1440, height: 4000});        // whole card on screen: no scrolling under the sticky bar
+    await page.waitForTimeout(300);
+    await page.locator('#deep').locator('xpath=ancestor::section[1]').screenshot({path: `${OUT}/28-deep-analysis.png`});
+    await page.setViewportSize({width: 1440, height: 900});
+    console.log('saved 28-deep-analysis');
+    await audit(page, 'deep analysis');
+  }
   await visit(page, 'phishing', '08-phishing', false);
   await visit(page, 'suppliers', '09-supplier-risk');
   await page.goto(`${BASE}/#/vulnerabilities`); await settle(page);
@@ -153,10 +154,10 @@ async function visit(page, hash, name, full = true) {
   await visit(page, 'reports', '16-reports', false);
   await page.fill('#rq', 'A one-page board brief on phishing and supplier risk this quarter, as slides');
   await page.click('[data-fn="reportPlan"]');
-  await page.waitForSelector('#rplan .plan-box', {timeout: 20000});
+  await page.waitForSelector('#rplan .plan-box', {timeout: 90000});
   await shot(page, '25-report-plan', false);
   await page.click('[data-fn="buildPlanned"]');
-  await page.waitForSelector('#rout .rep-sec', {timeout: 60000});
+  await page.waitForSelector('#rout .rep-sec', {timeout: 180000});
   await settle(page);
   await audit(page, 'report generated');
   await page.evaluate(() => { const t = document.querySelector('#toast'); if (t) t.remove(); });
@@ -177,22 +178,27 @@ async function visit(page, hash, name, full = true) {
 
   // ---------- admin: access management, with a service-account key created in the UI
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
-  await page.fill('#si-user', 'ada@cci-demo.com'); await page.selectOption('#si-role', 'admin');
+  await page.fill('#si-user', 'ada@acme-demo.com'); await page.selectOption('#si-role', 'admin');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   await page.goto(`${BASE}/#/access`); await settle(page);
   await page.fill('#kn', 'prometheus'); await page.click('[data-fn="newKey"]'); await page.waitForTimeout(1200);
+  if (!(await page.$('#kout code'))) problems.push('service-account key was not shown');
+  await page.evaluate(() => { const c = document.querySelector('#kout code'); if (c) c.textContent = c.textContent.slice(0, 7) + '•'.repeat(24) + '  (masked for the screenshot)'; });
   await shot(page, '18-access');
   // auditor: compliance pack
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
-  await page.fill('#si-user', 'audrey@cci-demo.com'); await page.selectOption('#si-role', 'auditor');
+  await page.fill('#si-user', 'audrey@acme-demo.com'); await page.selectOption('#si-role', 'auditor');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   await page.goto(`${BASE}/#/reports`); await settle(page);
-  await page.click('[data-fn="compliancePack"]'); await page.waitForTimeout(3000);
+  await page.click('[data-fn="compliancePack"]');
+  await page.waitForSelector('#comp .callout', {timeout: 60000});
+  await page.evaluate(() => { document.querySelector('#comp').closest('section').scrollIntoView({block: 'center'}); });
+  await page.waitForTimeout(400);
   await shot(page, '19-compliance-pack', false);
 
   // ---------- layout audit at narrower widths, every screen, both themes
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
-  await page.fill('#si-user', 'lena@cci-demo.com'); await page.selectOption('#si-role', 'lead');
+  await page.fill('#si-user', 'lena@acme-demo.com'); await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'reports', 'access', 'audit'];
@@ -207,6 +213,6 @@ async function visit(page, hash, name, full = true) {
   await browser.close();
   console.log('\nPROBLEMS:', problems.length ? '\n - ' + problems.join('\n - ') : 'none');
   fs.writeFileSync(path.join(OUT, 'tour-result.json'), JSON.stringify({problems,
-    screenshots: fs.readdirSync(OUT).filter(f => f.endsWith('.png')).length, audited_widths: [1440, 1280, 1024]}, null, 1));
+    screenshots: fs.readdirSync(OUT).filter(f => f.endsWith('.png')).length, audited_widths: [1440, 1280, 1024], llm: llmOn}, null, 1));
   process.exit(problems.length ? 1 : 0);
 })().catch(e => { console.error('CRASH', e); console.log('PROBLEMS so far:', problems); process.exit(2); });

@@ -39,7 +39,7 @@ from soc_platform.llm.gateway import LLMGateway
 
 STATIC = Path(__file__).parent / "static"
 _PROD = get_settings().environment == "prod"
-app = FastAPI(title="CCI SOC AI & Automation Platform", version=__version__,
+app = FastAPI(title="Agentic SOC Platform", version=__version__,
               docs_url=None if _PROD else "/docs", redoc_url=None, openapi_url=None if _PROD else "/openapi.json")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -351,7 +351,7 @@ def ui() -> HTMLResponse:
 
 
 @app.get("/api/v1/dev/token")
-def dev_token(request: Request, user: str = "analyst@cci-demo.com", roles: str = "analyst", mfa: bool = True,
+def dev_token(request: Request, user: str = "analyst@acme-demo.com", roles: str = "analyst", mfa: bool = True,
               domains: str = "") -> dict[str, str]:
     st = get_settings()
     if st.auth_mode != "dev" or st.environment == "prod" or not st.dev_jwt_secret:

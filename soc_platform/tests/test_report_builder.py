@@ -30,7 +30,7 @@ def estate(session):
     inc.ingest()
     for c in inc.cluster():
         inc.investigate(c.id)
-    ph = PhishingService(session, reg, org_domains=["cci-demo.com"])
+    ph = PhishingService(session, reg, org_domains=["acme-demo.com"])
     for sub in ph.ingest_reported():
         ph.process(sub.id)
     IntelligenceService(session).refresh()
@@ -77,7 +77,7 @@ class ReportLLM(Provider):
 
 def test_llm_narrative_is_grounded_and_figures_never_come_from_the_model(session, estate, tmp_path):
     prov = ReportLLM()
-    gw = LLMGateway(session, Settings(llm_redact_pii=True, org_domains=["cci-demo.com"]), provider=prov)
+    gw = LLMGateway(session, Settings(llm_redact_pii=True, org_domains=["acme-demo.com"]), provider=prov)
     r = B.build_report(session, estate, B.get_template(session, "ciso_weekly"), tmp_path, llm=gw, by="t")
     assert r["writer"].startswith("LLM (scripted)")
     for sec in r["sections"]:
@@ -86,7 +86,7 @@ def test_llm_narrative_is_grounded_and_figures_never_come_from_the_model(session
         assert sec["narrative"].endswith("[F1]")
     risk = next(s for s in r["sections"] if s["source"] == "risk")
     assert any("98/100" in v for _, v in risk["facts"])                                     # figures computed in code
-    assert all("jane.doe@cci-demo.com" not in p for p in prov.prompts)                     # identities pseudonymised
+    assert all("jane.doe@acme-demo.com" not in p for p in prov.prompts)                     # identities pseudonymised
 
 
 def test_prompt_planner_only_uses_catalogue_sources(session):
@@ -112,7 +112,7 @@ def test_report_builder_over_http_scope_and_encryption(tmp_path, monkeypatch):
     monkeypatch.setenv("SOC_DATABASE_URL", f"sqlite:///{tmp_path / 's.db'}")
     monkeypatch.setenv("SOC_REPORT_OUTPUT_DIR", str(tmp_path / "rep"))
     monkeypatch.setenv("SOC_RAW_PAYLOAD_DIR", str(tmp_path / "raw"))
-    monkeypatch.setenv("SOC_ORG_DOMAINS", "cci-demo.com")
+    monkeypatch.setenv("SOC_ORG_DOMAINS", "acme-demo.com")
     monkeypatch.setenv("SOC_DATA_KEY", Fernet.generate_key().decode())
     from soc_platform.config import get_settings
     from soc_platform.core import db as dbm

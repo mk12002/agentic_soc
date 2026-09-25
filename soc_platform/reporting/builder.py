@@ -112,13 +112,20 @@ def src_phishing(c: Ctx) -> dict:
     from soc_platform.domains.phishing.service import PhishingService
 
     p = PhishingService(c.s, c.reg).metrics()
-    facts: Facts = [("Reported emails", p["reported"]), ("Verdict mix", ", ".join(f"{k} {v}" for k, v in p["verdict_mix"].items()) or "none"),
-                    ("Auto-closed (with QA sampling)", f"{p['auto_closed']} ({p['sampled_for_qa']} sampled)"), ("Campaigns", p["campaigns"]),
-                    ("Repeat clickers", len(p["repeat_clickers"])), ("Median minutes to containment", p["time_to_containment_minutes"]["median"])]
+    ttc = p["time_to_containment_minutes"]
+    facts: Facts = [("Emails reported by users (all verdicts, not all phishing)", p["reported"]),
+                    ("Verdicts of the reported emails", ", ".join(f"{k} {v}" for k, v in p["verdict_mix"].items()) or "none"),
+                    ("Reports auto-closed as clearly benign", p["auto_closed"]),
+                    ("Auto-closed reports sampled for QA review", p["sampled_for_qa"]),
+                    ("Distinct phishing campaigns (malicious or suspicious reports only)", p["campaigns"]),
+                    ("Users who clicked in more than one campaign", len(p["repeat_clickers"])),
+                    ("Median minutes from report to containment", ttc["median"] if ttc["median"] is not None
+                     else "not measured yet (no containment action executed)")]
     return {"facts": facts, "domain": "phishing",
             "table": {"header": ["User", "Clicks"], "rows": sorted(([u, n] for u, n in p["clickers"].items()), key=lambda r: -r[1])[:10]},
-            "det": lambda f: (f"{f['Reported emails']} emails were reported ({f['Verdict mix']}); {f['Campaigns']} campaigns were identified and "
-                              f"{_n(f['Repeat clickers'], 'user')} clicked in more than one campaign.")}
+            "det": lambda f: (f"Users reported {_n(f['Emails reported by users (all verdicts, not all phishing)'], 'email')} "
+                              f"({f['Verdicts of the reported emails']}); {_n(f['Distinct phishing campaigns (malicious or suspicious reports only)'], 'phishing campaign')} "
+                              f"identified and {_n(f['Users who clicked in more than one campaign'], 'user')} clicked in more than one campaign.")}
 
 
 def src_suppliers(c: Ctx) -> dict:
@@ -429,7 +436,8 @@ WRITE_RULES = ("Write the section for the stated audience in clear prose (2-5 se
 
 
 def _narrate(llm: LLMGateway | None, spec: dict, section: dict, data: dict) -> dict[str, Any]:
-    facts = data["facts"]
+    facts = [(k, "not available" if v is None else v) for k, v in data["facts"]]
+    data["facts"] = facts
     evidence = [{"id": f"F{i}", "claim": f"{k}: {v}", "source": section["source"]} for i, (k, v) in enumerate(facts, 1)]
     fdict = {k: v for k, v in facts}
     if llm is not None:

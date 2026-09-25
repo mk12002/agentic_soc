@@ -350,8 +350,10 @@ class IncidentService:
                                        "inbox rule (manual in Exchange admin until a connector action is approved).",
                                        cite(lambda e, s: s.get("suspicious_inbox_rules")), priority=19))
         secrets = sorted({x for _, s in sig for x in s.get("secrets") or []})
+        names = {k: v for _, s in sig for k, v in (s.get("secret_names") or {}).items()}
         if secrets:
-            recs.append(Recommendation("pam.rotate_secret", [{"type": "secret", "id": x, "secret_id": x} for x in secrets],
+            recs.append(Recommendation("pam.rotate_secret", [{"type": "secret", "id": x, "secret_id": x, **({"name": names[x]} if x in names else {})}
+                                                             for x in secrets],
                                        "Privileged secret(s) were viewed/copied after compromise indicators; rotate.",
                                        cite(lambda e, s: s.get("sensitive_access")),
                                        expected_impact="Invalidates the exposed credential",

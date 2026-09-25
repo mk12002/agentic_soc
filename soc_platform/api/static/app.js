@@ -236,7 +236,7 @@ function signInScreen() {
   $('#app').innerHTML = `<div class="auth"><section class="card auth-card"><div class="card-b">
     <div class="brand" style="padding:0"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations platform</div></div></div>
     <h1>Sign in</h1>
-    <div class="field"><label for="si-user">Work email</label><input class="input" id="si-user" value="lena@cci-demo.com" autocomplete="username"></div>
+    <div class="field"><label for="si-user">Work email</label><input class="input" id="si-user" value="lena@acme-demo.com" autocomplete="username"></div>
     <div class="field"><label for="si-role">Role</label><select id="si-role">${['lead', 'analyst', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${cap(r)}</option>`).join('')}</select></div>
     <button class="btn primary" data-fn="signIn" data-args="[]" style="justify-content:center;height:36px">Continue</button>
     <div class="foot">Development sign-in. In production the console uses Microsoft Entra ID single sign-on with MFA; this form is only available when <code>SOC_AUTH_MODE=dev</code>.</div>

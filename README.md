@@ -1,7 +1,7 @@
 # Agentic SOC Platform
 
 AI-assisted investigation and automation layer for a Security Operations Centre, built against the
-*CCI SOC – AI & Automation Consolidated Requirements*. One platform serves three workflows over a shared,
+*SOC – AI & Automation Consolidated Requirements*. One platform serves three workflows over a shared,
 governed context store, with a cross-domain intelligence layer on top.
 
 ![Overview](docs/screenshots/01-overview.png)
@@ -103,9 +103,12 @@ Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md).
 file, enable it in `connectors.yaml`. Third-party packages can register connectors through the
 `soc_platform.connectors` entry-point group.
 
-LLM providers (`SOC_LLM_PROVIDER`): `azure_openai`, `anthropic` (Claude via the official SDK), or
-`openai_compatible` (OpenAI or a self-hosted vLLM / Ollama endpoint). All go through the same governance:
-approved-endpoint allow-list, pseudonymisation, prompt/response log, model pinning, token budget, grounding.
+LLM providers (`SOC_LLM_PROVIDER`): `azure_foundry` (Azure AI Foundry / Azure OpenAI v1 API - verified live with
+gpt-4.1-mini), `azure_openai` (deployments API), `anthropic` (Claude via the official SDK), or `openai_compatible`
+(OpenAI or a self-hosted vLLM / Ollama endpoint). All go through the same governance: approved-endpoint allow-list
+(fail closed), pseudonymisation, prompt/response log, model pinning, token budget, citation grounding, and numeric
+fidelity (a statement stating a figure absent from its evidence is removed). Live tests: `SOC_LIVE_LLM=1 pytest
+soc_platform/tests/test_live_llm.py`.
 Without an LLM every feature still works, with deterministic, cited answers.
 
 ## Security
@@ -142,6 +145,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 
 | Document | For |
 |---|---|
+| [docs/PRESENTER_GUIDE.md](docs/PRESENTER_GUIDE.md) | Everything needed to present, demo and defend the platform: walkthroughs, formulas, guardrails, hard questions, limits |
 | [docs/FEATURES.md](docs/FEATURES.md) | Complete feature list with screenshots |
 | [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | 25-minute client walkthrough, what a demo proves |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
@@ -151,7 +155,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | [docs/REQUIREMENTS_TRACEABILITY.md](docs/REQUIREMENTS_TRACEABILITY.md) | Every requirement ID → code, test, status |
 | [docs/TEST_REPORT.md](docs/TEST_REPORT.md) | Test and evaluation results |
 | [docs/FEATURE_VERIFICATION.md](docs/FEATURE_VERIFICATION.md) | Each feature mapped to the tests that prove it, with results |
-| [CCI_Gap_Analysis_and_Build_Plan.md](CCI_Gap_Analysis_and_Build_Plan.md) | Original gap analysis and build tracker |
+| [Gap_Analysis_and_Build_Plan.md](Gap_Analysis_and_Build_Plan.md) | Original gap analysis and build tracker |
 
 ## Repository layout
 

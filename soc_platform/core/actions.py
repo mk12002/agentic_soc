@@ -305,7 +305,7 @@ _STRONG_TARGET_KEYS = ("crowdstrike_aid", "mde_device_id", "entra_object_id", "u
 
 def _target_sig(t: dict[str, Any]) -> set[str]:
     """Identifiers that make two target descriptions the same object even when their display ids differ
-    (``jane-lt01`` vs ``jane-lt01.cci-demo.com``, or the same device seen by two EDRs)."""
+    (``jane-lt01`` vs ``jane-lt01.acme-demo.com``, or the same device seen by two EDRs)."""
     sig = {f"{k}:{str(t[k]).lower()}" for k in _STRONG_TARGET_KEYS if t.get(k)}
     ident = str(t.get("id") or t.get("value") or "").strip().lower()
     if ident:

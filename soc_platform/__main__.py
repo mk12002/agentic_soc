@@ -4,7 +4,7 @@
   demo        run all three workflows end to end on fixture connectors and write reports
   serve       start the API + console (uvicorn)
   scheduler   run recurring jobs (syncs, investigations, follow-ups, reports)
-  token       mint a dev token:  python -m soc_platform token alice@cci-demo.com analyst,lead
+  token       mint a dev token:  python -m soc_platform token alice@acme-demo.com analyst,lead
   fixtures    regenerate connector fixtures and the labelled email corpus
 """
 
@@ -42,7 +42,7 @@ def cmd_demo() -> None:
 
     reg = ConnectorRegistry.all_fake()
     out = Path(os.environ.get("SOC_REPORT_OUTPUT_DIR", "./data/reports"))
-    analyst = Principal("demo.analyst@cci-demo.com", "Demo Analyst", frozenset({Role.ANALYST}))
+    analyst = Principal("demo.analyst@acme-demo.com", "Demo Analyst", frozenset({Role.ANALYST}))
     with _db().session() as s:
         vm = VulnerabilityService(s, reg)
         r = vm.refresh()
@@ -57,7 +57,7 @@ def cmd_demo() -> None:
             if c.status != "closed":
                 v = im.investigate(c.id)
                 print(f"[IM] {v['case']['severity']:>8} {v['case']['title'][:70]} - {len(v['actions'])} recommended action(s)")
-        ph = PhishingService(s, reg, org_domains=["cci-demo.com"], raw_dir=Path("./data/raw/phishing"))
+        ph = PhishingService(s, reg, org_domains=["acme-demo.com"], raw_dir=Path("./data/raw/phishing"))
         for sub in ph.ingest_reported():
             v = ph.process(sub.id)
             a = v["assessment"]
@@ -68,7 +68,7 @@ def cmd_demo() -> None:
         intel = IntelligenceService(s, vm=vm)
         for ins in sorted(intel.refresh(), key=lambda i: -i.score)[:6]:
             print(f"[INTEL] {ins.severity:>8} {ins.title}")
-        ans = intel.analyst.ask("Is jane.doe@cci-demo.com compromised?")
+        ans = intel.analyst.ask("Is jane.doe@acme-demo.com compromised?")
         print(f"[ASK] {ans['answer']}  (tools: {', '.join(c['tool'] for c in ans['tool_calls'])})")
         rs = ReportService(s, out)
         for run in (rs.daily_exposure(vm), rs.weekly_vm(vm), rs.weekly_management_deck(vm, im, ph)):
@@ -83,7 +83,7 @@ def cmd_serve() -> None:
                 port=int(os.environ.get("SOC_PORT", "8080")))
 
 
-def cmd_token(user: str = "analyst@cci-demo.com", roles: str = "analyst") -> None:
+def cmd_token(user: str = "analyst@acme-demo.com", roles: str = "analyst") -> None:
     from soc_platform.config import get_settings
     from soc_platform.core.auth import issue_dev_token
 

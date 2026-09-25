@@ -382,9 +382,9 @@
         },
         "entitySnapshot": {
          "id": "wiz-sa-backups",
-         "name": "ccibackups",
+         "name": "acmebackups",
          "type": "BUCKET",
-         "providerId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Storage/storageAccounts/ccibackups",
+         "providerId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Storage/storageAccounts/acmebackups",
          "region": "centralindia",
          "cloudPlatform": "Azure",
          "subscriptionExternalId": "sub-001"

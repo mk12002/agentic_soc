@@ -18,10 +18,10 @@ spec = importlib.util.spec_from_file_location("rename_estate", ROOT / "scripts" 
 rename = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rename)
 
-ORIGINAL_TOKENS = ["jane", "cci-demo", "micros0ft", "krishna", "sap-prod", "185.220.101.4", "web01"]
+ORIGINAL_TOKENS = ["jane", "acme-demo", "micros0ft", "krishna", "sap-prod", "185.220.101.4", "web01"]
 
 
-def _registry(rx=None, table=None, domain="cci-demo.com"):
+def _registry(rx=None, table=None, domain="acme-demo.com"):
     from soc_platform.connectors.registry import ConnectorRegistry, discover
 
     manifests = discover()
@@ -110,7 +110,7 @@ def both(tmp_path_factory):
     rx, table = rename.build_pattern(rename.DEFAULT_MAP)
     results = {}
     for label, fixtures, corpus, org, sup, reg_args in [
-            ("original", None, ROOT / "artifacts/phishing/corpus", "cci-demo.com", ROOT / "config/suppliers.yaml", {}),
+            ("original", None, ROOT / "artifacts/phishing/corpus", "acme-demo.com", ROOT / "config/suppliers.yaml", {}),
             ("renamed", out / "fixtures", out / "corpus", "northwind-labs.io", out / "suppliers.yaml", {"rx": rx, "table": table})]:
         old = os.environ.get("SOC_FIXTURES_DIR"), os.environ.get("SOC_SUPPLIERS_FILE")
         if fixtures:

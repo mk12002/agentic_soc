@@ -26,7 +26,7 @@ def defender_endpoint() -> None:
         {"id": "da-0001", "title": "Suspicious PowerShell command line", "severity": "High", "category": "Execution",
          "status": "New", "machineId": j["mde"], "computerDnsName": j["fqdn"], "alertCreationTime": f"{D}09:09:30Z",
          "mitreTechniques": ["T1059.001", "T1105"], "detectionSource": "WindowsDefenderAtp", "incidentId": 4401,
-         "relatedUser": {"userName": "jane.doe", "domainName": "CCI"},
+         "relatedUser": {"userName": "jane.doe", "domainName": "ACME"},
          "evidence": [{"entityType": "File", "sha256": PAYLOAD_SHA, "fileName": "invoice_viewer.ps1"},
                       {"entityType": "Url", "url": "https://login.micros0ft-helpdesk.com/p.ps1"}]},
         {"id": "da-0002", "title": "Exchange Server exploitation attempt blocked", "severity": "Medium",
@@ -280,9 +280,9 @@ def wiz() -> None:
                                   "region": "centralindia", "cloudPlatform": "Azure", "subscriptionExternalId": "sub-001"}},
               {"id": "wiz-issue-002", "severity": "MEDIUM", "status": "OPEN", "createdAt": "2026-09-10T00:00:00Z",
                "type": "CLOUD_CONFIGURATION", "sourceRule": {"name": "Storage account allows public blob access"},
-               "entitySnapshot": {"id": "wiz-sa-backups", "name": "ccibackups", "type": "BUCKET",
+               "entitySnapshot": {"id": "wiz-sa-backups", "name": "acmebackups", "type": "BUCKET",
                                   "providerId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Storage/"
-                                                "storageAccounts/ccibackups", "region": "centralindia",
+                                                "storageAccounts/acmebackups", "region": "centralindia",
                                   "cloudPlatform": "Azure", "subscriptionExternalId": "sub-001"}}]
     pi = {"hasNextPage": False, "endCursor": "c1"}
     write("wiz", [
@@ -361,13 +361,13 @@ def canary() -> None:
 
 def delinea_secret_server() -> None:
     recs = [{"secretAuditId": 7001, "secretId": 42, "secretName": "SAP-Prod-Finance-Service", "action": "VIEW",
-             "byUserName": "CCI\\jane.doe", "dateRecorded": f"{D}09:45:30Z", "ipAddress": HOSTS["jane"]["ip"],
+             "byUserName": "ACME\\jane.doe", "dateRecorded": f"{D}09:45:30Z", "ipAddress": HOSTS["jane"]["ip"],
              "machineName": "JANE-LT01", "folderPath": "\\Finance\\Production"},
             {"secretAuditId": 7002, "secretId": 42, "secretName": "SAP-Prod-Finance-Service", "action": "COPY PASSWORD",
-             "byUserName": "CCI\\jane.doe", "dateRecorded": f"{D}09:45:52Z", "ipAddress": HOSTS["jane"]["ip"],
+             "byUserName": "ACME\\jane.doe", "dateRecorded": f"{D}09:45:52Z", "ipAddress": HOSTS["jane"]["ip"],
              "machineName": "JANE-LT01", "folderPath": "\\Finance\\Production"},
             {"secretAuditId": 7003, "secretId": 17, "secretName": "Exchange-Admin", "action": "LAUNCH",
-             "byUserName": "CCI\\bob.lee", "dateRecorded": f"{D}08:00:00Z", "ipAddress": HOSTS["bob"]["ip"],
+             "byUserName": "ACME\\bob.lee", "dateRecorded": f"{D}08:00:00Z", "ipAddress": HOSTS["bob"]["ip"],
              "machineName": "BOB-LT02", "folderPath": "\\IT"}]
     write("delinea_secret_server", [
         route("GET", r"^/api/v1/secret-audits$", {"records": recs[:2]}, params={"filter.userName": "jane.doe"}),
@@ -381,7 +381,7 @@ def delinea_secret_server() -> None:
 
 
 def delinea_privilege_manager() -> None:
-    ev = [{"id": 501, "eventTime": f"{D}09:08:00Z", "userName": "CCI\\jane.doe", "computerName": "JANE-LT01",
+    ev = [{"id": 501, "eventTime": f"{D}09:08:00Z", "userName": "ACME\\jane.doe", "computerName": "JANE-LT01",
            "applicationName": "powershell.exe", "outcome": "Denied", "policyName": "Block unsigned admin tools",
            "fileHash": PAYLOAD_SHA}]
     write("delinea_privilege_manager", [

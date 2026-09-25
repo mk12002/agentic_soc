@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from soc_platform.core.context_store import ContextStore
@@ -24,6 +24,21 @@ from soc_platform.intelligence.correlation import CorrelationEngine
 from soc_platform.intelligence.models import Insight
 from soc_platform.intelligence.risk import RiskEngine
 from soc_platform.llm.gateway import BudgetExceeded, LLMGateway
+
+
+class Page(list):
+    """A capped result list that still knows the true total (so no answer says "30" when there are 34)."""
+
+    def __init__(self, items, total: int) -> None:
+        super().__init__(items)
+        self.total = int(total)
+
+
+def _total(res: Any) -> int:
+    return res.total if isinstance(res, Page) else len(res)
+
+
+_SCORE_IN_TITLE = re.compile(r"\s*\(\d+(?:\.\d+)?/100\)")
 
 PLANNER_SYSTEM = (
     "You are a SOC investigation planner. Choose read-only tools to answer the analyst's question. "
@@ -98,24 +113,26 @@ class IntelligenceAnalyst:
                  "dimensions": p.dimensions} for p in self.risk.top(kind or None, int(limit or 5))]
 
     def _list_insights(self, severity: str | None = None, rule: str | None = None) -> Any:
-        q = select(Insight).where(Insight.status != "dismissed").order_by(Insight.score.desc()).limit(20)
+        q = select(Insight).where(Insight.status != "dismissed")
         if severity:
             q = q.where(Insight.severity == severity)
         if rule:
             q = q.where(Insight.rule == rule)
-        return [{"insight_id": i.id, "rule": i.rule, "title": i.title, "severity": i.severity, "score": i.score}
-                for i in self.s.execute(q).scalars()]
+        total = self.s.execute(select(func.count()).select_from(q.subquery())).scalar() or 0
+        return Page([{"insight_id": i.id, "rule": i.rule, "title": i.title, "severity": i.severity, "score": i.score}
+                     for i in self.s.execute(q.order_by(Insight.score.desc()).limit(20)).scalars()], total)
 
     def _search_cases(self, text: str | None = None, domain: str | None = None, status: str | None = None) -> Any:
-        q = select(Case).order_by(Case.created_at.desc()).limit(15)
+        q = select(Case)
         if domain:
             q = q.where(Case.domain == domain)
         if status:
             q = q.where(Case.status == status)
         if text:
             q = q.where(Case.title.ilike(f"%{text}%"))
-        return [{"case_id": c.id, "domain": c.domain, "title": c.title, "severity": c.severity, "verdict": c.verdict,
-                 "status": c.status} for c in self.s.execute(q).scalars()]
+        total = self.s.execute(select(func.count()).select_from(q.subquery())).scalar() or 0
+        return Page([{"case_id": c.id, "domain": c.domain, "title": c.title, "severity": c.severity, "verdict": c.verdict,
+                      "status": c.status} for c in self.s.execute(q.order_by(Case.created_at.desc()).limit(15)).scalars()], total)
 
     def _case_summary(self, case_id: str = "") -> Any:
         c = self.s.get(Case, case_id)
@@ -170,10 +187,11 @@ class IntelligenceAnalyst:
                 "pending_actions": [{"action_id": a.id, "action": a.action_type, "rationale": a.rationale} for a in acts]}
 
     def _pending(self) -> Any:
-        rows = self.s.execute(select(ActionRequest).where(ActionRequest.status.in_(("recommended", "pending_approval")))
-                              .limit(30)).scalars().all()
-        return [{"action_id": a.id, "action": a.action_type, "case_id": a.case_id, "rationale": a.rationale}
-                for a in rows]
+        q = select(ActionRequest).where(ActionRequest.status.in_(("recommended", "pending_approval")))
+        total = self.s.execute(select(func.count()).select_from(q.subquery())).scalar() or 0
+        rows = self.s.execute(q.limit(30)).scalars().all()
+        return Page([{"action_id": a.id, "action": a.action_type, "case_id": a.case_id, "rationale": a.rationale}
+                     for a in rows], total)
 
     # ------------------------------------------------------------------ planning
 
@@ -244,6 +262,8 @@ class IntelligenceAnalyst:
         ev = []
         for i, r in enumerate(results, start=1):
             text = json.dumps(r["result"], default=str)
+            if isinstance(r["result"], Page) and r["result"].total > len(r["result"]):
+                text = f"(total {r['result'].total}, first {len(r['result'])} shown) " + text
             ev.append({"id": f"R{i}", "claim": f"{r['tool']}({json.dumps(r['args'], default=str)}) -> {text[:1800]}",
                        "source": r["tool"]})
         return ev
@@ -281,7 +301,9 @@ class IntelligenceAnalyst:
                     for i, e in enumerate(insight.evidence)]
         if self.llm is not None:
             g = self.llm.grounded("intelligence.narrate",
-                                  f"Explain this correlated finding to a SOC analyst in 3-5 sentences: {insight.title}. "
+                                  f"Explain this correlated finding to a SOC analyst in 3-5 sentences: "
+                                  f"{_SCORE_IN_TITLE.sub('', insight.title)}. Do not state numeric risk scores (the UI "
+                                  "shows the live score). "
                                   "What happened, in what order, why it matters, and what is uncertain.", evidence)
             if g.get("source") == "llm":
                 insight.narrative = g["summary"] + ("\n" + "\n".join(f"- {c['text']} [{', '.join(c['evidence_ids'])}]"
@@ -302,7 +324,9 @@ class IntelligenceAnalyst:
         pending = self._pending()
         open_cases = self._search_cases(status=None)
         vm = self.vm.metrics() if self.vm is not None else {}
-        facts = {"insights": insights[:10], "riskiest_entities": risky, "pending_approvals": len(pending),
+        facts = {"insights": insights[:10], "open_insights_total": _total(insights), "riskiest_entities": risky,
+                 "pending_approvals": _total(pending),
+                 "open_cases_total": self.s.execute(select(func.count()).select_from(Case).where(Case.status != "closed")).scalar(),
                  "open_cases": [c for c in open_cases if c["status"] != "closed"][:10],
                  "vulnerability": {k: vm.get(k) for k in ("open", "kev_open", "sla_breached", "internet_exposed_open",
                                                           "by_priority")} if vm else {}}
@@ -354,15 +378,15 @@ def _facts_summary(results: list[dict[str, Any]]) -> str:
             parts.append(f"{res['cve']} affects {res['affected']} asset(s)"
                          + (": " + ", ".join(a["asset"] for a in res.get("assets", [])[:5]) if res.get("assets") else ""))
         elif r["tool"] == "list_insights" and isinstance(res, list):
-            parts.append(f"{len(res)} active correlated finding(s)" + (": " + "; ".join(i["title"] for i in res[:3]) if res else ""))
+            parts.append(f"{_total(res)} active correlated finding(s)" + (": " + "; ".join(i["title"] for i in res[:3]) if res else ""))
         elif r["tool"] == "top_risky" and isinstance(res, list):
             parts.append("highest-risk users/hosts: " + ", ".join(f"{x['name']} ({x['score']:.0f}, {x['band']})" for x in res[:5]))
         elif r["tool"] == "vulnerability_query" and isinstance(res, dict) and "answer" in res:
             parts.append(res["answer"])
         elif r["tool"] == "pending_approvals" and isinstance(res, list):
-            parts.append(f"{len(res)} action(s) awaiting approval")
+            parts.append(f"{_total(res)} action(s) awaiting approval")
         elif r["tool"] == "search_cases" and isinstance(res, list):
-            parts.append(f"{len(res)} matching case(s)")
+            parts.append(f"{_total(res)} matching case(s)")
     if not parts:
         return "No matching data found."
     def cap(p: str) -> str:  # never capitalise an address or host name that opens a sentence
@@ -442,6 +466,6 @@ class IntelligenceService:
         insights = self.correlation.run(entity_ids)
         if narrate:
             for i in insights:
-                if not i.narrative or i.narrative_source == "deterministic":
+                if not i.narrative or i.narrative_source in {"deterministic", "stale"}:
                     self.analyst.narrate(i)
         return insights

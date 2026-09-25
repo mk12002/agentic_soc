@@ -28,7 +28,7 @@ def estate(session):
     inc.ingest()
     for c in inc.cluster():
         inc.investigate(c.id)
-    ph = PhishingService(session, reg, org_domains=["cci-demo.com"])
+    ph = PhishingService(session, reg, org_domains=["acme-demo.com"])
     for sub in ph.ingest_reported():
         ph.process(sub.id)
     return reg, ph
@@ -61,7 +61,7 @@ def test_story_reconstructs_the_cross_tool_chain(session, estate):
     assert hyp["The script execution was legitimate IT / admin activity"] == "rejected"
     phases = [p["phase"] for p in st["response_plan"]]
     assert phases[:2] == ["contain", "preserve"] and "recover" in phases
-    assert "Confirmed compromise of jane.doe@cci-demo.com" in st["summary"]
+    assert "Confirmed compromise of jane.doe@acme-demo.com" in st["summary"]
 
 
 def test_story_never_invents_evidence(session, estate):
@@ -123,15 +123,15 @@ def test_deep_analysis_is_bound_to_evidence(session, estate):
     case = _case(session, "phishing")
     st = story_for_case(session, case.id, reg)
     prov = ReviewLLM()
-    gw = LLMGateway(session, Settings(llm_redact_pii=True, org_domains=["cci-demo.com"]), provider=prov)
-    r = run_deep_analysis(session, st, gw, actor="lena", org_domains=["cci-demo.com"])
+    gw = LLMGateway(session, Settings(llm_redact_pii=True, org_domains=["acme-demo.com"]), provider=prov)
+    r = run_deep_analysis(session, st, gw, actor="lena", org_domains=["acme-demo.com"])
     assert r["ok"] and r["confidence"] == "high"
     assert [f["text"] for f in r["key_findings"]] == ["PowerShell pulled a payload from the phishing domain"]
     assert [h["hypothesis"] for h in r["alternative_explanations"]] == ["Travel"]
     assert {p["action_ref"] for p in r["priorities"]} == {"P1", "manual"}                 # fake action dropped
     assert r["priorities"][0]["action_id"]                                                # P1 maps to a real pending action
     assert r["dropped_statements"] == 4
-    assert "jane.doe@cci-demo.com" not in prov.prompts[-1]                               # identities pseudonymised
+    assert "jane.doe@acme-demo.com" not in prov.prompts[-1]                               # identities pseudonymised
     again = run_deep_analysis(session, st, gw, actor="lena")
     assert again["cached"] and len(prov.prompts) == 1                                     # cached per evidence fingerprint
     assert (session.get(Case, case.id).assessment or {})["deep_analysis"]["model"] == "claude-test"
@@ -152,9 +152,9 @@ def test_deep_analysis_respects_the_token_budget(session, estate):
 def test_analyst_tells_the_story(session, estate):
     from soc_platform.intelligence.analyst import IntelligenceService
 
-    r = IntelligenceService(session).analyst.ask("What happened to jane.doe@cci-demo.com?")
+    r = IntelligenceService(session).analyst.ask("What happened to jane.doe@acme-demo.com?")
     assert "attack_story" in [c["tool"] for c in r["tool_calls"]]
-    assert r["answer"].startswith("Confirmed compromise of jane.doe@cci-demo.com")
+    assert r["answer"].startswith("Confirmed compromise of jane.doe@acme-demo.com")
     assert any("Credential Access" in c["text"] for c in r["claims"])
 
 
@@ -167,7 +167,7 @@ def test_story_over_http_bundle_approval_keeps_governance(tmp_path, monkeypatch)
     monkeypatch.setenv("SOC_DATABASE_URL", f"sqlite:///{tmp_path / 's.db'}")
     monkeypatch.setenv("SOC_REPORT_OUTPUT_DIR", str(tmp_path / "rep"))
     monkeypatch.setenv("SOC_RAW_PAYLOAD_DIR", str(tmp_path / "raw"))
-    monkeypatch.setenv("SOC_ORG_DOMAINS", "cci-demo.com")
+    monkeypatch.setenv("SOC_ORG_DOMAINS", "acme-demo.com")
     from soc_platform.config import get_settings
     from soc_platform.core import db as dbm
 

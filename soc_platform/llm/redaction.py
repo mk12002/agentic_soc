@@ -61,9 +61,13 @@ class Redactor:
         return out
 
     def restore(self, text: str) -> str:
-        for tok, orig in self.mapping.items():
-            text = text.replace(tok, orig)
-        return text
+        """Put the originals back. Models sometimes drop the brackets (``USER_1`` for ``<USER_1>``), so a token is
+        matched with or without them - as a whole word, so ``USER_1`` never matches inside ``USER_10``."""
+        if not self.mapping or not text:
+            return text
+        bare = {tok.strip("<>").upper(): orig for tok, orig in self.mapping.items()}
+        rx = re.compile(r"<?\b(" + "|".join(re.escape(k) for k in sorted(bare, key=len, reverse=True)) + r")\b>?", re.IGNORECASE)
+        return rx.sub(lambda m: bare[m.group(1).upper()], text)
 
 
 def _luhn(s: str) -> bool:

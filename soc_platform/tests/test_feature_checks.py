@@ -72,7 +72,7 @@ def test_phishing_verdict_is_explained_with_counterfactual_and_citations(session
     from soc_platform.core.cases import CaseService
     from soc_platform.domains.phishing.service import PhishingService
 
-    svc = PhishingService(session, ConnectorRegistry.all_fake(), org_domains=["cci-demo.com"])
+    svc = PhishingService(session, ConnectorRegistry.all_fake(), org_domains=["acme-demo.com"])
     sub = svc.submit_raw((ROOT / "artifacts/phishing/corpus/cred_phish_lookalike.eml").read_bytes(), source="test")
     svc.process(sub.id)
     case = session.get(Case, sub.case_id)

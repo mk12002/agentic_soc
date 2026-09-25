@@ -24,9 +24,9 @@ Every connector runs in one of two modes, set per connector in `config/connector
 
 **Verification status.** Every connector is implemented against the vendor's documented API and verified end to end
 on fixtures shaped like the documented responses (`soc_platform/tests/test_connectors.py`). The public feeds (NVD,
-EPSS, CISA KEV) are also verified live. The vendor connectors have **not yet been run against CCI's tenants**: do
+EPSS, CISA KEV) are also verified live. The vendor connectors have **not yet been run against the client's tenants**: do
 that per connector with the *Test* button (Connectors screen) or `POST /api/v1/connectors/{name}/test`, which
-authenticates and reads one page. Items under *To confirm* are licence or permission questions for CCI (A01, A03).
+authenticates and reads one page. Items under *To confirm* are licence or permission questions for the client (A01, A03).
 
 **Onboarding a tool (live):**
 
@@ -55,7 +55,7 @@ def main() -> None:
                     f"- Vendor: {m.vendor} · focus areas: {', '.join(m.focus_areas)}\n"
                     f"- Read scopes: {', '.join(getattr(c, 'read_scopes', ()) or ()) or 'see vendor docs / to confirm'}\n"
                     f"- Write scopes (only for approved actions): {', '.join(getattr(c, 'write_scopes', ()) or ()) or '-'}\n"
-                    f"- To confirm with CCI: {m.to_confirm or '-'}\n- Configuration:\n{cfg}\n")
+                    f"- To confirm with the client: {m.to_confirm or '-'}\n- Configuration:\n{cfg}\n")
     parts += ["", "## Per-connector setup", ""] + rows
     OUT.write_text("\n".join(parts) + "\n", encoding="utf-8")
     print(f"{len(rows)} connectors -> {OUT}")

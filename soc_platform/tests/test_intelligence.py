@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from types import SimpleNamespace
 
@@ -28,7 +29,7 @@ def world(session):
     for c in im.cluster():
         if c.status != "closed":
             im.investigate(c.id)
-    ph = PhishingService(session, reg, org_domains=["cci-demo.com"], raw_dir=tempfile.mkdtemp())
+    ph = PhishingService(session, reg, org_domains=["acme-demo.com"], raw_dir=tempfile.mkdtemp())
     ph.process(ph.ingest_reported()[0].id)
     return vm
 
@@ -52,7 +53,7 @@ def test_cross_domain_correlations(session, world):
 def test_entity_risk_is_explainable_and_ranked(session, world):
     svc = IntelligenceService(session, vm=world)
     top = svc.analyst.risk.top(limit=3)
-    assert top[0].name == "jane.doe@cci-demo.com" and top[0].band == "critical"
+    assert top[0].name == "jane.doe@acme-demo.com" and top[0].band == "critical"
     assert {"email", "endpoint", "identity", "privileged_access", "deception"} <= set(top[0].dimensions)
     assert all(f.ref and f.source for f in top[0].factors)
 
@@ -70,9 +71,9 @@ def test_dismissed_insight_stays_dismissed_unless_worse(session, world):
 
 def test_ask_without_llm_uses_deterministic_planner(session, world):
     a = IntelligenceService(session, vm=world).analyst
-    r = a.ask("Is jane.doe@cci-demo.com compromised?")
+    r = a.ask("Is jane.doe@acme-demo.com compromised?")
     assert r["planner"] == "deterministic" and {"find_entity", "entity_risk"} <= {c["tool"] for c in r["tool_calls"]}
-    assert "jane.doe@cci-demo.com is at CRITICAL risk" in r["answer"] and "Recommended first step" in r["answer"]
+    assert "jane.doe@acme-demo.com is at CRITICAL risk" in r["answer"] and "Recommended first step" in r["answer"]
     ids = {f"R{i + 1}" for i in range(len(r["results"]))}
     assert r["claims"] and all(set(c["evidence_ids"]) <= ids for c in r["claims"])        # every claim is cited
     assert not any("{" in c["text"] for c in r["claims"])                                  # no raw JSON shown
@@ -103,12 +104,12 @@ class ScriptedLLM(Provider):
 def test_ask_with_llm_plans_only_catalogue_tools_and_is_grounded(session, world):
     IntelligenceService(session, vm=world).refresh()
     llm = ScriptedLLM()
-    gw = LLMGateway(session, Settings(llm_redact_pii=True, org_domains=["cci-demo.com"]), provider=llm)
+    gw = LLMGateway(session, Settings(llm_redact_pii=True, org_domains=["acme-demo.com"]), provider=llm)
     r = IntelligenceService(session, gw, vm=world).analyst.ask("Who is most at risk right now?")
     assert r["planner"] == "llm"
     assert [c["tool"] for c in r["tool_calls"]] == ["top_risky", "list_insights"]
     assert [c["text"] for c in r["claims"]] == ["Jane has the highest fused risk"]    # uncited claim dropped
-    assert "jane.doe@cci-demo.com" not in llm.prompts[-1]                            # internal users pseudonymised
+    assert "jane.doe@acme-demo.com" not in llm.prompts[-1]                            # internal users pseudonymised
     assert gw.tokens_this_month() > 0
 
 
@@ -118,6 +119,55 @@ def test_brief_covers_all_domains(session, world):
     b = svc.analyst.brief()
     assert "Top correlated threats" in b["summary"] and "Exposure:" in b["summary"]
     assert b["facts"]["pending_approvals"] > 0
+
+
+def test_counts_are_true_totals_not_capped_lists(session, world):
+    """Regression: the brief said "30 pending approvals" when 34 were open (a 30-row list was being counted)."""
+    from soc_platform.core.models import ActionRequest
+
+    for i in range(45):
+        session.add(ActionRequest(action_type="ticket.create", requested_by="t", idempotency_key=f"cap-{i}", status="recommended"))
+    session.flush()
+    true_total = session.query(ActionRequest).filter(ActionRequest.status.in_(("recommended", "pending_approval"))).count()
+    svc = IntelligenceService(session, vm=world)
+    svc.refresh()
+    b = svc.analyst.brief()
+    assert true_total > 30 and b["facts"]["pending_approvals"] == true_total
+    r = svc.analyst.ask("How many actions are waiting for approval?")
+    assert f"{true_total} action(s) awaiting approval" in r["answer"]
+
+
+def test_llm_narrative_rewritten_when_the_finding_changes_not_on_score_drift(session, world):
+    """Regression: an insight titled 100/100 kept a narrative written when it was 94/100."""
+    from soc_platform.intelligence.correlation import _basis
+    from soc_platform.intelligence.models import Insight
+
+    class Narrator(Provider):
+        name = "scripted"
+
+        def __init__(self):
+            self.prompts = []
+
+        def complete(self, system, user, *, tier):
+            self.prompts.append(user)
+            return Completion(json.dumps({"summary": "narrative", "claims": [{"text": "x", "kind": "fact", "evidence_ids": ["E1"]}]}),
+                              10, 10, "m")
+
+    prov = Narrator()
+    svc = IntelligenceService(session, LLMGateway(session, Settings(), provider=prov), vm=world)
+    ins = svc.refresh()
+    assert ins and all(i.narrative_source == "llm" for i in ins)
+    assert not any(re.search(r"\(\d+/100\)", p.split("EVIDENCE")[0]) for p in prov.prompts)   # no score given to the model
+    n = len(prov.prompts)
+    svc.refresh()
+    assert len(prov.prompts) == n                                                        # unchanged findings: no new calls
+    target = session.query(Insight).filter(Insight.narrative_source == "llm").first()
+    target.evidence = target.evidence[:-1]                                               # the finding's substance changes
+    target_basis = _basis(target)
+    session.flush()
+    svc.refresh()
+    fresh = session.get(Insight, target.id)
+    assert _basis(fresh) != target_basis and fresh.narrative_source == "llm" and len(prov.prompts) > n
 
 
 # --------------------------------------------------------------------------- providers
@@ -171,6 +221,34 @@ def test_openai_compatible_provider(monkeypatch):
     p = oc.OpenAICompatibleProvider(Settings(llm_endpoint="http://llm:8000", llm_deployment="qwen"))
     out = p.complete("s", "u", tier="large")
     assert out.text == '{"ok": true}' and seen["url"] == "http://llm:8000/v1/chat/completions"
+
+
+def test_azure_foundry_provider(monkeypatch):
+    from soc_platform.llm.gateway import build_provider
+    from soc_platform.llm.providers import openai_compatible as oc
+
+    seen = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        seen.update(url=url, headers=headers, model=json["model"])
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {
+            "model": "gpt-4.1-mini-2025-04-14", "choices": [{"message": {"content": '{"ok": true}'}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2}})
+
+    monkeypatch.setattr(oc.httpx, "post", fake_post)
+    base = "https://res.services.ai.azure.com/openai/v1"
+    st = Settings(llm_provider="azure_foundry", llm_endpoint=base + "/", llm_deployment="gpt-4.1-mini")
+    monkeypatch.delenv("SOC_LLM_API_KEY", raising=False)
+    assert build_provider(st).complete("s", "u", tier="large") is None            # no key -> deterministic path
+    monkeypatch.setenv("SOC_LLM_API_KEY", "k" * 32)
+    p = build_provider(st)
+    out = p.complete("s", "u", tier="small")
+    assert p.name == "azure_foundry" and out.model.startswith("gpt-4.1-mini")
+    assert seen["url"] == base + "/chat/completions" and seen["model"] == "gpt-4.1-mini"
+    assert seen["headers"] == {"api-key": "k" * 32}                                  # Azure key header, not Bearer
+    with pytest.raises(ValueError):
+        build_provider(Settings(llm_provider="azure_foundry", llm_endpoint="https://evil.example/openai/v1",
+                                llm_approved_endpoints=[base]))
 
 
 def test_drift_monitor_flags_agreement_drop_and_verdict_shift(session):

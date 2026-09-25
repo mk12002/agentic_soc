@@ -12,6 +12,24 @@
 
 Environment: see `.env.example`. Secrets are read from `<NAME>_FILE` (vault mount) or `<NAME>`.
 
+## LLM (optional)
+
+Everything works without an LLM. To enable narratives, deep analysis and prompt-planned reports with Azure AI
+Foundry (verified live):
+
+```
+SOC_LLM_PROVIDER=azure_foundry
+SOC_LLM_ENDPOINT=https://<resource>.services.ai.azure.com/openai/v1
+SOC_LLM_API_KEY=<key>                      # or SOC_LLM_API_KEY_FILE=/run/secrets/llm_key
+SOC_LLM_DEPLOYMENT=gpt-4.1-mini            # SOC_LLM_DEPLOYMENT_SMALL for a cheaper routine tier
+SOC_LLM_APPROVED_ENDPOINTS=https://<resource>.services.ai.azure.com/openai/v1   # anything else is refused
+SOC_LLM_MODEL_VERSION=gpt-4.1-mini         # responses from another model are logged as a mismatch
+SOC_LLM_MONTHLY_TOKEN_BUDGET=5000000       # alert at 80 %, deterministic fallback when exhausted
+```
+
+Check: `GET /api/v1/llm/status`; live test: `SOC_LIVE_LLM=1 pytest soc_platform/tests/test_live_llm.py` (costs
+tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept for `SOC_LLM_LOG_RETENTION_DAYS`.
+
 ## Jobs
 
 | Job | Default interval | Does |

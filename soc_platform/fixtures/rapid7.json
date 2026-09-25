@@ -7,7 +7,7 @@
     "resources": [
      {
       "id": 101,
-      "hostName": "web01.cci-demo.com",
+      "hostName": "web01.acme-demo.com",
       "ip": "10.10.0.5",
       "os": "Ubuntu 22.04 LTS",
       "riskScore": 25000.0,
@@ -33,7 +33,7 @@
      },
      {
       "id": 102,
-      "hostName": "db01.cci-demo.com",
+      "hostName": "db01.acme-demo.com",
       "ip": "10.10.0.6",
       "os": "Windows Server 2019",
       "riskScore": 25000.0,
@@ -59,7 +59,7 @@
      },
      {
       "id": 103,
-      "hostName": "fs01.cci-demo.com",
+      "hostName": "fs01.acme-demo.com",
       "ip": "10.10.0.20",
       "os": "Windows Server 2022",
       "riskScore": 120.0,
@@ -85,7 +85,7 @@
      },
      {
       "id": 110,
-      "hostName": "jane-lt01.cci-demo.com",
+      "hostName": "jane-lt01.acme-demo.com",
       "ip": "10.20.1.15",
       "os": "Windows 11 Enterprise",
       "riskScore": 25000.0,
@@ -140,7 +140,7 @@
    "path": "^/api/3/assets/101$",
    "body": {
     "id": 101,
-    "hostName": "web01.cci-demo.com",
+    "hostName": "web01.acme-demo.com",
     "ip": "10.10.0.5",
     "os": "Ubuntu 22.04 LTS",
     "riskScore": 25000.0,
@@ -185,7 +185,7 @@
    "path": "^/api/3/assets/102$",
    "body": {
     "id": 102,
-    "hostName": "db01.cci-demo.com",
+    "hostName": "db01.acme-demo.com",
     "ip": "10.10.0.6",
     "os": "Windows Server 2019",
     "riskScore": 25000.0,
@@ -224,7 +224,7 @@
    "path": "^/api/3/assets/103$",
    "body": {
     "id": 103,
-    "hostName": "fs01.cci-demo.com",
+    "hostName": "fs01.acme-demo.com",
     "ip": "10.10.0.20",
     "os": "Windows Server 2022",
     "riskScore": 120.0,
@@ -269,7 +269,7 @@
    "path": "^/api/3/assets/110$",
    "body": {
     "id": 110,
-    "hostName": "jane-lt01.cci-demo.com",
+    "hostName": "jane-lt01.acme-demo.com",
     "ip": "10.20.1.15",
     "os": "Windows 11 Enterprise",
     "riskScore": 25000.0,
@@ -414,7 +414,7 @@
     "resources": [
      {
       "id": 101,
-      "hostName": "web01.cci-demo.com",
+      "hostName": "web01.acme-demo.com",
       "ip": "10.10.0.5",
       "os": "Ubuntu 22.04 LTS",
       "riskScore": 25000.0,
@@ -453,7 +453,7 @@
     "resources": [
      {
       "id": 110,
-      "hostName": "jane-lt01.cci-demo.com",
+      "hostName": "jane-lt01.acme-demo.com",
       "ip": "10.20.1.15",
       "os": "Windows 11 Enterprise",
       "riskScore": 25000.0,
@@ -501,7 +501,7 @@
     "resources": [
      {
       "id": 101,
-      "hostName": "web01.cci-demo.com",
+      "hostName": "web01.acme-demo.com",
       "ip": "10.10.0.5",
       "os": "Ubuntu 22.04 LTS",
       "riskScore": 25000.0,
@@ -540,7 +540,7 @@
     "resources": [
      {
       "id": 102,
-      "hostName": "db01.cci-demo.com",
+      "hostName": "db01.acme-demo.com",
       "ip": "10.10.0.6",
       "os": "Windows Server 2019",
       "riskScore": 25000.0,
@@ -588,7 +588,7 @@
     "resources": [
      {
       "id": 101,
-      "hostName": "web01.cci-demo.com",
+      "hostName": "web01.acme-demo.com",
       "ip": "10.10.0.5",
       "os": "Ubuntu 22.04 LTS",
       "riskScore": 25000.0,
@@ -624,7 +624,7 @@
     "resources": [
      {
       "id": 102,
-      "hostName": "db01.cci-demo.com",
+      "hostName": "db01.acme-demo.com",
       "ip": "10.10.0.6",
       "os": "Windows Server 2019",
       "riskScore": 25000.0,
@@ -660,7 +660,7 @@
     "resources": [
      {
       "id": 110,
-      "hostName": "jane-lt01.cci-demo.com",
+      "hostName": "jane-lt01.acme-demo.com",
       "ip": "10.20.1.15",
       "os": "Windows 11 Enterprise",
       "riskScore": 25000.0,

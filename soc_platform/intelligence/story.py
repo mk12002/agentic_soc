@@ -471,7 +471,7 @@ class AttackStory:
                 if a.id in seen or a.action_type not in types:
                     continue
                 seen.add(a.id)
-                items.append({"id": a.id, "action_type": a.action_type, "targets": [t.get("id") for t in a.targets or []][:5],
+                items.append({"id": a.id, "action_type": a.action_type, "targets": [t.get("name") or t.get("recipient") or t.get("id") for t in a.targets or []][:5],
                               "status": a.status, "rationale": a.rationale, "case_id": a.case_id,
                               "four_eyes": any("four-eyes" in str(r) for r in a.policy_reasons or []),
                               "approvable": a.status in {"recommended", "pending_approval"}})
@@ -480,7 +480,7 @@ class AttackStory:
         rest = [a for a in acts if a.id not in seen]
         if rest:
             phases.append({"phase": "other", "label": "Other", "actions": [
-                {"id": a.id, "action_type": a.action_type, "targets": [t.get("id") for t in a.targets or []][:5], "status": a.status,
+                {"id": a.id, "action_type": a.action_type, "targets": [t.get("name") or t.get("recipient") or t.get("id") for t in a.targets or []][:5], "status": a.status,
                  "rationale": a.rationale, "case_id": a.case_id, "four_eyes": False,
                  "approvable": a.status in {"recommended", "pending_approval"}} for a in rest]})
         return phases
@@ -530,16 +530,18 @@ class AttackStory:
         deep = {"TA0003", "TA0004", "TA0006", "TA0007", "TA0008", "TA0009", "TA0010", "TA0040"}
         tools = {t for s in succ for t in s["tools"]}
         stages = {s["stage"] for s in succ}
+        blocked_only = {s["stage"] for s in steps if s["outcome"] == "blocked"} - stages
+        reached = f"{len(stages)} kill-chain stage(s) reached" + (f" ({len(blocked_only)} more blocked)" if blocked_only else "")
         benign_open = [h for h in hyps if h["status"] == "plausible"]
         if not steps:
             verdict, conf, why = "no_attack_activity", "medium", "no attack step found in any connected tool"
         elif not succ:
             verdict, conf, why = "attempt_blocked", "high", "every observed step was blocked by a control"
         elif len(stages) >= 3 and stages & deep and len(tools) >= 3 and not benign_open:
-            verdict, conf, why = "confirmed_compromise", "high", f"{len(stages)} kill-chain stages corroborated by {len(tools)} tools; benign explanations rejected"
+            verdict, conf, why = "confirmed_compromise", "high", f"{reached}, corroborated by {len(tools)} tools; benign explanations rejected"
         elif stages & deep or len(stages) >= 2:
             verdict, conf, why = "likely_compromise", "medium" if benign_open else "high", \
-                f"{len(stages)} stage(s) observed across {len(tools)} tool(s)" + (f"; {len(benign_open)} benign explanation(s) still plausible" if benign_open else "")
+                f"{reached} across {len(tools)} tool(s)" + (f"; {len(benign_open)} benign explanation(s) still plausible" if benign_open else "")
         else:
             verdict, conf, why = "suspicious_activity", "low", "a single initial step without follow-on activity"
         return {"verdict": verdict, "label": verdict.replace("_", " ").capitalize(), "confidence": conf, "reason": why}
@@ -568,7 +570,8 @@ class AttackStory:
         pending = [x for ph in plan for x in ph["actions"] if x["approvable"]]
         if pending:
             parts.append(f"First action: {plan[0]['label'].lower()} - {pending[0]['action_type']} on "
-                         f"{', '.join(map(str, pending[0]['targets'][:2])) or 'the targets'} ({len(pending)} action(s) awaiting approval).")
+                         f"{', '.join(map(str, pending[0]['targets'][:2])) or 'the targets'} "
+                         f"({sum(1 + len(x.get('duplicate_ids', [])) for x in pending)} action(s) awaiting approval).")
         return " ".join(parts)
 
 

@@ -1,7 +1,7 @@
 # Client demo guide
 
 A 25-minute walkthrough of the platform on the built-in scenario (fixture mode: realistic, vendor-shaped data from
-20 tools about one fictional organisation, `cci-demo.com`). Everything shown is computed live by the platform.
+20 tools about one fictional organisation, `acme-demo.com`). Everything shown is computed live by the platform.
 
 ## What a demo proves, and what it does not
 
@@ -9,9 +9,9 @@ A 25-minute walkthrough of the platform on the built-in scenario (fixture mode: 
 conclusion cites its evidence), governance (approvals, autonomy policy, kill switch, audit chain), RBAC, reports,
 and the analyst experience. The code paths are the same as in live mode.
 
-**It does not prove (say so if asked):** behaviour on CCI's own tenants and data volumes. The vendor connectors
-are built to the documented APIs and verified on fixtures, but must each be connected and tested in CCI's
-environment (connector *Test* button), and accuracy/latency targets must be measured on CCI's historical data
+**It does not prove (say so if asked):** behaviour on the client's own tenants and data volumes. The vendor connectors
+are built to the documented APIs and verified on fixtures, but must each be connected and tested in the client's
+environment (connector *Test* button), and accuracy/latency targets must be measured on the client's historical data
 (A07, A09). The LLM is optional: without one the platform gives deterministic, cited answers; with an approved
 endpoint it adds narrative - claims are still restricted to cited evidence.
 
@@ -32,7 +32,7 @@ Cases → *Run incident pipeline*, *Pull reported emails*; Vulnerabilities → *
    rates), integration health, enrichment latency, verdict drift. *"Every number here is computed, and every tile
    drills down to the records."*
 2. **Intelligence** (5 min) - the situation brief; the top insight *jane.doe accessed privileged credentials after
-   compromise indicators*. Ask: *"Is jane.doe@cci-demo.com compromised and what should we do first?"* - point out
+   compromise indicators*. Ask: *"Is jane.doe@acme-demo.com compromised and what should we do first?"* - point out
    the cited evidence (Canary, CrowdStrike, Entra, Delinea, phishing) and that the answer names the first step.
 3. **Case** (5 min) - open the phishing case: verdict, why (hover the E-numbers to see the evidence), campaign
    scope, who clicked, endpoint/identity impact, MITRE, recommended actions with blast radius and reversibility.

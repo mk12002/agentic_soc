@@ -94,7 +94,7 @@ class AzureOpenAIProvider(Provider):
 
 
 def build_provider(settings: Settings) -> Provider:
-    """Provider factory: none | azure_openai | anthropic | openai_compatible (SOC_LLM_PROVIDER)."""
+    """Provider factory: none | azure_openai | azure_foundry | anthropic | openai_compatible (SOC_LLM_PROVIDER)."""
     name = (settings.llm_provider or "none").lower()
     if name == "azure_openai":
         return AzureOpenAIProvider(settings)
@@ -106,6 +106,10 @@ def build_provider(settings: Settings) -> Provider:
         from soc_platform.llm.providers.openai_compatible import OpenAICompatibleProvider
 
         return OpenAICompatibleProvider(settings)
+    if name == "azure_foundry":
+        from soc_platform.llm.providers.openai_compatible import AzureFoundryProvider
+
+        return AzureFoundryProvider(settings)
     return NullProvider()
 
 
@@ -185,9 +189,16 @@ class LLMGateway:
             data = None
         if data:
             claims = validate_claims(data.get("claims"), valid)
-            if claims or data.get("insufficient_evidence"):
-                return {**data, "summary": str(data.get("summary", "")), "claims": claims, "grounded": True,
-                        "insufficient_evidence": bool(data.get("insufficient_evidence")), "source": "llm"}
+            by_id = {str(e["id"]): f"{e['claim']} {json.dumps({k: v for k, v in e.items() if k not in {'id', 'claim'}}, default=str)}"
+                     for e in evidence}
+            everything = question + " " + " ".join(by_id.values())
+            checked = [c for c in claims
+                       if not unsupported_numbers(c["text"], question + " " + " ".join(by_id[i] for i in c["evidence_ids"]))]
+            summary, removed = supported_summary(str(data.get("summary", "")), everything)
+            if checked or data.get("insufficient_evidence"):
+                return {**data, "summary": summary, "claims": checked, "grounded": True,
+                        "insufficient_evidence": bool(data.get("insufficient_evidence")), "source": "llm",
+                        "dropped_unsupported_figures": len(claims) - len(checked) + removed}
         return deterministic_grounded(evidence)
 
     def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str) -> None:
@@ -195,6 +206,38 @@ class LLMGateway:
                            response=response, prompt_tokens=pt, completion_tokens=ct, status=status,
                            grounded=True))
         self.s.flush()
+
+
+# Standalone quantities in model text (counts, scores, percentages, times). Digits inside names, IPs, CVE ids,
+# hashes or dates (host01, 10.2.3.4, CVE-2021-44228, 2026-09-20) are identifiers, not figures, and are ignored.
+_QTY = re.compile(r"(?<![\w.\-])\d+(?:\.\d+)?(?![\w\-]|\.\d)")
+_TRIVIAL = {"0", "1"}
+
+
+def _norm(n: str) -> str:
+    return str(int(n)) if n.isdigit() else n.rstrip("0").rstrip(".")
+
+
+def unsupported_numbers(text: str, support: str) -> list[str]:
+    """Figures a model statement contains that appear nowhere in the evidence it rests on (R02: numbers come from
+    code, never from the model). ``support`` is the text of the cited evidence (plus the question)."""
+    have = {_norm(x) for x in re.findall(r"\d+(?:\.\d+)?", support)} | {_norm(x) for x in re.findall(r"\d+", support)}
+    return [n for n in (_norm(x) for x in _QTY.findall(text)) if n not in _TRIVIAL and n not in have]
+
+
+def _split_sentences(text: str) -> list[str]:
+    return [p for p in re.split(r"(?<=[.!?])\s+", text.strip()) if p]
+
+
+def supported_summary(summary: str, support: str) -> tuple[str, int]:
+    """Drop summary sentences that state a figure absent from all the evidence; returns (text, removed)."""
+    keep, removed = [], 0
+    for sent in _split_sentences(summary):
+        if unsupported_numbers(sent, support):
+            removed += 1
+        else:
+            keep.append(sent)
+    return " ".join(keep), removed
 
 
 def validate_claims(claims: Any, valid_ids: set[str]) -> list[dict[str, Any]]:

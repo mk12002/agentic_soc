@@ -2,7 +2,7 @@
  "routes": [
   {
    "method": "GET",
-   "path": "^/v1.0/users/soc-reports@cci-demo.com/mailFolders/inbox/messages$",
+   "path": "^/v1.0/users/soc-reports@acme-demo.com/mailFolders/inbox/messages$",
    "body": {
     "value": [
      {
@@ -10,13 +10,13 @@
       "subject": "Phishing report: Action required: your password expires today",
       "from": {
        "emailAddress": {
-        "address": "bob.lee@cci-demo.com",
+        "address": "bob.lee@acme-demo.com",
         "name": "Bob Lee"
        }
       },
       "receivedDateTime": "2026-09-20T09:20:00Z",
       "hasAttachments": true,
-      "internetMessageId": "<report-0001@cci-demo.com>"
+      "internetMessageId": "<report-0001@acme-demo.com>"
      }
     ]
    },
@@ -24,7 +24,7 @@
   },
   {
    "method": "GET",
-   "path": "^/v1.0/users/soc-reports@cci-demo.com/messages/rep-msg-0001/attachments$",
+   "path": "^/v1.0/users/soc-reports@acme-demo.com/messages/rep-msg-0001/attachments$",
    "body": {
     "value": [
      {
@@ -32,7 +32,7 @@
       "id": "att-1",
       "name": "original.eml",
       "contentType": "message/rfc822",
-      "contentBytes": "UmV0dXJuLVBhdGg6IDxpdC1zdXBwb3J0QG1pY3JvczBmdC1oZWxwZGVzay5jb20+DQpSZWNlaXZlZDogZnJvbSBtYWlsLm1pY3JvczBmdC1oZWxwZGVzay5jb20gKDE4NS4yMjAuMTAxLjQpIGJ5IG14LmNjaS1kZW1vLmNvbTsgU3VuLCAyMCBTZXAgMjAyNiAwOTowMjowMCArMDAwMA0KQXV0aGVudGljYXRpb24tUmVzdWx0czogbXguY2NpLWRlbW8uY29tOyBzcGY9cGFzcyBzbXRwLm1haWxmcm9tPW1pY3JvczBmdC1oZWxwZGVzay5jb207IGRraW09bm9uZTsgZG1hcmM9ZmFpbCBoZWFkZXIuZnJvbT1taWNyb3MwZnQtaGVscGRlc2suY29tDQpGcm9tOiAiTWljcm9zb2Z0IDM2NSBTdXBwb3J0IiA8aXQtc3VwcG9ydEBtaWNyb3MwZnQtaGVscGRlc2suY29tPg0KVG86IGJvYi5sZWVAY2NpLWRlbW8uY29tDQpTdWJqZWN0OiBBY3Rpb24gcmVxdWlyZWQ6IHlvdXIgcGFzc3dvcmQgZXhwaXJlcyB0b2RheQ0KTWVzc2FnZS1JRDogPDIwMjYwOTIwMDkwMjAwLjExMTFAbWljcm9zMGZ0LWhlbHBkZXNrLmNvbT4NCkRhdGU6IFN1biwgMjAgU2VwIDIwMjYgMDk6MDI6MDAgKzAwMDANCk1JTUUtVmVyc2lvbjogMS4wDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD11dGYtOA0KDQo8aHRtbD48Ym9keT48cD5EZWFyIHVzZXIsPC9wPjxwPllvdXIgTWljcm9zb2Z0IDM2NSBwYXNzd29yZCA8Yj5leHBpcmVzIHRvZGF5PC9iPi4gVG8gYXZvaWQgbG9zaW5nIGFjY2VzcyB0byB5b3VyIG1haWxib3gsIHZlcmlmeSB5b3VyIGFjY291bnQgaW1tZWRpYXRlbHkuPC9wPjxwPjxhIGhyZWY9Imh0dHBzOi8vbG9naW4ubWljcm9zMGZ0LWhlbHBkZXNrLmNvbS92ZXJpZnk/dT1qYW5lLmRvZSI+S2VlcCBteSBwYXNzd29yZDwvYT48L3A+PHA+TWljcm9zb2Z0IDM2NSBTdXBwb3J0IFRlYW08L3A+PC9ib2R5PjwvaHRtbD4NCg=="
+      "contentBytes": "UmV0dXJuLVBhdGg6IDxpdC1zdXBwb3J0QG1pY3JvczBmdC1oZWxwZGVzay5jb20+DQpSZWNlaXZlZDogZnJvbSBtYWlsLm1pY3JvczBmdC1oZWxwZGVzay5jb20gKDE4NS4yMjAuMTAxLjQpIGJ5IG14LmFjbWUtZGVtby5jb207IFN1biwgMjAgU2VwIDIwMjYgMDk6MDI6MDAgKzAwMDANCkF1dGhlbnRpY2F0aW9uLVJlc3VsdHM6IG14LmFjbWUtZGVtby5jb207IHNwZj1wYXNzIHNtdHAubWFpbGZyb209bWljcm9zMGZ0LWhlbHBkZXNrLmNvbTsgZGtpbT1ub25lOyBkbWFyYz1mYWlsIGhlYWRlci5mcm9tPW1pY3JvczBmdC1oZWxwZGVzay5jb20NCkZyb206ICJNaWNyb3NvZnQgMzY1IFN1cHBvcnQiIDxpdC1zdXBwb3J0QG1pY3JvczBmdC1oZWxwZGVzay5jb20+DQpUbzogYm9iLmxlZUBhY21lLWRlbW8uY29tDQpTdWJqZWN0OiBBY3Rpb24gcmVxdWlyZWQ6IHlvdXIgcGFzc3dvcmQgZXhwaXJlcyB0b2RheQ0KTWVzc2FnZS1JRDogPDIwMjYwOTIwMDkwMjAwLjExMTFAbWljcm9zMGZ0LWhlbHBkZXNrLmNvbT4NCkRhdGU6IFN1biwgMjAgU2VwIDIwMjYgMDk6MDI6MDAgKzAwMDANCk1JTUUtVmVyc2lvbjogMS4wDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD11dGYtOA0KDQo8aHRtbD48Ym9keT48cD5EZWFyIHVzZXIsPC9wPjxwPllvdXIgTWljcm9zb2Z0IDM2NSBwYXNzd29yZCA8Yj5leHBpcmVzIHRvZGF5PC9iPi4gVG8gYXZvaWQgbG9zaW5nIGFjY2VzcyB0byB5b3VyIG1haWxib3gsIHZlcmlmeSB5b3VyIGFjY291bnQgaW1tZWRpYXRlbHkuPC9wPjxwPjxhIGhyZWY9Imh0dHBzOi8vbG9naW4ubWljcm9zMGZ0LWhlbHBkZXNrLmNvbS92ZXJpZnk/dT1qYW5lLmRvZSI+S2VlcCBteSBwYXNzd29yZDwvYT48L3A+PHA+TWljcm9zb2Z0IDM2NSBTdXBwb3J0IFRlYW08L3A+PC9ib2R5PjwvaHRtbD4NCg=="
      }
     ]
    },
@@ -56,7 +56,7 @@
        {
         "@odata.type": "#microsoft.graph.security.userEvidence",
         "userAccount": {
-         "userPrincipalName": "bob.lee@cci-demo.com"
+         "userPrincipalName": "bob.lee@acme-demo.com"
         }
        },
        {
@@ -80,7 +80,7 @@
     "results": [
      {
       "Timestamp": "2026-09-20T09:05:10Z",
-      "AccountUpn": "jane.doe@cci-demo.com",
+      "AccountUpn": "jane.doe@acme-demo.com",
       "Url": "https://login.micros0ft-helpdesk.com/verify?u=jane.doe",
       "ActionType": "ClickAllowed",
       "IsClickedThrough": true,
@@ -90,7 +90,7 @@
      },
      {
       "Timestamp": "2026-09-20T09:11:02Z",
-      "AccountUpn": "priya.nair@cci-demo.com",
+      "AccountUpn": "priya.nair@acme-demo.com",
       "Url": "https://login.micros0ft-helpdesk.com/verify?u=jane.doe",
       "ActionType": "ClickBlocked",
       "IsClickedThrough": false,
@@ -110,7 +110,7 @@
     "results": [
      {
       "Timestamp": "2026-09-20T09:05:10Z",
-      "AccountUpn": "jane.doe@cci-demo.com",
+      "AccountUpn": "jane.doe@acme-demo.com",
       "Url": "https://login.micros0ft-helpdesk.com/verify?u=jane.doe",
       "ActionType": "ClickAllowed",
       "IsClickedThrough": true,
@@ -149,7 +149,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "jane.doe@cci-demo.com",
+      "RecipientEmailAddress": "jane.doe@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -173,7 +173,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "bob.lee@cci-demo.com",
+      "RecipientEmailAddress": "bob.lee@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -197,7 +197,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "raj.mehta@cci-demo.com",
+      "RecipientEmailAddress": "raj.mehta@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -221,7 +221,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "priya.nair@cci-demo.com",
+      "RecipientEmailAddress": "priya.nair@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -245,7 +245,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "arun.k@cci-demo.com",
+      "RecipientEmailAddress": "arun.k@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -269,7 +269,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "meera.s@cci-demo.com",
+      "RecipientEmailAddress": "meera.s@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -293,7 +293,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "tom.w@cci-demo.com",
+      "RecipientEmailAddress": "tom.w@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -317,7 +317,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "li.chen@cci-demo.com",
+      "RecipientEmailAddress": "li.chen@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -341,7 +341,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "priya.nair@cci-demo.com",
+      "RecipientEmailAddress": "priya.nair@acme-demo.com",
       "Subject": "Re: Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -365,7 +365,7 @@
       "SenderDisplayName": "Vendor News",
       "SenderIPv4": "198.51.100.20",
       "SenderFromDomain": "vendor.example",
-      "RecipientEmailAddress": "arun.k@cci-demo.com",
+      "RecipientEmailAddress": "arun.k@acme-demo.com",
       "Subject": "September product update",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -393,7 +393,7 @@
      {
       "Timestamp": "2026-09-20T09:30:00Z",
       "NetworkMessageId": "nm-7f3a-0001",
-      "RecipientEmailAddress": "raj.mehta@cci-demo.com",
+      "RecipientEmailAddress": "raj.mehta@acme-demo.com",
       "Action": "Moved to Junk",
       "ActionType": "ZAP",
       "ActionResult": "Success",
@@ -418,7 +418,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "jane.doe@cci-demo.com",
+      "RecipientEmailAddress": "jane.doe@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -442,7 +442,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "bob.lee@cci-demo.com",
+      "RecipientEmailAddress": "bob.lee@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -466,7 +466,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "raj.mehta@cci-demo.com",
+      "RecipientEmailAddress": "raj.mehta@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -490,7 +490,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "priya.nair@cci-demo.com",
+      "RecipientEmailAddress": "priya.nair@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -514,7 +514,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "arun.k@cci-demo.com",
+      "RecipientEmailAddress": "arun.k@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -538,7 +538,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "meera.s@cci-demo.com",
+      "RecipientEmailAddress": "meera.s@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -562,7 +562,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "tom.w@cci-demo.com",
+      "RecipientEmailAddress": "tom.w@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -586,7 +586,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "li.chen@cci-demo.com",
+      "RecipientEmailAddress": "li.chen@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -620,7 +620,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "jane.doe@cci-demo.com",
+      "RecipientEmailAddress": "jane.doe@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -644,7 +644,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "bob.lee@cci-demo.com",
+      "RecipientEmailAddress": "bob.lee@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -668,7 +668,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "raj.mehta@cci-demo.com",
+      "RecipientEmailAddress": "raj.mehta@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -692,7 +692,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "priya.nair@cci-demo.com",
+      "RecipientEmailAddress": "priya.nair@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -716,7 +716,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "arun.k@cci-demo.com",
+      "RecipientEmailAddress": "arun.k@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -740,7 +740,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "meera.s@cci-demo.com",
+      "RecipientEmailAddress": "meera.s@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -764,7 +764,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "tom.w@cci-demo.com",
+      "RecipientEmailAddress": "tom.w@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -788,7 +788,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "li.chen@cci-demo.com",
+      "RecipientEmailAddress": "li.chen@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",
@@ -838,7 +838,7 @@
       "SenderDisplayName": "Microsoft 365 Support",
       "SenderIPv4": "185.220.101.4",
       "SenderFromDomain": "micros0ft-helpdesk.com",
-      "RecipientEmailAddress": "jane.doe@cci-demo.com",
+      "RecipientEmailAddress": "jane.doe@acme-demo.com",
       "Subject": "Action required: your password expires today",
       "DeliveryAction": "Delivered",
       "DeliveryLocation": "Inbox/folder",

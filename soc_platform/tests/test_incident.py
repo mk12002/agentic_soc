@@ -65,7 +65,7 @@ def test_recommendations_are_ranked_gated_and_well_formed(session, world):
     assert acts["endpoint.isolate"]["status"] == "recommended"  # L2 by default: nothing auto-executes
     iso_target = acts["endpoint.isolate"]["targets"][0]
     assert iso_target["crowdstrike_aid"] == "cs-aid-jane01" and iso_target["mde_device_id"] == "mde-jane01"
-    assert acts["identity.revoke_sessions"]["targets"][0]["upn"] == "jane.doe@cci-demo.com"
+    assert acts["identity.revoke_sessions"]["targets"][0]["upn"] == "jane.doe@acme-demo.com"
     assert acts["pam.rotate_secret"]["targets"][0]["secret_id"] == "42"
     blocked = [a["targets"][0]["value"] for a in view["actions"] if a["action_type"] == "dns.block_domain"]
     assert "login.micros0ft-helpdesk.com" in blocked and all("." in b for b in blocked)

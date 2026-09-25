@@ -154,6 +154,14 @@ FEATURES: list[tuple[str, str, list[str]]] = [
     ("Connectors", "Configuration: secrets interpolation, missing live config reported, threat-intel attribution",
      ["test_connectors.py::test_secret_interpolation", "test_connectors.py::test_live_mode_reports_missing_config",
       "test_connectors.py::test_threat_intel_fusion_attributes_every_source"]),
+    ("LLM (live)", "Configured LLM endpoint answers on the pinned model; grounded answers cited, identities redacted, calls logged - opt-in (--llm)",
+     ["test_live_llm.py::test_provider_round_trip", "test_live_llm.py::test_grounded_answer_is_cited_redacted_and_logged",
+      "test_live_llm.py::test_every_llm_call_succeeded_on_the_pinned_model"]),
+    ("LLM (live)", "Live LLM writes incident summaries, phishing explanations and analyst answers, all cited - opt-in (--llm)",
+     ["test_live_llm.py::test_incident_summaries_written_by_llm_and_cited", "test_live_llm.py::test_phishing_explanation_written_by_llm_and_redacted",
+      "test_live_llm.py::test_analyst_answers_with_llm"]),
+    ("LLM (live)", "Live LLM deep analysis bound to the story, and all standard reports + prompt planner - opt-in (--llm)",
+     ["test_live_llm.py::test_deep_analysis_on_the_sample_estate", "test_live_llm.py::test_every_standard_report_with_llm_narrative"]),
     ("Connectors", "Live public feeds (NVD, EPSS, CISA KEV) - network, opt-in",
      ["test_live_public_feeds.py::test_nvd_detail", "test_live_public_feeds.py::test_epss_scores", "test_live_public_feeds.py::test_cisa_kev_catalogue"]),
     # ---------------------------------------------------------------- operations
@@ -189,15 +197,15 @@ FEATURES: list[tuple[str, str, list[str]]] = [
 ]
 
 NOT_AUTOMATED = [
-    ("Vendor connectors against CCI's real tenants", "Each connector is built to the vendor's documented API and exercised on vendor-shaped "
+    ("Vendor connectors against the client's real tenants", "Each connector is built to the vendor's documented API and exercised on vendor-shaped "
      "fixtures through the same code. Real tenants need credentials: press *Test* per connector (Integrations screen)."),
-    ("LLM providers with real keys", "Provider adapters are tested against the official SDK request shapes with stubbed responses; "
-     "a real call needs an approved endpoint and key."),
+    ("Other LLM providers with real keys (Azure OpenAI deployments API, Anthropic, self-hosted)", "Azure AI Foundry is verified live "
+     "with `--llm`; the other adapters are tested against the official request shapes with stubbed responses."),
     ("Detonation on an isolated sandbox host / CAPEv2", "Hardening and fail-closed behaviour are unit-tested in the engine suite; "
      "actual detonation needs the isolated host."),
     ("Entra ID SSO login flow", "RS256/JWKS validation is tested with signed tokens; the browser SSO redirect needs an app registration."),
     ("Docker Compose deployment", "Compose file validated (YAML/services); images were not built in this environment."),
-    ("Accuracy and latency on CCI data / volumes", "Measured on synthetic and public data only; shadow-mode metrics measure it in production."),
+    ("Accuracy and latency on client data / volumes", "Measured on synthetic and public data only; shadow-mode metrics measure it in production."),
 ]
 
 
@@ -237,7 +245,19 @@ def run_evaluations() -> list[tuple[str, str, bool]]:
     return out
 
 
-def run_browser_tour() -> tuple[bool, str]:
+def llm_env() -> dict[str, str]:
+    """SOC_LLM_* from the environment, else from the repository's .env (values never printed)."""
+    env = {k: v for k, v in os.environ.items() if k.startswith("SOC_LLM_")}
+    if "SOC_LLM_PROVIDER" not in env and (ROOT / ".env").is_file():
+        for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
+            k, sep, v = line.partition("=")
+            if sep and k.strip().startswith("SOC_LLM_"):
+                env[k.strip()] = v.split(" #")[0].strip()
+    return env
+
+
+def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple[bool, str]:
+    """Tour into a temporary folder (docs/screenshots is only refreshed deliberately, via SOC_SHOTS)."""
     tour = ROOT / "scripts" / "ui_tour"
     if not (tour / "node_modules").exists():
         subprocess.run(["npm", "install", "--silent", "--no-audit", "--no-fund"], cwd=tour, check=True, shell=os.name == "nt")
@@ -246,8 +266,10 @@ def run_browser_tour() -> tuple[bool, str]:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     env = {**os.environ, "SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": "verify-" + os.urandom(16).hex(), "SOC_ENVIRONMENT": "dev",
-           "SOC_DATABASE_URL": f"sqlite:///{tmp / 'soc.db'}", "SOC_ORG_DOMAINS": "cci-demo.com",
-           "SOC_REPORT_OUTPUT_DIR": str(tmp / "reports"), "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw")}
+           "SOC_DATABASE_URL": f"sqlite:///{tmp / 'soc.db'}", "SOC_ORG_DOMAINS": "acme-demo.com",
+           "SOC_REPORT_OUTPUT_DIR": str(tmp / "reports"), "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"),
+           **(llm_env() if with_llm else {"SOC_LLM_PROVIDER": "none"})}
+    shots = shots or tmp / "shots"
     server = subprocess.Popen([sys.executable, "-m", "uvicorn", "soc_platform.api.app:app", "--host", "127.0.0.1", "--port", str(port)],
                               cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -257,11 +279,11 @@ def run_browser_tour() -> tuple[bool, str]:
                 break
             except OSError:
                 time.sleep(1)
-        p = subprocess.run(["node", "tour.js"], cwd=tour, env={**os.environ, "SOC_BASE": f"http://127.0.0.1:{port}"},
+        p = subprocess.run(["node", "tour.js"], cwd=tour, env={**os.environ, "SOC_BASE": f"http://127.0.0.1:{port}", "SOC_SHOTS": str(shots)},
                            capture_output=True, text=True)
-        res = json.loads((ROOT / "docs" / "screenshots" / "tour-result.json").read_text())
+        res = json.loads((shots / "tour-result.json").read_text())
         ok = p.returncode == 0 and not res["problems"]
-        detail = (f"{res['screenshots']} screenshots, layout audited at {', '.join(map(str, res['audited_widths']))} px in light + dark; "
+        detail = (("LLM on - " if with_llm else "") + f"{res['screenshots']} screenshots, layout audited at {', '.join(map(str, res['audited_widths']))} px in light + dark; "
                   f"problems: {len(res['problems'])}" + ("" if ok else " - " + "; ".join(res["problems"][:5])))
         return ok, detail
     finally:
@@ -274,13 +296,14 @@ def main() -> int:
     ap.add_argument("--browser", action="store_true")
     ap.add_argument("--engine", action="store_true")
     ap.add_argument("--live", action="store_true", help="also run the live public-feed tests (network)")
+    ap.add_argument("--llm", action="store_true", help="also run the live LLM tests and the browser tour with the configured LLM (costs tokens)")
     args = ap.parse_args()
     started = datetime.now(timezone.utc)
     tests = sorted({t for _, _, ts in FEATURES for t in ts})
-    results = run_pytest(tests, {"SOC_LIVE_TESTS": "1"} if args.live else None)
+    results = run_pytest(tests, {**({"SOC_LIVE_TESTS": "1"} if args.live else {}), **({"SOC_LIVE_LLM": "1"} if args.llm else {})})
     missing = [t for t in tests if t not in results]
     evals = run_evaluations()
-    browser = run_browser_tour() if args.browser else None
+    browser = run_browser_tour(with_llm=args.llm) if args.browser else None
     engine = None
     if args.engine:
         p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "soc_platform/domains/phishing/tests/unit"],
@@ -297,12 +320,12 @@ def main() -> int:
         rows.append((area, feat, status, ev))
 
     md = ["# Feature verification", "",
-          f"Generated by `python scripts/verify_features.py{' --browser' if args.browser else ''}{' --engine' if args.engine else ''}{' --live' if args.live else ''}` "
+          f"Generated by `python scripts/verify_features.py{' --browser' if args.browser else ''}{' --engine' if args.engine else ''}{' --live' if args.live else ''}{' --llm' if args.llm else ''}` "
           f"on {started:%Y-%m-%d %H:%M} UTC. Re-run it any time; every row names the tests that prove it.", "",
           "## Summary", "", "| Check | Result |", "|---|---|",
           f"| Features verified by automated tests | **{counts['VERIFIED']} of {len(FEATURES)}**"
           + (f" ({counts['FAILED']} failed)" if counts["FAILED"] else "")
-          + (f" · {counts['not run (opt-in)']} opt-in (network) not run" if counts["not run (opt-in)"] else "") + " |",
+          + (f" · {counts['not run (opt-in)']} opt-in (network / LLM) not run" if counts["not run (opt-in)"] else "") + " |",
           f"| Tests mapped to features, executed | {sum(1 for v in results.values() if v != 'skip')} run, "
           f"{sum(1 for v in results.values() if v == 'fail')} failed |"]
     for name, detail, ok in evals:
@@ -320,7 +343,7 @@ def main() -> int:
             area = a
         md.append(f"| {feat} | {'✅ ' if status == 'VERIFIED' else '❌ ' if status == 'FAILED' else '⏭️ '}{status} | {ev} |")
     md += ["", "## What automated verification cannot prove", "",
-           "These need CCI's environment or credentials; the platform is built for them but they have not been exercised here.", "",
+           "These need the client's environment or credentials; the platform is built for them but they have not been exercised here.", "",
            "| Item | Status |", "|---|---|"] + [f"| {a} | {b} |" for a, b in NOT_AUTOMATED]
     OUT.write_text("\n".join(md) + "\n", encoding="utf-8")
     ok = counts["FAILED"] == 0 and all(e[2] for e in evals) and (browser is None or browser[0]) and (engine is None or engine[0]) and not missing

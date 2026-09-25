@@ -32,7 +32,7 @@ FIRST = ["jane", "john", "priya", "arun", "meera", "tom", "li", "sara", "ravi", 
          "vikram", "maria", "david", "omar", "fatima", "chen", "yuki"]
 LAST = ["doe", "smith", "nair", "kumar", "shah", "white", "chen", "iyer", "rao", "mehta", "patel", "singh",
         "khan", "gupta", "das", "roy", "bose", "jain", "verma", "sethi"]
-DOM, NETBIOS = "corp.cci.com", "CORP"
+DOM, NETBIOS = "corp.acme.com", "CORP"
 
 
 def people(n: int, rnd: random.Random) -> list[dict]:

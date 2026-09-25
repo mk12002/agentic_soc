@@ -1,6 +1,6 @@
 """SIEM / case-management alert sources (IM-F01, IM-T02, Q01).
 
-Whether CCI runs a SIEM is the top open question. Two implementations:
+Whether the client runs a SIEM is the top open question. Two implementations:
   * ``sentinel``     - Microsoft Sentinel incidents via the Azure management API
   * ``generic_siem`` - any SIEM/SOAR that can POST JSON alerts to the platform
                        webhook (``POST /api/v1/ingest/alerts``); this connector
@@ -82,7 +82,7 @@ class GenericSiemConnector(ToolConnector):
 MANIFESTS = [
     ConnectorManifest(
         name="sentinel", tool="Microsoft Sentinel", vendor="Microsoft", category="siem", dimension="other",
-        description="Sentinel incidents (if Sentinel is CCI's SIEM).",
+        description="Sentinel incidents (if Sentinel is the client's SIEM).",
         factory=lambda s, t: SentinelConnector(s, t, rate_per_sec=2, burst=4),
         live_transport=lambda s: HttpTransport("https://management.azure.com", entra_app_auth(
             s["tenant_id"], s["client_id"], s["client_secret"], "https://management.azure.com/.default")),

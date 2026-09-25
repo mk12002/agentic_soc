@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.models import Case, LLMCall
 from soc_platform.intelligence.story import evidence_for_llm
-from soc_platform.llm.gateway import BudgetExceeded, LLMGateway
+from soc_platform.llm.gateway import BudgetExceeded, LLMGateway, supported_summary, unsupported_numbers
 from soc_platform.llm.redaction import Redactor
 
 SYSTEM = (
@@ -53,6 +53,12 @@ VERDICT_CONF = {"confirmed_compromise": "high", "likely_compromise": "medium", "
 
 def _cited(item: dict[str, Any], valid: set[str]) -> list[str]:
     return [str(i) for i in (item.get("evidence_ids") or []) if str(i) in valid]
+
+
+def _figures_ok(item: dict[str, Any], fields: tuple[str, ...], ids: list[str], text_by_id: dict[str, str], context: str) -> bool:
+    """Every figure a statement states must appear in the evidence it cites (or the case context)."""
+    support = context + " " + " ".join(text_by_id.get(i, "") for i in ids)
+    return not any(unsupported_numbers(str(item.get(f, "")), support) for f in fields)
 
 
 def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway | None, *, actor: str,
@@ -82,11 +88,13 @@ def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway |
     if not data:
         return {"available": True, "ok": False, "reason": "The model returned no usable answer (see the LLM call log)."}
 
+    text_by_id = {e["id"]: e["claim"] for e in evidence}
+    context = f"{story['title']} {story['assessment']['label']} {story['assessment']['reason']}"
     dropped = 0
     findings = []
     for f in data.get("key_findings") or []:
         ids = _cited(f, valid) if isinstance(f, dict) else []
-        if not ids or not str(f.get("text", "")).strip():
+        if not ids or not str(f.get("text", "")).strip() or not _figures_ok(f, ("text",), ids, text_by_id, context):
             dropped += 1
             continue
         findings.append({"text": str(f["text"]).strip(), "kind": f.get("kind") if f.get("kind") in {"fact", "inference"} else "inference",
@@ -94,7 +102,7 @@ def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway |
     alts = []
     for h in data.get("alternative_explanations") or []:
         ids = _cited(h, valid) if isinstance(h, dict) else []
-        if not ids or h.get("status") not in STATUSES:
+        if not ids or h.get("status") not in STATUSES or not _figures_ok(h, ("hypothesis", "reasoning"), ids, text_by_id, context):
             dropped += 1
             continue
         alts.append({"hypothesis": str(h.get("hypothesis", ""))[:300], "status": h["status"],
@@ -111,7 +119,7 @@ def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway |
         if ref != "manual" and ref not in plan_ids:
             dropped += 1          # references an action that does not exist
             continue
-        if not ids:
+        if not ids or not _figures_ok(p, ("text", "why"), ids, text_by_id, context):
             dropped += 1
             continue
         priorities.append({"action_ref": ref, "action_id": plan_ids.get(ref), "text": str(p.get("text", ""))[:300],
@@ -127,8 +135,10 @@ def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway |
     if abs(rank[conf] - rank[expected]) >= 2 or (story["assessment"]["verdict"] == "no_attack_activity" and findings):
         disagreement = (f"The model's confidence ({conf}) differs markedly from the deterministic assessment "
                         f"({story['assessment']['label']}, {story['assessment']['confidence']}). Review the cited evidence.")
+    assessment, removed = supported_summary(str(data.get("assessment", "")), context + " " + " ".join(text_by_id.values()))
+    dropped += removed
     call = session.query(LLMCall).filter(LLMCall.workflow == "intelligence.deep_analysis").order_by(LLMCall.ts.desc()).first()
-    result = {"available": True, "ok": True, "assessment": str(data.get("assessment", ""))[:1200], "confidence": conf,
+    result = {"available": True, "ok": True, "assessment": assessment[:1200], "confidence": conf,
               "attacker_objective": objective, "key_findings": findings, "alternative_explanations": alts,
               "open_questions": questions, "priorities": priorities, "dropped_statements": dropped,
               "disagreement": disagreement, "fingerprint": story["fingerprint"],

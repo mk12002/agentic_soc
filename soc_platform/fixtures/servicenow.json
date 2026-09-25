@@ -8,7 +8,7 @@
      {
       "sys_id": "ci-web01",
       "name": "web01",
-      "fqdn": "web01.cci-demo.com",
+      "fqdn": "web01.acme-demo.com",
       "ip_address": "10.10.0.5",
       "os": "Ubuntu 22.04 LTS",
       "serial_number": "VMware-42 1a 7c 3e",
@@ -40,7 +40,7 @@
      {
       "sys_id": "ci-db01",
       "name": "DB01",
-      "fqdn": "db01.cci-demo.com",
+      "fqdn": "db01.acme-demo.com",
       "ip_address": "10.10.0.6",
       "os": "Windows Server 2019",
       "serial_number": "VMware-42 9f 11 02",
@@ -72,7 +72,7 @@
      {
       "sys_id": "ci-fs01",
       "name": "FS01",
-      "fqdn": "fs01.cci-demo.com",
+      "fqdn": "fs01.acme-demo.com",
       "ip_address": "10.10.0.20",
       "os": "Windows Server 2022",
       "serial_number": "CZ20240001",
@@ -104,7 +104,7 @@
      {
       "sys_id": "ci-jane",
       "name": "JANE-LT01",
-      "fqdn": "jane-lt01.cci-demo.com",
+      "fqdn": "jane-lt01.acme-demo.com",
       "ip_address": "10.20.1.15",
       "os": "Windows 11 Enterprise",
       "serial_number": "5CG1234XYZ",
@@ -136,7 +136,7 @@
      {
       "sys_id": "ci-bob",
       "name": "BOB-LT02",
-      "fqdn": "bob-lt02.cci-demo.com",
+      "fqdn": "bob-lt02.acme-demo.com",
       "ip_address": "10.20.1.22",
       "os": "Windows 11 Enterprise",
       "serial_number": "5CG5678ABC",
@@ -179,7 +179,7 @@
      {
       "sys_id": "ci-web01",
       "name": "web01",
-      "fqdn": "web01.cci-demo.com",
+      "fqdn": "web01.acme-demo.com",
       "ip_address": "10.10.0.5",
       "os": "Ubuntu 22.04 LTS",
       "serial_number": "VMware-42 1a 7c 3e",
@@ -199,7 +199,7 @@
      {
       "sys_id": "ci-db01",
       "name": "DB01",
-      "fqdn": "db01.cci-demo.com",
+      "fqdn": "db01.acme-demo.com",
       "ip_address": "10.10.0.6",
       "os": "Windows Server 2019",
       "serial_number": "VMware-42 9f 11 02",
@@ -219,7 +219,7 @@
      {
       "sys_id": "ci-fs01",
       "name": "FS01",
-      "fqdn": "fs01.cci-demo.com",
+      "fqdn": "fs01.acme-demo.com",
       "ip_address": "10.10.0.20",
       "os": "Windows Server 2022",
       "serial_number": "CZ20240001",
@@ -239,7 +239,7 @@
      {
       "sys_id": "ci-jane",
       "name": "JANE-LT01",
-      "fqdn": "jane-lt01.cci-demo.com",
+      "fqdn": "jane-lt01.acme-demo.com",
       "ip_address": "10.20.1.15",
       "os": "Windows 11 Enterprise",
       "serial_number": "5CG1234XYZ",
@@ -259,7 +259,7 @@
      {
       "sys_id": "ci-bob",
       "name": "BOB-LT02",
-      "fqdn": "bob-lt02.cci-demo.com",
+      "fqdn": "bob-lt02.acme-demo.com",
       "ip_address": "10.20.1.22",
       "os": "Windows 11 Enterprise",
       "serial_number": "5CG5678ABC",

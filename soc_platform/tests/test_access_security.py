@@ -30,7 +30,7 @@ def _st(**kw) -> Settings:
     return Settings(auth_mode="dev", dev_jwt_secret=SECRET, environment="test", **kw)
 
 
-ADMIN = Principal("root.admin@cci", "Admin", frozenset({Role.ADMIN}))
+ADMIN = Principal("root.admin@acme", "Admin", frozenset({Role.ADMIN}))
 
 
 # ----------------------------------------------------------------------------- principal / token rules
@@ -336,4 +336,4 @@ def test_scoped_users_only_see_and_decide_their_domain_actions(client):
     other = next(a for a in client.get("/api/v1/actions?status=recommended,pending_approval", headers=lead).json()
                  if a["domain"] == "incident")
     assert client.post(f"/api/v1/actions/{other['id']}/approve", headers=vm_only, json={"note": "x"}).status_code == 404
-    assert client.get("/api/v1/entities/find?kind=asset&key=fqdn&value=web01.cci-demo.com", headers=vm_only).status_code == 403
+    assert client.get("/api/v1/entities/find?kind=asset&key=fqdn&value=web01.acme-demo.com", headers=vm_only).status_code == 403

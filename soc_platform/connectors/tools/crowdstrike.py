@@ -2,7 +2,7 @@
 
 Read: alerts (detections), host inventory, Spotlight vulnerabilities, IOC lookups.
 Write (policy-gated): network containment / lift, Real Time Response collection.
-To confirm with CCI: API client scopes, Spotlight/Exposure licence, RTR response policy.
+To confirm with the client: API client scopes, Spotlight/Exposure licence, RTR response policy.
 """
 
 from __future__ import annotations
@@ -244,6 +244,6 @@ MANIFEST = ConnectorManifest(
             ConfigField("user_domain", "Domain appended to bare user names to form a UPN", required=False)],
     actions=_actions, confidence="High",
     to_confirm="API client scopes; Spotlight/Exposure licence; RTR response policy",
-    fake_settings={"user_domain": "cci-demo.com"},
+    fake_settings={"user_domain": "acme-demo.com"},
     focus_areas=("incident", "vulnerability", "phishing"),
 )

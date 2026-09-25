@@ -1,5 +1,5 @@
 # Services the organisation has approved (U11). Anything else in a watched category (file sharing,
-# generative AI, personal VPN, remote access...) is reported as shadow IT. Replace with CCI's list.
+# generative AI, personal VPN, remote access...) is reported as shadow IT. Replace with the client's list.
 sanctioned:
   - sharepoint.com
   - onedrive.live.com

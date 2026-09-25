@@ -103,5 +103,5 @@ MANIFEST = ConnectorManifest(
             ConfigField("auth_token", "API auth token", secret=True),
             ConfigField("user_domain", "UPN suffix for Canary usernames", required=False)],
     actions=_actions, confidence="High", to_confirm="API token provisioning", focus_areas=("incident",),
-    fake_settings={"domain_hash": "cci-demo", "user_domain": "cci-demo.com"},
+    fake_settings={"domain_hash": "acme-demo", "user_domain": "acme-demo.com"},
 )

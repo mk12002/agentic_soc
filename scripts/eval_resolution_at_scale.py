@@ -48,7 +48,7 @@ def make_estate(n: int, rnd: random.Random) -> list[dict]:
         used.add(name)
         is_vm = role not in {"lt", "ws"}
         serial = clone_serial if (is_vm and rnd.random() < 0.08) else f"SN{rnd.randrange(10**9):09d}"
-        hosts.append({"gt": i, "name": name, "fqdn": f"{name}.corp.cci.local", "serial": serial,
+        hosts.append({"gt": i, "name": name, "fqdn": f"{name}.corp.acme.local", "serial": serial,
                       "mac": ":".join(f"{rnd.randrange(256):02x}" for _ in range(6)),
                       "ip": f"10.{rnd.randrange(1, 60)}.{rnd.randrange(256)}.{rnd.randrange(1, 255)}",
                       "os": rnd.choice(OSES[3:5] if role in {"web", "k8s-node"} else OSES),

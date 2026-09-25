@@ -5,8 +5,10 @@ workflows - **phishing / reported email**, **incident management** and **vulnera
 governed context store, with a cross-domain intelligence layer on top.
 
 Every screenshot below was captured from the running system (API + console in Chrome) after loading the built-in
-sample estate: 20 security tools' worth of vendor-shaped data about a fictional organisation (`cci-demo.com`),
-plus 12 sample emails. Nothing in the screenshots is mocked; every number is computed by the platform.
+sample estate: 20 security tools' worth of vendor-shaped data about a fictional organisation (`acme-demo.com`),
+plus 12 sample emails. Nothing in the screenshots is mocked; every number is computed by the platform. They were
+taken with the approved LLM switched on (Azure AI Foundry, gpt-4.1-mini), so narratives are real model output -
+each bound to cited evidence; with the LLM off the same screens show deterministic, equally cited text.
 
 **Contents**
 1. [Platform](#1-platform) - console, context store, entity resolution, governance, security
@@ -222,14 +224,15 @@ legitimate vendor, internal and marketing mail).
 ![](screenshots/02-intelligence.png)
 
 * **Explainable risk engine** - per user and host across all domains, time-decayed, every factor shown.
-* **12 correlation rules** raising insights with evidence and next steps (plus job-failure alerts from the scheduler): phishing → endpoint → identity chain
+* **12 correlation rules** raising insights with evidence and next steps (plus two operational alerts: a scheduled job dead-lettered, break-glass access used): phishing → endpoint → identity chain
   (U08), privileged access after compromise (U07), deception corroborated (U04), exposed host under attack (U06),
   attacked host without EDR, control gap - a blocked indicator still reachable in another control (U10), repeat
   clickers (U16), new KEV exposure (U02), shared infrastructure, high entity risk, **supplier risk (U18)** and
   **model drift (R14)**.
 * **Analyst assistant** - ask in plain language; a planner calls read-only tools (never actions), and the answer
   cites the tool results. Without an LLM the answer is deterministic and still cited; with an approved LLM
-  (Azure OpenAI, Anthropic Claude, OpenAI-compatible) claims are restricted to the cited evidence, PII is
+  (Azure AI Foundry, Azure OpenAI, Anthropic Claude, OpenAI-compatible) claims are restricted to the cited evidence
+  and may not state figures absent from it, PII is
   pseudonymised, prompts are logged, the model is pinned and a token budget applies.
 * **Situation brief** for the SOC lead / CISO.
 * **ATT&CK coverage (U09)** - capability × observed matrix for the enabled tools, priority blind spots,
@@ -277,12 +280,10 @@ count is shown); priorities may only reference real pending actions or be marked
 is compared with the deterministic assessment and disagreement is flagged; results are cached per evidence
 fingerprint, logged, and subject to the token budget. Without an LLM the page says so and the story is complete.
 
-![](screenshots/28-deep-analysis-stub-llm.png)
+![](screenshots/28-deep-analysis.png)
 
-*This screenshot was produced with a local stub model (its name, "stub-model (not a real LLM)", is shown on the
-card) because no approved LLM key was available. It exercises the real provider → gateway → guardrail → UI path;
-the stub deliberately cites one non-existent record, which the guardrail removed ("1 unsupported statement(s)
-removed").*
+*Real output of Azure AI Foundry gpt-4.1-mini (model and version shown on the card). Note "unsupported statement(s)
+removed": statements the model produced without valid evidence were dropped by the guardrail before display.*
 
 ---
 
@@ -308,7 +309,7 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
 * **Observability** - connector freshness and reconciliation, job health, enrichment latency, drift,
   Prometheus `/metrics` (scraped with an auditor service-account key).
 * **Reports** - the [report builder](#71-ai-report-builder) plus fixed exports (daily exposure, weekly VM,
-  management deck, investigation records); CCI templates plug in.
+  management deck, investigation records); your own templates plug in.
 * **Compliance evidence pack (U17)** - control tests with pass/fail (audit-chain integrity, four-eyes approvals,
   policy change control, MFA and access controls, LLM governance, encryption and retention, kill switch,
   integration freshness) + evidence JSON + full chained audit export + summary document, as one ZIP.
@@ -363,5 +364,5 @@ The same script can produce a client-branded demo estate (`SOC_FIXTURES_DIR=<out
 | Requirements coverage | every requirement ID mapped in [REQUIREMENTS_TRACEABILITY.md](REQUIREMENTS_TRACEABILITY.md) |
 
 **Scope note.** The sample estate exercises every workflow through the same code as production. What it cannot
-show is behaviour against CCI's own tenants and volumes: each vendor connector must be connected and tested in
-CCI's environment, and accuracy / latency targets measured on CCI's data (see DEMO_GUIDE.md).
+show is behaviour against the client's own tenants and volumes: each vendor connector must be connected and tested in
+the client's environment, and accuracy / latency targets measured on the client's data (see DEMO_GUIDE.md).

@@ -62,13 +62,13 @@ def test_alias_and_sam_seen_before_directory_collapse_into_one_person():
     db = _ctx()
     with db.session() as s:
         st = ContextStore(s)
-        st.ingest(_event("umbrella", user_ref("jane@corp.cci.com"), 1))            # alias
-        st.ingest(_event("crowdstrike", user_ref(r"CORP\jdoe", default_domain="corp.cci.com"), 2))  # SAM != UPN prefix
-        st.ingest(_event("email", user_ref("jane.doe@corp.cci.com"), 3))           # primary address
+        st.ingest(_event("umbrella", user_ref("jane@corp.acme.com"), 1))            # alias
+        st.ingest(_event("crowdstrike", user_ref(r"CORP\jdoe", default_domain="corp.acme.com"), 2))  # SAM != UPN prefix
+        st.ingest(_event("email", user_ref("jane.doe@corp.acme.com"), 3))           # primary address
         assert len(_identities(s)) == 3
-        st.ingest(_entra("oid-1", "jane.doe@corp.cci.com", "jdoe", ["jane@corp.cci.com"]))
+        st.ingest(_entra("oid-1", "jane.doe@corp.acme.com", "jdoe", ["jane@corp.acme.com"]))
         assert len(_identities(s)) == 1
-        st.ingest(_event("delinea", user_ref(r"CORP\jdoe", default_domain="corp.cci.com"), 4))
+        st.ingest(_event("delinea", user_ref(r"CORP\jdoe", default_domain="corp.acme.com"), 4))
         assert len(_identities(s)) == 1
 
 
@@ -80,10 +80,10 @@ def test_two_directory_users_are_never_merged_even_when_a_record_bridges_them():
     db = _ctx()
     with db.session() as s:
         st = ContextStore(s)
-        st.ingest(_entra("oid-1", "a.one@corp.cci.com", "aone"))
-        st.ingest(_entra("oid-2", "b.two@corp.cci.com", "btwo"))
+        st.ingest(_entra("oid-1", "a.one@corp.acme.com", "aone"))
+        st.ingest(_entra("oid-2", "b.two@corp.acme.com", "btwo"))
         # A corrupted record claims oid-1 together with the other person's address: must not merge.
-        st.ingest(_entra("oid-1", "b.two@corp.cci.com", "aone"))
+        st.ingest(_entra("oid-1", "b.two@corp.acme.com", "aone"))
         assert len(_identities(s)) == 2
         assert s.query(UnresolvedItem).count() == 1
         # A built-in account never becomes a person.

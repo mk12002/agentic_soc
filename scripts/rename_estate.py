@@ -20,11 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_MAP: list[tuple[str, str]] = [
     # organisation, domains, tenant
-    ("cci-demo.com", "northwind-labs.io"), ("cci-demo", "northwind-labs"), ("CCI", "NWL"),
+    ("acme-demo.com", "northwind-labs.io"), ("acme-demo", "northwind-labs"), ("ACME", "NWL"),
     # phishing / attacker infrastructure (still a look-alike of a real brand, but different strings)
     ("micros0ft-helpdesk.com", "micr0soft-servicedesk.net"), ("185.220.101.4", "45.155.205.99"),
     ("benefits-portal.payroll-update.support", "hr-benefits.salary-review.help"), ("payroll-update.support", "salary-review.help"),
-    ("cci-dem0.com", "northwind-lab5.io"), ("global-freight-ltd.com", "atlas-cargo-group.com"),
+    ("acme-dem0.com", "northwind-lab5.io"), ("global-freight-ltd.com", "atlas-cargo-group.com"),
     ("krishna-logistics.com", "blueriver-freight.com"), ("krishna-logistlcs.com", "blueriver-frelght.com"),
     ("Krishna Logistics", "BlueRiver Freight"),
     # people (first / last name tokens)

@@ -22,7 +22,7 @@ SECRET = "demo-secret-0123456789abcdef0123456789"
 def client(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("demo")
     os.environ.update({"SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": SECRET, "SOC_ENVIRONMENT": "test",
-                       "SOC_DATABASE_URL": f"sqlite:///{tmp / 'demo.db'}", "SOC_ORG_DOMAINS": "cci-demo.com",
+                       "SOC_DATABASE_URL": f"sqlite:///{tmp / 'demo.db'}", "SOC_ORG_DOMAINS": "acme-demo.com",
                        "SOC_CONNECTORS_CONFIG": str(ROOT / "config" / "connectors.yaml"),
                        "SOC_REPORT_OUTPUT_DIR": str(tmp / "reports"), "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw")})
     from cryptography.fernet import Fernet
@@ -55,8 +55,8 @@ def ok(r, code=200):
 
 
 def test_full_client_demo(client, tmp_path):
-    an, lead = H(client, "alice@cci-demo.com", "analyst"), H(client, "lena@cci-demo.com", "lead")
-    aud, adm = H(client, "audrey@cci-demo.com", "auditor"), H(client, "ada@cci-demo.com", "admin")
+    an, lead = H(client, "alice@acme-demo.com", "analyst"), H(client, "lena@acme-demo.com", "lead")
+    aud, adm = H(client, "audrey@acme-demo.com", "auditor"), H(client, "ada@acme-demo.com", "admin")
     ui = ok(client.get("/")).text
     assert "/static/app.js" in ui and "/static/views.js" in ui and "/static/styles.css" in ui
     for f in ("app.js", "views.js", "styles.css", "theme.js", "favicon.svg"):
@@ -115,7 +115,7 @@ def test_full_client_demo(client, tmp_path):
     ins = ok(client.get("/api/v1/intelligence/insights", headers=an)).json()
     assert ins and all(i["evidence"] and i["next_steps"] for i in ins)
     assert {"supplier_risk", "phishing_compromise_chain"} <= {i["rule"] for i in ins}
-    a = ok(client.post("/api/v1/intelligence/ask", headers=an, json={"question": "Is jane.doe@cci-demo.com compromised?"})).json()
+    a = ok(client.post("/api/v1/intelligence/ask", headers=an, json={"question": "Is jane.doe@acme-demo.com compromised?"})).json()
     assert a["answer"] and a["tool_calls"]
 
     # 5. approvals: a lead approves one pending action; a four-eyes action cannot be self-approved

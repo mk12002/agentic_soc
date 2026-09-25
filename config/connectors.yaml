@@ -100,7 +100,7 @@ connectors:
     enabled: true
     mode: fake
     settings:
-      console_url: "${RAPID7_CONSOLE_URL}"   # Security Console URL, e.g. https://ivm.cci.local:3780
+      console_url: "${RAPID7_CONSOLE_URL}"   # Security Console URL, e.g. https://ivm.acme.local:3780
       username: "${RAPID7_USERNAME}"   # SECRET - Read-only API user
       password: "${RAPID7_PASSWORD}"   # SECRET - API user password
       verify_tls: "${RAPID7_VERIFY_TLS}"   # Verify console TLS certificate (optional)

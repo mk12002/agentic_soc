@@ -1,6 +1,6 @@
 """ITSM / case management and CMDB connectors (VM-T10, IM-T10, VM-F07, D06, D07).
 
-CCI's ITSM, case-management and CMDB systems are unconfirmed (Q03, Q13), so three
+The client's ITSM, case-management and CMDB systems are unconfirmed (Q03, Q13), so three
 interchangeable implementations share one interface:
 
   * ``servicenow``  - Table API (incident / sn_vul ticket tables, cmdb_ci)
@@ -236,7 +236,7 @@ MANIFESTS = [
                 ConfigField("ticket_table", "incident | sn_vul_vulnerable_item | custom", required=False),
                 ConfigField("cmdb_table", "CMDB CI table", required=False)],
         actions=_ticket_actions, confidence="Unknown", to_confirm="Which ITSM system; API access; workflow ownership (Q03)",
-        fake_settings={"instance_url": "https://cci-demo.service-now.com"},
+        fake_settings={"instance_url": "https://acme-demo.service-now.com"},
         focus_areas=("vulnerability", "incident")),
     ConnectorManifest(
         name="jira", tool="Jira (ITSM)", vendor="Atlassian", category="itsm", dimension="ticketing",
@@ -245,7 +245,7 @@ MANIFESTS = [
         live_transport=lambda s: HttpTransport(s["base_url"], BasicAuth(s["email"], s["api_token"])),
         config=[ConfigField("base_url", "https://<site>.atlassian.net"), ConfigField("email", "Integration user email"),
                 ConfigField("api_token", "API token", secret=True), ConfigField("project_key", "Project key", required=False)],
-        actions=_ticket_actions, confidence="Unknown", to_confirm="Only if CCI uses Jira (Q03)",
+        actions=_ticket_actions, confidence="Unknown", to_confirm="Only if the client uses Jira (Q03)",
         focus_areas=("vulnerability", "incident")),
     ConnectorManifest(
         name="cmdb_csv", tool="Ownership mapping (CSV)", vendor="internal", category="cmdb", dimension="ticketing",

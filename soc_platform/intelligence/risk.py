@@ -116,8 +116,13 @@ class RiskEngine:
                     ev.display_name)
 
         # Cases this entity is part of (phishing interaction, incidents)
+        # An entity can be linked to one case in several roles (recipient and clicker): count each case once.
+        roles: dict[str, set[str]] = {}
         for ln in self.s.execute(select(CaseEntity).where(CaseEntity.entity_id == entity_id)).scalars():
-            case = self.s.get(Case, ln.case_id)
+            roles.setdefault(ln.case_id, set()).add(ln.role)
+        compromised_via: list[Case] = []
+        for case_id, rs in roles.items():
+            case = self.s.get(Case, case_id)
             if case is None or case.status == "closed" and case.verdict in {"false_positive", "benign", "safe"}:
                 continue
             if case.domain == "phishing":
@@ -127,14 +132,19 @@ class RiskEngine:
                     add("phishing_click", "email", 20, "phishing", case.id, case.created_at,
                         f"clicked a {case.verdict} email: {case.title}")
                 if upn and upn in (ui.get("identity_compromise") or []):
-                    add("phishing_identity_compromise", "identity", 30, "phishing", case.id, case.created_at,
-                        "identity compromise indicators after phishing click")
-                elif ln.role in {"recipient"} and case.verdict == "malicious":
+                    compromised_via.append(case)
+                elif "recipient" in rs and case.verdict == "malicious":
                     add("phishing_recipient", "email", 4, "phishing", case.id, case.created_at,
                         f"received {case.verdict} email: {case.title}")
-            elif case.domain == "incident" and case.status != "closed" and ln.role != "alert":
+            elif case.domain == "incident" and case.status != "closed" and rs - {"alert"}:
                 add("open_incident", "incident", SEV_W.get(case.severity, 5) / 2, "incident", case.id,
                     case.created_at, case.title)
+        if compromised_via:
+            # one compromise, however many phishing cases point at it
+            latest = max(compromised_via, key=lambda c: c.created_at)
+            add("phishing_identity_compromise", "identity", 30, "phishing", latest.id, latest.created_at,
+                "identity compromise indicators after phishing click"
+                + (f" (seen from {len(compromised_via)} phishing cases)" if len(compromised_via) > 1 else ""))
 
         if ent.kind == "asset":
             from soc_platform.domains.vulnerability.models import ConsolidatedFinding, VulnIntel
@@ -152,7 +162,10 @@ class RiskEngine:
                 if f.internet_exposed:
                     add("internet_exposed_vulnerable", "exposure", 5, "wiz", f.id, f.first_seen,
                         f"{f.cve} on internet-exposed asset")
-            if not {"crowdstrike", "defender_endpoint"} & set((ent.attributes or {}).get("by_tool", {})) and factors:
+            from soc_platform.core.asset_types import needs_endpoint_agent
+
+            has_edr = {"crowdstrike", "defender_endpoint"} & set((ent.attributes or {}).get("by_tool", {}))
+            if not has_edr and factors and needs_endpoint_agent(self.s, ent):
                 add("no_edr_coverage", "coverage", 5, "platform", entity_id, None, "no EDR telemetry for this host")
         if ent.kind == "identity":
             priv = [r for r, o in self.store.neighbors(entity_id) if o.kind == "secret_access"]
@@ -161,7 +174,7 @@ class RiskEngine:
                     "account with privileged credential access shows compromise indicators")
 
         raw = sum(f.decayed for f in factors)
-        score = round(100 * (1 - math.exp(-raw / 60)), 1)
+        score = int(round(100 * (1 - math.exp(-raw / 60))))     # whole points: the same figure on every screen and answer
         band = next(b for t, b in BANDS if score >= t)
         return RiskProfile(entity_id, ent.kind, ent.display_name, score, band, factors)
 

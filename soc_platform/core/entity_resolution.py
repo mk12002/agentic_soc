@@ -457,7 +457,7 @@ class EntityResolver:
         return prov
 
     def absorb_identity_aliases(self, entity: Entity) -> list[str]:
-        r"""Order independence for users: a SAM-only identity created earlier (e.g. from ``CCI\jane.doe`` before the
+        r"""Order independence for users: a SAM-only identity created earlier (e.g. from ``ACME\jane.doe`` before the
         directory record arrived) whose derived UPN equals one of this entity's UPN/email keys is merged into it -
         only when exactly one such provisional identity exists and no strong keys conflict."""
         mine = {v for (v,) in self.s.execute(select(EntityKey.key_value).where(
