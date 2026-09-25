@@ -119,11 +119,17 @@ def _collect_email_files() -> list[Path]:
     return sorted(selected)
 
 
+def _http_url(url: str) -> str:
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"only http(s) URLs are allowed: {url!r}")
+    return url
+
+
 def _http_json(url: str, method: str = "GET", data: bytes | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
-    req = request.Request(url, data=data, method=method)
+    req = request.Request(_http_url(url), data=data, method=method)
     for key, value in (headers or {}).items():
         req.add_header(key, value)
-    with request.urlopen(req, timeout=60) as resp:
+    with request.urlopen(req, timeout=60) as resp:  # nosec B310 - scheme restricted to http(s) by _http_url
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -132,8 +138,8 @@ def _api_reachable() -> tuple[bool, str]:
     for path in probe_paths:
         probe_url = f"{BASE_URL}{path}"
         try:
-            req = request.Request(probe_url, method="GET")
-            with request.urlopen(req, timeout=5):
+            req = request.Request(_http_url(probe_url), method="GET")
+            with request.urlopen(req, timeout=5):  # nosec B310 - scheme restricted to http(s) by _http_url
                 return True, probe_url
         except Exception:
             continue

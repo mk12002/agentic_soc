@@ -67,8 +67,8 @@ try:
     if MODEL_DIR.exists() and (MODEL_DIR / "config.json").exists():
         record("Model directory", PASS, str(MODEL_DIR))
 
-        tokenizer = AutoTokenizer.from_pretrained(str(MODEL_DIR))
-        model = AutoModelForSequenceClassification.from_pretrained(str(MODEL_DIR))
+        tokenizer = AutoTokenizer.from_pretrained(str(MODEL_DIR), local_files_only=True)  # nosec B615 - local directory, no Hub download
+        model = AutoModelForSequenceClassification.from_pretrained(str(MODEL_DIR), local_files_only=True)  # nosec B615 - local directory, no Hub download
         classifier = pipeline("text-classification", model=model, tokenizer=tokenizer, truncation=True)
         record("Model load", PASS, f"vocab={tokenizer.vocab_size}, labels={model.config.num_labels}")
 

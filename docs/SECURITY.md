@@ -15,12 +15,14 @@ responsibility of the hosting environment.
 | Compromised integration credential | Service-account API keys: SHA-256 stored, expiry ≤ 365 days, roles limited to analyst / auditor / automation admin, **never** approval, policy or access permissions | `core/access.py` |
 | Identity-provider outage | Break-glass: sealed secret, only its hash configured, every use and failure audited and raised as a critical insight | `core/access.py` |
 | Repudiation of who did what | Append-only access log (ORM refuses update/delete; pruned only by the audited retention job) in addition to the audit chain | `api/app.py`, `core/models.py` |
-| Data at rest exposure | Raw payloads and reported emails encrypted with Fernet (`SOC_DATA_KEY`, rotation supported; mandatory in prod); retention with legal hold | `core/crypto.py`, `core/retention.py` |
+| Data at rest exposure | Raw payloads, reported emails and **generated reports / evidence packs** encrypted with Fernet (`SOC_DATA_KEY`, rotation supported; mandatory in prod); retention with legal hold | `core/crypto.py`, `core/retention.py` |
 | Over-automation (R04) | Autonomy levels L0–L4 per action; destructive actions never autonomous; VIP / critical assets and blast radius force approval; hard blast-radius limit blocks; global kill switch | `core/policy.py` |
 | Tampering with evidence / history | Append-only audit table (ORM refuses UPDATE/DELETE) with SHA-256 hash chain; `/api/v1/audit/verify` detects any edit; grant the DB role INSERT/SELECT only | `core/audit.py` |
 | Duplicate / replayed actions | Idempotency keys, compare-and-set status transitions, pre-conditions re-checked at execution | `core/actions.py` |
 | LLM hallucination / prompt injection (R02) | Model sees only retrieved evidence; claims must cite valid evidence ids or are dropped; verdicts, scores and all figures are computed in code; model output can never trigger an action | `llm/gateway.py`, domain services; tested in `test_resilience_security.py` |
 | LLM analyst misuse / prompt injection via data | Analyst can only request tools from a fixed read-only catalogue (unknown tools ignored); arguments type-checked; answers must cite tool results; every question and tool call audited | `intelligence/analyst.py` |
+| LLM deep analysis of an attack story | Only the story's stored evidence is sent (identities pseudonymised); statements must cite S#/G#/H#/B#/P#/X# ids or are removed (count shown); priorities may only reference real pending actions or "manual"; disagreement with the deterministic assessment is flagged; cached per evidence fingerprint; bundle approval still runs policy and four-eyes per action | `intelligence/deep_analysis.py`, `api/app.py` |
+| Report builder misuse (prompt-planned reports) | Planner may only choose sources from a fixed catalogue (unknown / case-bound sources dropped); specs validated and size-bounded; figures computed in code, narrative sentences must cite a figure (F#); sections outside the requester's data scope skipped and scope-dependent counts computed for the requester; download requires a scope covering both the report's domains and the builder's scope; case reports require access to the case; compliance data needs the evidence-export permission | `reporting/builder.py`, `api/app.py` |
 | Personal-data leakage to the LLM (R10) | Internal users, names, phone numbers, national ids pseudonymised before the prompt leaves the platform and restored after; prompts/responses logged; approved-endpoint allow-list; model pinning; token budget | `llm/redaction.py`, `llm/gateway.py` |
 | Malicious attachments (R12) | Hardened detonation (below); Windows payloads to CAPEv2 on an isolated analysis network | `engine/agents/sandbox_agent/agent.py` |
 | Tampered ML models (pickle = code execution) | SHA-256 manifest verified before any joblib/pickle artifact is deserialised; unlisted artifacts refused | `engine/integrity.py`, `artifacts/phishing/models/MANIFEST.sha256` |
@@ -80,6 +82,8 @@ responsibility of the hosting environment.
 | Dev sign-in reachable from any host in dev mode | Medium | Loopback only unless `SOC_DEV_TOKENS_REMOTE=1`; never in prod |
 | Access-log writes blocked requests for 5 s on SQLite and were silently lost | Medium | Background batched writer |
 | Raw payloads and emails stored in plaintext | Medium | Encryption at rest |
+| Generated reports and compliance packs stored in plaintext | Medium | Sealed on write, decrypted on authorised download |
+| Report overview section computed across all domains for a domain-scoped requester (caught by test before release) | Medium | Overview computed with the requester's scope; download re-checks builder scope |
 | Concurrent first-use DB initialisation race | Low | Locked, publish-after-create |
 | Identity records silently dropping keys owned by another person | Low (data integrity) | Queued as key collisions for analyst review |
 | Dependency advisories (setuptools, nltk) | Low | Upgraded / removed |

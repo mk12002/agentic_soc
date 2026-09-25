@@ -18,6 +18,9 @@ import sys
 import json
 import shutil
 import hashlib
+
+# pin the Hugging Face model revision (commit hash) for reproducible, tamper-evident downloads
+HF_REVISION = os.environ.get("HF_MODEL_REVISION", "main")
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -176,7 +179,7 @@ def main():
     model_id = os.getenv("SLM_MODEL_ID", "prajjwal1/bert-tiny")
     # bert-tiny uses BERT vocabulary; loading a stable slow tokenizer avoids
     # fast-tokenizer backend issues in minimal environments.
-    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", do_lower_case=True)
+    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", do_lower_case=True, revision=HF_REVISION)
 
     print("2. Loading + token-aware preprocessing...")
     # Load via generator/pandas chunking to Arrow format with TQDM progress bar
@@ -262,7 +265,7 @@ def main():
     num_labels = len(label_values)
     try:
         model = BertForSequenceClassification.from_pretrained(
-            model_id, num_labels=num_labels
+            model_id, num_labels=num_labels, revision=HF_REVISION
         )
     except Exception as exc:
         print(
@@ -270,7 +273,7 @@ def main():
             "Attempting fallback to AutoModelForSequenceClassification..."
         )
         model = AutoModelForSequenceClassification.from_pretrained(
-            model_id, num_labels=num_labels
+            model_id, num_labels=num_labels, revision=HF_REVISION
         )
 
     def compute_metrics(eval_pred):

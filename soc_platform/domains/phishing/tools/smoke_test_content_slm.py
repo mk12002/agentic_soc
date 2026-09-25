@@ -54,8 +54,8 @@ def main():
         sys.exit(1)
 
     print(f"Loading finetuned SLM from {MODEL_DIR}...")
-    tokenizer = AutoTokenizer.from_pretrained(str(MODEL_DIR))
-    model = AutoModelForSequenceClassification.from_pretrained(str(MODEL_DIR))
+    tokenizer = AutoTokenizer.from_pretrained(str(MODEL_DIR), local_files_only=True)  # nosec B615 - local directory, no Hub download
+    model = AutoModelForSequenceClassification.from_pretrained(str(MODEL_DIR), local_files_only=True)  # nosec B615 - local directory, no Hub download
 
     classifier = pipeline("text-classification", model=model, tokenizer=tokenizer)
 

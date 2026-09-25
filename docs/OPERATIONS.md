@@ -65,10 +65,21 @@ Console *Policy* → kill switch, or `POST /api/v1/kill-switch?on=true` (lead / 
 It is stored in the database, so every API replica and the scheduler stop executing actions immediately and it
 survives restarts. `SOC_KILL_SWITCH=1` forces it on from configuration.
 
+## Where data is stored
+
+| Data | Store | Protection |
+|---|---|---|
+| Cases, entities and relations, actions, findings, insights, jobs, policies, grants, saved report templates | Database (`SOC_DATABASE_URL`; PostgreSQL in prod) | DB access control; audit and access log append-only |
+| Audit chain, access log, LLM call log (redacted prompts + responses) | Database | Hash chain (audit); retention jobs for access / LLM logs |
+| Raw vendor payloads and reported emails | `SOC_RAW_PAYLOAD_DIR` | Encrypted (Fernet), retention with legal hold |
+| Generated reports, post-incident reports, compliance packs | `SOC_REPORT_OUTPUT_DIR` | Encrypted; decrypted only on an authorised, scope-checked download |
+| Attack stories | Not stored - rebuilt from records on request; only the deep-analysis result is cached on the case | - |
+| Phishing ML engine stores (optional) | As configured in the engine deployment | See engine docs |
+
 ## Data protection
 
 * `SOC_DATA_KEY` (Fernet; comma-separated for rotation, first encrypts) encrypts raw payloads and reported
-  emails at rest; mandatory in prod. Rotate: prepend a new key, keep the old one until retention has cycled.
+  emails, generated reports and evidence packs at rest; mandatory in prod. Rotate: prepend a new key, keep the old one until retention has cycled.
 * Retention: `SOC_RAW_RETENTION_DAYS` (180), `SOC_LLM_LOG_RETENTION_DAYS` (180), `SOC_ACCESS_LOG_RETENTION_DAYS`
   (400). Emails of open cases are kept (legal hold). The audit log is never pruned by the platform.
 * Audit export for archiving/SIEM: `GET /api/v1/audit/export` (JSON Lines with chain verification).
