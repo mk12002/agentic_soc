@@ -113,7 +113,7 @@ class SupplierMonitor:
                 per[sup.name][f"verdict_{verdict or 'unknown'}"] += 1
 
                 def add(kind: str, sev: str, detail: str, sup: Supplier = sup, case: Case = case,
-                        sender: str = sender, clicked: bool = clicked) -> None:
+                        sender: str = sender, clicked: list[str] = clicked) -> None:
                     if sup.criticality == "high" and sev == "high":
                         sev = "critical"
                     if clicked and sev in {"medium", "high"}:

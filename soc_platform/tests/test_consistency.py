@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import tempfile
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -329,7 +330,7 @@ def _estate(s, reg, cfg, llm=None):
     inc.ingest()
     for c in inc.cluster():
         inc.investigate(c.id)
-    ph = PhishingService(s, reg, org_domains=[cfg["org"]], llm=llm)
+    ph = PhishingService(s, reg, org_domains=[cfg["org"]], llm=llm, raw_dir=Path(tempfile.mkdtemp(prefix="soc-raw-")))
     for sub in ph.ingest_reported():
         ph.process(sub.id)
     for f in cfg["uploads"]:
@@ -338,6 +339,15 @@ def _estate(s, reg, cfg, llm=None):
     VulnerabilityService(s, reg, llm=llm).create_campaign(cfg["campaign_cve"], lead, notify_via="ticket")
     mis.route(lead)
     IntelligenceService(s, llm).refresh()
+
+
+@pytest.fixture()
+def frozen_clock(monkeypatch):
+    """Runs compared figure-for-figure must see the same instant: risk decays with time, so a slower run (an LLM,
+    a loaded machine) would otherwise read a slightly later clock and a score could round the other way."""
+    from datetime import UTC, datetime
+
+    monkeypatch.setenv("SOC_CLOCK_FREEZE", datetime.now(UTC).replace(microsecond=0).isoformat())
 
 
 def _state(s):
@@ -356,7 +366,7 @@ def _state(s):
 
 
 @pytest.mark.parametrize("estate", ESTATES)
-def test_rerunning_every_pipeline_and_job_changes_nothing(estate, estate_configs):
+def test_rerunning_every_pipeline_and_job_changes_nothing(estate, estate_configs, frozen_clock):
     from soc_platform.connectors.registry import ConnectorRegistry
     from soc_platform.core.db import Database
     from soc_platform.jobs import JOBS, run_job
@@ -381,7 +391,7 @@ def test_rerunning_every_pipeline_and_job_changes_nothing(estate, estate_configs
 
 # --------------------------------------------------------------------------------------------- 4. LLM never changes a figure
 @pytest.mark.parametrize("estate", ESTATES)
-def test_llm_on_or_off_gives_identical_figures_verdicts_and_actions(estate, estate_configs):
+def test_llm_on_or_off_gives_identical_figures_verdicts_and_actions(estate, estate_configs, frozen_clock):
     from soc_platform.config import Settings
     from soc_platform.connectors.registry import ConnectorRegistry
     from soc_platform.core.db import Database

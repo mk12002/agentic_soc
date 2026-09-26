@@ -36,8 +36,8 @@ class AnthropicProvider(Provider):
         if approved and (base_url or "https://api.anthropic.com") not in approved:
             raise ValueError(f"LLM endpoint {base_url or 'https://api.anthropic.com'} is not on the approved list")
         key = secret("SOC_LLM_API_KEY")
-        kwargs = {"base_url": base_url} if base_url else {}
-        self.client = anthropic.Anthropic(api_key=key, **kwargs) if key else anthropic.Anthropic(**kwargs)
+        # None for either falls back to the SDK's own resolution (ANTHROPIC_API_KEY / profile, public endpoint)
+        self.client = anthropic.Anthropic(api_key=key or None, base_url=base_url)
 
     def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
         model = self.models.get(tier) or self.models["large"]

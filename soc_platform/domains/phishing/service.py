@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import statistics
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,7 +84,7 @@ class PhishingService:
     def __init__(self, session: Session, registry: ConnectorRegistry, *, policy: PolicyEngine | None = None,
                  llm: LLMGateway | None = None, actions: ActionRegistry | None = None, use_engine: bool = False,
                  org_domains: list[str] | None = None, auto_close: AutoClosePolicy | None = None,
-                 raw_dir: str | Path = "./data/raw/phishing", campaign_threshold: float = 0.5) -> None:
+                 raw_dir: str | Path | None = None, campaign_threshold: float = 0.5) -> None:
         self.s = session
         self.registry = registry
         self.policy = policy or PolicyEngine.for_session(session)
@@ -100,6 +101,10 @@ class PhishingService:
         heuristic = HeuristicAnalyzer(org_domains=self.org_domains, threat_intel=ti, partner_domains=partners)
         self.analyzer = CompositeAnalyzer(heuristic, EngineAnalyzer() if use_engine else None)
         self.auto_close = auto_close or AutoClosePolicy()
+        if raw_dir is None:                                  # the configured store (SOC_RAW_PAYLOAD_DIR), like the API
+            from soc_platform.config import get_settings
+
+            raw_dir = Path(get_settings().raw_payload_dir) / "phishing"
         self.raw_dir = Path(raw_dir)
         self.campaign_threshold = campaign_threshold
 
@@ -450,5 +455,5 @@ class PhishingService:
                 "sampled_for_qa": sum(1 for s in subs if s.sampled_for_review),
                 "campaigns": len({s.campaign_key for s in subs if s.campaign_key and s.verdict in {"malicious", "suspicious"}}),
                 "clickers": dict(clicks), "repeat_clickers": sorted(u for u, n in clicks.items() if n >= 2),
-                "time_to_containment_minutes": {"median": sorted(ttc)[len(ttc) // 2] if ttc else None, "samples": len(ttc)},
+                "time_to_containment_minutes": {"median": round(statistics.median(ttc), 1) if ttc else None, "samples": len(ttc)},
                 "top_reporters": Counter(s.reporter for s in subs if s.reporter).most_common(5)}

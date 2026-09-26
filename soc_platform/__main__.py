@@ -31,7 +31,14 @@ def cmd_init_db() -> None:
     print("database ready:", os.environ.get("SOC_DATABASE_URL", "sqlite:///./soc_platform.db"))
 
 
+SAMPLE_ORG = "acme-demo.com"
+BUILTIN_CORPUS = Path(__file__).resolve().parents[1] / "artifacts" / "phishing" / "corpus"
+SAMPLE_UPLOADS = ("supplier_bank_change.eml", "supplier_lookalike_payment.eml", "bec_ceo_fraud.eml", "quishing_qr.eml",
+                  "legit_vendor_invoice.eml", "marketing_spam.eml")
+
+
 def cmd_demo() -> None:
+    from soc_platform.config import get_settings
     from soc_platform.connectors.registry import ConnectorRegistry
     from soc_platform.core.audit import AuditLog
     from soc_platform.core.auth import Principal, Role
@@ -40,9 +47,11 @@ def cmd_demo() -> None:
     from soc_platform.domains.vulnerability.service import VulnerabilityService
     from soc_platform.reporting.reports import ReportService
 
+    st = get_settings()
     reg = ConnectorRegistry.all_fake()
-    out = Path(os.environ.get("SOC_REPORT_OUTPUT_DIR", "./data/reports"))
-    analyst = Principal("demo.analyst@acme-demo.com", "Demo Analyst", frozenset({Role.ANALYST}))
+    out = Path(st.report_output_dir)
+    org = st.org_domains or [SAMPLE_ORG]                     # the built-in sample organisation unless configured
+    analyst = Principal(f"demo.analyst@{org[0]}", "Demo Analyst", frozenset({Role.ANALYST}))
     with _db().session() as s:
         vm = VulnerabilityService(s, reg)
         r = vm.refresh()
@@ -57,12 +66,24 @@ def cmd_demo() -> None:
             if c.status != "closed":
                 v = im.investigate(c.id)
                 print(f"[IM] {v['case']['severity']:>8} {v['case']['title'][:70]} - {len(v['actions'])} recommended action(s)")
-        ph = PhishingService(s, reg, org_domains=["acme-demo.com"], raw_dir=Path("./data/raw/phishing"))
+        ph = PhishingService(s, reg, org_domains=org, raw_dir=Path(st.raw_payload_dir) / "phishing")
         for sub in ph.ingest_reported():
             v = ph.process(sub.id)
             a = v["assessment"]
             print(f"[PH] {v['case']['verdict']} '{v['case']['title'][:50]}': {len(a['campaign']['recipients'])} recipients, "
                   f"clicked {a['user_impact']['clicked']}, compromised {a['user_impact']['identity_compromise']}")
+        # the sample messages a presenter uploads in the console (supplier fraud, CEO fraud, QR phishing, benign, spam)
+        corpus = Path(os.environ.get("SOC_SAMPLE_CORPUS_DIR") or BUILTIN_CORPUS)   # a variant estate brings its own
+        for f in SAMPLE_UPLOADS:
+            path = corpus / f
+            if path.exists():
+                v = ph.process(ph.submit_raw(path.read_bytes(), source="upload", reporter=analyst.id).id)
+                print(f"[PH] {v['case']['verdict']:>10} '{v['case']['title'][:60]}' (uploaded sample)")
+        from soc_platform.domains.vulnerability.misconfig import MisconfigurationService
+
+        mis = MisconfigurationService(s, reg)
+        mis.refresh()
+        mis.route(analyst)
         from soc_platform.intelligence.analyst import IntelligenceService
 
         intel = IntelligenceService(s, vm=vm)

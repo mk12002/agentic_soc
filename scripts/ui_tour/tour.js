@@ -108,7 +108,21 @@ async function visit(page, hash, name, full = true) {
   await call(lead, 'POST', '/api/v1/intelligence/refresh');
   const ops = await token(`otto@${EST.org}`, 'automation_admin');
   for (const j of ['intelligence', 'follow_up', 'retention']) await call(ops, 'POST', `/api/v1/jobs/${j}/run`);
+  // stored-XSS probe: script in every field the console displays (subject, sender, body link, attachment name)
+  const XSS = `<img src=x onerror="window.__xss='img'"><script>window.__xss='script'</script>`;
+  const xssMail = [`From: "Mallory ${XSS}" <mallory@evil.example>`, `To: ${EST.focus_upn}`,
+    `Subject: Invoice ${XSS}`, 'Message-ID: <xss-probe@evil.example>', 'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="b1"', '', '--b1', 'Content-Type: text/html; charset=utf-8', '',
+    `<p>Pay now ${XSS} <a href="javascript:window.__xss='href'">here</a> https://evil.example/pay?q="><svg onload=window.__xss='svg'></p>`,
+    '--b1', `Content-Type: application/octet-stream; name="a${XSS}.pdf"`,
+    `Content-Disposition: attachment; filename="a${XSS}.pdf"`, 'Content-Transfer-Encoding: base64', '', 'JVBERi0xLjQK', '--b1--', ''].join('\r\n');
+  const fdx = new FormData();
+  fdx.append('file', new Blob([xssMail], {type: 'message/rfc822'}), 'xss.eml');
+  const xr = await fetch(BASE + '/api/v1/phishing/submit', {method: 'POST', headers: {Authorization: 'Bearer ' + lead}, body: fdx});
+  if (!xr.ok) problems.push(`xss probe upload -> ${xr.status}`);
   const cases = await call(lead, 'GET', '/api/v1/cases');
+  const xssCase = cases.find(c => (c.title || '').includes('onerror'));
+  if (!xssCase) problems.push('xss probe case not created');
   const phishCase = cases.find(c => c.domain === 'phishing' && c.title.includes(EST.phish_subject_token)) || cases.find(c => c.domain === 'phishing');
   const incCase = cases.find(c => c.domain === 'incident' && c.severity === 'critical') || cases.find(c => c.domain === 'incident');
   const jane = await call(lead, 'GET', `/api/v1/entities/find?kind=identity&key=upn&value=${encodeURIComponent(EST.focus_upn)}`);
@@ -117,6 +131,7 @@ async function visit(page, hash, name, full = true) {
   const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, deviceScaleFactor: 1, bypassCSP: true}); // harness only: CSP blocks Playwright's eval-based waits
   const page = await ctx.newPage();
   page.on('pageerror', e => problems.push('pageerror: ' + e.message));
+  page.on('dialog', d => { problems.push('XSS: a dialog opened: ' + d.message()); d.dismiss(); });
   page.on('console', m => { if (m.type() === 'error') problems.push('console: ' + m.text()); });
   page.on('response', r => { if (r.status() >= 500) problems.push(`HTTP ${r.status()} ${r.url()}`); });
 
@@ -257,6 +272,17 @@ async function visit(page, hash, name, full = true) {
   await page.evaluate(() => { document.querySelector('#comp').closest('section').scrollIntoView({block: 'center'}); });
   await page.waitForTimeout(400);
   await shot(page, '19-compliance-pack', false);
+
+  // ---------- stored XSS: open every screen that displays the hostile e-mail
+  if (xssCase) {
+    for (const r of [`cases/${xssCase.id}`, `story/${xssCase.id}`, 'cases', 'phishing', 'approvals', 'overview', 'intelligence', 'audit']) {
+      await page.goto(`${BASE}/#/${r}`); await settle(page);
+      const hit = await page.evaluate(() => ({flag: window.__xss || null,
+        injected: document.querySelectorAll('#main img[src="x"], #main svg[onload], #main script, #main a[href^="javascript:"]').length}));
+      if (hit.flag || hit.injected) problems.push(`XSS on ${r}: executed=${hit.flag} injected elements=${hit.injected}`);
+    }
+    console.log('stored-XSS probe checked');
+  }
 
   // ---------- layout audit at narrower widths, every screen, both themes
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');

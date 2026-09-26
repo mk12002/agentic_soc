@@ -8,7 +8,25 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 8 (2026-09-26) - latest results: PostgreSQL, time, accessibility, code quality
+## 0. Round 9 (2026-09-26) - latest results: penetration testing, fuzzing, types, coverage
+
+| Check | Result |
+|---|---|
+| Penetration tests (`test_pentest.py`), details in SECURITY.md | 17 attack groups, all refused |
+| Stored-XSS probe in the browser (8 screens, CSP disabled) | Nothing executed or injected |
+| Property-based fuzzing (Hypothesis, thousands of generated inputs: redaction, numeric guardrail, timestamps, text bounding, e-mail decomposer) | 11 properties hold |
+| Type check (pyright, platform core, 77 files) | Findings triaged; no reachable crash left (the rest are library typing limits) |
+| Test coverage, platform core | 90.2 % of 10,105 statements; the untested production sign-in and card redaction are now covered |
+| Dependency audit (pip-audit, npm audit) | No known vulnerabilities |
+
+**Found and fixed:**
+- Tokens without an expiry were accepted.
+- Redaction crashed on marker lookalikes, masked spaced card numbers only partly, and could corrupt an IP address.
+- The e-mail decomposer crashed on malformed headers.
+- Concurrent writes of the same message failed on Windows.
+- An unwired scaffold claimed "benign 95 %".
+
+## 0a. Round 8 (2026-09-26): PostgreSQL, time, accessibility, code quality
 
 | Check | Result |
 |---|---|

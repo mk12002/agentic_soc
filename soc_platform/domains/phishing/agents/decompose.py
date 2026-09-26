@@ -106,15 +106,59 @@ def _fuzzy(data: bytes) -> str | None:
         return None
 
 
+def _hdr_all(msg: Any, name: str) -> list[str]:
+    """Header values as text, safely: Python's structured header parser raises on some malformed headers (for
+    example a raw newline inside an address display name). Hostile mail must not stop the analysis, so fall back to
+    the header exactly as received."""
+    try:
+        return [str(v) for v in (msg.get_all(name, []) or [])]
+    except Exception:
+        return [str(v) for k, v in msg.raw_items() if k.lower() == name.lower()]
+
+
+def _hdr(msg: Any, name: str) -> str:
+    vals = _hdr_all(msg, name)
+    return vals[0] if vals else ""
+
+
+def _headers(msg: Any) -> dict[str, str]:
+    """Every header, decoded where it parses and as received where it does not."""
+    out: dict[str, str] = {}
+    for k, raw in msg.raw_items():
+        try:
+            v = str(msg.policy.header_fetch_parse(k, raw))
+        except Exception:
+            v = str(raw)
+        out[k] = v[:500]                                                   # a repeated header keeps its last value
+    return out
+
+
+def _part_meta(part: Any) -> tuple[str, str, str | None]:
+    """(content type, disposition, filename) of a MIME part, tolerating malformed headers."""
+    try:
+        ctype = part.get_content_type()
+    except Exception:
+        ctype = "application/octet-stream"
+    try:
+        disp = (part.get_content_disposition() or "").lower()
+    except Exception:
+        disp = ""
+    try:
+        fname = part.get_filename()
+    except Exception:
+        fname = "unnamed.bin"
+    return ctype, disp, fname
+
+
 def decompose(raw: bytes) -> DecomposedEmail:
     msg: EmailMessage = BytesParser(policy=policy.default).parsebytes(raw)  # type: ignore[assignment]
     warnings: list[str] = []
-    display, sender = parseaddr(str(msg.get("From", "")))
+    display, sender = parseaddr(_hdr(msg, "From"))
     sender = sender.lower()
-    auth_hdr = " ".join(str(v) for v in msg.get_all("Authentication-Results", []) or [])
+    auth_hdr = " ".join(_hdr_all(msg, "Authentication-Results"))
     auth = {k.lower(): v.lower() for k, v in AUTH_RE.findall(auth_hdr)}
     received = []
-    for hop in msg.get_all("Received", []) or []:
+    for hop in _hdr_all(msg, "Received"):
         m = RECEIVED_FROM_RE.search(str(hop))
         ips = IP_RE.findall(str(hop))
         received.append({"from": m.group(1) if m else None, "ips": ips, "raw": str(hop)[:300]})
@@ -126,10 +170,13 @@ def decompose(raw: bytes) -> DecomposedEmail:
     for part in msg.walk():
         if part.is_multipart():
             continue
-        ctype = part.get_content_type()
-        disp = (part.get_content_disposition() or "").lower()
-        fname = part.get_filename()
-        payload = part.get_payload(decode=True) or b""
+        ctype, disp, fname = _part_meta(part)
+        try:
+            payload = part.get_payload(decode=True) or b""
+        except Exception:
+            payload = str(part.get_payload()).encode("utf-8", "replace")
+        if not isinstance(payload, bytes):
+            payload = str(payload).encode("utf-8", "replace")
         if disp == "attachment" or fname or ctype.startswith(("image/", "application/")):
             if ctype in ("text/plain", "text/html") and not fname:
                 pass
@@ -165,16 +212,16 @@ def decompose(raw: bytes) -> DecomposedEmail:
     all_urls = sorted(set(urls) | {u for a in attachments for u in a.qr_urls if u.startswith("http")})
     date = None
     try:
-        date = parsedate_to_datetime(str(msg.get("Date"))).isoformat() if msg.get("Date") else None
+        date = parsedate_to_datetime(_hdr(msg, "Date")).isoformat() if _hdr(msg, "Date") else None
     except Exception:
         warnings.append("unparseable Date header")
     return DecomposedEmail(
-        message_id=str(msg.get("Message-ID", "")).strip(), subject=str(msg.get("Subject", "")), sender=sender,
-        sender_domain=_domain(sender), display_name=display, reply_to=parseaddr(str(msg.get("Reply-To", "")))[1] or None,
-        return_path=parseaddr(str(msg.get("Return-Path", "")))[1] or None,
-        to=[a.lower() for _, a in getaddresses(msg.get_all("To", []) or []) if a],
-        cc=[a.lower() for _, a in getaddresses(msg.get_all("Cc", []) or []) if a], date=date, auth=auth,
+        message_id=_hdr(msg, "Message-ID").strip(), subject=_hdr(msg, "Subject"), sender=sender,
+        sender_domain=_domain(sender), display_name=display, reply_to=parseaddr(_hdr(msg, "Reply-To"))[1] or None,
+        return_path=parseaddr(_hdr(msg, "Return-Path"))[1] or None,
+        to=[a.lower() for _, a in getaddresses(_hdr_all(msg, "To")) if a],
+        cc=[a.lower() for _, a in getaddresses(_hdr_all(msg, "Cc")) if a], date=date, auth=auth,
         received_path=received, origin_ip=origin_ip, body_text=body_text, body_html=body_html, urls=all_urls,
         url_domains=sorted({_url_domain(u) for u in all_urls}), hidden_link_mismatch=mismatch,
-        attachments=attachments, headers={k: str(v)[:500] for k, v in msg.items()},
+        attachments=attachments, headers=_headers(msg),
         raw_sha256=hashlib.sha256(raw).hexdigest(), warnings=warnings)

@@ -27,6 +27,8 @@ Companion documents: [FEATURES.md](FEATURES.md) (screens), [DEMO_GUIDE.md](DEMO_
 12. [Numbers to remember](#12-numbers-to-remember)
 13. [If something goes wrong during a demo](#13-if-something-goes-wrong-during-a-demo)
 14. [Glossary](#14-glossary)
+15. [Reference: every component in depth](#15-reference-every-component-in-depth) - connectors, actions, policy, roles, jobs, data model, every screen, the workflows step by step, failures, deployment
+16. [How it was tested - and how to explain it](#16-how-it-was-tested---and-how-to-explain-it)
 
 ---
 
@@ -91,7 +93,7 @@ Draw it as four layers (full diagram in [ARCHITECTURE.md](ARCHITECTURE.md)):
      Cloud misconfigurations go through the same lifecycle.
 4. **Intelligence.**
    - Explainable fused risk per user and host.
-   - 12 correlation rules, plus 3 operational alerts.
+   - 12 correlation rules, plus 4 operational alerts.
    - A platform self-check that proves the same figures agree everywhere (hourly).
    - Analyst Q&A with cited answers.
    - Situation brief.
@@ -111,11 +113,26 @@ an isolated detonation host.
 
 ## 4. Before you present: setup and checklist
 
+Step-by-step instructions for installing, configuring, loading data and ingesting live are in
+[RUN_GUIDE.md](RUN_GUIDE.md). The short version:
+
 ```bash
 python -m soc_platform init-db
+python -m soc_platform demo                  # load the sample organisation (below)
 python -m soc_platform serve                 # http://127.0.0.1:8080 ; sign in as Lead
-python -m soc_platform demo                  # optional: load everything once beforehand
 ```
+
+`demo` loads, through the same code as production:
+- the four vulnerability scanners, with a remediation campaign for CVE-2021-44228 (Log4Shell)
+- the incident alerts, clustered and investigated (3 incidents)
+- the reporting mailbox (1 report), plus the six sample messages a presenter would otherwise upload: supplier bank
+  change, supplier look-alike payment, CEO wire fraud, QR phishing, a genuine invoice and marketing spam
+- the cloud misconfigurations, routed to their teams
+- the correlation, the three standard reports, and an audit-chain check
+
+Result: 7 phishing + 3 incident cases, 6 open vulnerabilities, 34 actions awaiting approval (incident 15, phishing 16,
+vulnerability 3). It uses `SOC_ORG_DOMAINS`, `SOC_RAW_PAYLOAD_DIR` and `SOC_REPORT_OUTPUT_DIR` from settings. Running
+it twice changes nothing.
 
 To show the LLM features, the `.env` must contain an approved endpoint (already configured for Azure AI Foundry):
 `SOC_LLM_PROVIDER=azure_foundry`, `SOC_LLM_ENDPOINT`, `SOC_LLM_API_KEY`, `SOC_LLM_DEPLOYMENT=gpt-4.1-mini`,
@@ -437,7 +454,7 @@ Use these when someone asks "how do you get that number?". Every one is determin
 9. **Fingerprint:** the same attack gives the same story from any related case, and deep analysis is cached per
    fingerprint.
 
-### 6.7 Correlation rules (12) and operational alerts (2)
+### 6.7 Correlation rules (12) and operational alerts (4)
 
 | Rule | What it raises |
 |---|---|
@@ -454,17 +471,11 @@ Use these when someone asks "how do you get that number?". Every one is determin
 | Supplier risk | Vendor compromise, impersonation, payment diversion |
 | Model drift | Verdict quality drifting against analyst decisions |
 
-Operational alerts: a scheduled job dead-lettered after 3 failures; break-glass access used; the platform self-check
-failing (§6.9).
-
-### 6.9 Platform self-check
-
-Every hour the platform recomputes each figure that appears in more than one place - awaiting approvals, open
-cases, open findings, open vulnerabilities - through each independent code path (dashboard, database count,
-analyst tool, report builder) and compares them. It also resolves every stored reference (case links, evidence,
-actions, campaigns, insight entities, citations), checks nothing that must be unique is duplicated (one case per
-reported email, no duplicate active campaigns), and verifies the audit chain. A failure raises a *Platform
-self-check* finding. **Say:** "The platform doesn't just show numbers; it proves every hour that they agree." 
+Operational alerts:
+- a scheduled job dead-lettered after 3 failures
+- break-glass access used
+- the platform self-check failing (§6.9)
+- the monthly LLM token budget at 80 % or exhausted
 
 ### 6.8 Reports
 
@@ -480,6 +491,15 @@ self-check* finding. **Say:** "The platform doesn't just show numbers; it proves
 - **Output:** Word or PowerPoint, encrypted at rest, audited.
 - **Access:** download re-checks that the reader's scope covers every domain in the report *and* the builder's
   scope. Case reports need access to the case. Compliance data needs the evidence-export permission.
+
+### 6.9 Platform self-check
+
+Every hour the platform recomputes each figure that appears in more than one place - awaiting approvals, open
+cases, open findings, open vulnerabilities - through each independent code path (dashboard, database count,
+analyst tool, report builder) and compares them. It also resolves every stored reference (case links, evidence,
+actions, campaigns, insight entities, citations), checks nothing that must be unique is duplicated (one case per
+reported email, no duplicate active campaigns), and verifies the audit chain. A failure raises a *Platform
+self-check* finding. **Say:** "The platform doesn't just show numbers; it proves every hour that they agree." 
 
 ---
 
@@ -539,7 +559,7 @@ and recommendation is identical."
   - Domain scoping (phishing / incident / vulnerability); cross-domain views need all-domain scope. Out-of-scope
     records answer 404.
   - Separation of duties: no self-approval of four-eyes actions, policies, exceptions or grants.
-- **Automation safety:** L0 observe · L1 notify · L2 recommend (default) · L3 approve · L4 autonomous. Destructive
+- **Automation safety:** L0 observe · L1 enrich · L2 recommend (default) · L3 approve · L4 autonomous. Destructive
   actions are never autonomous. VIP, blast-radius and four-eyes gates apply. The kill switch is durable. Actions
   are idempotent, pre-conditions are re-checked at execution, and actions can be rolled back.
 - **Data:**
@@ -562,17 +582,21 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 211 passed (plus 12 opt-in live tests) |
+| Platform test suite | 264 passed on SQLite (with PostgreSQL's rules enforced) and 265 on PostgreSQL 16 (one test runs on PostgreSQL only), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
-| Phishing ML engine suite | 162 passed |
+| Phishing ML engine suite | 205 passed |
 | Feature → test mapping | **89 of 89** features verified, each mapped to the tests that prove it, run with the live LLM and live feeds ([FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md)) |
 | Generalisation | whole platform on a renamed organisation: identical results, 0 leaked names |
-| Browser tour | real server + Chrome, 4 roles, every screen, light and dark, layout audited at 1440/1280/1024 px: 0 errors, 0 clipped or overflowing elements, and no table needing sideways scroll at desktop width |
+| Browser tour | real server + Chrome, 4 roles, every screen, light and dark, layout audited at 1440/1280/1024/768 px: 0 errors, 0 clipped or overflowing elements, no table needing sideways scroll at desktop width; axe-core accessibility scan (WCAG 2.1 A/AA) with 0 findings; stored-XSS probe with nothing executed |
 | Stress tests | 0 false merges (400 hosts; 300 people) |
 | Output review | every model output of a full run audited for figures not in its evidence (see below) |
 | Consistency suite | the same figure compared across every surface (dashboards, lists, badges, brief, analyst tools, report facts, generated Word documents); every pipeline and job run twice with zero change; LLM on vs off with identical figures; every GET route × 7 roles (no errors, no leaks, explicit UTC); every write route fuzzed; every stored reference resolved |
 | Screen vs API | the browser tour reads every KPI, badge and tab count off the rendered screens and compares it with the API |
+| Penetration tests | 17 attack groups (authentication, privilege, cross-domain, injection, prompt injection, traversal, uploads, leakage, brute force, races, production surface, Entra token forgery): all refused (§16) |
+| Property-based fuzzing | 11 rules checked against thousands of generated inputs (redaction, guardrail, timestamps, e-mail parser) |
+| Time-travel tests | clock moved forward on 3 estates: SLAs, budget roll-over, retention, risk decay all correct |
+| Code quality | ruff: 0 findings across the repository; bandit: 0 medium/high; pip-audit and npm audit: no known vulnerabilities |
 
 **The output review, and what it caught.** All screens and model outputs from a full run with the real LLM were
 reviewed and cross-checked against the database. Every issue was fixed with a regression test:
@@ -636,7 +660,11 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
    providers are tested against their request shapes with stubbed responses.
 7. **Templates:** reports use generic layouts until the client's Word and PowerPoint templates are supplied (they
    plug in).
-8. **Needed from the client:** API access per tool (read scopes first, dedicated service principals), an Entra app
+8. **Security testing is internal.** The automated penetration tests, fuzzing and XSS probe pass, but an independent
+   third-party penetration test should be run in the client's environment before go-live.
+9. **Accessibility** is checked automatically (WCAG 2.1 A/AA, 0 findings); a manual screen-reader review has not been
+   done.
+10. **Needed from the client:** API access per tool (read scopes first, dedicated service principals), an Entra app
    registration, a CMDB/ownership source, representative historical data for tuning and validation, and decisions
    on residency/deployment target. Full list: A/D/Q items in
    [REQUIREMENTS_TRACEABILITY.md](REQUIREMENTS_TRACEABILITY.md).
@@ -691,11 +719,34 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | 211 platform tests, 162 engine tests, live tests (public feeds, the LLM), stress tests, a consistency suite (every figure on every surface, re-runs, LLM on/off, every route × role, fuzzing, integrity), a browser tour that audits layout and cross-checks screen values against the API, and a feature-by-feature verification report. The platform also self-checks hourly. |
-| What happens if the LLM or a tool goes down? | Nothing breaks: calls time out after 30 s, and after 3 failures a circuit breaker answers from the deterministic path instantly. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
+| How was it tested? | See §16. In short: 264 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
 | What didn't you test? | Section 10. |
+
+### About security testing
+
+| Question | Answer |
+|---|---|
+| Has it been penetration-tested? | Internally, yes, and automatically on every test run: 17 attack groups against a local instance, plus a stored-XSS probe in a real browser (§16, SECURITY.md). It has not had an independent third-party test; that should be done in the client's environment before go-live. |
+| What if someone steals a token? | Tokens expire (a token without an expiry is refused). Logout revokes the token server-side, and an admin can revoke every session of a user at once. High-impact decisions need MFA on the token. |
+| Could someone forge an Entra token? | No. Production tokens are verified with RS256 against the tenant's published keys, with audience, issuer and expiry enforced. The tests try another signing key, the wrong audience or issuer, `alg: none` and the classic algorithm-confusion attack; all are refused. |
+| Can a phishing analyst see incident data? | No. Every list, record, report, audit entry and access-log entry is scoped. Asking for another domain's record by id answers "not found", which is tested for every id route. |
+| Could two analysts approving at once run an action twice? | No. Tested with six simultaneous approvals: it executed once. Actions are idempotent, and the database enforces one execution. |
+| Could a malicious e-mail attack the analyst's browser? | No. Everything shown is escaped. The test puts script in the subject, sender, body, link and attachment name and views it on 8 screens with the browser's CSP turned off: nothing runs. The CSP (no inline script) is a second layer in production. |
+| Could a malicious e-mail make the server fetch internal URLs (SSRF)? | No. The platform never fetches links taken from e-mail content; outbound calls go only to configured vendor endpoints. |
+| Could a malicious e-mail crash the analysis? | Fuzzing found three ways, and all are fixed: a hostile `From:` header (a bug in Python's own parser, now worked around), hostile MIME, and NUL characters. The parser is now fuzzed with arbitrary bytes on every run. |
+| Do you depend on vulnerable packages? | pip-audit and npm audit report no known vulnerabilities. bandit reports no medium or high findings. |
+| Is it accessible? | Every screen passes an automated WCAG 2.1 A/AA scan in both themes. A manual screen-reader review has not been done. |
+
+### About the database and scale
+
+| Question | Answer |
+|---|---|
+| Does it run on PostgreSQL? | Yes, that is the production engine, and the full suite runs on it. The faster SQLite runs enforce PostgreSQL's rules too, which found several production-only bugs, all now fixed (§16). |
+| How big can it get? | Measured at 20,000 entities: risk ranking 0.06 s, correlation 0.09 s, a case's actions 0.005 s. The API is stateless and scales out; jobs are leased. It has not been load-tested at the client's volumes (§10). |
+| What happens during an upgrade? | Start-up creates new tables and widens text columns a new release has made longer. It never narrows or drops anything automatically. |
 
 ---
 
@@ -705,13 +756,14 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 |---|---|
 | Connectors | 20 (live + fake mode each) |
 | Workflows | 3 (phishing, incident, vulnerability) + intelligence layer |
-| Correlation rules | 12 + 3 operational alerts |
+| Correlation rules | 12 + 4 operational alerts |
 | Action types under the autonomy policy | 25, default L2 (recommend) |
 | Roles | 5 |
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 211 (+12 opt-in live) / 162 |
+| Platform tests / engine tests | 264 SQLite, 265 PostgreSQL / 205 |
+| Penetration test groups / fuzzing properties | 17 / 11, all passing |
 | Features verified | 89 of 89 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
@@ -742,7 +794,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Evidence ids (E#, S#, F#, R#, G#, H#, B#, P#, X#) | References to stored records: evidence, story steps, report figures, tool results, gaps, hypotheses, blast radius, plan actions, exposure |
 | Fact / inference | A fact is directly supported by a record; an inference is a conclusion from several facts, labelled as such |
 | Four-eyes | A second, suitably senior person must approve |
-| L0-L4 | Autonomy levels: observe, notify, recommend, approve, autonomous |
+| L0-L4 | Autonomy levels: observe, enrich, recommend, approve, autonomous |
 | Blind spot | An ATT&CK stage that no enabled tool can observe (different from "checked, nothing found") |
 | KEV | CISA Known Exploited Vulnerabilities catalogue |
 | EPSS | Exploit Prediction Scoring System: probability of exploitation in the next 30 days |
@@ -750,3 +802,330 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Shadow mode | The platform's verdicts are compared with analysts' decisions to measure agreement before any automation |
 | Fingerprint | Hash of a story's evidence: the same attack gives the same story and cached deep analysis |
 | Pseudonymisation | Internal identities replaced with tokens before a prompt leaves the platform, restored in the answer |
+
+---
+
+## 15. Reference: every component in depth
+
+Use this section when someone drills into a detail. Every fact here is taken from the code.
+
+### 15.1 The 20 connectors
+
+Every connector runs on the same SDK:
+- per-tool request budgets under the vendor's rate limits
+- backoff and retry
+- cursors, and reconciliation of counts against the source
+- per-record fault isolation: one malformed record is set aside, the rest of the page is kept
+- freshness checked against each stream's expected cadence
+
+Each connector has a *live* mode (the vendor API) and a *fake* mode (vendor-shaped fixtures through the same parsing
+code).
+
+| Connector | Category | What it pulls | What the platform uses it for | Actions it can perform |
+|---|---|---|---|---|
+| CrowdStrike Falcon | EDR | alerts, hosts, Spotlight vulnerabilities | Endpoint detections; host identity (agent id, serial, IP); vulnerability findings | Network containment and release; read-only forensic collection |
+| Microsoft Defender for Endpoint | EDR | alerts, machines, vulnerabilities | Same as CrowdStrike, second source | Isolation and release; antivirus scan; investigation package; custom indicators (block and unblock) |
+| Microsoft Defender for Office 365 (+ Exchange admin) | Email | user-reported messages, email alerts; campaign search, clicks and post-delivery events through advanced hunting | The phishing intake, campaign scope, who clicked, what the admin already did | Tag; tenant-wide purge and restore; block and unblock sender; reporter feedback; notification e-mail |
+| Check Point Avanan | Email | security events | A second email-control verdict ("control disagreement") | Quarantine and restore |
+| Microsoft Entra ID | Identity | users, sign-ins, risky users, risk detections, directory audits | Identity resolution; risky sign-ins; MFA methods; inbox rules; devices | Revoke sessions; force password reset; disable and re-enable; mark compromised |
+| Cisco Umbrella | DNS | DNS activity | Malicious destinations reached; shadow IT | Block and unblock a domain |
+| Thinkst Canary | Deception | incidents, devices | High-fidelity deception hits (decoys are sensors, never scored as assets) | Acknowledge |
+| Delinea Secret Server | PAM | secret audit events | Privileged credential viewed or copied | Rotate a secret |
+| Delinea Privilege Manager | PAM | elevation events | Elevation allowed or denied | - |
+| Rapid7 InsightVM | Vulnerability | assets, findings (API or CSV export) | Findings and asset inventory | - |
+| Wiz | Cloud | resources, vulnerabilities, issues | Cloud vulnerabilities, internet exposure, misconfigurations | - |
+| NVD | Intel | recent CVEs; per-CVE lookup | CVSS and description | - |
+| FIRST EPSS | Intel | per-CVE lookup | Probability of exploitation in 30 days | - |
+| CISA KEV | Intel | catalogue | Known-exploited flag | - |
+| Threat-intel fusion | Intel | lookups against VirusTotal, AbuseIPDB, AlienVault OTX, URLhaus, ThreatFox, MalwareBazaar, GreyNoise, Shodan | One fused verdict per indicator, with each source's answer attributed | - |
+| ServiceNow | ITSM / CMDB | tickets, CMDB | Owners, support groups, criticality; ticket status | Create and update tickets |
+| Jira | ITSM | tickets | Ticket status | Create and update tickets |
+| CMDB CSV | CMDB | CSV file | Owners where there is no CMDB API | - |
+| Microsoft Sentinel | SIEM | incidents | An additional alert source | - |
+| Generic SIEM webhook | SIEM | alerts pushed to `POST /api/v1/ingest/alerts` | Any other tool that can send a webhook | - |
+
+**Say, if asked "what if a tool is down?":** "The lookup reports the source as *unavailable* - never as clean - and
+the investigation continues with the others. The Integrations screen shows it as stale."
+
+### 15.2 The action catalogue and the autonomy policy
+
+Every change to a tool is an **action request**. It is evaluated by the active, versioned autonomy policy, then
+recommended, sent for approval or blocked, and recorded in the audit log. Defaults as shipped:
+
+| Action | Tool | Default level | Blast-radius limit | Four-eyes | Reverse action |
+|---|---|---|---|---|---|
+| `email.tag` | Defender for Office 365 | L2 | 25 | - | - |
+| `email.campaign_purge` | Defender for Office 365 | L2 | 200 | - | `email.restore` |
+| `email.block_sender` | Defender for Office 365 | L2 | 25 | - | `email.unblock_sender` |
+| `email.gateway_quarantine` | Avanan | L2 | 25 | - | `email.gateway_restore` |
+| `email.reporter_feedback` | Defender for Office 365 | L2 | 25 | - | - |
+| `notify.email` | Defender for Office 365 | L2 | 25 | - | - |
+| `identity.revoke_sessions` | Entra ID | L2 | 10 | - | - |
+| `identity.reset_password` | Entra ID | L2 | 10 | - | - |
+| `identity.disable_account` | Entra ID | L2 | 3 | **yes** | `identity.enable_account` |
+| `identity.confirm_compromised` | Entra ID | L2 | 25 | - | - |
+| `endpoint.isolate` | CrowdStrike / Defender | L2 | 5 | **yes** | `endpoint.release` |
+| `endpoint.scan`, `endpoint.collect_forensics` | Defender / CrowdStrike | L2 | 25 | - | - |
+| `dns.block_domain` | Umbrella | L2 | 25 | - | `dns.unblock_domain` |
+| `indicator.block` | Defender for Endpoint | L2 | 25 | - | `indicator.unblock` |
+| `pam.rotate_secret` | Secret Server | L2 | 5 | - | - |
+| `ticket.create`, `ticket.update` | ServiceNow / Jira | L2 | 25 | - | - |
+| `canary.acknowledge` | Canary | L2 | 25 | - | - |
+
+**Levels:** L0 observe · L1 enrich · **L2 recommend (default for every action)** · L3 approve · L4 autonomous.
+
+**How a request is decided, in order:**
+1. A failed pre-condition blocks it (for example, isolating a host with no EDR agent).
+2. More targets than the hard limit (5,000) blocks it.
+3. The kill switch caps it at L3: approval required.
+4. A destructive action type is capped at L3, so it is never autonomous.
+5. Any VIP or critical-tagged target caps it at L3 and marks it high-impact.
+6. More targets than the action's blast-radius limit caps it at L3 and marks it high-impact.
+7. Four-eyes: a second person must approve, and it must be someone with `approve_high_impact` (a lead).
+
+The reasons are always shown next to the action, even when no cap applied.
+
+**At execution** the pre-conditions are re-checked, the action is idempotent (the same request never runs twice),
+and the result is recorded.
+- A reversible action can be rolled back through its reverse action. Rollback needs the `rollback_action` permission.
+- Nobody approves their own request.
+- API-key (service) principals can never approve.
+
+**Changing the policy:** an automation admin *proposes* a new version, and a different person with `approve_policy`
+(a lead) *approves* it. Every version is kept.
+
+### 15.3 Roles and permissions
+
+| Role | Permissions |
+|---|---|
+| Analyst | read, investigate, request actions, approve (non-high-impact) actions, resolve entities, read audit |
+| Lead | everything an analyst has, plus approve high-impact actions, approve policy, roll back actions, kill switch, export evidence |
+| Automation admin | read, read audit, manage connectors, propose policy, kill switch |
+| Admin | read, read audit, manage access (roles, service accounts, session revocation), manage connectors, kill switch, export evidence |
+| Auditor | read, read audit, export evidence |
+
+- **Domain scope:** any role can be limited to phishing, incident and/or vulnerability data. Records outside the
+  scope answer "not found", including inside reports, the audit log and the access log.
+- **Step-up MFA:** approvals, rollback, policy approval, the kill switch and access management need a token that
+  shows MFA. This is on by default in production.
+- **Service accounts:** API keys that can hold only analyst, auditor or automation-admin roles and can never approve.
+  They are hashed at rest, shown once, and expire.
+- **Break-glass:** a sealed emergency credential. Only its SHA-256 is configured. Every use is audited and raises a
+  critical finding.
+
+### 15.4 Scheduled jobs
+
+| Job | Default interval | What it does |
+|---|---|---|
+| `phishing` | 2 minutes | Pull newly reported e-mails and analyse them |
+| `incident` | 5 minutes | Ingest alerts, cluster them into incidents, investigate |
+| `intelligence` | 10 minutes | Re-correlate: risk, 12 rules, brief |
+| `vulnerability` | 6 hours | Refresh the four scanners, prioritise, update SLAs |
+| `self_check` | 1 hour | Prove every shared figure agrees everywhere; check the LLM budget |
+| `follow_up` | daily | Chase unacknowledged remediation plans; sync tickets; catch false closures |
+| `daily_report` | daily | The SOC daily report |
+| `retention` | daily | Prune old raw payloads, closed-case e-mails and LLM prompt text; keep legal holds |
+
+Every run is recorded. A run that fails is retried with backoff; after 3 failed runs it is **dead-lettered** and a
+finding is raised. Any job can be replayed from Integrations. Several scheduler replicas are safe, because each job
+takes a database lease. If the scheduler stops, every screen shows a "Scheduler stopped" banner.
+
+### 15.5 The data model in one paragraph
+
+Tools send **source records** (the raw payload is kept encrypted, for evidence).
+- Records resolve into **entities**: hosts, people, indicators and events. Each entity has all its **identifiers**
+  from every tool, linked by **relations**.
+- A **case** (phishing, incident or vulnerability) links to entities with a role, and holds **evidence** rows (E#).
+- Recommended changes are **action requests**, decided by the **policy version** in force.
+- Analyst **dispositions** feed shadow-mode agreement and drift monitoring.
+- Cross-domain **insights** come from the correlation rules.
+- The vulnerability domain adds consolidated **findings**, **remediation campaigns** with per-team **action plans**,
+  **exceptions**, a **risk register** and **cloud misconfigurations**.
+- Reported e-mails are **submissions**.
+
+Everything that changes state writes an **audit record** in a hash chain. Every request writes an **access-log** row,
+and every model call writes an **LLM call** row.
+
+### 15.6 Screen by screen
+
+| Screen | What it shows | Where the numbers come from | Who |
+|---|---|---|---|
+| **Overview** | Open cases, awaiting approval, automation rate, median time to close, open insights, open vulnerabilities; new cases per day; open cases by severity; top insights; riskiest users and hosts; data quality; integrations; enrichment latency; verdict quality | Cases, actions, insights and findings counted in the database. Awaiting approval counts the whole backlog, not a time window. Scoped to the viewer's domains. | All |
+| **Intelligence** | Situation brief; ask the analyst; risk by user and host; correlated findings with next steps | Brief facts computed in code (cached while unchanged); answers from read-only tools; risk from the engine (§6.1) | All-domain scope (it spans every domain) |
+| **Cases** | Every case with domain, severity, verdict, status; domain tabs with true totals | Cases table; tab counts from the summary endpoint | All (scoped) |
+| **Case** | Assessment with E# citations, facts vs inferences; evidence; cross-domain context; entities; recommended actions with policy reasons; analyst decision; timeline; audit trail; links to the Attack story and a case report | Evidence rows and the case assessment | All (scoped) |
+| **Attack story** | Kill-chain stages, steps, users reached, hosts, privileged secrets, gaps checked; kill-chain row; what happened; response plan (bulk approve); blast radius; benign explanations; gaps; exposure; deep analysis | Rebuilt on demand from stored records (§6.6), never stored | All (scoped) |
+| **Entity 360** | Why this score; timeline across tools; identifiers; cases; insights; vulnerabilities; related entities; per-tool attributes | The context store and the risk engine | All (records outside the viewer's scope answer 404) |
+| **Approvals** | Every action awaiting a decision, with targets, rationale and policy; domain tabs | Action requests, scoped to the viewer | All can view; approving needs `approve_action` (high-impact: `approve_high_impact`) |
+| **Phishing** | Reported, auto-closed, campaigns, repeat clickers, median time to containment; verdict mix; users who clicked; analyse a message (upload) | Submissions. Time to containment runs from report to the first executed purge, isolation or session revocation. | Phishing scope |
+| **Suppliers** | Supplier account compromise, look-alike domains, payment diversion, impersonation | Reported mail matched against the supplier register (`config/suppliers.yaml`) | Phishing scope |
+| **Vulnerabilities** | Open findings, KEV, internet-exposed, past SLA, asset match rate; ask about exposure; coverage gaps; findings list | Consolidated findings (§6.2); the natural-language question shows the filter it generated | Vulnerability scope |
+| **Cloud posture** | Open, past SLA, false closures, teams involved; misconfigurations with route / mark fixed / validate | Wiz issues through the same lifecycle as findings | Vulnerability scope |
+| **ATT&CK coverage** | Weighted coverage, priority blind spots, single-source techniques, firing; the matrix; blind spots to close | The enabled tools' detection capabilities (56 techniques) and what has fired | All |
+| **Shadow IT** | Unsanctioned services, high-risk services, users involved, risky sites; by category; risky destinations | Umbrella DNS against `config/sanctioned_services.yaml`; aggregated, never stored | Incident scope |
+| **Integrations** | Each connector's freshness and a Test button; platform self-check; scheduled jobs with history and replay | Connector checkpoints; job runs; the self-check | All can view; Test, Sync and job replay need `manage_connectors` |
+| **Automation policy** | Every action type with level, limits, four-eyes, reversible; kill switch; pending policy changes | The active policy version | All; changes by role |
+| **Reports** | Seven standard reports; describe a report in words; compliance evidence pack; audit export | The 16-source catalogue (§6.8) | All (scoped); evidence exports need `export_evidence` |
+| **Access** | Your access; role assignments; service accounts; role permissions | Role grants and API keys | Admin (manage), all (own access) |
+| **Audit log** | Chain status and records | The hash-chained audit log | All roles have audit read (scoped to the viewer's domains) |
+
+Every screen works in light and dark themes and at 768 px and above. All times are shown in UTC.
+
+### 15.7 The three workflows, step by step
+
+**Phishing: from a reported e-mail to remediation**
+1. **Intake.** Reports come from the Defender *Report* button (reporting mailbox), Avanan, or an upload in the
+   console. The original message, headers included, is stored encrypted under its content hash. The same report is
+   never processed twice.
+2. **Decompose.**
+   - Sender, reply-to and return-path.
+   - SPF/DKIM/DMARC results.
+   - The received path and origin IP.
+   - Text and HTML bodies.
+   - Every URL, including links whose text differs from their target.
+   - Attachments: hash, fuzzy hash, risky extension, macro hints.
+   - QR codes in images.
+
+   Malformed or hostile MIME is tolerated, never fatal.
+3. **Analyse.** The deterministic signal model (§6.3) produces the verdict, score and named signals. The optional
+   ML engine can take this step instead.
+4. **Enrich.** Threat-intel fusion on the URLs, domains, hashes and origin IP. A source that fails is reported as
+   unavailable.
+5. **Campaign scope.** Defender advanced hunting finds similar messages: recipients and variants.
+6. **Control reconciliation.** Defender's and Avanan's verdicts are compared, and a disagreement is a finding.
+7. **User impact.**
+   - Who clicked, and whether the click was blocked.
+   - What the admin already moved.
+   - Endpoint activity after the click.
+   - Identity compromise indicators: risky sign-ins, a new MFA method, inbox rules.
+8. **Case.** Evidence (E#), MITRE techniques, and a cited explanation.
+9. **Recommendations.** Purge the campaign, block the sender, block the domain/URL, revoke sessions or reset
+   passwords for clickers, isolate an endpoint if code ran, tell the reporter, open a ticket. All go through the
+   policy.
+10. **Auto-close.** Clear-safe and clear-spam reports with confidence ≥ 0.7 are closed with a reply to the reporter.
+    10 % are sampled for QA, chosen deterministically.
+
+**Incident: from alerts to an investigated case**
+1. **Ingest.** Alerts arrive from both EDRs, Entra risk, Canary, the Delinea tools, Umbrella and the SIEMs. Each
+   becomes an event linked to the resolved host and person.
+2. **Cluster.** Alerts that share a user or host within 24 hours are merged into one incident. Detections with a
+   poor track record are flagged.
+3. **Investigate.**
+   - Extract the users, hosts and indicators.
+   - Query every relevant tool in parallel, each lookup with its own timeout.
+   - Add any KEV-listed vulnerabilities on the involved hosts.
+4. **Assess.** Severity, confidence and verdict (§6.4); MITRE techniques; a cited summary.
+5. **Recommend.** Actions through the policy.
+6. **Also:** similar past incidents, and a shift handover report of the last N hours.
+
+**Vulnerability: from four scanners to a validated fix**
+1. **Consolidate.** Rapid7, CrowdStrike Spotlight, Defender and Wiz findings are resolved to one record per host and
+   CVE, listing every scanner that sees it.
+2. **Enrich.** CVSS (NVD), EPSS, KEV, internet exposure (Wiz), and criticality and owner (CMDB/ServiceNow).
+3. **Prioritise.** Band P1-P4 and an SLA (§6.2).
+4. **Campaign per CVE.** Draft → notifying → in progress → validating → closed. Each owning team gets an action
+   plan: awaiting notification → notified → acknowledged → in progress → done or blocked. Notifications and tickets
+   are actions, so they need approval.
+5. **Follow-up (daily).** Plans unacknowledged after 3 days are chased. Tickets are synced both ways, and a ticket
+   marked done while a scanner still sees the vulnerability is a **false closure**, reopened.
+6. **Validate.** Every scanner is asked again. The result per source is *still present*, *not present* or
+   *unverifiable*, and a fix is never accepted on an unverifiable answer.
+7. **Exceptions and risk register.** An exception needs a justification, a compensating control and an expiry, and
+   a different person approves it; expiry reopens the finding. Findings past SLA are proposed for the risk register.
+8. **Cloud misconfigurations** (Wiz) follow the same route → fix → validate lifecycle.
+9. **New KEV exposure:** when CISA adds a CVE, the affected assets are found immediately.
+
+### 15.8 What happens when things fail
+
+| Failure | What the platform does |
+|---|---|
+| LLM slow or down | 10 s connect limit; 30 s / 120 s read limit; one retry on throttling; after 3 failures, deterministic answers for 60 s |
+| LLM budget reached | Findings at 80 % and 100 %; deterministic output until the month rolls over |
+| A tool's API down or rate-limited | Backoff and retry; the source shows as *unavailable* in investigations and *stale* on Integrations |
+| A malformed vendor record | Set aside; the rest of the stream continues |
+| A job keeps failing | Retried; dead-lettered after 3 runs with a finding; replayable |
+| Scheduler stopped | "Scheduler stopped" banner on every screen; `/health` reports it |
+| Two schedulers | A database lease means each job runs once |
+| Something ran twice | Every pipeline is idempotent; the self-check watches for duplicates |
+| Figures drift between screens | The hourly self-check recomputes them and raises a finding (only if confirmed on a re-run) |
+| Hostile input | NUL characters stripped; over-long free text kept to width; malformed ids refused with 400; malformed e-mail headers read raw |
+| Automation misbehaves | The kill switch: durable, on every replica |
+
+Full detail: [FAILURE_MODES.md](FAILURE_MODES.md).
+
+### 15.9 Deployment and configuration
+
+- **Components:**
+  - `platform-api` (stateless; scale out behind a load balancer)
+  - `platform-scheduler` (one or more)
+  - PostgreSQL
+  - a volume or blob store for encrypted raw payloads and reports
+  - optionally the phishing ML engine with RabbitMQ and Redis, and an isolated detonation host
+
+  `deploy/docker-compose.yml` has all of them.
+- **Settings that matter in production:**
+
+  | Setting | Purpose |
+  |---|---|
+  | `SOC_ENVIRONMENT=prod` | Turns on production defaults: MFA required, no API docs, no dev sign-in, test clocks ignored |
+  | `SOC_DATABASE_URL` | PostgreSQL |
+  | `SOC_AUTH_MODE=entra`, `SOC_ENTRA_TENANT_ID`, `SOC_ENTRA_AUDIENCE` | Single sign-on |
+  | `SOC_DATA_KEY` | Encryption key(s), comma-separated for rotation; mandatory in production |
+  | `SOC_REQUIRE_MFA`, `SOC_MFA_AUTH_CONTEXT` | Step-up rules |
+  | `SOC_BREAKGLASS_SHA256` | Hash of the sealed emergency credential |
+  | `SOC_ORG_DOMAINS` | What counts as internal (for redaction and look-alike detection) |
+  | `SOC_CONNECTOR_MODE`, `config/connectors.yaml` | Live or fake mode per tool, with credentials from vault-mounted files |
+  | `SOC_LLM_*` | Provider, endpoint, key, deployment, approved endpoints, pinned model version, monthly token budget |
+  | `SOC_RAW_RETENTION_DAYS`, `SOC_LLM_LOG_RETENTION_DAYS`, `SOC_ACCESS_LOG_RETENTION_DAYS` | Retention (180 / 180 / 400 by default) |
+  | `SOC_KILL_SWITCH` | Start with automation halted |
+  | `SOC_JOB_*_SECONDS` | Job intervals |
+- **Upgrades:** on PostgreSQL, start-up widens any text column a newer release has made longer. Nothing is ever
+  narrowed or dropped automatically.
+- **Operations:** health at `/health` (database, scheduler heartbeat, kill switch); Prometheus metrics at `/metrics`
+  (auditor API key); backups, key rotation and connector changes in [OPERATIONS.md](OPERATIONS.md).
+
+---
+
+## 16. How it was tested - and how to explain it
+
+**The one-line answer:** "Every feature is mapped to the automated tests that prove it. The suite runs on both
+database engines, attacks itself, fuzzes its parsers, moves its own clock forward, and checks every screen in a real
+browser."
+
+| Kind of testing | What it proves | Result |
+|---|---|---|
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 264 platform tests (265 on PostgreSQL), 205 engine tests |
+| **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
+| **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
+| **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |
+| **Time travel** | The test clock is moved forward: SLAs fall due and every screen agrees at each point; the token budget resets at month end; retention prunes old mail but keeps open cases; open exposures keep their risk while activity fades | Green on 3 estates |
+| **Penetration testing** | 17 attack groups against a local instance: forged, expired and unsigned tokens; algorithm confusion on production tokens; privilege escalation; cross-domain access by id; SQL and prompt injection; path traversal; upload abuse; information leakage; brute force; races (six simultaneous approvals execute once); production mode exposes no developer surface | All refused |
+| **Stored XSS** | Script in an e-mail's subject, sender, body, link and attachment name, viewed on 8 screens with the browser's CSP switched off | Nothing executed or injected |
+| **Property-based fuzzing** | Rules checked against thousands of generated inputs: redaction round-trips exactly and never leaks an internal address or card number; attacker indicators are kept; the numeric guardrail accepts supported figures and rejects invented ones; every vendor timestamp format parses to the same instant; the e-mail parser survives arbitrary bytes and hostile MIME | 11 properties hold |
+| **Accessibility** | axe-core (WCAG 2.1 A/AA) on every screen, both themes | 0 findings |
+| **Layout** | Every screen at 1440, 1280, 1024 and 768 px, light and dark: nothing clipped, overflowing or squeezed | 0 problems |
+| **Live** | The real LLM (Azure AI Foundry), NVD, EPSS and CISA KEV | Green |
+| **Stress** | 400 hosts and 300 people with messy naming: no false merges; 20,000-entity scale benchmarks | 0 false merges |
+| **Static analysis** | ruff (whole repository), bandit, pip-audit, npm audit, type checking of the platform core | 0 findings / 0 medium-high / no known vulnerabilities |
+
+**What the testing found, and why that is good news.** Each round of testing from a new angle found real problems.
+Each was fixed with a regression test that keeps it fixed. Examples to quote:
+- **Running on PostgreSQL:**
+  - a manual job by a user with a long e-mail address failed
+  - `%00` in an id crashed 20 routes
+- **Moving the clock:**
+  - approvals older than 14 days disappeared from the dashboard
+  - open vulnerabilities faded from risk while still open
+- **Penetration testing:** a token without an expiry would have been valid forever.
+- **Fuzzing:**
+  - redaction could crash on hostile mail
+  - a card pattern could corrupt an IP address used as evidence
+  - a malformed `From:` header crashed the e-mail parser (a bug in Python's own library, now worked around)
+- **The accessibility scan:** 18 serious issues.
+- **Code review and lint:** a "warning banner" action that reported success without changing anything.
+
+**Say:** "We didn't just write tests that pass. We kept attacking the platform from new directions until they stopped
+finding anything - and every finding is now a permanent test."
+
+**Be honest about the limits:** passing tests show the absence of the bugs they look for, not of every bug. What
+remains unproven needs the client's environment (§10).

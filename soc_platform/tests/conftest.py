@@ -12,6 +12,11 @@ from soc_platform.core.db import Database
 # SOC_TEST_POSTGRES=postgresql://user:pw@host:port/postgres runs the whole suite on PostgreSQL (the production
 # engine): every SQLite database a test creates becomes a fresh PostgreSQL database - the same file URL maps to the
 # same database, each in-memory database gets its own. Engines do not pool, so ~200 tests stay within limits.
+# Tests never write into the project folder: raw payloads and reports go to a per-run temporary directory unless a
+# test chooses its own.
+__import__("os").environ.setdefault("SOC_RAW_PAYLOAD_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-raw-"))
+__import__("os").environ.setdefault("SOC_REPORT_OUTPUT_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-reports-"))
+
 _PG = __import__("os").environ.get("SOC_TEST_POSTGRES")
 if _PG:
     import hashlib as _hashlib

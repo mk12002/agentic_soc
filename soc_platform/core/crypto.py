@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
@@ -69,7 +70,16 @@ def write_protected(path: str | Path, data: bytes, cipher: DataCipher | None = N
         with os.fdopen(fd, "wb") as fh:
             fh.write(blob)
         os.chmod(tmp, 0o600)
-        os.replace(tmp, p)
+        for attempt in range(6):
+            try:
+                os.replace(tmp, p)
+                break
+            except PermissionError:
+                # Windows refuses to replace a file another writer is replacing at that instant (concurrent pulls
+                # of the same content-addressed message); the lock clears in milliseconds.
+                if attempt == 5:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise

@@ -75,14 +75,16 @@ class VisualURLAgent:
         # 4. Run OCR to extract visual text (e.g., "Sign in to your Microsoft account")
         # 5. Run Computer Vision to template match brand logos
         
-        # Mock result for now
-        verdict = "benign"
-        confidence = 0.95
+        # Not implemented: say so rather than vouch for the page. A made-up "benign" here would count as evidence
+        # of safety for every link if the agent were ever wired into the pipeline.
+        verdict = "unavailable"
+        confidence = 0.0
         visual_findings = {
             "logos_detected": [],
-            "ocr_text": "Mock text analysis",
-            "impersonation_score": 0.05,
+            "ocr_text": "",
+            "impersonation_score": None,
             "backend": self.backend,
+            "note": "visual analysis not implemented",
         }
         
         return {

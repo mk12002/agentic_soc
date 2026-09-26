@@ -1,9 +1,9 @@
 """Multi-source threat-intelligence fusion connector (IM-F04 threat intel, PH-F03, VM-F04).
 
 Sources (each optional, enabled by providing its key): VirusTotal, AbuseIPDB,
-AlienVault OTX, URLhaus, ThreatFox, MalwareBazaar, GreyNoise, Shodan, urlscan.
-The eight sources of the endpoint system are covered; results are fused into a
-single verdict with per-source attribution so every claim stays traceable.
+AlienVault OTX, URLhaus, ThreatFox, MalwareBazaar, GreyNoise and Shodan - the eight
+sources of the endpoint system. Results are fused into a single verdict with per-source
+attribution so every claim stays traceable.
 Queries run through one transport per source; in fake mode all sources share a
 fixture transport keyed by path prefix.
 """

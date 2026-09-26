@@ -209,3 +209,29 @@ def test_start_up_widens_columns_an_older_schema_left_narrow():
     db.create_all()
     width = {c["name"]: getattr(c["type"], "length", None) for c in inspect(db.engine).get_columns("job_runs")}["trigger"]
     assert width == 320
+
+
+def test_access_log_rows_go_to_the_database_of_their_own_request():
+    """Rows are queued and written later; they must land in the database that served the request, even if the
+    process's default database has changed before the background writer flushes."""
+    from soc_platform.api.app import ACCESS_LOG
+    from soc_platform.core import db as dbm
+    from soc_platform.core.models import AccessLogRecord
+
+    saved = dbm._default
+    a, b = dbm.Database("sqlite://"), dbm.Database("sqlite://")
+    a.create_all()
+    b.create_all()
+    try:
+        dbm.set_database(a)
+        ACCESS_LOG.put({"ts": __import__("soc_platform.core.models", fromlist=["x"]).utcnow(), "principal_id": "p-a",
+                        "auth_method": "bearer", "method": "GET", "path": "/api/v1/me", "status": 200,
+                        "client_ip": "127.0.0.1", "user_agent": "t", "latency_ms": 1.0})
+        dbm.set_database(b)                                                         # switched before the flush
+        ACCESS_LOG.flush()
+        with a.session() as s:
+            assert s.query(AccessLogRecord).filter(AccessLogRecord.principal_id == "p-a").count() == 1
+        with b.session() as s:
+            assert s.query(AccessLogRecord).count() == 0
+    finally:
+        dbm._default = saved

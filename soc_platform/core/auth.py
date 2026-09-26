@@ -182,6 +182,7 @@ def principal_from_token(token: str, settings: Settings) -> Principal:
                 token,
                 key.key,
                 algorithms=["RS256"],
+                options={"require": ["exp", "iat"]},
                 audience=settings.entra_audience,
                 issuer=f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0",
             )
@@ -193,7 +194,8 @@ def principal_from_token(token: str, settings: Settings) -> Principal:
         if not settings.dev_jwt_secret:
             raise AuthError("SOC_DEV_JWT_SECRET not configured")
         try:
-            claims = jwt.decode(token, settings.dev_jwt_secret, algorithms=["HS256"])
+            # a token must expire: one minted without `exp` would otherwise be valid forever
+            claims = jwt.decode(token, settings.dev_jwt_secret, algorithms=["HS256"], options={"require": ["exp", "iat"]})
         except jwt.PyJWTError as exc:
             raise AuthError(f"invalid token: {exc}") from exc
     else:

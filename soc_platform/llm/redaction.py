@@ -8,6 +8,7 @@ URLs, hashes) are left intact because they *are* the evidence.
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass, field
 
 EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
@@ -46,19 +47,23 @@ class Redactor:
             return self._token("USER", m.group(0)) if self._is_internal(m.group(2)) else m.group(0)
 
         out = EMAIL_RE.sub(_email, text)
+        # IPs are indicators (evidence), never personal data: shield them before any number pattern runs, so a card,
+        # id or phone pattern can never swallow an octet. The marker carries a random tag in private-use
+        # characters, so text in a hostile e-mail can never pass for one.
+        ips: list[str] = []
+        tag = secrets.token_hex(4)
+        out = IP_RE.sub(lambda m: (ips.append(m.group(0)), f"\ue000{tag}:{len(ips) - 1}\ue001")[1], out)
         for name in sorted(self.known_names, key=len, reverse=True):
             if name and len(name) > 3:
                 out = re.sub(re.escape(name), lambda m: self._token("PERSON", m.group(0)), out, flags=re.IGNORECASE)
         out = PAN_RE.sub(lambda m: self._token("ID", m.group(0)), out)
-        out = AADHAAR_RE.sub(lambda m: self._token("ID", m.group(0)), out)
+        # cards before the 12-digit national id: a spaced card number would otherwise be cut at 12 digits
         out = CARD_RE.sub(lambda m: self._token("CARD", m.group(0)) if _luhn(m.group(0)) else m.group(0), out)
-        # IPs are indicators; protect them from the phone regex by masking temporarily.
-        ips: list[str] = []
-        out = IP_RE.sub(lambda m: (ips.append(m.group(0)), f"\x00IP{len(ips) - 1}\x00")[1], out)
+        out = AADHAAR_RE.sub(lambda m: self._token("ID", m.group(0)), out)
         out = PHONE_RE.sub(lambda m: self._token("PHONE", m.group(0)) if 10 <= sum(c.isdigit() for c in m.group(0)) <= 13
                            else m.group(0), out)
-        out = re.sub(r"\x00IP(\d+)\x00", lambda m: ips[int(m.group(1))], out)
-        return out
+        return re.sub("\ue000" + tag + r":(\d+)\ue001",
+                      lambda m: ips[int(m.group(1))] if int(m.group(1)) < len(ips) else m.group(0), out)
 
     def restore(self, text: str) -> str:
         """Put the originals back. Models sometimes drop the brackets (``USER_1`` for ``<USER_1>``), so a token is

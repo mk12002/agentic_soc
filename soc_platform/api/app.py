@@ -175,7 +175,7 @@ class _AccessLogWriter:
         import queue
         import threading
 
-        self.q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=100_000)
+        self.q: queue.Queue[tuple[Any, dict[str, Any]]] = queue.Queue(maxsize=100_000)
         self.dropped = 0
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -185,7 +185,8 @@ class _AccessLogWriter:
         import threading
 
         try:
-            self.q.put_nowait(row)
+            # bound to the database of the request that produced it, not whichever is current at flush time
+            self.q.put_nowait((get_database(), row))
         except queue.Full:
             self.dropped += 1
             return
@@ -208,15 +209,22 @@ class _AccessLogWriter:
                     batch.append(self.q.get_nowait())
                 except queue.Empty:
                     break
-            for attempt in range(20):
-                try:
-                    with get_database().session() as s:
-                        s.add_all([AccessLogRecord(**r) for r in batch])
-                    break
-                except Exception:  # noqa: BLE001 - database busy/unavailable: back off, never crash
-                    _t.sleep(min(2.0, 0.1 * (attempt + 1)))
-            else:
-                self.dropped += len(batch)
+            by_db: dict[int, tuple[Any, list[dict[str, Any]]]] = {}
+            for db, row in batch:
+                by_db.setdefault(id(db), (db, []))[1].append(row)
+            for db, rows in by_db.values():
+                for attempt in range(20):
+                    try:
+                        with db.session() as s:
+                            s.add_all([AccessLogRecord(**r) for r in rows])
+                        break
+                    except Exception:  # noqa: BLE001 - database busy/unavailable: back off, never crash
+                        _t.sleep(min(2.0, 0.1 * (attempt + 1)))
+                else:
+                    self.dropped += len(rows)
+                    import logging
+
+                    logging.getLogger(__name__).warning("access log: %d row(s) could not be written", len(rows))
 
     def flush(self, timeout: float = 10.0) -> None:
         import time as _t
@@ -231,7 +239,9 @@ ACCESS_LOG = _AccessLogWriter()
 
 
 def _log_access(request: Request, status: int, latency_ms: float) -> None:
-    ACCESS_LOG.put({"ts": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    from soc_platform.core.models import utcnow
+
+    ACCESS_LOG.put({"ts": utcnow(),
                     "principal_id": getattr(request.state, "principal_id", None),
                     "auth_method": getattr(request.state, "auth_method", None),
                     "method": request.method[:8], "path": request.url.path[:512], "status": int(status),

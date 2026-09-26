@@ -107,6 +107,9 @@ def test_forged_and_expired_tokens_rejected():
     none_alg = jwt.encode({"sub": "x", "roles": ["lead"]}, None, algorithm="none")
     with pytest.raises(AuthError):
         principal_from_token(none_alg, st)
+    now = int(time.time())
+    with pytest.raises(AuthError):  # a correctly signed token without an expiry would be valid forever
+        principal_from_token(jwt.encode({"sub": "x", "roles": ["lead"], "iat": now}, "a" * 40, algorithm="HS256"), st)
     with pytest.raises(AuthError):  # dev tokens are refused in prod regardless
         principal_from_token(jwt.encode({"sub": "x"}, "a" * 40, algorithm="HS256"),
                              Settings(auth_mode="dev", dev_jwt_secret="a" * 40, environment="prod"))
@@ -114,8 +117,9 @@ def test_forged_and_expired_tokens_rejected():
 
 def test_unknown_role_claims_grant_nothing():
     st = Settings(auth_mode="dev", dev_jwt_secret="a" * 40)
-    p = principal_from_token(jwt.encode({"sub": "x", "roles": ["superuser", "Global Administrator"]}, "a" * 40,
-                                        algorithm="HS256"), st)
+    now = int(time.time())
+    p = principal_from_token(jwt.encode({"sub": "x", "roles": ["superuser", "Global Administrator"], "iat": now,
+                                         "exp": now + 600}, "a" * 40, algorithm="HS256"), st)
     assert not p.roles
 
 

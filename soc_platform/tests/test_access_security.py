@@ -31,6 +31,7 @@ def _st(**kw) -> Settings:
 
 
 ADMIN = Principal("root.admin@acme", "Admin", frozenset({Role.ADMIN}))
+_LIFE = {"iat": int(__import__("time").time()), "exp": int(__import__("time").time()) + 3600}   # tokens must expire
 
 
 # ----------------------------------------------------------------------------- principal / token rules
@@ -39,11 +40,11 @@ ADMIN = Principal("root.admin@acme", "Admin", frozenset({Role.ADMIN}))
 def test_domain_scoped_roles_from_entra_style_claims():
     import jwt
 
-    tok = jwt.encode({"sub": "u1", "roles": ["SOC.Analyst.Phishing"], "amr": ["mfa"]}, SECRET, algorithm="HS256")
+    tok = jwt.encode({"sub": "u1", "roles": ["SOC.Analyst.Phishing"], "amr": ["mfa"], **_LIFE}, SECRET, algorithm="HS256")
     p = principal_from_token(tok, _st())
     assert p.roles == frozenset({Role.ANALYST}) and p.domains == frozenset({"phishing"})
     assert p.in_domain("phishing") and not p.in_domain("vulnerability")
-    tok = jwt.encode({"sub": "u2", "roles": ["SOC.Lead"]}, SECRET, algorithm="HS256")
+    tok = jwt.encode({"sub": "u2", "roles": ["SOC.Lead"], **_LIFE}, SECRET, algorithm="HS256")
     assert principal_from_token(tok, _st()).domains == frozenset({"*"})
 
 
@@ -53,7 +54,7 @@ def test_step_up_mfa_required_for_decisions_when_enforced():
     assert weak.can(Perm.INVESTIGATE) and not weak.can(Perm.APPROVE_ACTION) and not weak.can(Perm.KILL_SWITCH)
     assert "multi-factor" in weak.why_not(Perm.APPROVE_ACTION)
     assert strong.can(Perm.APPROVE_ACTION) and strong.can(Perm.APPROVE_HIGH_IMPACT)
-    ctx = principal_from_token(__import__("jwt").encode({"sub": "x", "roles": ["lead"], "acrs": ["c1"]}, SECRET,
+    ctx = principal_from_token(__import__("jwt").encode({"sub": "x", "roles": ["lead"], "acrs": ["c1"], **_LIFE}, SECRET,
                                                         algorithm="HS256"), _st(require_mfa=True, mfa_auth_context="c1"))
     assert ctx.can(Perm.APPROVE_ACTION)
 

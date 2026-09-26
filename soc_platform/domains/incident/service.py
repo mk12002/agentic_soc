@@ -185,6 +185,8 @@ class IncidentService:
 
     def investigate(self, case_id: str) -> dict[str, Any]:
         case = self.s.get(Case, case_id)
+        if case is None:
+            raise KeyError(f"unknown incident {case_id}")
         targets = self.extract_entities(case_id)
         outcome = EnrichmentOrchestrator(self.s, self.registry).enrich(case_id, targets, actor=f"agent:{AGENT}")
         evidence = self.s.execute(select(Evidence).where(Evidence.case_id == case_id)).scalars().all()

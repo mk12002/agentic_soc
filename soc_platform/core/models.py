@@ -33,11 +33,18 @@ from soc_platform.core.db import Base, BoundedText, UTCDateTime
 
 
 def utcnow() -> datetime:
-    """The platform's clock (UTC). ``SOC_CLOCK_OFFSET_SECONDS`` shifts it for time-travel tests (SLAs falling due,
-    month roll-over, retention); it is ignored when ``SOC_ENVIRONMENT=prod``."""
+    """The platform's clock (UTC). Two test-only controls, both ignored when ``SOC_ENVIRONMENT=prod``:
+    ``SOC_CLOCK_OFFSET_SECONDS`` shifts it (SLAs falling due, month roll-over, retention) and ``SOC_CLOCK_FREEZE``
+    (ISO time) stops it, so two runs compared figure-for-figure see the same instant however long each takes."""
     now = datetime.now(UTC)
+    if os.environ.get("SOC_ENVIRONMENT", "dev") == "prod":
+        return now
+    frozen = os.environ.get("SOC_CLOCK_FREEZE")
+    if frozen:
+        now = datetime.fromisoformat(frozen)
+        now = now if now.tzinfo else now.replace(tzinfo=UTC)
     offset = os.environ.get("SOC_CLOCK_OFFSET_SECONDS")
-    if offset and os.environ.get("SOC_ENVIRONMENT", "dev") != "prod":
+    if offset:
         from datetime import timedelta
 
         now += timedelta(seconds=float(offset))

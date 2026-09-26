@@ -43,3 +43,8 @@ test_reports/private/
 .DS_Store
 Thumbs.db
 node_modules/
+
+# test tooling output
+.coverage
+.coverage.*
+.hypothesis/
