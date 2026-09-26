@@ -2,15 +2,16 @@
 """Confirm monitoring endpoint reachability and rule visibility."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -52,7 +53,7 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true", help="Fail if any endpoint check fails")
     args = parser.parse_args()
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     out_dir = ANALYSIS_ROOT / f"monitoring_check_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -74,7 +75,7 @@ def main() -> int:
 
     failed = [item for item in checks if not item["ok"]]
     report = {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "strict": args.strict,
         "checks": checks,
         "overall_passed": len(failed) == 0,

@@ -126,7 +126,7 @@ def test_reports_and_answers_never_mention_another_estate(loaded, tmp_path):
     texts.append(ans["answer"])
     toks = cfg.get("original_tokens") or []
     for t in toks:
-        rx = re.compile(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])", re.I)
+        rx = re.compile(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])", re.IGNORECASE)
         assert not any(rx.search(x) for x in texts), (cfg["name"], t)
 
 

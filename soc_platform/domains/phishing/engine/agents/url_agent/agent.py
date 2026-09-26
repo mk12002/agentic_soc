@@ -9,10 +9,10 @@ from urllib.parse import urlparse
 
 import httpx
 
+from soc_platform.domains.phishing.engine.agents.trust_signals import assess_transactional_legitimacy
 from soc_platform.domains.phishing.engine.agents.url_agent.feature_extractor import extract_features
 from soc_platform.domains.phishing.engine.agents.url_agent.inference import predict
 from soc_platform.domains.phishing.engine.agents.url_agent.model_loader import load_model
-from soc_platform.domains.phishing.engine.agents.trust_signals import assess_transactional_legitimacy
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 
@@ -35,7 +35,7 @@ def _entropy(text: str) -> float:
     if not text:
         return 0.0
     probs = [text.count(char) / len(text) for char in set(text)]
-    return -sum(prob * math.log(prob, 2) for prob in probs)
+    return -sum(prob * math.log2(prob) for prob in probs)
 
 
 def _is_trusted_tracking_url(host: str) -> bool:
@@ -122,6 +122,7 @@ def _unicode_deception_indicators(url: str) -> list[str]:
     concrete original->skeleton mapping so the evidence stays grounded in truth.
     """
     from urllib.parse import urlparse
+
     from soc_platform.domains.phishing.engine.utils.unicode_normalizer import analyze_text
 
     host = (urlparse(str(url)).hostname or "").lower().strip(".")
@@ -137,7 +138,7 @@ def _unicode_deception_indicators(url: str) -> list[str]:
     # Only meaningful when confusable substitution actually changed the host.
     if report["has_confusables"]:
         folded = report["skeleton"]
-        folded_root = folded[4:] if folded.startswith("www.") else folded
+        folded_root = folded.removeprefix("www.")
         for brand in BRAND_TOKENS:
             legit_root = f"{brand}.com"
             if folded_root == legit_root or folded_root.endswith(f".{legit_root}") or brand in folded_root:
@@ -443,15 +444,14 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
     for u in urls[:20]:
         f = extract_features({"urls": [u]})
         pred = predict(f, model=model)
-        if pred.get("confidence", 0.0) > 0.0:
-            if float(pred.get("risk_score", 0.0)) > max_ml_risk:
-                max_ml_risk = float(pred.get("risk_score", 0.0))
-                max_ml_conf = float(pred.get("confidence", 0.0))
-                if "feature_importance" in pred:
-                    result_feature_importance.update(pred["feature_importance"])
-                for ind in pred.get("indicators", []):
-                    if ind not in ml_indicators:
-                        ml_indicators.append(ind)
+        if pred.get("confidence", 0.0) > 0.0 and float(pred.get("risk_score", 0.0)) > max_ml_risk:
+            max_ml_risk = float(pred.get("risk_score", 0.0))
+            max_ml_conf = float(pred.get("confidence", 0.0))
+            if "feature_importance" in pred:
+                result_feature_importance.update(pred["feature_importance"])
+            for ind in pred.get("indicators", []):
+                if ind not in ml_indicators:
+                    ml_indicators.append(ind)
 
     if max_ml_conf > 0.0:
         risk_score = _clamp(max(evidence_risk, max_ml_risk, heuristic_risk))

@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 from soc_platform.domains.phishing.engine.api import main as api_main
 
-
 AGENTS = [
     "header_agent",
     "content_agent",

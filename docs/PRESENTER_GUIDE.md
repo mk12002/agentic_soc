@@ -225,7 +225,7 @@ if its confidence disagrees with the deterministic assessment that is flagged."
 **Say:** "One person, resolved across every tool - UPN, SAM account, email address, Entra object id - with one
 explainable risk score."
 **Point at:**
-- **Why this score:** each factor has its points, source tool and time, and the weights decay with age.
+- **Why this score:** each factor has its points, source tool and time. Activity decays with age; open exposures and open incidents count in full until closed.
 - A compromise found through several phishing cases counts **once** (the detail says "seen from N phishing
   cases").
 - The unified timeline; related assets; per-tool attributes.
@@ -327,6 +327,13 @@ Use these when someone asks "how do you get that number?". Every one is determin
 - **Formula:** score = 100 × (1 − e^(−Σ decayed weights / 60)). The score is rounded to whole points and
   saturates towards 100, so one noisy signal can't max it out.
 - **Decay:** each factor halves every **7 days**: weight × 0.5^(age / 7 days).
+  - **Activity** (alerts, sign-ins, clicks, DNS hits) decays.
+  - **What is still open does not decay:** KEV and priority vulnerabilities and open incidents count in full until
+    they are closed. An unpatched host does not "become safe" by waiting.
+  - **Amplifiers** (privileged user at risk, no EDR on a host with activity) fade with the activity that triggered
+    them.
+  - "Now" is the latest observation in the data. If every feed stops, scores freeze rather than fall to zero, and
+    the stale connectors raise the alarm.
 - **Bands:** critical ≥ 80, high ≥ 60, medium ≥ 30, otherwise low.
 - **Main weights:**
 

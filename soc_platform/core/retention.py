@@ -16,9 +16,10 @@ The audit log is never pruned by the platform. Every run is itself audited.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session

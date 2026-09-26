@@ -12,7 +12,7 @@ import json
 import os
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -33,47 +33,52 @@ def api(request, tmp_path_factory, estate_configs):
            "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"), "SOC_LLM_PROVIDER": "none",
            "SOC_RATE_LIMIT_RPS": "100000", "SOC_RATE_LIMIT_BURST": "100000"}
     saved = {k: os.environ.get(k) for k in env}
-    os.environ.update(env)
-    scope = estate_env(cfg)
-    scope.__enter__()
+    from soc_platform.api import app as appmod
     from soc_platform.config import get_settings
     from soc_platform.core import db as dbm
+
+    scope, limiter = estate_env(cfg), appmod._limiter      # the limiter is created at first import: restored after
+
+    def restore():                                         # registered before setup: a failed setup cannot leak its estate
+        appmod._limiter = limiter
+        scope.__exit__(None, None, None)
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        get_settings.cache_clear()
+        dbm._default = None
+
+    request.addfinalizer(restore)
+    os.environ.update(env)
+    scope.__enter__()
 
     get_settings.cache_clear()
     dbm._default = None
     from fastapi.testclient import TestClient
 
-    from soc_platform.api import app as appmod
-
     appmod.registry.cache_clear()
-    limiter = appmod._limiter                      # created at first import: replace for this module, restore after
     appmod._limiter = appmod._RateLimiter(1e9, 10**9)
-    c = TestClient(appmod.app, raise_server_exceptions=False)
+    c = TestClient(appmod.app, raise_server_exceptions=bool(os.environ.get("DBG_RAISE")))
 
     def H(user, roles, domains=""):
         return {"Authorization": "Bearer " + c.get(f"/api/v1/dev/token?user={user}&roles={roles}&domains={domains}").json()["token"]}
 
     lead, ops = H(cfg["lead"], "lead"), H(f"ops@{cfg['org']}", "automation_admin")
+    def ok(r):
+        assert r.status_code == 200, (str(r.request.url), r.status_code, r.text[:500])
+
     for step in ("/api/v1/vm/refresh", "/api/v1/incidents/run", "/api/v1/phishing/ingest"):
-        assert c.post(step, headers=lead).status_code == 200, step
+        ok(c.post(step, headers=lead))
     for f in cfg["uploads"]:
-        r = c.post("/api/v1/phishing/submit", headers=lead, files={"file": (f, (Path(cfg["corpus_dir"]) / f).read_bytes())})
-        assert r.status_code == 200, f
-    assert c.post("/api/v1/vm/campaigns", headers=lead, json={"cve": cfg["campaign_cve"], "notify_via": "ticket"}).status_code == 200
-    assert c.post("/api/v1/vm/misconfigurations/route", headers=lead).status_code == 200
-    assert c.post("/api/v1/intelligence/refresh", headers=lead).status_code == 200
+        ok(c.post("/api/v1/phishing/submit", headers=lead, files={"file": (f, (Path(cfg["corpus_dir"]) / f).read_bytes())}))
+    ok(c.post("/api/v1/vm/campaigns", headers=lead, json={"cve": cfg["campaign_cve"], "notify_via": "ticket"}))
+    ok(c.post("/api/v1/vm/misconfigurations/route", headers=lead))
+    ok(c.post("/api/v1/intelligence/refresh", headers=lead))
     for j in ("intelligence", "follow_up", "retention"):
-        assert c.post(f"/api/v1/jobs/{j}/run", headers=ops).status_code == 200
-    yield {"c": c, "H": H, "lead": lead, "app": appmod.app, "cfg": cfg}
-    appmod._limiter = limiter
-    scope.__exit__(None, None, None)
-    for k, v in saved.items():
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
-    get_settings.cache_clear()
-    dbm._default = None
+        ok(c.post(f"/api/v1/jobs/{j}/run", headers=ops))
+    return {"c": c, "H": H, "lead": lead, "app": appmod.app, "cfg": cfg}
 
 
 def J(r):
@@ -83,7 +88,7 @@ def J(r):
 
 def _aware(iso: str) -> datetime:
     d = datetime.fromisoformat(iso)
-    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    return d if d.tzinfo else d.replace(tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------------------------- 1. same figure everywhere
@@ -110,7 +115,7 @@ def test_every_figure_agrees_across_every_surface(api):
     open_cases = [x for x in cases if x["status"] != "closed"]
     open_ins = [i for i in ins if i["status"] in ("new", "acknowledged")]
     open_f = [f for f in finds if f["status"] in ("open", "reopened")]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     agree = {
         "open cases": [ov["cases"]["open"], len(open_cases), brief["open_cases_total"]],
         "open cases by domain": [ov["cases"]["open_by_domain"], dict(Counter(x["domain"] for x in open_cases))],
@@ -150,6 +155,34 @@ def test_every_figure_agrees_across_every_surface(api):
         if r["name"] in rep_scores:
             scores.add(rep_scores[r["name"]])
         assert len(scores) == 1 and isinstance(r["score"], int), (r["name"], scores)
+
+    # a risk score is exactly its listed factors through the published formula, and the band follows the score
+    import math
+
+    from soc_platform.intelligence.risk import BANDS
+
+    for r in risk[:8]:
+        p360 = J(c.get(f"/api/v1/entities/{r['entity_id']}/360", headers=lead))["risk"]
+        assert p360["score"] == round(100 * (1 - math.exp(-sum(f["decayed"] for f in p360["factors"]) / 60))), r["name"]
+        assert p360["band"] == next(b for t, b in BANDS if p360["score"] >= t), r["name"]
+
+    # ATT&CK: the summary is the matrix counted, on the screen and in the report
+    rows = [t for ta in cov["tactics"] for t in ta["techniques"]]
+    sm = cov["summary"]
+    assert sm["techniques"] == len(rows) and sm["covered"] == sum(1 for t in rows if t["coverage"] != "none")
+    assert sm["full"] == sum(1 for t in rows if t["coverage"] == "full")
+    assert sm["firing"] == sum(1 for t in rows if t["status"] == "firing")
+    assert sm["priority_blind_spots"] == len(cov["priority_blind_spots"])
+
+    # a domain-scoped viewer's dashboard counts only what their own lists show
+    for d in ("phishing", "vulnerability"):
+        hd = api["H"](f"scoped-{d}@{api['cfg']['org']}", "analyst", d)
+        sov = J(c.get("/api/v1/dashboard/overview", headers=hd))
+        sacts = J(c.get("/api/v1/actions?status=recommended,pending_approval", headers=hd))
+        scases = J(c.get("/api/v1/cases", headers=hd))
+        assert {a["domain"] for a in sacts} <= {d} and {x["domain"] for x in scases} <= {d}
+        assert sov["actions"]["pending_approval"] == len(sacts), d
+        assert sov["cases"]["open"] == sum(1 for x in scases if x["status"] != "closed"), d
 
     # attack story: summary, assessment, KPIs and plan agree with each other
     pc = next(x for x in cases if x["domain"] == "phishing" and api["cfg"]["phish_subject_token"] in x["title"])
@@ -210,7 +243,7 @@ def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
     extra = {"/api/v1/entities/find": f"?kind=identity&key=upn&value={api['cfg']['focus_upn']}", "/api/v1/metrics/shadow": "?domain=phishing"}
     # on a variant estate, no response may mention the built-in estate: nothing in the code is tied to its names
     toks = api["cfg"]["original_tokens"]
-    leak = re.compile("|".join(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])" for t in toks), re.I) if toks else None
+    leak = re.compile("|".join(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])" for t in toks), re.IGNORECASE) if toks else None
     iso = re.compile(r'"(ts_utc|[a-z_]*(?:_at|_due|_seen|since|until|when|start|end|date))":\s*"(\d{4}-\d{2}-\d{2}T[\d:.]+)(Z|[+-]\d{2}:\d{2})?"')
     problems = []
     gets = sorted({r.path for r in app.routes if hasattr(r, "methods") and "GET" in r.methods and r.path.startswith("/api")}
@@ -317,9 +350,9 @@ def _state(s):
     return {"counts": counts,
             "risk": {p.name: p.score for p in RiskEngine(s).top(None, 100)},
             "insights": sorted(s.execute(text("select rule || '|' || severity || '|' || title from insights")).scalars()),
-            "cases": sorted(s.execute(text("select domain || '|' || title || '|' || severity || '|' || coalesce(verdict,'') || '|' || status || '|' || round(coalesce(confidence,0), 3) from cases")).scalars()),
+            "cases": sorted(s.execute(text("select domain || '|' || title || '|' || severity || '|' || coalesce(verdict,'') || '|' || status || '|' || round(cast(coalesce(confidence,0) as numeric), 3) from cases")).scalars()),
             "actions": sorted(s.execute(text("select action_type || '|' || status || '|' || domain from action_requests")).scalars()),
-            "findings": sorted(s.execute(text("select cve || '|' || asset_name || '|' || priority_band || '|' || round(priority_score, 3) from vm_findings")).scalars())}
+            "findings": sorted(s.execute(text("select cve || '|' || asset_name || '|' || priority_band || '|' || round(cast(priority_score as numeric), 3) from vm_findings")).scalars())}
 
 
 @pytest.mark.parametrize("estate", ESTATES)
@@ -360,7 +393,7 @@ def test_llm_on_or_off_gives_identical_figures_verdicts_and_actions(estate, esta
         name = "scripted"
 
         def complete(self, system, user, *, tier):
-            ids = re.findall(r"^\[([A-Z]\d+)\]", user, re.M) or ["E1"]
+            ids = re.findall(r"^\[([A-Z]\d+)\]", user, re.MULTILINE) or ["E1"]
             if '"calls"' in user:
                 return Completion(json.dumps({"calls": [{"tool": "list_insights", "args": {}}]}), 10, 10, "m")
             return Completion(json.dumps({"summary": "Risk is 12/100 across 99 tools.", "claims": [

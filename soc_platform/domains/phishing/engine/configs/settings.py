@@ -5,14 +5,14 @@ Loads configuration from environment variables and .env file.
 All settings are validated and typed at application startup.
 """
 
-from soc_platform.domains.phishing.engine.paths import ENV_FILE, PHISHING_HOME
-from pathlib import Path
+import logging
 from functools import lru_cache
-from typing import Optional
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from soc_platform.domains.phishing.engine.paths import ENV_FILE, PHISHING_HOME
 
 # Runtime artifact root (models, config, reference data); see engine/paths.py
 PROJECT_ROOT = PHISHING_HOME
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     api_auth_enabled: bool = Field(
         default=True, description="Enable shared API key authentication for protected endpoints"
     )
-    api_auth_key: Optional[str] = Field(
+    api_auth_key: str | None = Field(
         default=None, description="Shared API key required when API auth is enabled"
     )
 
@@ -141,11 +141,11 @@ class Settings(BaseSettings):
     gdrive_credentials_path: str = Field(
         default="/app/email_security/gdrive_credentials.json", description="Path to GDrive service account JSON"
     )
-    gdrive_ingestion_folder_id: Optional[str] = Field(default=None)
-    gdrive_staging_folder_id: Optional[str] = Field(default=None)
-    gdrive_approved_folder_id: Optional[str] = Field(default=None)
-    gdrive_quarantine_folder_id: Optional[str] = Field(default=None)
-    gdrive_deleted_folder_id: Optional[str] = Field(default=None)
+    gdrive_ingestion_folder_id: str | None = Field(default=None)
+    gdrive_staging_folder_id: str | None = Field(default=None)
+    gdrive_approved_folder_id: str | None = Field(default=None)
+    gdrive_quarantine_folder_id: str | None = Field(default=None)
+    gdrive_deleted_folder_id: str | None = Field(default=None)
 
     # --- OCR / Attachment Text Extraction ---
     enable_ocr_extraction: bool = Field(
@@ -161,21 +161,21 @@ class Settings(BaseSettings):
     ocr_timeout_seconds: float = Field(
         default=30.0, description="Timeout in seconds for OCR requests"
     )
-    azure_ocr_endpoint: Optional[str] = Field(
+    azure_ocr_endpoint: str | None = Field(
         default=None, description="Azure AI Vision Endpoint"
     )
-    azure_ocr_key: Optional[str] = Field(
+    azure_ocr_key: str | None = Field(
         default=None, description="Azure AI Vision API Key"
     )
 
     # --- Azure OpenAI ---
-    azure_openai_endpoint: Optional[str] = Field(
+    azure_openai_endpoint: str | None = Field(
         default=None, description="Azure OpenAI endpoint"
     )
-    azure_openai_api_key: Optional[str] = Field(
+    azure_openai_api_key: str | None = Field(
         default=None, description="Azure OpenAI API key"
     )
-    azure_openai_deployment: Optional[str] = Field(
+    azure_openai_deployment: str | None = Field(
         default=None, description="Azure OpenAI model deployment name"
     )
     azure_openai_api_version: str = Field(
@@ -191,16 +191,16 @@ class Settings(BaseSettings):
     )
 
     # --- Threat Intelligence API Keys ---
-    virustotal_api_key: Optional[str] = Field(
+    virustotal_api_key: str | None = Field(
         default=None, description="VirusTotal API key"
     )
-    google_safe_browsing_api_key: Optional[str] = Field(
+    google_safe_browsing_api_key: str | None = Field(
         default=None, description="Google Safe Browsing API key"
     )
-    otx_api_key: Optional[str] = Field(
+    otx_api_key: str | None = Field(
         default=None, description="AlienVault OTX API key"
     )
-    abuseipdb_api_key: Optional[str] = Field(
+    abuseipdb_api_key: str | None = Field(
         default=None, description="AbuseIPDB API key"
     )
     enable_virustotal_url_lookup: bool = Field(
@@ -255,10 +255,10 @@ class Settings(BaseSettings):
     malwarebazaar_api_url: str = Field(
         default="https://mb-api.abuse.ch/api/v1/", description="MalwareBazaar API endpoint"
     )
-    urlscan_api_key: Optional[str] = Field(
+    urlscan_api_key: str | None = Field(
         default=None, description="URLScan.io API key"
     )
-    shodan_api_key: Optional[str] = Field(
+    shodan_api_key: str | None = Field(
         default=None, description="Shodan API key"
     )
 
@@ -398,13 +398,13 @@ class Settings(BaseSettings):
     )
 
     # --- External API Integrations (Graph & Azure Search) ---
-    graph_tenant_id: Optional[str] = Field(
+    graph_tenant_id: str | None = Field(
         default=None, description="Microsoft Graph Tenant ID"
     )
-    graph_client_id: Optional[str] = Field(
+    graph_client_id: str | None = Field(
         default=None, description="Microsoft Graph Client ID"
     )
-    graph_client_secret: Optional[str] = Field(
+    graph_client_secret: str | None = Field(
         default=None, description="Microsoft Graph Client Secret"
     )
     graph_authority: str = Field(
@@ -419,10 +419,10 @@ class Settings(BaseSettings):
     action_quarantine_enabled: bool = Field(
         default=False, description="Enable automated email quarantine via Graph"
     )
-    azure_search_service: Optional[str] = Field(
+    azure_search_service: str | None = Field(
         default=None, description="Azure Search service name"
     )
-    azure_search_api_key: Optional[str] = Field(
+    azure_search_api_key: str | None = Field(
         default=None, description="Azure Search API key"
     )
     azure_search_index_name: str = Field(
@@ -491,11 +491,11 @@ class Settings(BaseSettings):
             "(e.g. via /api/override); automated verdicts are recorded as pending actions"
         ),
     )
-    quarantine_api_url: Optional[str] = Field(
+    quarantine_api_url: str | None = Field(
         default=None,
         description="Endpoint URL for quarantine action dispatch",
     )
-    soc_alert_api_url: Optional[str] = Field(
+    soc_alert_api_url: str | None = Field(
         default=None,
         description="Endpoint URL for SOC alert dispatch",
     )
@@ -541,7 +541,7 @@ class Settings(BaseSettings):
         default=False,
         description="Enable local Docker detonation mode in sandbox agent",
     )
-    sandbox_executor_url: Optional[str] = Field(
+    sandbox_executor_url: str | None = Field(
         default=None,
         description="Remote sandbox executor service URL",
     )
@@ -549,7 +549,7 @@ class Settings(BaseSettings):
         default=30.0,
         description="Timeout in seconds for remote sandbox executor requests",
     )
-    sandbox_executor_shared_token: Optional[str] = Field(
+    sandbox_executor_shared_token: str | None = Field(
         default=None,
         description="Shared token for sandbox executor service authentication",
     )
@@ -569,17 +569,17 @@ class Settings(BaseSettings):
     sandbox_pids_limit: int = Field(
         default=128, description="PID limit for each detonation container"
     )
-    sandbox_runtime: Optional[str] = Field(
+    sandbox_runtime: str | None = Field(
         default=None, description="OCI runtime for detonation containers, e.g. 'runsc' (gVisor) - strongly recommended")
     sandbox_cpu_limit: float = Field(default=1.0, description="CPU cores available to a detonation container")
-    sandbox_seccomp_profile: Optional[str] = Field(
+    sandbox_seccomp_profile: str | None = Field(
         default=None, description="Path to a custom seccomp JSON profile (Docker default profile otherwise)")
     sandbox_allow_image_pull: bool = Field(
         default=False, description="Allow pulling the detonation image at runtime (dev only; prod uses a pinned local image)")
     sandbox_max_output_bytes: int = Field(default=2_000_000, description="Cap on captured trace output per detonation")
-    sandbox_cape_url: Optional[str] = Field(
+    sandbox_cape_url: str | None = Field(
         default=None, description="CAPEv2 base URL for Windows payload detonation (isolated analysis VM network)")
-    sandbox_cape_token: Optional[str] = Field(default=None, description="CAPEv2 API token")
+    sandbox_cape_token: str | None = Field(default=None, description="CAPEv2 API token")
     sandbox_cape_timeout_seconds: int = Field(default=300, description="Max wait for a CAPE report")
     sandbox_max_detonations: int = Field(
         default=5, description="Maximum attachments to detonate per email"
@@ -670,7 +670,7 @@ class Settings(BaseSettings):
         return warnings
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Return cached settings instance (singleton pattern)."""
     return Settings()
@@ -691,4 +691,4 @@ try:
         sys.modules[alias] = sys.modules[__name__]
 except Exception:
     # Best-effort only; failures here should not break normal startup.
-    pass
+    logging.getLogger(__name__).debug("settings module alias not registered", exc_info=True)

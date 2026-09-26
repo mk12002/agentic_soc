@@ -12,6 +12,7 @@ from soc_platform.connectors.registry import ConnectorRegistry
 from soc_platform.core.models import Case, Entity
 from soc_platform.intelligence.story import story_for_case
 from soc_platform.llm.gateway import Completion, LLMGateway, Provider
+from soc_platform.tests.conftest import ESTATES, estate_env
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -88,6 +89,67 @@ def test_clean_email_produces_no_attack_story(session, estate):
     ph.process(sub.id)
     st = story_for_case(session, sub.case_id, reg)
     assert st["steps"] == [] and st["assessment"]["verdict"] == "no_attack_activity"
+
+
+def _step(stage, outcome="succeeded", tools=("crowdstrike",)):
+    return {"stage": stage, "outcome": outcome, "tools": list(tools)}
+
+
+@pytest.mark.parametrize("steps,hyps,verdict,conf", [
+    ([], [], "no_attack_activity", "medium"),
+    ([_step("TA0001", "blocked"), _step("TA0011", "blocked", ("umbrella",))], [], "attempt_blocked", "high"),
+    ([_step("TA0001")], [], "suspicious_activity", "low"),
+    ([_step("TA0001"), _step("TA0002")], [], "likely_compromise", "high"),
+    ([_step("TA0001"), _step("TA0006")], [{"status": "plausible"}], "likely_compromise", "medium"),
+    ([_step("TA0001", tools=("o365",)), _step("TA0002"), _step("TA0006", tools=("entra",))], [], "confirmed_compromise", "high"),
+    ([_step("TA0001", tools=("o365",)), _step("TA0002"), _step("TA0006", tools=("entra",))], [{"status": "plausible"}],
+     "likely_compromise", "medium"),                                                     # an open benign explanation caps it
+    ([_step("TA0001"), _step("TA0004", "blocked")], [], "suspicious_activity", "low"),     # a blocked step is not progress
+])
+def test_every_verdict_follows_from_the_steps(steps, hyps, verdict, conf):
+    from soc_platform.intelligence.story import AttackStory
+
+    a = AttackStory._assess(steps, hyps)
+    assert (a["verdict"], a["confidence"]) == (verdict, conf), a
+    if verdict == "attempt_blocked":
+        assert "blocked" in a["reason"]
+    assert ("blocked" in a["reason"]) == any(x["outcome"] == "blocked" for x in steps) or verdict == "confirmed_compromise"
+
+
+@pytest.mark.parametrize("name", ESTATES)
+def test_every_incident_tells_a_self_consistent_story(session, name, estate_configs):
+    """Not only the phishing chain: host-centric incidents with no email in them obey the same rules, on every estate."""
+    from soc_platform.domains.incident.service import IncidentService
+
+    with estate_env(estate_configs[name]):
+        reg = ConnectorRegistry.all_fake()
+        inc = IncidentService(session, reg)
+        inc.ingest()
+        for c in inc.cluster():
+            inc.investigate(c.id)
+        _check_incident_stories(session, reg)
+
+
+def _check_incident_stories(session, reg):
+    incidents = session.query(Case).filter(Case.domain == "incident").all()
+    assert len(incidents) >= 2
+    for case in incidents:
+        st = story_for_case(session, case.id, reg)
+        refs = {e["ref"] for e in st["events"]}
+        assert all(set(x["evidence"]) <= refs for x in st["steps"]), case.title
+        timed = [x["start"] for x in st["steps"] if x["start"]]
+        assert timed == sorted(timed), case.title
+        reached = {x["stage"] for x in st["steps"] if x["outcome"] != "blocked"}
+        a = st["assessment"]
+        if st["steps"] and reached:
+            assert a["reason"].startswith(f"{len(reached)} kill-chain stage(s) reached") or a["verdict"] == "suspicious_activity", case.title
+        elif st["steps"]:
+            assert a["verdict"] == "attempt_blocked", case.title
+        assert sorted(st["tools"]) == sorted({t for x in st["steps"] for t in x["tools"]}), case.title
+        pending = sum(1 + len(x.get("duplicate_ids", [])) for ph_ in st["response_plan"] for x in ph_["actions"] if x["approvable"])
+        if st["steps"] and pending:
+            assert f"({pending} action(s) awaiting approval)" in st["summary"], case.title
+        assert st["fingerprint"] == story_for_case(session, case.id, reg)["fingerprint"], case.title   # reproducible
 
 
 class ReviewLLM(Provider):
@@ -179,7 +241,7 @@ def test_story_over_http_bundle_approval_keeps_governance(tmp_path, monkeypatch)
 
     appmod.registry.cache_clear()
     c = TestClient(appmod.app)
-    H = lambda u, r: {"Authorization": "Bearer " + c.get(f"/api/v1/dev/token?user={u}&roles={r}").json()["token"]}  # noqa: E731
+    H = lambda u, r: {"Authorization": "Bearer " + c.get(f"/api/v1/dev/token?user={u}&roles={r}").json()["token"]}
     lead, analyst = H("lena", "lead"), H("alice", "analyst")
     c.post("/api/v1/incidents/run", headers=lead)
     c.post("/api/v1/phishing/ingest", headers=lead)

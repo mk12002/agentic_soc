@@ -2,13 +2,14 @@
 """Refresh local IOC store and print lifecycle health status."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent.agent import get_ioc_store_status, refresh_ioc_store
 
 

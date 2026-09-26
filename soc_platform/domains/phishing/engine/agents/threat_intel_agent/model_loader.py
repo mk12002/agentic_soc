@@ -4,7 +4,7 @@ Model loader for the Threat Intelligence Agent.
 Handles loading, caching, and version management of the XGBoost ML model.
 """
 
-from typing import Optional
+
 import xgboost as xgb
 
 from soc_platform.domains.phishing.engine.agents.ml_runtime import resolve_model_path
@@ -21,9 +21,9 @@ class ModelLoader:
             model_path,
             required_files=("threat_intel_xgb.json",),
         )
-        self._model: Optional[xgb.XGBClassifier] = None
+        self._model: xgb.XGBClassifier | None = None
 
-    def load_model(self) -> Optional[xgb.XGBClassifier]:
+    def load_model(self) -> xgb.XGBClassifier | None:
         """
         Load the model from disk.
 
@@ -38,10 +38,10 @@ class ModelLoader:
         
         try:
             if not artifact.exists():
-                logger.warning("No trained model found at {}; using placeholder", str(artifact))
+                logger.warning(f"No trained model found at {artifact!s}; using placeholder")
                 return None
                 
-            logger.info("Loading XGBoost model from {}", str(artifact))
+            logger.info(f"Loading XGBoost model from {artifact!s}")
             model = xgb.XGBClassifier()
             model.load_model(str(artifact))
             self._model = model
@@ -49,7 +49,7 @@ class ModelLoader:
             return self._model
             
         except Exception as e:
-            logger.error("Failed to load XGBoost model: {}", e)
+            logger.error(f"Failed to load XGBoost model: {e}")
             return None
 
     def is_loaded(self) -> bool:
@@ -60,7 +60,7 @@ class ModelLoader:
 _LOADER = ModelLoader()
 
 
-def load_model(model_path: str = "models/threat_intel_agent/") -> Optional[xgb.XGBClassifier]:
+def load_model(model_path: str = "models/threat_intel_agent/") -> xgb.XGBClassifier | None:
     """Convenience function to load the agent model."""
     global _LOADER
     if model_path != "models/threat_intel_agent/":

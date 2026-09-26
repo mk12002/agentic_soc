@@ -1,19 +1,11 @@
-from soc_platform.domains.phishing.engine.orchestrator.counterfactual_engine import calculate_counterfactual, threshold_for_verdict
+from soc_platform.domains.phishing.engine.orchestrator.counterfactual_engine import (
+    calculate_counterfactual,
+    threshold_for_verdict,
+)
+
 
 def test_counterfactual_finding():
-    # Mocking agent results that lead to a high score
-    agent_results = [
-        {"agent_name": "url_agent", "risk_score": 0.95},
-        {"agent_name": "content_agent", "risk_score": 0.8},
-        {"agent_name": "header_agent", "risk_score": 0.2},
-    ]
-    # In scorer.py:
-    # url weight=0.20
-    # content weight=0.20
-    # header weight=0.15
-    # total weighted sum = (0.95*0.2) + (0.8*0.2) + (0.2*0.15) 
-    # = 0.19 + 0.16 + 0.03 = 0.38
-    # Wait, 0.38 is below 0.6 threshold. Let's inflate it so it blocks.
+    # Agent results whose weighted sum crosses the 0.6 blocking threshold
     agent_results_2 = [
         {"agent_name": "url_agent", "risk_score": 0.95},          # 0.95 * 0.20 = 0.19
         {"agent_name": "attachment_agent", "risk_score": 0.95},   # 0.95 * 0.15 = 0.1425

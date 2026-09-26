@@ -1,6 +1,10 @@
 """Tests for the Azure Search Client."""
 
-from soc_platform.domains.phishing.engine.action_layer.azure_search_client import AzureSearchClient, is_azure_search_available
+from soc_platform.domains.phishing.engine.action_layer.azure_search_client import (
+    AzureSearchClient,
+    is_azure_search_available,
+)
+
 
 class MockAzureSearchClientSDK:
     def search(self, search_text, **kwargs):

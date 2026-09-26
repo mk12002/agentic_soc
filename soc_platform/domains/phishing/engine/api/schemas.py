@@ -4,11 +4,9 @@ Pydantic schemas for the Email Analysis API.
 Defines request and response models for all API endpoints.
 """
 
-from typing import Optional
 from typing import Any
 
 from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # H-1: Feedback schema
@@ -24,7 +22,7 @@ class AnalysisFeedbackRequest(BaseModel):
         ...,
         description="Analyst assessment: true_positive | false_positive | true_negative | false_negative | needs_review",
     )
-    notes: Optional[str] = Field(
+    notes: str | None = Field(
         default=None,
         description="Optional analyst notes explaining the assessment",
     )
@@ -85,13 +83,13 @@ class EmailHeaders(BaseModel):
     """Parsed email header fields."""
 
     sender: str = Field(..., description="Sender email address")
-    reply_to: Optional[str] = Field(default=None, description="Reply-To address")
+    reply_to: str | None = Field(default=None, description="Reply-To address")
     subject: str = Field(default="", description="Email subject line")
     received: list[str] = Field(
         default_factory=list, description="Received header chain"
     )
-    message_id: Optional[str] = Field(default=None, description="Message-ID header")
-    authentication_results: Optional[str] = Field(
+    message_id: str | None = Field(default=None, description="Message-ID header")
+    authentication_results: str | None = Field(
         default=None, description="SPF/DKIM/DMARC results"
     )
     to: list[str] = Field(default_factory=list, description="Recipient email addresses")
@@ -103,7 +101,7 @@ class AttachmentInfo(BaseModel):
     filename: str = Field(..., description="Attachment filename")
     content_type: str = Field(..., description="MIME content type")
     size_bytes: int = Field(default=0, description="File size in bytes")
-    content_base64: Optional[str] = Field(
+    content_base64: str | None = Field(
         default=None, description="Base64-encoded file content"
     )
 
@@ -150,46 +148,46 @@ class EmailAnalysisResponse(BaseModel):
 
     status: str = Field(..., description="Processing status")
     message: str = Field(..., description="Human-readable result message")
-    analysis_id: Optional[str] = Field(
+    analysis_id: str | None = Field(
         default=None, description="Unique analysis tracking ID"
     )
     agent_results: list[AgentResult] = Field(
         default_factory=list, description="Individual agent analysis results"
     )
-    overall_risk_score: Optional[float] = Field(
+    overall_risk_score: float | None = Field(
         default=None, description="Aggregated risk score"
     )
-    verdict: Optional[str] = Field(default=None, description="Final decision verdict")
-    llm_explanation: Optional[str] = Field(
+    verdict: str | None = Field(default=None, description="Final decision verdict")
+    llm_explanation: str | None = Field(
         default=None, description="LLM-generated explanation for SOC analysts"
     )
-    grounded_evidence: Optional[list[dict[str, Any]]] = Field(
+    grounded_evidence: list[dict[str, Any]] | None = Field(
         default=None,
         description="Citable evidence records {id, agent, type, claim, raw_value, indicator} derived from agent indicators; every llm_explanation claim references these ids",
     )
-    grounded_claims: Optional[list[dict[str, Any]]] = Field(
+    grounded_claims: list[dict[str, Any]] | None = Field(
         default=None,
         description="Validated explanation claims {text, evidence_ids}; each claim cites one or more grounded_evidence ids (anti-hallucination)",
     )
-    analyst_brief: Optional[dict[str, Any]] = Field(
+    analyst_brief: dict[str, Any] | None = Field(
         default=None,
         description="SOC-ready structured brief {executive_summary, key_evidence, confidence_assessment, investigation_steps, false_positive_indicators, escalation_recommendation}; built deterministically from the same grounded evidence",
     )
-    provenance_chain: Optional[list[dict[str, Any]]] = Field(
+    provenance_chain: list[dict[str, Any]] | None = Field(
         default=None,
         description="Ordered, auditable record of how the verdict was reached: raw_signals -> agent_score -> correlation_boost -> guardrail -> counterfactual -> verdict, each with impact_on_score and refs",
     )
-    threat_storyline: Optional[list[StorylineEvent]] = Field(
+    threat_storyline: list[StorylineEvent] | None = Field(
         default=None, description="Chronological timeline of the attack flow"
     )
-    counterfactual_result: Optional[dict] = Field(
+    counterfactual_result: dict | None = Field(
         default=None, description="Decision boundary perturbation result explaining what minimum change is needed to make the email safe"
     )
-    report_endpoint: Optional[str] = Field(
+    report_endpoint: str | None = Field(
         default=None,
         description="Endpoint to poll for the final orchestration report",
     )
-    final_report_features: Optional[list[str]] = Field(
+    final_report_features: list[str] | None = Field(
         default=None,
         description="Fields that are available in final report payloads from /reports/{analysis_id}",
     )
@@ -199,7 +197,7 @@ class RabbitMQHealth(BaseModel):
     """Health status for RabbitMQ connection and queues."""
 
     status: str = Field(..., description="Connection status (healthy/unhealthy)")
-    error: Optional[str] = Field(default=None, description="Detailed error message if unhealthy")
+    error: str | None = Field(default=None, description="Detailed error message if unhealthy")
     queue_depths: dict[str, int] = Field(
         default_factory=dict, description="Current message counts for monitored queues"
     )
@@ -220,10 +218,10 @@ class HealthResponse(BaseModel):
     status: str = Field(default="healthy")
     version: str = Field(default="1.0.0")
     environment: str = Field(default="development")
-    rabbitmq: Optional[RabbitMQHealth] = Field(
+    rabbitmq: RabbitMQHealth | None = Field(
         default=None, description="RabbitMQ-specific health details"
     )
-    disk: Optional[DiskHealth] = Field(
+    disk: DiskHealth | None = Field(
         default=None, description="Disk space health details"
     )
 

@@ -16,7 +16,6 @@ Usage:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
@@ -24,9 +23,11 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 os.environ.setdefault("OMP_NUM_THREADS", "2")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
@@ -56,7 +57,7 @@ from sklearn.model_selection import train_test_split
 matplotlib.use("Agg")
 
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 PROCESSED_DIR = REPO_ROOT.parent / "datasets_processed"
 MODEL_DIR = REPO_ROOT.parent / "models" / "header_agent"
 CHECKPOINT_PATH = MODEL_DIR / "model.joblib"
@@ -78,7 +79,7 @@ FEATURE_COLS = [
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def _setup_logger(report_dir: Path) -> logging.Logger:
@@ -128,7 +129,7 @@ def _dataset_audit(df: pd.DataFrame) -> dict[str, Any]:
     class_ratio = float(max(label_counts.values()) / max(1, min(label_counts.values())))
 
     return {
-        "rows": int(len(df)),
+        "rows": len(df),
         "label_distribution": {str(k): int(v) for k, v in label_counts.items()},
         "class_ratio_major_to_minor": round(class_ratio, 2),
         "feature_columns": FEATURE_COLS,
@@ -523,10 +524,10 @@ def main() -> None:
         "timestamp_utc": stamp,
         "dataset": {
             "path": str(args.csv_path),
-            "rows_used": int(len(df)),
-            "train_rows": int(len(X_train)),
-            "val_rows": int(len(X_val)),
-            "test_rows": int(len(X_test)),
+            "rows_used": len(df),
+            "train_rows": len(X_train),
+            "val_rows": len(X_val),
+            "test_rows": len(X_test),
             "label_distribution": {str(k): int(v) for k, v in zip(*np.unique(y, return_counts=True))},
         },
         "data_audit": audit,

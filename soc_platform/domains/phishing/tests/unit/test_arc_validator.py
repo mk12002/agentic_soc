@@ -3,18 +3,18 @@ integration into the header agent and grounded evidence."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from soc_platform.domains.phishing.engine.agents.header_agent.agent import analyze as header_analyze
 from soc_platform.domains.phishing.engine.agents.header_agent.arc_validator import (
     analyze_headers,
     analyze_received_hops,
     validate_arc_chain,
 )
-from soc_platform.domains.phishing.engine.agents.header_agent.agent import analyze as header_analyze
 from soc_platform.domains.phishing.engine.orchestrator.evidence_collector import collect_evidence
 
 # Pinned "now" so future-date checks are deterministic.
-NOW = datetime(2026, 6, 18, 6, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 18, 6, 0, 0, tzinfo=UTC)
 
 CLEAN_CHAIN = [
     "from a.example by b.example; Wed, 18 Jun 2026 05:00:30 +0000",

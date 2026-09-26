@@ -11,7 +11,6 @@ from unittest import mock
 
 import pytest
 
-
 # ── Domain validation (security) ──────────────────────────────────────────
 
 @pytest.mark.parametrize(
@@ -38,9 +37,8 @@ def test_enrich_domain_never_calls_whois_on_malformed_input():
     """Malformed/unsafe domains must never reach python-whois."""
     import soc_platform.domains.phishing.engine.services.domain_enrichment as de
 
-    with mock.patch.object(de, "_domain_cache", {}):
-        with mock.patch("whois.whois") as whois_mock:
-            result = de.enrich_domain("a; rm -rf /")
+    with mock.patch.object(de, "_domain_cache", {}), mock.patch("whois.whois") as whois_mock:
+        result = de.enrich_domain("a; rm -rf /")
     whois_mock.assert_not_called()
     assert "invalid_domain_format" in result["risk_signals"]
     assert result["whois_available"] is False
@@ -49,7 +47,7 @@ def test_enrich_domain_never_calls_whois_on_malformed_input():
 # ── PDF generation ────────────────────────────────────────────────────────
 
 def test_build_report_pdf_returns_pdf_bytes():
-    reportlab = pytest.importorskip("reportlab")  # noqa: F841
+    pytest.importorskip("reportlab")
     from soc_platform.domains.phishing.engine.services.pdf_report import build_report_pdf
 
     report = {

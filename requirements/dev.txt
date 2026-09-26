@@ -5,3 +5,4 @@ ruff>=0.5
 qrcode>=7.4            # builds the labelled QR-phishing corpus
 bandit>=1.7
 pip-audit>=2.7
+pgserver>=0.1.4        # optional: embedded PostgreSQL for SOC_TEST_POSTGRES runs without a server

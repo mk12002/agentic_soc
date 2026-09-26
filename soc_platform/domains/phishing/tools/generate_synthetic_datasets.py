@@ -12,13 +12,13 @@ Usage:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import csv
 import json
 import random
 import string
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 SEED = 42
 random.seed(SEED)

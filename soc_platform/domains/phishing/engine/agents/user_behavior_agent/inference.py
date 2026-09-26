@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 import xgboost as xgb
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
@@ -31,5 +32,5 @@ def predict(features: dict[str, Any], model: xgb.XGBClassifier | None = None) ->
             "indicators": indicators
         }
     except Exception as e:
-        logger.error("UBA Inference failed: {}", e)
+        logger.error(f"UBA Inference failed: {e}")
         return {"risk_score": 0.0, "confidence": 0.0, "indicators": []}

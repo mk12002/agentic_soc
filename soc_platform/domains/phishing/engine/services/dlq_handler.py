@@ -6,8 +6,8 @@ Consumes failed messages, attempts retries with backoff, and routes to poison qu
 import time
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
-from soc_platform.domains.phishing.engine.services.messaging_service import RabbitMQClient
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
+from soc_platform.domains.phishing.engine.services.messaging_service import RabbitMQClient
 
 logger = get_service_logger("dlq_handler")
 

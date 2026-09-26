@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 
-from build_fixtures import CVES, D, EXPOSURE, HOSTS, ORG, PAYLOAD_SHA, PHISH, TOR_IP, USERS, route, write
+from build_fixtures import CVES, EXPOSURE, HOSTS, ORG, PAYLOAD_SHA, PHISH, TOR_IP, USERS, D, route, write
 
 
 def u(k):
@@ -39,7 +39,7 @@ def defender_endpoint() -> None:
               "productVersion": CVES[cve]["product"].split()[-1], "severity": CVES[cve]["sev"],
               "fixingKbId": "KB5034765" if cve == "CVE-2024-21412" else None}
              for hk, cves in EXPOSURE.items() for cve in cves if "mde" in HOSTS[hk]]
-    by_fqdn = lambda f: [m for m in machines if m["computerDnsName"] == f]  # noqa: E731
+    by_fqdn = lambda f: [m for m in machines if m["computerDnsName"] == f]
     write("defender_endpoint", [
         route("GET", r"^/api/machines$", {"value": by_fqdn(j["fqdn"])},
               params={"$filter": f"computerDnsName eq '{j['fqdn']}'"}),

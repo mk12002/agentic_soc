@@ -2,13 +2,14 @@
 """Bootstrap runtime dependencies like queues and IOC freshness."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
+import logging
 import sys
 from typing import Any
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 if str(REPO_ROOT.parent) not in sys.path:
@@ -58,7 +59,7 @@ def bootstrap_runtime_state(
             try:
                 mq.close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("message-queue close failed", exc_info=True)
 
     if refresh_ioc:
         try:

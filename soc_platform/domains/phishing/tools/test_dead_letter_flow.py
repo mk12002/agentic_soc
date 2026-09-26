@@ -2,12 +2,14 @@
 """Operational DLQ test for RabbitMQ dead-letter routing."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
+import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -20,7 +22,7 @@ ANALYSIS_ROOT = REPO_ROOT / "analysis_reports"
 
 
 def main() -> int:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     out_dir = ANALYSIS_ROOT / f"dlq_test_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -28,7 +30,7 @@ def main() -> int:
     dead_queue = settings.rabbitmq_dead_letter_queue
 
     report = {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "test_queue": queue_name,
         "dead_letter_queue": dead_queue,
         "published": False,
@@ -49,7 +51,7 @@ def main() -> int:
         )
         report["published"] = True
 
-        method, properties, body = client.channel.basic_get(queue=queue_name, auto_ack=False)
+        method, _properties, _body = client.channel.basic_get(queue=queue_name, auto_ack=False)
         if method is None:
             report["errors"].append("No message fetched from test queue")
         else:
@@ -57,7 +59,7 @@ def main() -> int:
             report["nacked"] = True
 
             for _ in range(10):
-                d_method, d_props, d_body = client.channel.basic_get(queue=dead_queue, auto_ack=False)
+                d_method, _d_props, d_body = client.channel.basic_get(queue=dead_queue, auto_ack=False)
                 if d_method is not None:
                     report["dlq_received"] = True
                     report["delivery_payload"] = d_body.decode("utf-8", errors="replace")
@@ -68,7 +70,7 @@ def main() -> int:
         try:
             client.channel.queue_delete(queue=queue_name)
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("test queue could not be deleted", exc_info=True)
 
     except Exception as exc:
         report["errors"].append(str(exc))

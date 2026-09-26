@@ -1,5 +1,6 @@
 // Browser tour: drives the real console in Chrome/Edge against a running server, loads the sample estate through
-// the API, visits every screen (3 roles, light + dark), audits layout at 1440/1280/1024 px, saves screenshots.
+// the API, visits every screen (3 roles, light + dark), audits layout at 1440/1280/1024/768 px, runs an axe-core
+// accessibility scan (WCAG 2.1 A/AA) on every screen in both themes, saves screenshots.
 //   npm install            (once, in this folder; uses the installed Chrome/Edge - no browser download)
 //   SOC_BASE=http://127.0.0.1:8765 node tour.js
 // Exit code 0 = no problems. Problems (JS errors, HTTP 5xx, clipped / off-screen / squeezed content) are listed.
@@ -22,6 +23,8 @@ const BROWSER = process.env.SOC_BROWSER || ['C:/Program Files/Google/Chrome/Appl
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find(p => fs.existsSync(p));
 fs.mkdirSync(OUT, {recursive: true});
 const problems = [];
+const a11yNotes = [];   // moderate / minor accessibility findings: reported, not failing
+const AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 
 async function token(user, roles) { return (await (await fetch(`${BASE}/api/v1/dev/token?user=${user}&roles=${roles}`)).json()).token; }
 async function call(tok, method, p, body) {
@@ -64,6 +67,14 @@ const AUDIT = () => {
       if (t.scrollWidth > t.clientWidth + 1) out.push(`table needs sideways scroll (${t.scrollWidth - t.clientWidth}px) ` + desc(t.querySelector('th') || t));
   return [...new Set(out)].slice(0, 12);
 };
+async function axe(page, label) {
+  if (!(await page.evaluate(() => !!window.axe))) await page.addScriptTag({content: AXE});
+  const res = await page.evaluate(() => window.axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}}));
+  for (const v of res.violations) {
+    const where = v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ');
+    (['serious', 'critical'].includes(v.impact) ? problems : a11yNotes).push(`${label}: a11y ${v.impact} ${v.id} (${v.nodes.length}) ${where}`);
+  }
+}
 async function audit(page, label) {
   const issues = await page.evaluate(AUDIT);
   issues.forEach(i => problems.push(`${label}: ${i}`));
@@ -253,17 +264,19 @@ async function visit(page, hash, name, full = true) {
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'reports', 'access', 'audit'];
-  for (const [w, theme] of [[1280, 'light'], [1024, 'light'], [1024, 'dark']]) {
+  for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light']]) {
     await page.setViewportSize({width: w, height: 900});
     await page.evaluate(t => { document.documentElement.setAttribute('data-theme', t); }, theme);
     for (const r of routes) { await page.goto(`${BASE}/#/${r}`); await settle(page); await audit(page, `${w}px ${theme} ${r}`);
+      if (w === 1280) await axe(page, `${theme} ${r}`);
       const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       if (ov > 2) problems.push(`${w}px ${r}: page overflow ${ov}px`); }
     console.log('audited', w, theme, routes.length, 'screens');
   }
   await browser.close();
+  if (a11yNotes.length) console.log('\nACCESSIBILITY NOTES (moderate/minor):\n - ' + [...new Set(a11yNotes)].join('\n - '));
   console.log('\nPROBLEMS:', problems.length ? '\n - ' + problems.join('\n - ') : 'none');
   fs.writeFileSync(path.join(OUT, 'tour-result.json'), JSON.stringify({problems,
-    screenshots: fs.readdirSync(OUT).filter(f => f.endsWith('.png')).length, audited_widths: [1440, 1280, 1024], llm: llmOn}, null, 1));
+    screenshots: fs.readdirSync(OUT).filter(f => f.endsWith('.png')).length, audited_widths: [1440, 1280, 1024, 768], a11y_notes: [...new Set(a11yNotes)], llm: llmOn}, null, 1));
   process.exit(problems.length ? 1 : 0);
 })().catch(e => { console.error('CRASH', e); console.log('PROBLEMS so far:', problems); process.exit(2); });

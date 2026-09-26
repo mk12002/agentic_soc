@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from soc_platform.domains.phishing.engine.paths import REPO_ROOT
 
 

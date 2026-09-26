@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-
-from soc_platform.domains.phishing.engine.paths import REPO_ROOT
-
 from soc_platform.domains.phishing.engine.agents import AGENT_REGISTRY
 from soc_platform.domains.phishing.engine.agents.service_runner import AGENT_FUNCTIONS
 from soc_platform.domains.phishing.engine.orchestrator.runner import EXPECTED_AGENTS
 from soc_platform.domains.phishing.engine.orchestrator.scoring_engine.scorer import DEFAULT_WEIGHTS
+from soc_platform.domains.phishing.engine.paths import REPO_ROOT
 
 
 def test_expected_agents_match_runtime_agent_functions() -> None:

@@ -63,7 +63,7 @@ class GenericSiemConnector(ToolConnector):
         fm = {"id": "id", "title": "title", "severity": "severity", "time": "timestamp", "host": "host", "user": "user",
               "src_ip": "src_ip", "dst_ip": "dst_ip", "domain": "domain", "url": "url", "hash": "sha256",
               "source": "source", **(self.settings.get("field_map") or {})}
-        g = lambda k: a.get(fm[k])  # noqa: E731
+        g = lambda k: a.get(fm[k])
         refs = []
         if g("host"):
             refs.append(EntityRef(kind="asset", role="host", attributes={"hostname": g("host")}))

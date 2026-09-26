@@ -18,7 +18,8 @@ A ``record`` is::
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 # Labels that map to the positive (malicious) class.
 _POSITIVE_LABELS = {"phishing", "malicious", "spam", "bad", "bec", "malware", "positive", "1", "true"}

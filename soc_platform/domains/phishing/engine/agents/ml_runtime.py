@@ -1,18 +1,17 @@
 """Shared ML runtime helpers for agent model loading and inference."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
-import pickle
-
-from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
-import warnings
 import logging
+import pickle
+import warnings
 from pathlib import Path
 from typing import Any
 
 import joblib
 
+from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 # `src/agents/ml_runtime.py` lives under `email_security/src/agents/`, so the
 # package root is two parents up.

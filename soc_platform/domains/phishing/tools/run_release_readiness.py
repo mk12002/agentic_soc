@@ -2,16 +2,17 @@
 """Run release-readiness checks and emit a timestamped report."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -23,6 +24,7 @@ os.environ.setdefault("IOC_DB_PATH", str(REPO_ROOT / "data" / "ioc_store.db"))
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent.agent import get_ioc_store_status
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.messaging_service import RabbitMQClient
+
 ANALYSIS_ROOT = REPO_ROOT / "analysis_reports"
 
 
@@ -95,7 +97,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     out_dir = ANALYSIS_ROOT / f"release_readiness_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -105,7 +107,7 @@ def main() -> int:
     rabbitmq_check = _check_rabbitmq()
 
     report: dict[str, Any] = {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "app_env": settings.app_env,
         "production_warnings": production_warnings,
         "ioc_status": ioc_status,

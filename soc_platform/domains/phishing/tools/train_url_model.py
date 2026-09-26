@@ -2,16 +2,17 @@
 """Train a high-quality URL classifier with detailed audits, logs, and visual reports."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 # Keep CPU usage bounded for low-core machines.
 os.environ["OMP_NUM_THREADS"] = "2"
@@ -44,9 +45,8 @@ from sklearn.model_selection import train_test_split
 matplotlib.use("Agg")
 
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.preprocessing.feature_pipeline import URL_FEATURE_COLUMNS
-
 
 PROCESSED_DIR = REPO_ROOT.parent / "datasets_processed"
 MODEL_DIR = REPO_ROOT.parent / "models" / "url_agent"
@@ -58,7 +58,7 @@ RANDOM_SEED = 42
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def _setup_logger(report_dir: Path) -> logging.Logger:
@@ -86,7 +86,7 @@ def _stratified_cap(df: pd.DataFrame, target_rows: int, seed: int) -> pd.DataFra
     class_counts = df["label"].value_counts()
     total = int(class_counts.sum())
     alloc = {
-        int(label): max(1, int(round(target_rows * count / total)))
+        int(label): max(1, round(target_rows * count / total))
         for label, count in class_counts.items()
     }
 
@@ -147,7 +147,7 @@ def _dataset_audit(df: pd.DataFrame) -> dict[str, Any]:
     unique_urls = int(df["url"].nunique())
 
     return {
-        "rows": int(len(df)),
+        "rows": len(df),
         "columns": list(df.columns),
         "unique_urls": unique_urls,
         "duplicate_urls": int(len(df) - unique_urls),
@@ -580,10 +580,10 @@ def main() -> None:
         "timestamp_utc": stamp,
         "dataset": {
             "path": str(args.csv_path),
-            "rows_used": int(len(df)),
-            "train_rows": int(len(X_train)),
-            "val_rows": int(len(X_val)),
-            "test_rows": int(len(X_test)),
+            "rows_used": len(df),
+            "train_rows": len(X_train),
+            "val_rows": len(X_val),
+            "test_rows": len(X_test),
             "label_distribution": {str(k): int(v) for k, v in y.value_counts().to_dict().items()},
         },
         "data_audit": audit,

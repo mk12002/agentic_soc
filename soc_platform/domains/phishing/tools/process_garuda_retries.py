@@ -2,13 +2,14 @@
 """Process Garuda retry queue with exponential backoff reconciliation."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.garuda_integration.retry_queue import process_garuda_retries
 
 

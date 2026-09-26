@@ -2,20 +2,20 @@
 RabbitMQ messaging helpers for event-driven agent communication.
 """
 
+import gzip
+import io
 import json
 import threading
-import gzip
 import time
-import io
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from threading import Event
-from typing import Any, Callable
+from typing import Any
 
 import pika
-from concurrent.futures import ThreadPoolExecutor
 
 try:
-    from prometheus_client import Histogram, Gauge
-    from prometheus_client import core as prometheus_core
+    from prometheus_client import Gauge, Histogram
 
     # Lightweight no-op metric used when a metric is already registered or in tests
     class MockMetric:
@@ -252,7 +252,7 @@ class RabbitMQClient:
                 RABBITMQ_ACTIVE_CONNECTIONS.dec()
                 logger.info("RabbitMQ connection closed")
             except Exception:
-                pass
+                logger.opt(exception=True).debug("RabbitMQ connection close failed")
         self._connection = None
         self._channel = None
         self._consumer_thread_id = None
@@ -400,7 +400,7 @@ class RabbitMQClient:
                     try:
                         self._connection.add_callback_threadsafe(lambda: ch.basic_nack(delivery_tag=delivery_tag, requeue=False))
                     except Exception:
-                        pass
+                        logger.opt(exception=True).warning("could not nack a malformed message")
                     return
 
                 try:
@@ -429,7 +429,7 @@ class RabbitMQClient:
                 try:
                     ch.basic_nack(delivery_tag=delivery_tag, requeue=False)
                 except Exception:
-                    pass
+                    logger.opt(exception=True).warning("could not nack a message whose worker failed to start")
 
         self.channel.basic_consume(queue=queue_name, on_message_callback=_wrapped)
         logger.info("Consuming queue", queue=queue_name)

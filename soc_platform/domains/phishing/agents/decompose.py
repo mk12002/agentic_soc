@@ -18,10 +18,10 @@ from email.parser import BytesParser
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from typing import Any
 
-URL_RE = re.compile(r"""https?://[^\s"'<>\)\]]+""", re.I)
-HREF_RE = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.I)
-AUTH_RE = re.compile(r"\b(spf|dkim|dmarc|arc|compauth)=(\w+)", re.I)
-RECEIVED_FROM_RE = re.compile(r"from\s+([^\s;()]+)(?:\s*\(([^)]*)\))?", re.I)
+URL_RE = re.compile(r"""https?://[^\s"'<>\)\]]+""", re.IGNORECASE)
+HREF_RE = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+AUTH_RE = re.compile(r"\b(spf|dkim|dmarc|arc|compauth)=(\w+)", re.IGNORECASE)
+RECEIVED_FROM_RE = re.compile(r"from\s+([^\s;()]+)(?:\s*\(([^)]*)\))?", re.IGNORECASE)
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 RISKY_EXT = {".exe", ".scr", ".js", ".jse", ".vbs", ".vbe", ".hta", ".wsf", ".ps1", ".bat", ".cmd", ".lnk", ".iso",
              ".img", ".vhd", ".one", ".html", ".htm", ".svg", ".docm", ".xlsm", ".pptm", ".jar", ".msi", ".zip", ".rar", ".7z"}
@@ -79,7 +79,7 @@ def _domain(addr: str) -> str:
 
 
 def _url_domain(u: str) -> str:
-    return re.sub(r"^https?://", "", u, flags=re.I).split("/")[0].split("?")[0].split(":")[0].lower()
+    return re.sub(r"^https?://", "", u, flags=re.IGNORECASE).split("/")[0].split("?")[0].split(":")[0].lower()
 
 
 def _qr_from_image(data: bytes, warnings: list[str]) -> list[str]:
@@ -157,9 +157,9 @@ def decompose(raw: bytes) -> DecomposedEmail:
                    if u.lower().startswith("http")})
     # Link text that shows one domain but points to another (classic phishing tell)
     mismatch = []
-    for m in re.finditer(r"""<a[^>]+href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""", body_html, re.I | re.S):
+    for m in re.finditer(r"""<a[^>]+href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""", body_html, re.IGNORECASE | re.DOTALL):
         href, text = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
-        shown = URL_RE.search(text) or re.search(r"\b[a-z0-9-]+(\.[a-z0-9-]+)+\b", text, re.I)
+        shown = URL_RE.search(text) or re.search(r"\b[a-z0-9-]+(\.[a-z0-9-]+)+\b", text, re.IGNORECASE)
         if shown and href.startswith("http") and _url_domain(href) not in text.lower():
             mismatch.append({"shown": shown.group(0), "href": href})
     all_urls = sorted(set(urls) | {u for a in attachments for u in a.qr_urls if u.startswith("http")})

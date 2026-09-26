@@ -9,6 +9,7 @@ policy-gated recommendations -> analyst decision -> documentation / handover.
 
 from __future__ import annotations
 
+import itertools
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -108,7 +109,7 @@ class IncidentService:
         window = timedelta(hours=window_hours)
         for members in by_entity.values():
             members.sort(key=lambda a: a.first_seen)
-            for x, y in zip(members, members[1:]):
+            for x, y in itertools.pairwise(members):
                 if y.first_seen - x.first_seen <= window:
                     parent[find(y.id)] = find(x.id)
         groups: dict[str, list[Entity]] = defaultdict(list)
@@ -314,11 +315,11 @@ class IncidentService:
                 continue
             keys = self.store.keys_of(e.id)
             attrs = e.attributes or {}
-            if e.kind == "asset" and not attrs.get("deception") and (keys.get("crowdstrike_aid") or keys.get("mde_device_id")):
-                if not any(h["id"] == e.display_name for h in hosts):
-                    hosts.append({"type": "asset", "id": e.display_name,
-                                  **{k: v for k, v in keys.items() if k in {"crowdstrike_aid", "mde_device_id"}},
-                                  "tags": attrs.get("tags", []), "criticality": attrs.get("criticality")})
+            if (e.kind == "asset" and not attrs.get("deception") and (keys.get("crowdstrike_aid") or keys.get("mde_device_id"))
+                    and not any(h["id"] == e.display_name for h in hosts)):
+                hosts.append({"type": "asset", "id": e.display_name,
+                              **{k: v for k, v in keys.items() if k in {"crowdstrike_aid", "mde_device_id"}},
+                              "tags": attrs.get("tags", []), "criticality": attrs.get("criticality")})
             if e.kind == "identity" and keys.get("upn") and not any(u["upn"] == keys["upn"] for u in users):
                 users.append({"type": "identity", "id": keys["upn"], "upn": keys["upn"],
                               "entra_object_id": keys.get("entra_object_id")})

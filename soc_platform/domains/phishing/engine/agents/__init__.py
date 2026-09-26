@@ -7,10 +7,11 @@ a specific aspect of an email for phishing detection.
 
 import importlib
 
+
 def _get_agent_func(module_name: str):
     def wrapper(*args, **kwargs):
         module = importlib.import_module(f"soc_platform.domains.phishing.engine.agents.{module_name}")
-        return getattr(module, "analyze")(*args, **kwargs)
+        return module.analyze(*args, **kwargs)
     return wrapper
 
 AGENT_REGISTRY = {

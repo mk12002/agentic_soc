@@ -173,7 +173,7 @@ def test_wiz_lookup_follows_pagination():
     from soc_platform.connectors.http import FixtureTransport
 
     conn = ConnectorRegistry.all_fake().get("wiz")
-    node = lambda i: {"id": f"v{i}", "name": "CVE-2021-44228", "vulnerableAsset": {"name": "web01"}}  # noqa: E731
+    node = lambda i: {"id": f"v{i}", "name": "CVE-2021-44228", "vulnerableAsset": {"name": "web01"}}
     conn.http = FixtureTransport([
         {"method": "POST", "path": "^/graphql$", "body_contains": '"after": null',
          "body": {"data": {"vulnerabilityFindings": {"nodes": [node(1)], "pageInfo": {"hasNextPage": True, "endCursor": "c2"}}}}},
@@ -187,7 +187,7 @@ def test_jira_uses_enhanced_search_with_page_tokens():
     from soc_platform.connectors.http import FixtureTransport
 
     conn = ConnectorRegistry.all_fake().get("jira")
-    issue = lambda i: {"id": str(i), "key": f"SEC-{i}", "fields": {"summary": "x", "status": {"name": "Done"}}}  # noqa: E731
+    issue = lambda i: {"id": str(i), "key": f"SEC-{i}", "fields": {"summary": "x", "status": {"name": "Done"}}}
     conn.http = FixtureTransport([
         {"method": "GET", "path": "^/rest/api/3/search/jql$", "params": {"nextPageToken": "t2"},
          "body": {"issues": [issue(2)], "isLast": True}},

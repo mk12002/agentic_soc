@@ -5,13 +5,14 @@ Focuses on slow/missing-agent behavior and queue-pressure finalization latency.
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 import random
 import statistics
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -27,7 +28,7 @@ def _pct(values: list[float], pct: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
-    idx = int(round((pct / 100.0) * (len(ordered) - 1)))
+    idx = round((pct / 100.0) * (len(ordered) - 1))
     idx = max(0, min(idx, len(ordered) - 1))
     return ordered[idx]
 
@@ -51,7 +52,7 @@ def _simulate_finalize_latency(total_analyses: int, seed: int = 7) -> list[float
             elapsed = timeout + rng.uniform(0.1, 3.0)
 
         subset = [{"agent_name": name, "risk_score": 0.1} for name in agents[:count]]
-        should_finalize, _reason = worker._should_finalize(subset, datetime.now(timezone.utc).timestamp() - elapsed)
+        should_finalize, _reason = worker._should_finalize(subset, datetime.now(UTC).timestamp() - elapsed)
         if should_finalize:
             latencies.append(float(elapsed))
 
@@ -59,7 +60,7 @@ def _simulate_finalize_latency(total_analyses: int, seed: int = 7) -> list[float
 
 
 def main() -> int:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     out_dir = ANALYSIS_ROOT / f"degraded_slo_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,7 +71,7 @@ def main() -> int:
     max_allowed_p95 = timeout + 5.0
 
     report = {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "orchestrator_partial_timeout_seconds": timeout,
         "samples": len(latencies),
         "latency_seconds": {

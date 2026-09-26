@@ -14,7 +14,6 @@ from urllib.parse import urlparse, urlunparse
 
 import psycopg2
 
-
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "host.docker.internal"}
 _DOCKER_HOSTS = {"database", "postgres", "db"}
 

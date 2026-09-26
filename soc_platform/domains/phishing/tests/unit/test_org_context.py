@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
 from soc_platform.domains.phishing.engine.services.org_context import (
     apply_org_context,
     classify_recipient_role,
     get_recipient_risk_multiplier,
 )
-from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
 
 
 def test_classify_recipient_role() -> None:

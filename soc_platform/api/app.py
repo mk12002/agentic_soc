@@ -7,27 +7,29 @@ Every state change goes through the policy-gated ActionService and lands in the 
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from soc_platform import __version__
 from soc_platform.config import Settings, get_settings
 from soc_platform.connectors.base import SyncRunner
 from soc_platform.connectors.registry import ConnectorRegistry
+from soc_platform.core.access import AccessService, kill_switch_on, permissions_matrix
 from soc_platform.core.actions import ActionService
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.access import AccessService, kill_switch_on, permissions_matrix
 from soc_platform.core.auth import AuthError, Perm, Principal, issue_dev_token, principal_from_token
 from soc_platform.core.cases import CaseService, agreement_report, detection_quality
 from soc_platform.core.context_store import ContextStore
@@ -97,6 +99,9 @@ def _client_ip(request: Request) -> str:
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # NUL is never valid in an id, name or filter, and PostgreSQL rejects it in text: refuse it at the edge
+        if "\x00" in request.url.path or b"%00" in request.scope.get("query_string", b"").lower():
+            return JSONResponse({"detail": "invalid character in request"}, status_code=400)
         cl = request.headers.get("content-length")
         if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
             return JSONResponse({"detail": "request too large"}, status_code=413)
@@ -115,6 +120,12 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityMiddleware)
+
+
+@app.exception_handler(DataError)
+async def _data_error(_request: Request, _exc: Exception) -> JSONResponse:
+    """A value the database cannot store (too long, out of range, invalid text) is the caller's error, not a crash."""
+    return JSONResponse({"detail": "a value in the request is invalid or too long"}, status_code=400)
 
 
 class BodyLimitMiddleware:
@@ -164,7 +175,7 @@ class _AccessLogWriter:
         import queue
         import threading
 
-        self.q: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=100_000)
+        self.q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=100_000)
         self.dropped = 0
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None

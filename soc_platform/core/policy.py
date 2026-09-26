@@ -122,7 +122,7 @@ class PolicyEngine:
         self.kill_switch = kill_switch
 
     @classmethod
-    def for_session(cls, session: Session) -> "PolicyEngine":
+    def for_session(cls, session: Session) -> PolicyEngine:
         """The approved active policy + the durable kill switch (what every service must use by default)."""
         from soc_platform.config import get_settings
         from soc_platform.core.access import kill_switch_on
@@ -155,8 +155,7 @@ class PolicyEngine:
 
         def cap(to: Level, why: str) -> None:
             nonlocal level
-            if level > to:
-                level = to
+            level = min(level, to)
             reasons.append(why)  # always visible to the analyst, even when no cap was needed
 
         if self.kill_switch:
@@ -236,7 +235,7 @@ class PolicyStore:
 def _validate_policy(doc: dict[str, Any]) -> None:
     for name, cfg in (doc.get("actions") or {}).items():
         lvl = int(cfg.get("level", doc.get("default_level", 2)))
-        if lvl not in range(0, 5):
+        if lvl not in range(5):
             raise ValueError(f"{name}: level must be 0-4")
 
 

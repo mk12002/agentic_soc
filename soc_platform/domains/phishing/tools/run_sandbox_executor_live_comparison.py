@@ -2,16 +2,17 @@
 """Compare sandbox-agent outputs between simulated and live executor modes."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 import os
 import sys
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -100,13 +101,15 @@ def _run_simulated_case(payload: dict[str, Any]) -> dict[str, Any]:
         "behavior_risk_score": 0.94,
     }
 
-    with _patched_settings(sandbox_local_docker_enabled=False, sandbox_executor_url="http://simulated:8099"):
-        with _patched_attr(
+    with (
+        _patched_settings(sandbox_local_docker_enabled=False, sandbox_executor_url="http://simulated:8099"),
+        _patched_attr(
             sandbox_agent,
             "_detonate_via_executor",
             lambda _target: (0.94, ["shell_spawn_detected", "remote_connect_detected"], behavior, training_row),
-        ):
-            return sandbox_agent.analyze(payload)
+        ),
+    ):
+        return sandbox_agent.analyze(payload)
 
 
 def run(executor_url: str, token: str, attachment_root: Path) -> dict[str, Any]:
@@ -171,7 +174,7 @@ def run(executor_url: str, token: str, attachment_root: Path) -> dict[str, Any]:
         )
 
     return {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "executor_url": executor_url,
         "case_count": len(cases),
         "cases": cases,
@@ -195,7 +198,7 @@ def main() -> int:
 
     report = run(executor_url=executor_url, token=token, attachment_root=attachment_root)
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     report_dir = REPO_ROOT / "analysis_reports" / f"sandbox_live_vs_sim_{ts}"
     report_dir.mkdir(parents=True, exist_ok=True)
     out = report_dir / "sandbox_live_vs_sim.json"

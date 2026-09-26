@@ -6,9 +6,12 @@ and registrar reputation scoring.
 """
 
 from __future__ import annotations
-import time, re
-from datetime import datetime, timezone
+
+import re
+import time
+from datetime import UTC, datetime
 from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("domain_enrichment")
@@ -90,12 +93,12 @@ def enrich_domain(domain: str) -> dict[str, Any]:
             if creation:
                 if isinstance(creation, str):
                     try:
-                        creation = datetime.fromisoformat(creation.replace("Z", "+00:00"))
+                        creation = datetime.fromisoformat(creation)
                     except Exception:
                         creation = None
                 if creation:
                     result["creation_date"] = creation.isoformat()
-                    age_days = (datetime.now(timezone.utc) - creation.replace(tzinfo=timezone.utc if creation.tzinfo is None else creation.tzinfo)).days
+                    age_days = (datetime.now(UTC) - creation.replace(tzinfo=UTC if creation.tzinfo is None else creation.tzinfo)).days
                     result["domain_age_days"] = age_days
                     if age_days < 30:
                         result["is_newly_registered"] = True
@@ -187,7 +190,7 @@ def enrich_domains_from_email(
             if parsed.hostname:
                 domains.add(parsed.hostname.lower())
         except Exception:
-            pass
+            logger.opt(exception=True).debug("could not parse a URL for domain enrichment")
 
     enrichments = {}
     total_adjustment = 0.0

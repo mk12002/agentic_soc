@@ -14,7 +14,6 @@ Data flow:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
@@ -25,7 +24,7 @@ import sys
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,20 +39,22 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     confusion_matrix,
     f1_score,
+    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
     roc_curve,
-    precision_recall_curve,
 )
 from sklearn.model_selection import train_test_split
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 # Non-interactive backend for headless servers.
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 DATA_ROOT = REPO_ROOT.parent / "datasets" / "attachments" / "malware" / "DikeDataset" / "files"
 MODELS_ROOT = REPO_ROOT.parent / "models" / "attachment_agent"
 REPORTS_ROOT = REPO_ROOT / "analysis_reports"
@@ -97,7 +98,7 @@ def _entropy(data: bytes) -> float:
     for byte in data:
         freq[byte] += 1
     probs = [count / len(data) for count in freq if count]
-    return -sum(prob * math.log(prob, 2) for prob in probs)
+    return -sum(prob * math.log2(prob) for prob in probs)
 
 
 def _extract_single_file_features(path: Path) -> np.ndarray:
@@ -332,7 +333,7 @@ def _plot_probability_distribution(y_true: np.ndarray, prob: np.ndarray, out_dir
 
 
 def train(args: argparse.Namespace) -> None:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     report_dir = REPORTS_ROOT / f"attachment_ensemble_{timestamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
     logger = _setup_logger(report_dir)
@@ -439,11 +440,11 @@ def train(args: argparse.Namespace) -> None:
         per_model_report.append(
             {
                 "model_id": model_id,
-                "split_size": int(len(split_samples)),
-                "split_benign": int(len(train_benign)),
-                "split_malware": int(len(malware_chunk)),
-                "train_size": int(len(y_train)),
-                "val_size": int(len(y_val)),
+                "split_size": len(split_samples),
+                "split_benign": len(train_benign),
+                "split_malware": len(malware_chunk),
+                "train_size": len(y_train),
+                "val_size": len(y_val),
                 "train_seconds": float(train_seconds),
                 "val_best_threshold": float(val_threshold),
                 "val_metrics": val_best,
@@ -484,9 +485,9 @@ def train(args: argparse.Namespace) -> None:
         "dataset": {
             "benign_dir": str(benign_dir),
             "malware_dir": str(malware_dir),
-            "all_samples": int(len(all_samples)),
-            "train_pool": int(len(train_samples)),
-            "holdout": int(len(holdout_samples)),
+            "all_samples": len(all_samples),
+            "train_pool": len(train_samples),
+            "holdout": len(holdout_samples),
             "train_class_distribution": dict(Counter(s.label for s in train_samples)),
             "holdout_class_distribution": dict(Counter(s.label for s in holdout_samples)),
         },

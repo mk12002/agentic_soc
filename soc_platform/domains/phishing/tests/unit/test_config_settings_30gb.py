@@ -2,6 +2,7 @@
 
 from soc_platform.domains.phishing.engine.configs.settings import Settings
 
+
 def test_30gb_optimization_fields_present():
     """Verify that all 30GB RAM optimization fields are present with correct defaults."""
     settings = Settings()

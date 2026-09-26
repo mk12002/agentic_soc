@@ -15,8 +15,9 @@ A report is a **spec**: title, audience, format (docx | pptx) and sections. Each
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from docx import Document
 from docx.shared import Pt, RGBColor
@@ -393,9 +394,9 @@ PLAN_SYSTEM = ("You design security reports. Choose sections ONLY from the catal
 def plan_report(request: str, llm: LLMGateway | None) -> dict[str, Any]:
     """Turn a plain-language request into a spec using catalogue sources only."""
     req = request.strip()[:1500]
-    days = 7 if re.search(r"\b(week|weekly|7 days)\b", req, re.I) else 1 if re.search(r"\b(today|daily|24 ?h)\b", req, re.I) else \
-        90 if re.search(r"\b(quarter|quarterly|90 days)\b", req, re.I) else 30
-    fmt = "pptx" if re.search(r"\b(deck|slides|presentation|pptx|powerpoint)\b", req, re.I) else "docx"
+    days = 7 if re.search(r"\b(week|weekly|7 days)\b", req, re.IGNORECASE) else 1 if re.search(r"\b(today|daily|24 ?h)\b", req, re.IGNORECASE) else \
+        90 if re.search(r"\b(quarter|quarterly|90 days)\b", req, re.IGNORECASE) else 30
+    fmt = "pptx" if re.search(r"\b(deck|slides|presentation|pptx|powerpoint)\b", req, re.IGNORECASE) else "docx"
     if llm is not None:
         cat = "\n".join(f"- {k}: {v[0]} ({v[1]})" for k, v in SOURCES.items() if k != "case_story")
         try:

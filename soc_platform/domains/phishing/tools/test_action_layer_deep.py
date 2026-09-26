@@ -1,4 +1,5 @@
 import logging
+
 from soc_platform.domains.phishing.engine.action_layer.graph_client import GraphActionBot
 from soc_platform.domains.phishing.engine.action_layer.response_engine import ResponseEngine
 

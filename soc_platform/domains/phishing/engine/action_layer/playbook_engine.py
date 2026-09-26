@@ -6,9 +6,11 @@ per threat type (BEC, ransomware, credential phishing, etc.).
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("playbook_engine")
@@ -172,7 +174,7 @@ def execute_playbook(
         "playbook_id": playbook.playbook_id,
         "playbook_name": playbook.name,
         "analysis_id": analysis_id,
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
         "steps": [],
         "status": "recommended",
     }
@@ -184,7 +186,7 @@ def execute_playbook(
             "auto_execute": step.auto_execute,
             "requires_approval": step.requires_approval,
             "status": "pending_approval" if step.requires_approval else "recommended",
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "recorded_at": datetime.now(UTC).isoformat(),
         }
 
         if step.requires_approval:
@@ -192,7 +194,7 @@ def execute_playbook(
 
         execution_log["steps"].append(step_result)
 
-    execution_log["completed_at"] = datetime.now(timezone.utc).isoformat()
+    execution_log["completed_at"] = datetime.now(UTC).isoformat()
     logger.info(
         "Playbook executed",
         playbook=playbook.playbook_id,

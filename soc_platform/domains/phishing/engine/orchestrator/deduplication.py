@@ -10,12 +10,12 @@ Uses Redis for distributed cache with TTL-based expiration.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
-from typing import Any, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
-import importlib
 
 # Resolve the canonical settings singleton at runtime to avoid duplicate
 # cached `settings` instances when tests or modules import the settings
@@ -78,7 +78,7 @@ def compute_email_fingerprint(
     normalized_body = body.lower().strip()
     
     # Deduplicate and sort URLs for consistent ordering
-    unique_urls = sorted(set(url.lower() for url in urls))
+    unique_urls = sorted({url.lower() for url in urls})
     
     # Sort attachment hashes
     sorted_attachment_hashes = sorted(attachment_hashes)
@@ -118,7 +118,7 @@ class DeduplicationCache:
     - Graceful degradation if Redis unavailable
     """
     
-    def __init__(self, redis_client: Optional[Any] = None):
+    def __init__(self, redis_client: Any | None = None):
         """
         Initialize deduplication cache.
         
@@ -135,7 +135,7 @@ class DeduplicationCache:
             "errors": 0,
         }
     
-    def _get_redis(self) -> Optional[Any]:
+    def _get_redis(self) -> Any | None:
         """Lazy initialize Redis client if needed."""
         if self.redis_client is None:
             try:
@@ -152,7 +152,7 @@ class DeduplicationCache:
                 return None
         return self.redis_client
     
-    def get_cached_result(self, fingerprint: str) -> Optional[dict[str, Any]]:
+    def get_cached_result(self, fingerprint: str) -> dict[str, Any] | None:
         """
         Retrieve cached analysis result by fingerprint.
         
@@ -179,7 +179,7 @@ class DeduplicationCache:
                 result = json.loads(cached_json)
                 # Update access timestamp
                 result["dedup_cache_hit_count"] = result.get("dedup_cache_hit_count", 0) + 1
-                result["dedup_last_used_ts"] = datetime.now(timezone.utc).isoformat()
+                result["dedup_last_used_ts"] = datetime.now(UTC).isoformat()
                 return result
             
             self.stats["misses"] += 1
@@ -215,7 +215,7 @@ class DeduplicationCache:
             # Add dedup metadata to result
             result_copy = result.copy()
             result_copy["dedup_fingerprint"] = fingerprint
-            result_copy["dedup_cached_ts"] = datetime.now(timezone.utc).isoformat()
+            result_copy["dedup_cached_ts"] = datetime.now(UTC).isoformat()
             result_copy["dedup_cache_hit_count"] = 0
             
             result_json = json.dumps(result_copy)
@@ -277,7 +277,7 @@ class DeduplicationCache:
 
 
 # Global dedup cache instance
-_dedup_cache: Optional[DeduplicationCache] = None
+_dedup_cache: DeduplicationCache | None = None
 
 
 def get_dedup_cache() -> DeduplicationCache:
@@ -290,7 +290,7 @@ def get_dedup_cache() -> DeduplicationCache:
 
 def dedup_email_analysis(
     email_data: dict[str, Any],
-) -> tuple[Optional[dict[str, Any]], bool, Optional[str]]:
+) -> tuple[dict[str, Any] | None, bool, str | None]:
     """
     Check if email analysis result is cached via deduplication.
     

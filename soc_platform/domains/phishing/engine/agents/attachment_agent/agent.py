@@ -51,7 +51,7 @@ def _entropy(data: bytes) -> float:
     for byte in data:
         freq[byte] += 1
     probs = [count / len(data) for count in freq if count]
-    return -sum(prob * math.log(prob, 2) for prob in probs)
+    return -sum(prob * math.log2(prob) for prob in probs)
 
 
 def analyze(data: dict[str, Any]) -> dict[str, Any]:

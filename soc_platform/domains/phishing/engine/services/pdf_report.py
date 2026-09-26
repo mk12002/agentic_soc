@@ -9,7 +9,7 @@ pure-Python engine with no external binary dependencies.
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
@@ -77,7 +77,7 @@ def build_report_pdf(report: dict[str, Any]) -> bytes:
     flow.append(Paragraph("Email Threat Analysis Report", styles["Title"]))
     flow.append(Paragraph(
         f"Analysis ID: <b>{esc(analysis_id)}</b> &nbsp;|&nbsp; "
-        f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
         body,
     ))
     flow.append(Spacer(1, 6))

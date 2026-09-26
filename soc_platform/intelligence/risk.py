@@ -20,6 +20,14 @@ from soc_platform.core.models import Case, CaseEntity, Entity, utcnow
 
 SEV_W = {"critical": 40.0, "high": 25.0, "medium": 10.0, "low": 3.0, "informational": 0.0}
 HALF_LIFE_DAYS = 7.0
+# Signals that describe a condition which is still true (an open exposure, an open incident): they count in full
+# until the condition ends, instead of decaying like activity does.
+STANDING_SIGNALS = frozenset({"kev_exposure", "priority_vulnerability", "internet_exposed_vulnerable", "open_incident"})
+# Amplifiers add weight because of other signals; each fades with the signals that triggered it (None = any).
+AMPLIFIER_TRIGGERS: dict[str, frozenset[str] | None] = {
+    "privileged_user_at_risk": frozenset({"identity_risk", "risky_signin", "phishing_identity_compromise"}),
+    "no_edr_coverage": None,
+}
 BANDS = [(80, "critical"), (60, "high"), (30, "medium"), (0, "low")]
 
 
@@ -88,9 +96,17 @@ class RiskEngine:
         since = now - self.window
         factors: list[Factor] = []
 
-        def add(signal: str, dim: str, w: float, source: str, ref: str, when: datetime | None, detail: str) -> None:
-            factors.append(Factor(signal, dim, w, round(w * self._decay(when, now), 2), source or "platform", ref,
+        def add(signal: str, dim: str, w: float, source: str, ref: str, when: datetime | None, detail: str, *,
+                factor: float | None = None) -> None:
+            # Activity decays from when it happened; an open exposure or a contextual amplifier passes its own factor
+            # (an exposure does not fade while it stays open; an amplifier fades with the activity that triggered it).
+            k = 1.0 if signal in STANDING_SIGNALS else self._decay(when, now) if factor is None else factor
+            factors.append(Factor(signal, dim, w, round(w * k, 2), source or "platform", ref,
                                   _aware(when).isoformat() if when else None, detail))
+
+        def strongest(signals: frozenset[str] | None = None) -> float:
+            return max((f.decayed / f.weight for f in factors if f.weight and (signals is None or f.signal in signals)),
+                       default=0.0)
 
         for ev in self.store.events_for(entity_id, since=since):
             a = ev.attributes or {}
@@ -138,7 +154,7 @@ class RiskEngine:
                         f"received {case.verdict} email: {case.title}")
             elif case.domain == "incident" and case.status != "closed" and rs - {"alert"}:
                 add("open_incident", "incident", SEV_W.get(case.severity, 5) / 2, "incident", case.id,
-                    case.created_at, case.title)
+                    case.created_at, case.title)          # counts in full until the incident is closed
         if compromised_via:
             # one compromise, however many phishing cases point at it
             latest = max(compromised_via, key=lambda c: c.created_at)
@@ -166,15 +182,17 @@ class RiskEngine:
 
             has_edr = {"crowdstrike", "defender_endpoint"} & set((ent.attributes or {}).get("by_tool", {}))
             if not has_edr and factors and needs_endpoint_agent(self.s, ent):
-                add("no_edr_coverage", "coverage", 5, "platform", entity_id, None, "no EDR telemetry for this host")
+                add("no_edr_coverage", "coverage", 5, "platform", entity_id, None, "no EDR telemetry for this host",
+                    factor=strongest(AMPLIFIER_TRIGGERS["no_edr_coverage"]))
         if ent.kind == "identity":
             priv = [r for r, o in self.store.neighbors(entity_id) if o.kind == "secret_access"]
-            if priv and any(f.signal in {"identity_risk", "risky_signin", "phishing_identity_compromise"} for f in factors):
+            trig = AMPLIFIER_TRIGGERS["privileged_user_at_risk"]
+            if priv and any(f.signal in trig for f in factors):
                 add("privileged_user_at_risk", "privileged_access", 10, "platform", entity_id, None,
-                    "account with privileged credential access shows compromise indicators")
+                    "account with privileged credential access shows compromise indicators", factor=strongest(trig))
 
         raw = sum(f.decayed for f in factors)
-        score = int(round(100 * (1 - math.exp(-raw / 60))))     # whole points: the same figure on every screen and answer
+        score = round(100 * (1 - math.exp(-raw / 60)))     # whole points: the same figure on every screen and answer
         band = next(b for t, b in BANDS if score >= t)
         return RiskProfile(entity_id, ent.kind, ent.display_name, score, band, factors)
 

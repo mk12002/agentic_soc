@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 def create_dummy_data():
     base_dir = Path("datasets")
     

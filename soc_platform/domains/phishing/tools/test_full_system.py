@@ -8,14 +8,15 @@ Tests every layer of the Agentic Email Security System:
   4. All agent inference paths
 """
 
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import os
 import traceback
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 # Ensure email_security is importable
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 os.chdir(str(REPO_ROOT))
 
 PASS = "✅ PASS"
@@ -61,7 +62,7 @@ print("  SECTION 2: Content SLM Model")
 print("=" * 70)
 
 try:
-    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
     MODEL_DIR = REPO_ROOT.parent / "models" / "content_agent"
     if MODEL_DIR.exists() and (MODEL_DIR / "config.json").exists():
@@ -95,8 +96,8 @@ print("  SECTION 3: Content Agent Inference Pipeline")
 print("=" * 70)
 
 try:
-    from soc_platform.domains.phishing.engine.agents.content_agent.model_loader import load_model
     from soc_platform.domains.phishing.engine.agents.content_agent.inference import predict
+    from soc_platform.domains.phishing.engine.agents.content_agent.model_loader import load_model
 
     model_bundle = load_model()
     if model_bundle:
@@ -106,7 +107,7 @@ try:
         record("Inference pipeline", PASS, f"risk={result['risk_score']:.4f}, conf={result['confidence']:.4f}, indicators={result['indicators']}")
     else:
         record("Model loader", WARN, "No model loaded — heuristic mode")
-except Exception as exc:
+except Exception:
     record("Content Agent Inference", FAIL, traceback.format_exc().split("\n")[-2])
 
 # ──────────────────────────────────────────────────────────────
@@ -147,7 +148,7 @@ try:
     sim_result = bot.apply_warning_banner("test@test.com", "dummy-graph-id", severity="High")
     record("Banner (unconfigured)", PASS if not sim_result.ok else WARN, str(sim_result))
 
-except Exception as exc:
+except Exception:
     record("Graph Client", FAIL, traceback.format_exc().split("\n")[-2])
 
 # ──────────────────────────────────────────────────────────────
@@ -222,7 +223,7 @@ try:
     })
     record("Live mode dispatch", PASS, "Graph actions attempted (may fail without admin consent)")
 
-except Exception as exc:
+except Exception:
     record("Response Engine", FAIL, traceback.format_exc().split("\n")[-2])
 
 # ──────────────────────────────────────────────────────────────
@@ -233,8 +234,8 @@ print("  SECTION 6: LangGraph Orchestrator (Decision Pipeline)")
 print("=" * 70)
 
 try:
-    from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
     from soc_platform.domains.phishing.engine.orchestrator.langgraph_state import OrchestratorState
+    from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
 
     test_reports: list[dict] = []
 
@@ -314,7 +315,7 @@ try:
            f"verdict={decision_safe.get('verdict')}, score={decision_safe.get('overall_risk_score')}, "
            f"actions={decision_safe.get('recommended_actions')}")
 
-except Exception as exc:
+except Exception:
     record("LangGraph Orchestrator", FAIL, traceback.format_exc().split("\n")[-2])
 
 # ──────────────────────────────────────────────────────────────

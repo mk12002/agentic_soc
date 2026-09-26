@@ -4,8 +4,8 @@ Shared base class for all asynchronous email analysis agents.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import time
+from abc import ABC, abstractmethod
 from typing import Any
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
@@ -63,7 +63,7 @@ class BaseAgent(ABC):
             try:
                 self.messaging.shutdown()
             except Exception:
-                pass
+                self.logger.opt(exception=True).debug("messaging shutdown failed during graceful stop")
 
         signal.signal(signal.SIGTERM, _on_shutdown)
         signal.signal(signal.SIGINT, _on_shutdown)
@@ -82,7 +82,7 @@ class BaseAgent(ABC):
                 try:
                     self.messaging.close()
                 except Exception:
-                    pass
+                    self.logger.opt(exception=True).debug("messaging close failed before reconnect")
                 # Exponential backoff is handled in messaging.connect(),
                 # but we add a small safety sleep here as well.
                 time.sleep(2)

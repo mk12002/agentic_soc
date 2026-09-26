@@ -1,7 +1,6 @@
 """Threat intelligence agent backed by local IOC feed lookup."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import csv
 import functools
@@ -15,14 +14,15 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
-from soc_platform.domains.phishing.engine.configs import settings
-from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 from soc_platform.domains.phishing.engine.action_layer.azure_search_client import get_azure_search_client
 
 # Import the ML Pipeline components
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent.feature_extractor import extract_features
-from soc_platform.domains.phishing.engine.agents.threat_intel_agent.model_loader import load_model
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent.inference import predict
+from soc_platform.domains.phishing.engine.agents.threat_intel_agent.model_loader import load_model
+from soc_platform.domains.phishing.engine.configs import settings
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 from soc_platform.domains.phishing.engine.services.sender_reputation import get_sender_reputation_engine
 
 logger = get_agent_logger("threat_intel_agent")
@@ -280,7 +280,7 @@ def _ioc_type_for(value: str) -> str:
     if not value:
         return "unknown"
     lowered = value.lower()
-    if lowered.startswith("http://") or lowered.startswith("https://"):
+    if lowered.startswith(("http://", "https://")):
         return "url"
     if lowered.count(".") == 3 and all(part.isdigit() for part in lowered.split(".")):
         return "ip"
@@ -392,11 +392,7 @@ def _harvest_from_malwarebazaar() -> list[tuple[str, str, str]]:
     if not settings.enable_malwarebazaar_lookup:
         return []
     try:
-        # MalwareBazaar API uses a POST with 'query' parameter
-        headers = {}
-        if settings.virustotal_api_key: # Reusing VT key or checking if we have one (user didn't give specific MB key)
-             # Wait, I don't have a MB key. I'll just try without it but with proper headers.
-             pass
+        # MalwareBazaar API uses a POST with 'query' parameter (no API key needed for recent-sample queries)
         
         data = {"query": "get_recent", "selector": "100"}
         with httpx.Client(timeout=settings.threat_intel_harvest_timeout_seconds, follow_redirects=True) as client:
@@ -1191,7 +1187,7 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
                         if hit.get("score", 0) > 2.0: # Only high-relevance hits
                             azure_search_matches.append(f"azure_search_hit:{hit['indicator']}({hit['type']})")
                 except Exception:
-                    pass
+                    logger.opt(exception=True).warning("Azure AI Search lookup unavailable; semantic IOC matches skipped")
 
     if matches or azure_search_matches:
         # Prefix with highest risk matching indicator (typically limit to 10 for log brevity)

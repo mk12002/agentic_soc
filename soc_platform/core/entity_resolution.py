@@ -18,7 +18,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from rapidfuzz import fuzz
@@ -204,7 +204,7 @@ def _os_family(os_name: Any) -> str:
 
 def _aware(dt: datetime | None) -> datetime:
     dt = dt or utcnow()
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 # ----------------------------------------------------------------------------- resolver

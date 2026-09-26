@@ -6,11 +6,15 @@ cleans and normalizes the data, and converts them into the unified
 `ioc_reference_schema` as a Parquet dataset for the Threat Intel Agent.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
-import pandas as pd
-from datetime import datetime, timezone
 
-from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import ioc_reference_schema, validate_dataframe
+import pandas as pd
+
+from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import (
+    ioc_reference_schema,
+    validate_dataframe,
+)
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("threat_intel_dataset_builder")
@@ -23,7 +27,7 @@ OUTPUT_DIR = Path("../../datasets_processed/threat_intel").resolve()
 def create_base_ioc_df(df: pd.DataFrame, ioc_col: str, ioc_type: str, feed_source: str, 
                        default_reliability: float = 0.8) -> pd.DataFrame:
     """Helper to convert a raw CSV into the expected IOC Reference Schema."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     
     # Map the relevant columns to the standard schema
     std_df = pd.DataFrame()

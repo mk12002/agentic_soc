@@ -21,7 +21,6 @@ from soc_platform.domains.phishing.service import PhishingService
 from soc_platform.domains.vulnerability.service import VulnerabilityService
 from soc_platform.llm.gateway import Completion, LLMGateway, Provider
 
-
 # --------------------------------------------------------------------------- resilience
 
 
@@ -169,7 +168,6 @@ def test_redaction_before_any_model_call(session):
 
         def complete(self, system, user, *, tier):
             seen["prompt"] = user
-            return None
 
     from soc_platform.llm.redaction import Redactor
 

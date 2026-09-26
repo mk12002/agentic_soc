@@ -1,11 +1,10 @@
 """Deep EDA for processed URL training data."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -13,9 +12,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.preprocessing.feature_pipeline import URL_FEATURE_COLUMNS
 
 PROCESSED_CSV = REPO_ROOT.parent / "datasets_processed" / "url_training.csv"
@@ -24,7 +24,7 @@ MAX_PLOT_ROWS = 250000
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def _sample_for_plot(df: pd.DataFrame, max_rows: int = MAX_PLOT_ROWS) -> pd.DataFrame:
@@ -177,7 +177,7 @@ def main() -> None:
 
     summary = {
         "dataset_path": str(PROCESSED_CSV),
-        "rows": int(len(df)),
+        "rows": len(df),
         "unique_urls": int(df["url"].nunique()),
         "duplicate_urls": int(len(df) - df["url"].nunique()),
         "label_distribution": {str(k): int(v) for k, v in df["label"].value_counts().sort_index().to_dict().items()},

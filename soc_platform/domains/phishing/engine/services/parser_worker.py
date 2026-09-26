@@ -13,7 +13,7 @@ from pathlib import Path
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.email_parser import EmailParserService
 from soc_platform.domains.phishing.engine.services.gdrive_client import get_gdrive_client
-from soc_platform.domains.phishing.engine.services.logging_service import setup_logging, get_service_logger
+from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger, setup_logging
 
 logger = get_service_logger("parser_worker")
 
@@ -138,7 +138,7 @@ def run() -> None:
     try:
         parser.messaging.shutdown()
     except Exception:
-        pass
+        logger.opt(exception=True).debug("messaging shutdown failed while stopping the parser worker")
     logger.info("Parser worker stopped")
 
 

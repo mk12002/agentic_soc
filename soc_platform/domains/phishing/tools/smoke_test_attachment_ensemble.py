@@ -6,14 +6,15 @@ vector and higher risk for a malware-like feature vector.
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import importlib.util
 
 import numpy as np
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 ML_RUNTIME_PATH = REPO_ROOT / "agents" / "ml_runtime.py"
 _SPEC = importlib.util.spec_from_file_location("ml_runtime_standalone", ML_RUNTIME_PATH)
 if _SPEC is None or _SPEC.loader is None:

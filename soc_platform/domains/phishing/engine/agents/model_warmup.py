@@ -8,12 +8,11 @@ and significantly improves performance.
 
 from __future__ import annotations
 
+import importlib
 import time
 from typing import Any
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
-import importlib
-
 
 # Resolve settings at runtime to avoid duplicate instances when imported under
 # different package names (tests may mutate the `email_security`-prefixed module).

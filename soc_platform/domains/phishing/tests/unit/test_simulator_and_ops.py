@@ -5,11 +5,11 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from soc_platform.domains.phishing.engine.api.main import app
 from soc_platform.domains.phishing.engine.orchestrator.decision_engine.engine import (
     determine_verdict,
     simulate_verdict,
 )
-from soc_platform.domains.phishing.engine.api.main import app
 
 
 def test_determine_verdict_bands() -> None:

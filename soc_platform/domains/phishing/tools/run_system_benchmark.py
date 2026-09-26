@@ -2,7 +2,6 @@
 """Run a lightweight API load benchmark and write SLA summary."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import asyncio
@@ -10,9 +9,11 @@ import json
 import statistics
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -63,7 +64,7 @@ def _pct(values: list[float], pct: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
-    idx = int(round((pct / 100.0) * (len(ordered) - 1)))
+    idx = round((pct / 100.0) * (len(ordered) - 1))
     return ordered[max(0, min(idx, len(ordered) - 1))]
 
 
@@ -97,7 +98,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
     sla_ok = (failed == 0) and (p95 <= float(args.p95_sla_ms))
 
     return {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "endpoint": endpoint,
         "requests": args.requests,
         "concurrency": args.concurrency,
@@ -128,7 +129,7 @@ def main() -> int:
     parser.add_argument("--p95-sla-ms", type=float, default=1200.0)
     args = parser.parse_args()
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     out_dir = ANALYSIS_ROOT / f"benchmark_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 

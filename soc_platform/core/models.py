@@ -10,8 +10,9 @@ Section 5.3 layers mapped to tables:
 
 from __future__ import annotations
 
+import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -28,11 +29,19 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from soc_platform.core.db import Base, UTCDateTime
+from soc_platform.core.db import Base, BoundedText, UTCDateTime
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    """The platform's clock (UTC). ``SOC_CLOCK_OFFSET_SECONDS`` shifts it for time-travel tests (SLAs falling due,
+    month roll-over, retention); it is ignored when ``SOC_ENVIRONMENT=prod``."""
+    now = datetime.now(UTC)
+    offset = os.environ.get("SOC_CLOCK_OFFSET_SECONDS")
+    if offset and os.environ.get("SOC_ENVIRONMENT", "dev") != "prod":
+        from datetime import timedelta
+
+        now += timedelta(seconds=float(offset))
+    return now
 
 
 def new_id() -> str:
@@ -49,7 +58,7 @@ class Entity(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     kind: Mapped[str] = mapped_column(String(32), index=True)
-    display_name: Mapped[str] = mapped_column(String(512), default="")
+    display_name: Mapped[str] = mapped_column(BoundedText(512), default="")
     canonical_key: Mapped[str | None] = mapped_column(String(512), index=True, nullable=True)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
@@ -145,7 +154,7 @@ class Case(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     domain: Mapped[str] = mapped_column(String(32), index=True)          # phishing | incident | vulnerability
-    title: Mapped[str] = mapped_column(String(512))
+    title: Mapped[str] = mapped_column(BoundedText(512))
     status: Mapped[str] = mapped_column(String(32), default="open", index=True)  # open|investigating|awaiting_approval|closed
     severity: Mapped[str] = mapped_column(String(16), default="medium")
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
@@ -274,7 +283,7 @@ class Disposition(Base):
     analyst_verdict: Mapped[str] = mapped_column(String(64))
     analyst: Mapped[str] = mapped_column(String(256))
     reasoning: Mapped[str] = mapped_column(Text, default="")
-    detection_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    detection_source: Mapped[str | None] = mapped_column(BoundedText(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
@@ -317,7 +326,7 @@ class LLMCall(Base):
     ts: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     workflow: Mapped[str] = mapped_column(String(64), index=True)
     provider: Mapped[str] = mapped_column(String(32))
-    model: Mapped[str] = mapped_column(String(128))
+    model: Mapped[str] = mapped_column(BoundedText(128))
     prompt_redacted: Mapped[str] = mapped_column(Text)
     response: Mapped[str] = mapped_column(Text, default="")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -406,10 +415,10 @@ class AccessLogRecord(Base):
     principal_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     auth_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     method: Mapped[str] = mapped_column(String(8))
-    path: Mapped[str] = mapped_column(String(512))
+    path: Mapped[str] = mapped_column(BoundedText(512))
     status: Mapped[int] = mapped_column(Integer)
     client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    user_agent: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(BoundedText(256), nullable=True)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
 
 
@@ -442,7 +451,7 @@ class JobRun(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     job: Mapped[str] = mapped_column(String(64), index=True)
-    trigger: Mapped[str] = mapped_column(String(32), default="schedule")
+    trigger: Mapped[str] = mapped_column(BoundedText(320), default="schedule")   # "schedule" | "manual:<principal>"
     ordinal: Mapped[int] = mapped_column(BigInteger, index=True, default=0)  # strictly increasing run order
     status: Mapped[str] = mapped_column(String(16), index=True)  # ok | error | dead_letter
     attempts: Mapped[int] = mapped_column(Integer, default=1)

@@ -2,15 +2,16 @@
 """Run deep sandbox-agent scenario evaluation and emit structured report."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 import sys
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -71,7 +72,7 @@ def _summarize_case(name: str, output: dict[str, Any]) -> dict[str, Any]:
 
 
 def run() -> dict[str, Any]:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     report_dir = REPO_ROOT / "analysis_reports" / f"sandbox_deep_eval_{ts}"
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -180,13 +181,15 @@ def run() -> dict[str, Any]:
 
         # 7) Edge: executor configured but unavailable (forced fallback path)
         unavailable_input = {"attachments": [{"filename": suspicious_exe.name, "path": str(suspicious_exe)}]}
-        with _patched_settings(sandbox_local_docker_enabled=False, sandbox_executor_url="http://sandbox-executor:8099"):
-            with _patched_attr(
+        with (
+            _patched_settings(sandbox_local_docker_enabled=False, sandbox_executor_url="http://sandbox-executor:8099"),
+            _patched_attr(
                 sandbox_agent,
                 "_detonate_via_executor",
                 lambda _target: (_ for _ in ()).throw(OSError("executor offline")),
-            ):
-                output = sandbox_agent.analyze(unavailable_input)
+            ),
+        ):
+            output = sandbox_agent.analyze(unavailable_input)
         cases.append(
             {
                 "name": "edge_executor_unavailable_fallback",
@@ -227,13 +230,15 @@ def run() -> dict[str, Any]:
             "behavior_risk_score": 0.94,
         }
 
-        with _patched_settings(sandbox_local_docker_enabled=False, sandbox_executor_url="http://sandbox-executor:8099"):
-            with _patched_attr(
+        with (
+            _patched_settings(sandbox_local_docker_enabled=False, sandbox_executor_url="http://sandbox-executor:8099"),
+            _patched_attr(
                 sandbox_agent,
                 "_detonate_via_executor",
                 lambda _target: (0.94, ["shell_spawn_detected", "remote_connect_detected"], simulated_behavior, simulated_training_row),
-            ):
-                output = sandbox_agent.analyze(simulated_input)
+            ),
+        ):
+            output = sandbox_agent.analyze(simulated_input)
         cases.append(
             {
                 "name": "positive_executor_behavior_signals",
@@ -245,7 +250,7 @@ def run() -> dict[str, Any]:
         )
 
     report = {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "case_count": len(cases),
         "cases": cases,
     }

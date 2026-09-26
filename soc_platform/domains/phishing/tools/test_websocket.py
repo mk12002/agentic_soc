@@ -1,19 +1,21 @@
 import asyncio
 import json
-from pathlib import Path
-import websockets
-import httpx
 import sys
+from pathlib import Path
+
+import httpx
+import websockets
+
 
 async def upload_file(client, file_path):
-    with open(file_path, "rb") as f:
-        files = {"file": (file_path.name, f, "text/plain")}
-        print(f"Uploading {file_path.name}...")
-        response = await client.post("http://localhost:8000/ingest-raw-email", files=files)
-        response.raise_for_status()
-        data = response.json()
-        print(f"Upload successful. Analysis ID: {data['analysis_id']}")
-        return data['analysis_id']
+    content = await asyncio.to_thread(file_path.read_bytes)
+    files = {"file": (file_path.name, content, "text/plain")}
+    print(f"Uploading {file_path.name}...")
+    response = await client.post("http://localhost:8000/ingest-raw-email", files=files)
+    response.raise_for_status()
+    data = response.json()
+    print(f"Upload successful. Analysis ID: {data['analysis_id']}")
+    return data['analysis_id']
 
 async def run_websocket_probe() -> int:
     # 1. Create a dummy EML file

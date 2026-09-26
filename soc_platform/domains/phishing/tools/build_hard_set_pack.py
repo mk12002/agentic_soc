@@ -9,7 +9,6 @@ Categories created:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import csv
@@ -17,10 +16,11 @@ import json
 import re
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 DATASET_ROOT = REPO_ROOT.parent / "datasets" / "email_content"
@@ -233,22 +233,21 @@ def main() -> int:
                     break
 
         # If still under target, allow reuse to meet requested per-category depth.
-        if len(chosen) < target:
-            if ranked_fallback:
-                idx = 0
-                while len(chosen) < target:
-                    chosen.append(ranked_fallback[idx % len(ranked_fallback)])
-                    idx += 1
+        if len(chosen) < target and ranked_fallback:
+            idx = 0
+            while len(chosen) < target:
+                chosen.append(ranked_fallback[idx % len(ranked_fallback)])
+                idx += 1
 
         selected[category] = chosen
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     out_dir = OUTPUT_ROOT / f"hard_set_{timestamp}"
     manifest_path = out_dir / "manifest.json"
     summary_path = out_dir / "summary.md"
 
     manifest: dict[str, Any] = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "source_root": str(DATASET_ROOT),
         "ioc_unified_reference": str(IOC_UNIFIED),
         "per_category_target": int(args.per_category),

@@ -22,7 +22,7 @@ def _entropy(text: str) -> float:
     if not text:
         return 0.0
     probs = [text.count(char) / len(text) for char in set(text)]
-    return -sum(prob * math.log(prob, 2) for prob in probs)
+    return -sum(prob * math.log2(prob) for prob in probs)
 
 
 def _domain_from_email(address: str) -> str:

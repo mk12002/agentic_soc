@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -242,7 +243,7 @@ class IntelligenceAnalyst:
                 out = spec.fn(**{k: v for k, v in args.items() if isinstance(v, (str, int, float)) or v is None})
             except TypeError as exc:
                 out = {"error": f"bad arguments: {exc}"}
-            except Exception as exc:  # a failing tool never breaks the answer
+            except Exception as exc:  # noqa: BLE001 - a failing tool is reported in the answer, never breaks it
                 out = {"error": f"{type(exc).__name__}: {exc}"}
             results.append({"tool": spec.name, "args": args, "result": out})
         # Follow-up: resolved entities get their risk + timeline automatically (one hop, deterministic).
@@ -273,7 +274,7 @@ class IntelligenceAnalyst:
     def ask(self, question: str) -> dict[str, Any]:
         calls, planner = self._plan(question)
         results = self._execute(calls)
-        if re.search(r"what happened|story|timeline|how did|attack chain|kill chain|walk me through", question, re.I):
+        if re.search(r"what happened|story|timeline|how did|attack chain|kill chain|walk me through", question, re.IGNORECASE):
             sev = {"critical": 4, "high": 3, "medium": 2, "low": 1}
             cases = [c for r in results if r["tool"] == "entity_context" and isinstance(r["result"], dict)
                      for c in r["result"].get("cases", []) if c.get("status") != "closed"]

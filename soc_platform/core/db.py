@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any, Iterator
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import DateTime, create_engine, event
+from sqlalchemy import DateTime, String, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
@@ -28,12 +29,33 @@ class UTCDateTime(TypeDecorator):
 
     def process_bind_param(self, value: Any, dialect: Any) -> Any:
         if isinstance(value, datetime):
-            return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value).astimezone(timezone.utc)
+            return (value.replace(tzinfo=UTC) if value.tzinfo is None else value).astimezone(UTC)
         return value
 
     def process_result_value(self, value: Any, dialect: Any) -> Any:
         if isinstance(value, datetime) and value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value
+
+
+class BoundedText(TypeDecorator):
+    """Free text from vendors and people (titles, subjects, names, user agents): kept to the column width.
+
+    PostgreSQL rejects a value longer than its column, or one containing NUL, and the whole write fails; SQLite
+    accepts both, so this only ever failed in production. Over-long text is cut and ends with an ellipsis. Identifiers
+    and keys are never BoundedText: cutting those would silently break matching, so they fail loudly instead.
+    """
+
+    impl = String
+    cache_ok = True
+    truncates = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
+        if isinstance(value, str):
+            value = value.replace("\x00", "")
+            n = self.impl.length
+            if n and len(value) > n:
+                value = value[: n - 1] + "\u2026"
         return value
 
 
@@ -61,6 +83,24 @@ class Database:
         from soc_platform.reporting import models as _rep  # noqa: F401
 
         Base.metadata.create_all(self.engine)
+        if self.engine.dialect.name == "postgresql":
+            self._widen_columns()
+
+    def _widen_columns(self) -> None:
+        """create_all never changes an existing table: widen VARCHAR columns the model has since made longer (always
+        safe - no value is lost), so an upgrade does not leave production on an older, narrower schema."""
+        insp = inspect(self.engine)
+        existing = set(insp.get_table_names())
+        with self.engine.begin() as conn:
+            for table in Base.metadata.sorted_tables:
+                if table.name not in existing:
+                    continue
+                have = {c["name"]: c["type"] for c in insp.get_columns(table.name)}
+                for col in table.columns:
+                    want = getattr(col.type, "length", None) or getattr(getattr(col.type, "impl", None), "length", None)
+                    cur = getattr(have.get(col.name), "length", None)
+                    if want and cur and want > cur:
+                        conn.execute(text(f'ALTER TABLE "{table.name}" ALTER COLUMN "{col.name}" TYPE VARCHAR({int(want)})'))
 
     @contextmanager
     def session(self) -> Iterator[Session]:
@@ -73,6 +113,18 @@ class Database:
             raise
         finally:
             s.close()
+
+
+@event.listens_for(Session, "before_flush")
+def _strip_nul(session: Session, _ctx: Any, _instances: Any) -> None:
+    """PostgreSQL rejects NUL in any text column and fails the whole write. Mail bodies, vendor payloads and uploads
+    can carry one, so no text value is stored with it - on every table, whichever code path wrote it."""
+    for obj in (*session.new, *session.dirty):
+        state = inspect(obj)
+        for attr in state.mapper.column_attrs:
+            v = state.dict.get(attr.key)
+            if isinstance(v, str) and "\x00" in v:
+                setattr(obj, attr.key, v.replace("\x00", ""))
 
 
 def _sqlite_pragmas(dbapi_conn, _record) -> None:

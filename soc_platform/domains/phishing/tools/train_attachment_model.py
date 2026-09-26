@@ -17,7 +17,6 @@ Usage:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import sys
 
@@ -29,9 +28,10 @@ from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 DATASET_DIR = REPO_ROOT.parent / "datasets" / "attachments" / "malware" / "ember_features"
 MODEL_DIR = REPO_ROOT.parent / "models" / "attachment_agent"
 

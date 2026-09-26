@@ -39,7 +39,7 @@ def main() -> int:
             res_pos = requests.post(f"{BASE_URL}/agent-test/{agent}", json={"payload": positive_payload}, timeout=60).json()
             print(f"  [Positive] Score: {res_pos.get('output', {}).get('risk_score', 'N/A')} | Time: {time.time()-start:.2f}s")
         except Exception as exc:
-            print(f"  [Positive] FAILED: {str(exc)}")
+            print(f"  [Positive] FAILED: {exc!s}")
             res_pos = {"error": str(exc)}
 
         # 2. Negative (benign) by stripping suspicious indicators.
@@ -68,7 +68,7 @@ def main() -> int:
             res_neg = requests.post(f"{BASE_URL}/agent-test/{agent}", json={"payload": negative_payload}, timeout=60).json()
             print(f"  [Negative] Score: {res_neg.get('output', {}).get('risk_score', 'N/A')} | Time: {time.time()-start:.2f}s")
         except Exception as exc:
-            print(f"  [Negative] FAILED: {str(exc)}")
+            print(f"  [Negative] FAILED: {exc!s}")
             res_neg = {"error": str(exc)}
 
         # 3. Edge case (empty but schema-acceptable payload).
@@ -84,7 +84,7 @@ def main() -> int:
             res_edge = requests.post(f"{BASE_URL}/agent-test/{agent}", json={"payload": edge_payload}, timeout=60).json()
             print(f"  [Edge Case] Score: {res_edge.get('output', {}).get('risk_score', 'N/A')} | Time: {time.time()-start:.2f}s")
         except Exception as exc:
-            print(f"  [Edge Case] FAILED: {str(exc)}")
+            print(f"  [Edge Case] FAILED: {exc!s}")
             res_edge = {"error": str(exc)}
 
         results[agent] = {"positive": res_pos, "negative": res_neg, "edge": res_edge}

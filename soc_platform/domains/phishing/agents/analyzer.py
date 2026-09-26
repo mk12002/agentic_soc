@@ -15,6 +15,7 @@ downstream for grounded explanations.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
@@ -22,7 +23,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from rapidfuzz.distance import Levenshtein
 
@@ -36,16 +37,16 @@ BRANDS = {"microsoft": ["microsoft.com", "office.com", "outlook.com", "live.com"
           "hdfc": ["hdfcbank.com"], "icici": ["icicibank.com"]}
 URGENCY = re.compile(r"\b(urgent|immediately|expires? today|within 24 hours|suspend|locked|verify your account|"
                      r"unusual (sign-in|activity)|final notice|action required|password expir\w*|confirm your|"
-                     r"wire transfer|gift cards?|invoice attached|payment (is )?overdue|kindly)\b", re.I)
-CRED_WORDS = re.compile(r"\b(log ?in|sign ?in|verify|password|credential|account|mfa|authenticate|sso|enrol\w*)\b", re.I)
+                     r"wire transfer|gift cards?|invoice attached|payment (is )?overdue|kindly)\b", re.IGNORECASE)
+CRED_WORDS = re.compile(r"\b(log ?in|sign ?in|verify|password|credential|account|mfa|authenticate|sso|enrol\w*)\b", re.IGNORECASE)
 BANK_CHANGE = re.compile(r"\b(bank (account )?details (have|has) (changed|been (updated|changed))|new bank (account|details)|"
                          r"change of bank|update(d)? (our |the )?bank (account|details)|old (bank )?account is "
-                         r"(frozen|closed|blocked|under audit))\b", re.I)
+                         r"(frozen|closed|blocked|under audit))\b", re.IGNORECASE)
 PAYMENT = re.compile(r"\b(wire transfer|bank transfer|remittance|new (vendor|bank) (details|account)|change of bank|"
-                     r"gift cards?|payment (today|urgently)|INR [\d,]+|USD [\d,]+)\b", re.I)
+                     r"gift cards?|payment (today|urgently)|INR [\d,]+|USD [\d,]+)\b", re.IGNORECASE)
 SECRECY = re.compile(r"\b(confidential|keep this (between us|quiet)|do not (call|discuss)|reply by email only|"
-                     r"in a (board )?meeting)\b", re.I)
-BULK = re.compile(r"(unsubscribe|\d+% off|\bdeals?\b|\bsale\b|limited time|shop now|newsletter)", re.I)
+                     r"in a (board )?meeting)\b", re.IGNORECASE)
+BULK = re.compile(r"(unsubscribe|\d+% off|\bdeals?\b|\bsale\b|limited time|shop now|newsletter)", re.IGNORECASE)
 CONTAINER_EXT = {".iso", ".img", ".vhd", ".vhdx"}
 # Advance-fee ("419") fraud vocabulary - count distinct hits, require several to fire.
 ADVANCE_FEE = re.compile(r"\b(next of kin|beneficiary|transfer (of|the) (the )?(sum|fund|funds)|(\d+[.,]?\d*|\w+) million "
@@ -53,7 +54,7 @@ ADVANCE_FEE = re.compile(r"\b(next of kin|beneficiary|transfer (of|the) (the )?(
                          r"strictly confidential|confidential (transaction|business)|(late|deceased) (client|husband|father)|"
                          r"inheritance|compensation fund|lottery|won (the )?(sum|prize)|claims? (agent|officer)|"
                          r"diplomatic|consignment box|bank draft|barrister|god (reveals?|fearing)|noble proposal|"
-                         r"urgent (and )?(capable )?assistance)\b", re.I)
+                         r"urgent (and )?(capable )?assistance)\b", re.IGNORECASE)
 SUSPICIOUS_TLD = {"xyz", "top", "click", "zip", "mov", "icu", "buzz", "cam", "rest", "shop", "live", "support",
                   "work", "gq", "tk", "ml", "cf", "ga"}
 SEVERE = {"malicious", "phishing"}
@@ -115,7 +116,7 @@ class HeuristicAnalyzer:
 
     def analyze(self, em: DecomposedEmail, raw: bytes | None = None) -> AnalysisResult:
         s: list[Signal] = []
-        add = lambda n, w, e, a: s.append(Signal(n, w, e, a))  # noqa: E731
+        add = lambda n, w, e, a: s.append(Signal(n, w, e, a))
         auth = em.auth
         if auth.get("dmarc") == "fail":
             add("dmarc_fail", 0.25, f"DMARC {auth['dmarc']} for {em.sender_domain}", "header")
@@ -168,7 +169,7 @@ class HeuristicAnalyzer:
         fee_hits = sorted({m.group(0).lower() for m in ADVANCE_FEE.finditer(em.subject + " " + em.body_text)})
         if len(fee_hits) >= 2:
             add("advance_fee_fraud", min(0.6, 0.2 * len(fee_hits)), f"advance-fee fraud language: {fee_hits[:5]}", "content")
-        if re.match(r"^\s*(re|fwd?)\s*:", em.subject or "", re.I) and not (em.headers.get("In-Reply-To") or
+        if re.match(r"^\s*(re|fwd?)\s*:", em.subject or "", re.IGNORECASE) and not (em.headers.get("In-Reply-To") or
                                                                             em.headers.get("References")):
             add("fake_reply", 0.15, "subject pretends to be a reply/forward but no In-Reply-To/References header", "header")
         if em.sender_domain.split(".")[-1] in SUSPICIOUS_TLD:
@@ -189,6 +190,7 @@ class HeuristicAnalyzer:
                 try:
                     e = self.ti.enrich(itype, v)
                 except Exception:
+                    logging.getLogger(__name__).warning("threat-intel lookup failed for an indicator; source treated as unavailable", exc_info=True)
                     continue
                 if e.get("verdict") == "malicious":
                     add("threat_intel_malicious", 0.35, f"{itype} {v} rated malicious by "
@@ -242,7 +244,7 @@ class EngineAnalyzer:
     _lock = threading.Lock()
     _loaded = False
 
-    OFFLINE_ENV = {
+    OFFLINE_ENV: ClassVar[dict[str, str]] = {
         "AZURE_OPENAI_API_KEY": "", "AZURE_OPENAI_ENDPOINT": "", "AZURE_SEARCH_ENABLED": "false",
         "AZURE_SEARCH_API_KEY": "", "AZURE_OCR_KEY": "", "VIRUSTOTAL_API_KEY": "", "GOOGLE_SAFE_BROWSING_API_KEY": "",
         "ABUSEIPDB_API_KEY": "", "URLSCAN_API_KEY": "", "SHODAN_API_KEY": "", "OTX_API_KEY": "",

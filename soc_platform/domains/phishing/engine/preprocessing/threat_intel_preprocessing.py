@@ -13,18 +13,19 @@ Usage:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import csv
 import hashlib
 import random
 import time
+from datetime import UTC
 from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import (
     MESSAGE_FEATURE_COLUMNS,
     TRAINING_COLUMNS,
@@ -177,7 +178,7 @@ def _parse_malicious_urls(path: Path) -> list[dict]:
         for r in reader:
             url = (r.get("url") or "").strip().lower()
             if not url:
-                url = list(r.values())[0].strip().lower() if r else ""
+                url = next(iter(r.values())).strip().lower() if r else ""
             if not url:
                 continue
             rows.append({
@@ -205,7 +206,7 @@ def _parse_hashes(path: Path) -> list[dict]:
                 break
         if not hashval:
             # Take first column value
-            hashval = list(r.values())[0].strip().strip('"').lower() if r else ""
+            hashval = next(iter(r.values())).strip().strip('"').lower() if r else ""
         if not hashval or len(hashval) < 16:
             continue
         rows.append({
@@ -225,8 +226,8 @@ def _parse_date(date_str: str) -> int:
     date_str = date_str.strip().strip('"')
     for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
-            from datetime import datetime, timezone
-            dt = datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+            from datetime import datetime
+            dt = datetime.strptime(date_str, fmt).replace(tzinfo=UTC)
             return int(dt.timestamp())
         except ValueError:
             continue
@@ -350,8 +351,8 @@ def generate_benign_ips(count: int = 2000) -> list[str]:
         (20, range(33, 128)),    # Microsoft
         (34, range(192, 256)),   # AWS
         (35, range(184, 256)),   # Google Cloud
-        (52, range(0, 256)),     # AWS
-        (54, range(0, 256)),     # AWS
+        (52, range(256)),     # AWS
+        (54, range(256)),     # AWS
         (104, range(16, 32)),    # Cloudflare
         (151, range(101, 102)),  # Google
         (172, range(64, 80)),    # Google Cloud

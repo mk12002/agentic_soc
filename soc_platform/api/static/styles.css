@@ -221,6 +221,10 @@ textarea { height: auto; padding: 8px 10px; }
 .seg { display: inline-flex; background: var(--surface-3); border-radius: 8px; padding: 3px; gap: 2px; }
 .seg button { border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 560; color: var(--text-2); padding: 5px 12px;
   border-radius: 6px; cursor: pointer; }
+/* counts inside segmented tabs keep AA contrast on the tinted track */
+.seg button .muted { color: var(--text-2); }
+/* links inside running text are underlined, not told apart by colour alone (WCAG 1.4.1) */
+.t-sub a, .ev .grow a, p a, dd a { text-decoration: underline; text-underline-offset: 2px; }
 .seg button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 
 /* ---------------------------------------------------------------- chips & badges */

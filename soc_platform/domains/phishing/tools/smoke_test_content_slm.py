@@ -6,11 +6,13 @@ before sending text through the HuggingFace inference pipeline.
 """
 
 import sys
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import warnings
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 warnings.filterwarnings("ignore")
 
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
 MODEL_DIR = PHISHING_HOME / "models" / "content_agent"
 
@@ -67,17 +69,17 @@ def main():
          "BUY VIAGRA CHEAP NOW!!! FREE SHIPPING LIMITED TIME OFFER CLICK HERE TO GET 90% OFF ROLEX REPLICA"),
 
         ("Targeted Phishing",
-         "Dear Customer, Your PayPal account has been suspended due to suspicious activity. "
+         ("Dear Customer, Your PayPal account has been suspended due to suspicious activity. "
          "You must verify your identity immediately by clicking this secure link: "
-         "http://paypal-verify-secure123.com/login. Failure to do so will result in permanent closure."),
+         "http://paypal-verify-secure123.com/login. Failure to do so will result in permanent closure.")),
 
         ("Newsletter (Legitimate)",
-         "Weekly digest: Here are the top stories from TechCrunch this week. "
-         "Apple announced new MacBook models. Google released Android updates."),
+         ("Weekly digest: Here are the top stories from TechCrunch this week. "
+         "Apple announced new MacBook models. Google released Android updates.")),
 
         ("Nigerian Fraud (Phishing)",
-         "I am Barrister Johnson from Lagos Nigeria. You have been selected to receive $4.5 million USD. "
-         "Please send your bank details and a processing fee of $500 to claim your inheritance."),
+         ("I am Barrister Johnson from Lagos Nigeria. You have been selected to receive $4.5 million USD. "
+         "Please send your bank details and a processing fee of $500 to claim your inheritance.")),
     ]
 
     print("\n--- SMOKE TEST RESULTS ---")

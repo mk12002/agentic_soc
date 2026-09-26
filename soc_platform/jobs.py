@@ -15,8 +15,9 @@ import os
 import socket
 import time
 import traceback
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,7 +41,7 @@ HOLDER = f"{socket.gethostname()}:{os.getpid()}"
 
 
 def _aware(dt: datetime | None) -> datetime | None:
-    return dt.replace(tzinfo=timezone.utc) if dt is not None and dt.tzinfo is None else dt
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
 def _body(name: str, s: Session) -> dict[str, Any]:
@@ -80,9 +81,7 @@ def _body(name: str, s: Session) -> dict[str, Any]:
 
         return run_retention(s, get_settings())
     if name == "self_check":
-        from soc_platform.core.selfcheck import raise_or_resolve, run_self_check
-
-        from soc_platform.core.selfcheck import confirm, llm_budget_alert
+        from soc_platform.core.selfcheck import confirm, llm_budget_alert, raise_or_resolve, run_self_check
 
         result = confirm(s, run_self_check(s))            # alert only on checks that fail twice (no false alarms)
         raise_or_resolve(s, result)

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-
 TRUSTED_TRANSACTIONAL_DOMAINS = {
     "go.microsoft.com",
     "account.microsoft.com",
@@ -57,8 +56,7 @@ def _normalized_hosts(urls: list[str]) -> list[str]:
     hosts: list[str] = []
     for raw in urls:
         host = (urlparse(str(raw)).hostname or "").lower().strip(".")
-        if host.startswith("www."):
-            host = host[4:]
+        host = host.removeprefix("www.")
         if host:
             hosts.append(host)
     return hosts

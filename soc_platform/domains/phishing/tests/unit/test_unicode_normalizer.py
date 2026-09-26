@@ -3,6 +3,9 @@ integration into the URL and header agents."""
 
 from __future__ import annotations
 
+from soc_platform.domains.phishing.engine.agents.header_agent.agent import analyze as header_analyze
+from soc_platform.domains.phishing.engine.agents.url_agent.agent import _unicode_deception_indicators
+from soc_platform.domains.phishing.engine.agents.url_agent.agent import analyze as url_analyze
 from soc_platform.domains.phishing.engine.utils.unicode_normalizer import (
     analyze_text,
     find_zero_width,
@@ -10,15 +13,11 @@ from soc_platform.domains.phishing.engine.utils.unicode_normalizer import (
     is_punycode,
     skeleton,
 )
-from soc_platform.domains.phishing.engine.agents.url_agent.agent import _unicode_deception_indicators
-from soc_platform.domains.phishing.engine.agents.header_agent.agent import analyze as header_analyze
-from soc_platform.domains.phishing.engine.agents.url_agent.agent import analyze as url_analyze
-
 
 # Cyrillic homograph of "paypal" — 'а' (U+0430) and 'р' (U+0440) are confusables.
 CYRILLIC_PAYPAL = "pаypаl.com"
 # Zero-width space splitting the brand keyword.
-ZW_PAYPAL = "pay​pal.com"
+ZW_PAYPAL = "pay\u200bpal.com"
 
 
 def test_skeleton_folds_cyrillic_to_ascii() -> None:

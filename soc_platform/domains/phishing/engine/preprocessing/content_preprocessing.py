@@ -1,18 +1,20 @@
 """Content-agent preprocessing with canonical text/label normalization."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
-from collections import Counter, defaultdict
 import json
+import logging
 import os
-from pathlib import Path
 import quopri
 import random
 import re
+from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 from .feature_pipeline import build_content_features, write_processed_dataset
 
@@ -221,6 +223,7 @@ def _collect_text_files(directory: Path, default_label: int) -> list[dict[str, A
         try:
             raw_text = file_path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
+            logging.getLogger(__name__).warning("skipping an unreadable training file", exc_info=True)
             continue
 
         cleaned = _clean_email_text(raw_text)
@@ -414,7 +417,7 @@ def run(base_dir: str = "datasets", output_dir: str = "datasets_processed") -> s
         "post_balance": post_balance_summary,
         "canonical_slm": {
             "path": str(output / "content_training_slm.csv"),
-            "rows": int(len(slm_df)),
+            "rows": len(slm_df),
             "columns": list(slm_df.columns),
             "label_distribution": (
                 {str(k): int(v) for k, v in slm_df["label"].value_counts().to_dict().items()}

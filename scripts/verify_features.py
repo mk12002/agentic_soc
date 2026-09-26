@@ -22,7 +22,7 @@ import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -233,12 +233,12 @@ FEATURES: list[tuple[str, str, list[str]]] = [
 ]
 
 NOT_AUTOMATED = [
-    ("Vendor connectors against the client's real tenants", "Each connector is built to the vendor's documented API and exercised on vendor-shaped "
-     "fixtures through the same code. Real tenants need credentials: press *Test* per connector (Integrations screen)."),
-    ("Other LLM providers with real keys (Azure OpenAI deployments API, Anthropic, self-hosted)", "Azure AI Foundry is verified live "
-     "with `--llm`; the other adapters are tested against the official request shapes with stubbed responses."),
-    ("Detonation on an isolated sandbox host / CAPEv2", "Hardening and fail-closed behaviour are unit-tested in the engine suite; "
-     "actual detonation needs the isolated host."),
+    ("Vendor connectors against the client's real tenants", ("Each connector is built to the vendor's documented API and exercised on vendor-shaped "
+     "fixtures through the same code. Real tenants need credentials: press *Test* per connector (Integrations screen).")),
+    ("Other LLM providers with real keys (Azure OpenAI deployments API, Anthropic, self-hosted)", ("Azure AI Foundry is verified live "
+     "with `--llm`; the other adapters are tested against the official request shapes with stubbed responses.")),
+    ("Detonation on an isolated sandbox host / CAPEv2", ("Hardening and fail-closed behaviour are unit-tested in the engine suite; "
+     "actual detonation needs the isolated host.")),
     ("Entra ID SSO login flow", "RS256/JWKS validation is tested with signed tokens; the browser SSO redirect needs an app registration."),
     ("Docker Compose deployment", "Compose file validated (YAML/services); images were not built in this environment."),
     ("Accuracy and latency on client data / volumes", "Measured on synthetic and public data only; shadow-mode metrics measure it in production."),
@@ -266,7 +266,8 @@ def run_evaluations() -> list[tuple[str, str, bool]]:
     py = sys.executable
 
     def js(cmd):
-        p = subprocess.run([py, *cmd], cwd=ROOT, capture_output=True, text=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        p = subprocess.run([py, *cmd], cwd=ROOT, capture_output=True, text=True, check=False,
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         txt = p.stdout[p.stdout.find("{"):]
         return json.loads(txt)
     e = js(["scripts/eval_phishing.py"])["heuristic"]
@@ -295,7 +296,7 @@ def llm_env() -> dict[str, str]:
 def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple[bool, str]:
     """Tour into a temporary folder (docs/screenshots is only refreshed deliberately, via SOC_SHOTS)."""
     tour = ROOT / "scripts" / "ui_tour"
-    if not (tour / "node_modules").exists():
+    if not (tour / "node_modules" / "axe-core").exists():
         npm = shutil.which("npm") or shutil.which("npm.cmd")
         if npm is None:
             raise RuntimeError("npm is required for the browser tour")
@@ -319,7 +320,7 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
             except OSError:
                 time.sleep(1)
         p = subprocess.run(["node", "tour.js"], cwd=tour, env={**os.environ, "SOC_BASE": f"http://127.0.0.1:{port}", "SOC_SHOTS": str(shots)},
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
         res = json.loads((shots / "tour-result.json").read_text())
         ok = p.returncode == 0 and not res["problems"]
         detail = (("LLM on - " if with_llm else "") + f"{res['screenshots']} screenshots, layout audited at {', '.join(map(str, res['audited_widths']))} px in light + dark, "
@@ -338,7 +339,7 @@ def main() -> int:
     ap.add_argument("--live", action="store_true", help="also run the live public-feed tests (network)")
     ap.add_argument("--llm", action="store_true", help="also run the live LLM tests and the browser tour with the configured LLM (costs tokens)")
     args = ap.parse_args()
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     tests = sorted({t for _, _, ts in FEATURES for t in ts})
     results = run_pytest(tests, {**({"SOC_LIVE_TESTS": "1"} if args.live else {}), **({"SOC_LIVE_LLM": "1"} if args.llm else {})})
     missing = [t for t in tests if t not in results]
@@ -347,7 +348,7 @@ def main() -> int:
     engine = None
     if args.engine:
         p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "soc_platform/domains/phishing/tests/unit"],
-                           cwd=ROOT, capture_output=True, text=True)
+                           cwd=ROOT, capture_output=True, text=True, check=False)
         engine = (p.returncode == 0, (p.stdout.strip().splitlines() or ["no output"])[-1])
 
     rows, counts = [], defaultdict(int)
@@ -360,14 +361,14 @@ def main() -> int:
         rows.append((area, feat, status, ev))
 
     md = ["# Feature verification", "",
-          f"Generated by `python scripts/verify_features.py{' --browser' if args.browser else ''}{' --engine' if args.engine else ''}{' --live' if args.live else ''}{' --llm' if args.llm else ''}` "
-          f"on {started:%Y-%m-%d %H:%M} UTC. Re-run it any time; every row names the tests that prove it.", "",
+          (f"Generated by `python scripts/verify_features.py{' --browser' if args.browser else ''}{' --engine' if args.engine else ''}{' --live' if args.live else ''}{' --llm' if args.llm else ''}` "
+          f"on {started:%Y-%m-%d %H:%M} UTC. Re-run it any time; every row names the tests that prove it."), "",
           "## Summary", "", "| Check | Result |", "|---|---|",
           f"| Features verified by automated tests | **{counts['VERIFIED']} of {len(FEATURES)}**"
           + (f" ({counts['FAILED']} failed)" if counts["FAILED"] else "")
           + (f" · {counts['not run (opt-in)']} opt-in (network / LLM) not run" if counts["not run (opt-in)"] else "") + " |",
-          f"| Tests mapped to features, executed | {sum(1 for v in results.values() if v != 'skip')} run, "
-          f"{sum(1 for v in results.values() if v == 'fail')} failed |"]
+          (f"| Tests mapped to features, executed | {sum(1 for v in results.values() if v != 'skip')} run, "
+          f"{sum(1 for v in results.values() if v == 'fail')} failed |")]
     for name, detail, ok in evals:
         md.append(f"| {name} | {'✅' if ok else '❌'} {detail} |")
     if browser:

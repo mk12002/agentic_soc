@@ -6,8 +6,10 @@ when verdicts are finalized.
 """
 
 from __future__ import annotations
-from datetime import datetime, timezone
-from typing import Any, Optional
+
+from datetime import UTC, datetime
+from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("webhook_dispatcher")
@@ -43,7 +45,7 @@ class WebhookDispatcher:
             "events": events or ["verdict_finalized"],
             "headers": headers or {},
             "format": "json",
-            "registered_at": datetime.now(timezone.utc).isoformat(),
+            "registered_at": datetime.now(UTC).isoformat(),
         }
         self._webhooks.append(webhook)
         logger.info("Webhook registered", url=url)
@@ -68,7 +70,7 @@ class WebhookDispatcher:
         url = webhook["url"]
         wrapped = {
             "event_type": event_type,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "source": "agentic-email-security",
             "data": payload,
         }
@@ -84,7 +86,7 @@ class WebhookDispatcher:
             return {
                 "url": url, "status": "delivered",
                 "http_status": response.status_code,
-                "delivered_at": datetime.now(timezone.utc).isoformat(),
+                "delivered_at": datetime.now(UTC).isoformat(),
             }
         except ImportError:
             logger.debug("httpx not available, webhook skipped", url=url)
@@ -114,7 +116,7 @@ class WebhookDispatcher:
         ]
 
 
-_dispatcher: Optional[WebhookDispatcher] = None
+_dispatcher: WebhookDispatcher | None = None
 
 def get_webhook_dispatcher() -> WebhookDispatcher:
     global _dispatcher

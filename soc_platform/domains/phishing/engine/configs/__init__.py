@@ -6,9 +6,9 @@ Pydantic `settings` instance rather than the submodule object.
 """
 
 # Import the settings submodule and re-export the `settings` instance.
-from . import settings as _settings  # noqa: F401
+from . import settings as _settings
 
 # `settings` instance (Pydantic BaseSettings singleton)
-settings = getattr(_settings, "settings")
+settings = _settings.settings
 
 __all__ = ["settings"]

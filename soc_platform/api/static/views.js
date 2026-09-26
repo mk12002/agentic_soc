@@ -136,7 +136,7 @@ async function CaseDetail(id) {
       x.status === 'executed' && can('rollback_action') ? btn('Roll back', 'act', [x.id, 'rollback', id], 'sm') : ''}</div></td></tr>`;
   const intel = v.intelligence || {};
   setMainG(__g, `<div class="page-head"><div>
-      <div class="inline" style="margin-bottom:8px"><a href="#/cases" class="small">${icon('back', '')}</a>${chip(c.severity)}${chip(c.verdict || 'pending', 'plain')}<span class="muted small">${esc(cap(c.domain))} · ${esc(cap(c.status))} · opened ${dt(c.created_at)}</span></div>
+      <div class="inline" style="margin-bottom:8px"><a href="#/cases" class="small" aria-label="Back to cases" title="Back to cases">${icon('back', '')}</a>${chip(c.severity)}${chip(c.verdict || 'pending', 'plain')}<span class="muted small">${esc(cap(c.domain))} · ${esc(cap(c.status))} · opened ${dt(c.created_at)}</span></div>
       <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} · automation mode ${esc(cap(c.autonomy_mode || 'recommend'))}</p></div>
       <div class="actions"><a class="btn primary" href="#/story/${encodeURIComponent(id)}">${icon('intel')}Attack story</a>${btn('Investigation record', 'dl', [`/api/v1/cases/${id}/report`], '', 'download')}</div></div>
     ${un.length ? `<div class="callout"><b>Incomplete picture.</b>&nbsp;Unavailable sources: ${un.map(u => esc(u.source)).join(', ')}. Conclusions below exclude them.</div>` : ''}
@@ -158,7 +158,7 @@ async function CaseDetail(id) {
           (intel.insights || []).map(i => `<div class="list-row" style="align-items:flex-start">${chip(i.severity)}<div class="grow small">${esc(i.title)}</div></div>`).join('')) : ''}
         ${card('Entities', v.entities.map(e => `<div class="list-row"><span class="tag">${esc(e.kind)}</span><div class="grow"><div class="t-title">${['asset', 'identity'].includes(e.kind) ? entLink(e.id, e.name) : esc(e.name)}</div>
           <div class="t-sub">${esc(e.role)} · seen by ${esc(e.seen_by.join(', ') || '–')}</div></div></div>`).join('') || empty('No entities'))}
-        ${can('investigate') ? card('Analyst decision', `<div class="stack" style="gap:10px"><select id="dv">${['true_positive', 'malicious', 'suspicious', 'false_positive', 'benign'].map(o => `<option value="${o}">${cap(o)}</option>`).join('')}</select>
+        ${can('investigate') ? card('Analyst decision', `<div class="stack" style="gap:10px"><select id="dv" aria-label="Analyst verdict">${['true_positive', 'malicious', 'suspicious', 'false_positive', 'benign'].map(o => `<option value="${o}">${cap(o)}</option>`).join('')}</select>
           <textarea id="dr" rows="3" placeholder="Reasoning (used as feedback for tuning)"></textarea>${btn('Record decision', 'decide', [id], 'primary')}</div>
           ${v.dispositions.map(d => `<div class="list-row small"><span class="grow">${esc(d.analyst)}: <b>${esc(cap(d.verdict))}</b> - ${esc(d.reasoning)}</span><span class="muted">${dt(d.at)}</span></div>`).join('')}`) : ''}
         ${card('Timeline', v.timeline.slice(-30).reverse().map(t => `<div class="tl-row"><div class="tl-meta"><span class="mono muted">${dt(t.ts)}</span><span class="tag">${esc(t.tool || '')}</span></div><div class="tl-title">${esc(t.title)}</div></div>`).join('') || empty('No events'))}
@@ -230,7 +230,7 @@ async function Phishing() {
     <div class="grid g-3 mt">
       ${card('Verdict mix', donut(m.verdict_mix, {malicious: 'var(--c-critical)', suspicious: 'var(--c-high)', spam: 'var(--c-medium)', safe: 'var(--c-low)'}))}
       ${card('Users who clicked', clickers.map(([u, n]) => `<div class="list-row"><span class="grow">${esc(u)}</span>${n >= 2 ? chip('repeat', 'plain') : ''}<span class="score">${n}</span></div>`).join('') || empty('No clicks recorded'))}
-      ${can('investigate') ? card('Analyse a message', `<div class="stack" style="gap:10px"><input type="file" id="eml" accept=".eml,message/rfc822" class="input" style="padding:5px">
+      ${can('investigate') ? card('Analyse a message', `<div class="stack" style="gap:10px"><input type="file" id="eml" aria-label="Email file to analyse (.eml)" accept=".eml,message/rfc822" class="input" style="padding:5px">
         ${btn('Analyse', 'upload', [], 'primary')}<div class="small muted">The original is stored encrypted; the verdict, evidence and recommended actions open as a case.</div></div>`) : ''}
     </div>`));
 }
@@ -550,7 +550,7 @@ async function Story(id) {
     : `<div id="deep">${da ? deepHtml(da, evById) : `<p class="small muted" style="margin-top:0">A principal-responder review of this story by <b>${esc(llmSt.provider)}</b>. Only the evidence above is sent (internal identities pseudonymised); every statement must cite it or it is removed.</p>`}</div>
        ${can('investigate') ? `<div class="inline mt">${btn(da ? 'Re-run deep analysis' : 'Run deep analysis', 'runDeep', [id, !!da], 'primary', 'intel')}</div>` : ''}`;
   setMainG(__g, `<div class="page-head"><div>
-      <div class="inline" style="margin-bottom:8px"><a href="#/cases/${encodeURIComponent(id)}" class="small">${icon('back')}</a><span class="verdict ${esc(a.verdict)}">${esc(a.label)}</span>
+      <div class="inline" style="margin-bottom:8px"><a href="#/cases/${encodeURIComponent(id)}" class="small" aria-label="Back to the case" title="Back to the case">${icon('back')}</a><span class="verdict ${esc(a.verdict)}">${esc(a.label)}</span>
         <span class="small muted">${esc(a.confidence)} confidence · ${esc(a.reason)}</span></div>
       <h1>Attack story</h1><p>${esc(st.title)} · reconstructed from ${st.generated_from.length} case(s), ${st.tools.length} tools${st.span_minutes != null ? ` · ${st.span_minutes} min from first to last step` : ''}</p></div></div>
     ${card(null, `<div class="prose" style="font-size:14px">${esc(st.summary)}</div>`)}

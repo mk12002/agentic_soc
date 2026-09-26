@@ -19,7 +19,7 @@ import json
 import random
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.db import Database
@@ -27,7 +27,7 @@ from soc_platform.core.identity import user_ref
 from soc_platform.core.models import Entity, EntityKey, SourceRecord
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
-T0 = datetime(2026, 9, 20, tzinfo=timezone.utc)
+T0 = datetime(2026, 9, 20, tzinfo=UTC)
 FIRST = ["jane", "john", "priya", "arun", "meera", "tom", "li", "sara", "ravi", "anil", "sunita", "rahul", "neha",
          "vikram", "maria", "david", "omar", "fatima", "chen", "yuki"]
 LAST = ["doe", "smith", "nair", "kumar", "shah", "white", "chen", "iyer", "rao", "mehta", "patel", "singh",

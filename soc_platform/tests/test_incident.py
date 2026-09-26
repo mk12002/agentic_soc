@@ -31,7 +31,7 @@ def _jane_case(session, cases):
 
 
 def test_alerts_from_many_tools_cluster_into_one_incident(session, world):
-    reg, svc = world
+    _reg, svc = world
     cases = svc.cluster()
     jane = max(cases, key=lambda c: c.attributes["alert_count"])
     # CrowdStrike + Defender endpoint alerts, Entra risk, Canary deception all involve Jane / her laptop
@@ -43,7 +43,7 @@ def test_alerts_from_many_tools_cluster_into_one_incident(session, world):
 
 
 def test_investigation_builds_consolidated_context(session, world):
-    reg, svc = world
+    _reg, svc = world
     jane = max(svc.cluster(), key=lambda c: c.attributes["alert_count"])
     view = svc.investigate(jane.id)
     dims = set(view["evidence"])
@@ -58,7 +58,7 @@ def test_investigation_builds_consolidated_context(session, world):
 
 
 def test_recommendations_are_ranked_gated_and_well_formed(session, world):
-    reg, svc = world
+    _reg, svc = world
     jane = max(svc.cluster(), key=lambda c: c.attributes["alert_count"])
     view = svc.investigate(jane.id)
     acts = {a["action_type"]: a for a in view["actions"]}
@@ -75,7 +75,7 @@ def test_recommendations_are_ranked_gated_and_well_formed(session, world):
 
 
 def test_lead_approves_isolation_and_it_reaches_the_edr(session, world, lead):
-    reg, svc = world
+    _reg, svc = world
     jane = max(svc.cluster(), key=lambda c: c.attributes["alert_count"])
     view = svc.investigate(jane.id)
     iso = next(a for a in view["actions"] if a["action_type"] == "endpoint.isolate")
@@ -84,7 +84,7 @@ def test_lead_approves_isolation_and_it_reaches_the_edr(session, world, lead):
 
 
 def test_disposition_similar_incidents_handover_and_quality(session, world, analyst):
-    reg, svc = world
+    _reg, svc = world
     cases = svc.cluster()
     for c in cases:
         svc.investigate(c.id)
@@ -101,7 +101,7 @@ def test_disposition_similar_incidents_handover_and_quality(session, world, anal
 
 
 def test_noisy_detection_is_suppressed(session, world, analyst):
-    reg, svc = world
+    _reg, svc = world
     from soc_platform.core.models import Disposition
 
     for i in range(3):

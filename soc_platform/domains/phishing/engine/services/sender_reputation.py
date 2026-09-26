@@ -6,8 +6,10 @@ verdicts, analyst feedback, and sending patterns.
 """
 
 from __future__ import annotations
-from datetime import datetime, timezone
-from typing import Any, Optional
+
+from datetime import UTC, datetime
+from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("sender_reputation")
@@ -57,7 +59,7 @@ class SenderReputationEngine:
         """Update sender reputation after an analysis."""
         sender_email = sender_email.lower().strip()
         sender_domain = sender_email.split("@")[-1] if "@" in sender_email else sender_email
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             with self._connect() as conn:
@@ -105,35 +107,34 @@ class SenderReputationEngine:
         """Get reputation for a sender email address."""
         sender_email = sender_email.lower().strip()
         try:
-            with self._connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("""
                         SELECT sender_email, sender_domain, total_emails, safe_count,
                                suspicious_count, malicious_count, false_positive_count,
                                true_positive_count, reputation_score, first_seen, last_seen,
                                last_verdict, is_allowlisted, is_blocklisted
                         FROM sender_reputation WHERE sender_email = %s
                     """, (sender_email,))
-                    row = cur.fetchone()
-                    if not row:
-                        return {
-                            "sender_email": sender_email, "status": "unknown",
-                            "reputation_score": 0.5, "total_emails": 0,
-                            "risk_level": "neutral",
-                        }
+                row = cur.fetchone()
+                if not row:
                     return {
-                        "sender_email": row[0], "sender_domain": row[1],
-                        "total_emails": row[2], "safe_count": row[3],
-                        "suspicious_count": row[4], "malicious_count": row[5],
-                        "false_positive_count": row[6], "true_positive_count": row[7],
-                        "reputation_score": round(row[8], 4),
-                        "first_seen": row[9].isoformat() if row[9] else None,
-                        "last_seen": row[10].isoformat() if row[10] else None,
-                        "last_verdict": row[11],
-                        "is_allowlisted": row[12], "is_blocklisted": row[13],
-                        "risk_level": _score_to_risk(row[8]),
-                        "status": "known",
+                        "sender_email": sender_email, "status": "unknown",
+                        "reputation_score": 0.5, "total_emails": 0,
+                        "risk_level": "neutral",
                     }
+                return {
+                    "sender_email": row[0], "sender_domain": row[1],
+                    "total_emails": row[2], "safe_count": row[3],
+                    "suspicious_count": row[4], "malicious_count": row[5],
+                    "false_positive_count": row[6], "true_positive_count": row[7],
+                    "reputation_score": round(row[8], 4),
+                    "first_seen": row[9].isoformat() if row[9] else None,
+                    "last_seen": row[10].isoformat() if row[10] else None,
+                    "last_verdict": row[11],
+                    "is_allowlisted": row[12], "is_blocklisted": row[13],
+                    "risk_level": _score_to_risk(row[8]),
+                    "status": "known",
+                }
         except Exception as e:
             logger.warning("Failed to get sender reputation", error=str(e))
             return {"sender_email": sender_email, "reputation_score": 0.5, "error": str(e)}
@@ -165,7 +166,7 @@ def _score_to_risk(score: float) -> str:
     return "malicious"
 
 
-_engine: Optional[SenderReputationEngine] = None
+_engine: SenderReputationEngine | None = None
 
 def get_sender_reputation_engine() -> SenderReputationEngine:
     global _engine

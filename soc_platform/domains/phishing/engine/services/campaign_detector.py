@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
@@ -169,8 +169,8 @@ class CampaignDetector:
                         "sender_domain": sender_domain,
                         "subject_fingerprint": fingerprint,
                         "count": count,
-                        "first_seen": datetime.fromtimestamp(min(timestamps), tz=timezone.utc).isoformat(),
-                        "last_seen": datetime.fromtimestamp(max(timestamps), tz=timezone.utc).isoformat(),
+                        "first_seen": datetime.fromtimestamp(min(timestamps), tz=UTC).isoformat(),
+                        "last_seen": datetime.fromtimestamp(max(timestamps), tz=UTC).isoformat(),
                         "analysis_ids": analysis_ids[:20],
                     }
                 )

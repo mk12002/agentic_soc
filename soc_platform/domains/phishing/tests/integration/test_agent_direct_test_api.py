@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 from soc_platform.domains.phishing.engine.api import main as api_main
 
 
-
 def test_list_testable_agents() -> None:
     client = TestClient(api_main.app)
     resp = client.get("/agent-test/agents")

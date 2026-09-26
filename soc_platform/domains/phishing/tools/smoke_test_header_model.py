@@ -10,15 +10,16 @@ Usage:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.agents.header_agent.agent import analyze
 from soc_platform.domains.phishing.engine.agents.header_agent.feature_extractor import extract_features
 from soc_platform.domains.phishing.engine.agents.header_agent.model_loader import load_model
@@ -237,7 +238,7 @@ def _risk_label(score: float) -> str:
 
 
 def main() -> None:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     report_dir = REPO_ROOT / "analysis_reports" / f"header_smoke_test_{stamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
 

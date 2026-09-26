@@ -193,7 +193,7 @@ class FixtureTransport:
         self.calls: list[dict[str, Any]] = []
 
     @classmethod
-    def from_file(cls, path: str | Path, tool: str = "") -> "FixtureTransport":
+    def from_file(cls, path: str | Path, tool: str = "") -> FixtureTransport:
         p = Path(path)
         routes = json.loads(p.read_text(encoding="utf-8")).get("routes", []) if p.exists() else []
         return cls(routes, tool)
@@ -238,7 +238,7 @@ def _params_match(expected: dict[str, Any] | None, actual: dict[str, Any] | None
             if actual.get(k) in (None, ""):
                 return False
         elif isinstance(v, str) and v.startswith("~"):
-            if not re.search(v[1:], str(actual.get(k) or ""), re.I):
+            if not re.search(v[1:], str(actual.get(k) or ""), re.IGNORECASE):
                 return False
         elif v == "!":
             if k in actual:

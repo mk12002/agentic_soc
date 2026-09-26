@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import JSON, Float, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from soc_platform.core.db import Base, UTCDateTime
+from soc_platform.core.db import Base, BoundedText, UTCDateTime
 from soc_platform.core.models import new_id, utcnow
 
 
@@ -18,7 +18,7 @@ class Insight(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     rule: Mapped[str] = mapped_column(String(64), index=True)
     dedupe_key: Mapped[str] = mapped_column(String(256), unique=True)
-    title: Mapped[str] = mapped_column(String(512))
+    title: Mapped[str] = mapped_column(BoundedText(512))
     severity: Mapped[str] = mapped_column(String(16), index=True)
     score: Mapped[float] = mapped_column(Float, default=0.0)
     entity_ids: Mapped[list[str]] = mapped_column(JSON, default=list)

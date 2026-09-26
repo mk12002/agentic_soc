@@ -131,7 +131,7 @@ def test_phishing_explanation_written_by_llm_and_redacted(estate):
 def test_analyst_answers_with_llm(estate):
     from soc_platform.intelligence.analyst import IntelligenceService
 
-    s, reg, gw, _ = estate
+    s, _reg, gw, _ = estate
     r = IntelligenceService(s, gw).analyst.ask("What happened to jane.doe@acme-demo.com and what should we do first?")
     assert r["tool_calls"] and r["answer"]
     assert r.get("source") == "llm" and r["claims"]

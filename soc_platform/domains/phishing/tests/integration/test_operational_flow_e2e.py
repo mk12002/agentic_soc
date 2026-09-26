@@ -10,7 +10,7 @@ Covers:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar, Self
 
 from fastapi.testclient import TestClient
 
@@ -23,7 +23,7 @@ from soc_platform.domains.phishing.engine.orchestrator.runner import EXPECTED_AG
 
 
 class _FakeRabbitMQClient:
-    published_events: list[dict[str, Any]] = []
+    published_events: ClassVar[list[dict[str, Any]]] = []
 
     def connect(self) -> None:
         return None
@@ -53,14 +53,14 @@ class _FakeRedis:
     def delete(self, key: str) -> None:
         self.store.pop(key, None)
 
-    def publish(self, channel: str, message: str) -> None:  # noqa: ARG002
+    def publish(self, channel: str, message: str) -> None:
         pass
 
     # Pipeline / transactional stubs (used by _merge_results WATCH/MULTI/EXEC)
-    def pipeline(self) -> "_FakeRedis":
+    def pipeline(self) -> _FakeRedis:
         return self
 
-    def watch(self, *keys: str) -> None:  # noqa: ARG002
+    def watch(self, *keys: str) -> None:
         pass
 
     def multi(self) -> None:
@@ -69,10 +69,10 @@ class _FakeRedis:
     def execute(self) -> list[Any]:
         return [True]
 
-    def __enter__(self) -> "_FakeRedis":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         pass
 
 
@@ -92,7 +92,7 @@ class _FakeCursor:
             return None
         return (report,)
 
-    def __enter__(self) -> "_FakeCursor":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
@@ -106,7 +106,7 @@ class _FakeConnection:
     def cursor(self) -> _FakeCursor:
         return _FakeCursor(self.report_store)
 
-    def __enter__(self) -> "_FakeConnection":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
@@ -144,7 +144,7 @@ def test_operational_flow_ingest_finalize_actions_and_report_poll(monkeypatch) -
     monkeypatch.setattr(response_engine.response_engine, "simulated_mode", True)
     # Stub Garuda bridge to avoid real RabbitMQ / network calls in test environment
     # Must patch both the bridge module AND the workflow module (imported with 'from X import Y')
-    _garuda_stub = lambda decision: {"status": "stubbed", "response": {}}  # noqa: E731
+    _garuda_stub = lambda decision: {"status": "stubbed", "response": {}}
     monkeypatch.setattr(_garuda_bridge, "trigger_garuda_investigation", _garuda_stub)
     monkeypatch.setattr(_langgraph_wf, "trigger_garuda_investigation", _garuda_stub)
 

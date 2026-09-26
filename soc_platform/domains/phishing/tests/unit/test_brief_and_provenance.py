@@ -4,10 +4,9 @@ including their integration into the orchestrator reason node."""
 from __future__ import annotations
 
 from soc_platform.domains.phishing.engine.orchestrator.evidence_collector import collect_evidence
+from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
 from soc_platform.domains.phishing.engine.orchestrator.llm_reasoner import generate_structured_brief
 from soc_platform.domains.phishing.engine.orchestrator.provenance_chain import build_provenance_chain
-from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
-
 
 AGENT_RESULTS = [
     {
@@ -59,7 +58,6 @@ def test_brief_flags_weak_corroboration() -> None:
 
 
 def test_provenance_chain_is_ordered_and_terminates_in_verdict() -> None:
-    evidence = collect_evidence(AGENT_RESULTS)  # noqa: F841 (kept for parity)
     score_data = {
         "agent_contributions": {
             "header_agent": {"risk_score": 0.85, "weight": 0.15, "contribution": 0.1275},

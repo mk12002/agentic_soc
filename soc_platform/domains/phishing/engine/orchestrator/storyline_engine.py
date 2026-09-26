@@ -3,8 +3,8 @@ Threat Storyline Engine for translating disconnected agent indicators into
 a chronological narrative (Delivery -> Lure -> Weaponization -> Result).
 """
 
-from typing import Any
 import json
+from typing import Any
 
 from openai import AzureOpenAI
 
@@ -39,7 +39,10 @@ def _mitre_mapping_for_indicator(agent_name: str, indicator: str, phase: str) ->
     granular technique resolution, falling back to phase-based defaults.
     """
     try:
-        from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import map_indicator_to_techniques, format_attack_label
+        from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import (
+            format_attack_label,
+            map_indicator_to_techniques,
+        )
         matches = map_indicator_to_techniques(
             agent_name=agent_name,
             indicator=indicator,
@@ -51,7 +54,7 @@ def _mitre_mapping_for_indicator(agent_name: str, indicator: str, phase: str) ->
             best = max(matches, key=lambda m: m.confidence)
             return format_attack_label(best.technique.technique_id)
     except Exception:
-        pass
+        logger.opt(exception=True).debug("ATT&CK technique lookup failed for a storyline step")
 
     # Fallback: basic phase-based defaults
     text = indicator.lower()

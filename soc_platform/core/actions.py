@@ -257,7 +257,7 @@ class ActionService:
         try:
             result = spec.execute(req.params, req.targets) or {}
             status = "executed"
-        except Exception as exc:  # recorded, never swallowed silently
+        except Exception as exc:  # noqa: BLE001 - recorded on the action as 'failed', never swallowed
             result = {"error": f"{type(exc).__name__}: {exc}"}
             status = "failed"
         self.s.execute(
@@ -277,7 +277,7 @@ class ActionService:
             raise KeyError(f"unknown action request {request_id}")
         return req
 
-    PER_CASE_ACTIONS = {"ticket.create", "ticket.update", "notify.email", "email.reporter_feedback"}
+    PER_CASE_ACTIONS = frozenset({"ticket.create", "ticket.update", "notify.email", "email.reporter_feedback"})
 
     def _open_for_same_targets(self, action_type: str, targets: list[dict[str, Any]],
                                case_id: str | None) -> ActionRequest | None:
@@ -297,7 +297,7 @@ class ActionService:
         return self.s.execute(select(ActionRequest).where(ActionRequest.idempotency_key == key)).scalars().first()
 
 
-__all__ = ["ActionSpec", "ActionRegistry", "ActionService", "PolicyDecision", "idempotency_key"]
+__all__ = ["ActionRegistry", "ActionService", "ActionSpec", "PolicyDecision", "idempotency_key"]
 
 
 _STRONG_TARGET_KEYS = ("crowdstrike_aid", "mde_device_id", "entra_object_id", "upn", "network_message_id", "wiz_id")

@@ -7,11 +7,10 @@ and triggers Garuda/action layer for high-risk cases.
 
 from __future__ import annotations
 
-
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import redis
@@ -135,7 +134,7 @@ class OrchestratorWorker:
                     """,
                     (
                         analysis_id,
-                        datetime.now(timezone.utc),
+                        datetime.now(UTC),
                         float(decision.get("overall_risk_score", 0.0)),
                         decision.get("verdict", "unknown"),
                         decision.get("llm_explanation", ""),
@@ -186,10 +185,10 @@ class OrchestratorWorker:
             return
 
         if isinstance(decoded, dict):
-            first_seen_ts = float(decoded.get("first_seen_ts", datetime.now(timezone.utc).timestamp()))
+            first_seen_ts = float(decoded.get("first_seen_ts", datetime.now(UTC).timestamp()))
             merged = decoded.get("results", []) or []
         elif isinstance(decoded, list):
-            first_seen_ts = datetime.now(timezone.utc).timestamp()
+            first_seen_ts = datetime.now(UTC).timestamp()
             merged = decoded
         else:
             return
@@ -214,18 +213,17 @@ class OrchestratorWorker:
         self._finalize_analysis(analysis_id, merged, reason)
 
     def _report_exists(self, analysis_id: str) -> bool:
-        with self._pg_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
+        with self._pg_conn() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """
                     SELECT 1
                     FROM threat_reports
                     WHERE analysis_id = %s
                     LIMIT 1
                     """,
-                    (analysis_id,),
-                )
-                return cursor.fetchone() is not None
+                (analysis_id,),
+            )
+            return cursor.fetchone() is not None
 
     def _finalize_analysis(self, analysis_id: str, merged: list[dict[str, Any]], reason: str) -> None:
         received_agents = sorted(
@@ -344,7 +342,7 @@ class OrchestratorWorker:
 
                     # --- Read current state under WATCH ---
                     current = pipe.get(key)
-                    first_seen_ts = datetime.now(timezone.utc).timestamp()
+                    first_seen_ts = datetime.now(UTC).timestamp()
                     items: list[dict[str, Any]] = []
 
                     if current:
@@ -385,7 +383,7 @@ class OrchestratorWorker:
 
         # Fallback (should rarely reach here)
         current = self.redis_client.get(key)
-        first_seen_ts = datetime.now(timezone.utc).timestamp()
+        first_seen_ts = datetime.now(UTC).timestamp()
         items = []
         if current:
             decoded = json.loads(current)
@@ -409,7 +407,7 @@ class OrchestratorWorker:
         if self._is_complete(agent_results):
             return True, "complete"
 
-        elapsed = datetime.now(timezone.utc).timestamp() - first_seen_ts
+        elapsed = datetime.now(UTC).timestamp() - first_seen_ts
         if (
             elapsed >= settings.orchestrator_partial_timeout_seconds
             and len(agent_results) >= settings.orchestrator_min_agents_for_decision

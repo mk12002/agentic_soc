@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+
 from soc_platform.domains.phishing.engine.preprocessing.feature_pipeline import (
     URL_FEATURE_COLUMNS,
     extract_url_lexical_features,
     normalize_url,
 )
-
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 
 logger = get_agent_logger("url_agent")

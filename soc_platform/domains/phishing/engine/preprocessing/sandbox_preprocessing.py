@@ -1,9 +1,9 @@
 """Sandbox behavior preprocessing for sequence and dynamic-report datasets."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
+import logging
 import math
 import os
 import re
@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 try:
     from .sandbox_feature_contract import (
@@ -209,7 +210,7 @@ def _windows_api_id_to_bucket(call_id: int) -> str:
                     else:
                         _API_ID_TO_BUCKET[api_id] = "unknown"
             except Exception:
-                pass
+                logging.getLogger(__name__).warning("API-id bucket map could not be loaded", exc_info=True)
     return _API_ID_TO_BUCKET.get(call_id, "unknown")
 
 
@@ -311,6 +312,7 @@ def _load_generic_api_sequences(base_dir: Path) -> list[dict[str, object]]:
                     )
                     rows.append(normalized)
         except Exception:
+            logging.getLogger(__name__).warning("skipping an unreadable API-sequence file", exc_info=True)
             continue
 
     return rows
@@ -326,6 +328,7 @@ def _load_cuckoo_reports(base_dir: Path) -> list[dict[str, object]]:
         try:
             report = json.loads(file_path.read_text(encoding="utf-8", errors="ignore"))
         except Exception:
+            logging.getLogger(__name__).warning("skipping an unreadable sandbox report", exc_info=True)
             continue
 
         if not isinstance(report, dict):
@@ -664,7 +667,7 @@ def run(base_dir: str = "datasets", output_dir: str = "datasets_processed") -> s
                     _, va = train_test_split(source_idx, test_size=0.2, random_state=42)
                 val_indices.extend(va)
             except Exception:
-                pass
+                logging.getLogger(__name__).warning("stratified validation split failed for a source", exc_info=True)
 
     frame.loc[val_indices, "split"] = "val"
     frame["sample_weight"] = frame["source"].map(weights)

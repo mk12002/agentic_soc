@@ -2,18 +2,19 @@
 """Validate end-to-end consistency of sandbox data, model artifacts, and production feature schema."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import joblib
 import pandas as pd
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.preprocessing.sandbox_feature_contract import (
     SANDBOX_FEATURE_VERSION,
     SANDBOX_NUMERIC_FEATURE_COLUMNS,
@@ -142,7 +143,7 @@ def run_validation() -> dict[str, Any]:
 
     failures = [item for item in checks if item["status"] == "fail"]
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "summary": {
             "total_checks": len(checks),
             "passed": len(checks) - len(failures),
@@ -155,7 +156,7 @@ def run_validation() -> dict[str, Any]:
 
 def main() -> int:
     report = run_validation()
-    out_dir = REPO_ROOT / "analysis_reports" / f"sandbox_consistency_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    out_dir = REPO_ROOT / "analysis_reports" / f"sandbox_consistency_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "consistency_report.json"
     out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")

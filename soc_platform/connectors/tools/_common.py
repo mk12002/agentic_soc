@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from soc_platform.connectors.base import BaseConnector, LookupResult
 from soc_platform.connectors.http import Response, Transport
@@ -17,7 +18,7 @@ def parse_ts(v: Any) -> datetime | None:
     if v in (None, ""):
         return None
     if isinstance(v, (int, float)):
-        return datetime.fromtimestamp(v / 1000 if v > 1e11 else v, tz=timezone.utc)
+        return datetime.fromtimestamp(v / 1000 if v > 1e11 else v, tz=UTC)
     s = str(v).strip().replace("Z", "+00:00")
     if "." in s:  # trim >6 fractional digits (Graph returns 7)
         head, _, rest = s.partition(".")
@@ -29,16 +30,16 @@ def parse_ts(v: Any) -> datetime | None:
     except ValueError:
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
             try:
-                dt = datetime.strptime(s[:19], fmt)
+                dt = datetime.strptime(s[:19], fmt).replace(tzinfo=UTC)     # vendor times without offset are UTC
                 break
             except ValueError:
                 continue
         else:
             return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def sev_from_score(score: float | int | None, scale: float = 10.0) -> str:
+def sev_from_score(score: float | None, scale: float = 10.0) -> str:
     if score is None:
         return "informational"
     x = float(score) / scale * 10.0
@@ -99,7 +100,7 @@ class ToolConnector(BaseConnector):
             page = self.fetch_page(stream, None)
             return out | {"ok": True, "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                           "sample_records": len(page.records), "more": page.more}
-        except Exception as exc:  # noqa: BLE001 - reported, never raised
+        except Exception as exc:
             return out | {"ok": False, "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                           "error": f"{type(exc).__name__}: {_redact(str(exc))[:300]}"}
 

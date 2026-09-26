@@ -164,3 +164,48 @@ def test_health_reports_a_stopped_scheduler(client):
     with dbm.get_database().session() as s:
         s.add(JobRun(job="intelligence", trigger="schedule", status="ok", attempts=1, ordinal=2, started_at=utcnow(), finished_at=utcnow()))
     assert client.get("/health").json()["scheduler"]["state"] == "running"
+
+
+def test_input_postgresql_would_reject_never_crashes_a_request(client, seeded):
+    """PostgreSQL (production) rejects NUL characters and over-long text where SQLite (dev) is lax."""
+    lead = tok(client, "lena@acme-demo.com", "lead")
+    for url in ("/api/v1/cases/%00", "/api/v1/entities/a%00b/360", "/api/v1/cases?domain=%00"):
+        assert client.get(url, headers=lead).status_code == 400, url
+    # a job run by someone with a long address (the run records "manual:<address>")
+    long_user = "a.very.long.firstname.and.surname.for.testing@subsidiary.acme-demo.com"
+    ops = tok(client, long_user, "automation_admin")
+    assert client.post("/api/v1/jobs/follow_up/run", headers=ops).status_code == 200
+    assert any(long_user in str(r.get("trigger")) for r in client.get("/api/v1/jobs", headers=ops).json()["runs"])
+    # a reported email with an absurd subject and a NUL in it is analysed, not crashed; the subject is kept to width
+    raw = (b"From: Someone <someone@example.net>\r\nTo: jane.doe@acme-demo.com\r\nSubject: " + b"Invoice " * 400
+           + b"\x00tail\r\nMessage-ID: <long-subject@example.net>\r\nContent-Type: text/plain\r\n\r\nPlease see attached.\r\n")
+    r = client.post("/api/v1/phishing/submit", headers=lead, files={"file": ("long.eml", raw)})
+    assert r.status_code == 200, r.text[:300]
+    cid = r.json().get("id") or r.json()["case"]["id"]
+    case = client.get(f"/api/v1/cases/{cid}", headers=lead).json()
+    case = case.get("case", case)
+    assert "\x00" not in case["title"] + (case.get("summary") or "") and len(case["title"]) <= 512
+
+
+def test_bounded_text_keeps_values_to_width_and_free_of_nul():
+    from soc_platform.core.db import BoundedText
+
+    t = BoundedText(10)
+    assert t.process_bind_param("short", None) == "short"
+    assert t.process_bind_param("x" * 25, None) == "x" * 9 + "\u2026"
+    assert t.process_bind_param("a\x00b", None) == "ab" and t.process_bind_param(None, None) is None
+
+
+@pytest.mark.skipif(not __import__("os").environ.get("SOC_TEST_POSTGRES"), reason="PostgreSQL only (SOC_TEST_POSTGRES)")
+def test_start_up_widens_columns_an_older_schema_left_narrow():
+    from sqlalchemy import inspect, text
+
+    from soc_platform.core.db import Database
+
+    db = Database("sqlite://")                                   # a fresh PostgreSQL database in this mode
+    db.create_all()
+    with db.engine.begin() as c:
+        c.execute(text('ALTER TABLE job_runs ALTER COLUMN "trigger" TYPE VARCHAR(32)'))   # as an older release made it
+    db.create_all()
+    width = {c["name"]: getattr(c["type"], "length", None) for c in inspect(db.engine).get_columns("job_runs")}["trigger"]
+    assert width == 320

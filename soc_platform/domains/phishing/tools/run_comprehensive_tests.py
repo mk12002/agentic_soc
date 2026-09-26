@@ -1,13 +1,14 @@
 import json
-from soc_platform.domains.phishing.engine.agents.header_agent import analyze as header_analyze
-from soc_platform.domains.phishing.engine.agents.content_agent import analyze as content_analyze
-from soc_platform.domains.phishing.engine.agents.url_agent import analyze as url_analyze
+import warnings
+
 from soc_platform.domains.phishing.engine.agents.attachment_agent import analyze as attachment_analyze
+from soc_platform.domains.phishing.engine.agents.content_agent import analyze as content_analyze
+from soc_platform.domains.phishing.engine.agents.header_agent import analyze as header_analyze
 from soc_platform.domains.phishing.engine.agents.sandbox_agent import analyze as sandbox_analyze
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent import analyze as threat_intel_analyze
+from soc_platform.domains.phishing.engine.agents.url_agent import analyze as url_analyze
 from soc_platform.domains.phishing.engine.agents.user_behavior_agent.agent import analyze as user_behavior_analyze
 
-import warnings
 warnings.filterwarnings("ignore")
 
 agents = {

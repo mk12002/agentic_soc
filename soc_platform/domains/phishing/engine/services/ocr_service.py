@@ -110,7 +110,6 @@ def extract_text_from_file(file_path: Path) -> dict[str, Any]:
             from azure.ai.vision.imageanalysis import ImageAnalysisClient
             from azure.ai.vision.imageanalysis.models import VisualFeatures
             from azure.core.credentials import AzureKeyCredential
-            from azure.core.exceptions import AzureError
             
             raw_bytes = file_path.read_bytes()
             

@@ -1,14 +1,14 @@
 """Feature extraction for user interaction prediction models."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
-from typing import Any
 import sqlite3
 from pathlib import Path
+from typing import Any
 
-from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 from soc_platform.domains.phishing.engine.preprocessing.user_behavior_feature_contract import extract_behavior_features
+from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 
 logger = get_agent_logger("user_behavior_agent")
 
@@ -75,6 +75,6 @@ def extract_features(data: dict[str, Any]) -> dict[str, Any]:
         features = extract_behavior_features(data, cursor)
         return features
     except Exception as e:
-        logger.error("Failed to extract behavior features: {}", e)
+        logger.error(f"Failed to extract behavior features: {e}")
         # Fallback empty structure
         return {"numeric_vector": None, "context": {}}

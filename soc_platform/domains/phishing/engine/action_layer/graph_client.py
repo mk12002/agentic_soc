@@ -9,8 +9,9 @@ Provides Graph-backed email remediation actions including:
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
@@ -80,7 +81,7 @@ class GraphActionBot:
         self.graph_endpoint = "https://graph.microsoft.com/v1.0"
 
         # Defer MSAL app initialization to first use
-        self.app: Optional[Any] = None
+        self.app: Any | None = None
         self._app_initialized = False
         
         if self.tenant_id and self.client_id and self.client_secret:
@@ -375,36 +376,35 @@ class GraphActionBot:
                 detail="Graph client not configured",
             )
 
-        # Construct warning banner HTML
-        banner_html = self._construct_warning_banner(severity)
-
-        # Prepend banner to message body
-        status_code, resp_json = self._graph_request(
-            "PATCH",
-            f"/users/{user_principal_name}/messages/{graph_message_id}",
-            json_data={
-                "bodyPreview": f"[{severity} Risk] See below.",
-                # Note: Direct body HTML modification may require different approach
-                # depending on Graph permissions and message format
-            },
-        )
-
-        ok = status_code == 200
-        detail = None if ok else f"Graph returned {status_code}"
+        # Graph lets a message body be edited only while the message is a draft. A delivered message is marked the
+        # way Graph allows - a visible Outlook category - and the result says which of the two happened.
+        path = f"/users/{user_principal_name}/messages/{graph_message_id}"
+        status_code, msg = self._graph_request("GET", path, params={"$select": "isDraft,body,categories"})
+        if status_code != 200 or not isinstance(msg, dict):
+            ok, detail = False, f"could not read the message (Graph returned {status_code})"
+        elif msg.get("isDraft"):
+            body = msg.get("body") or {}
+            content = body.get("content") or ""
+            if (body.get("contentType") or "").lower() != "html":
+                content = "<pre>" + html.escape(content) + "</pre>"
+            status_code, _ = self._graph_request(
+                "PATCH", path,
+                json_data={"body": {"contentType": "HTML", "content": self._construct_warning_banner(severity) + content}})
+            ok = status_code == 200
+            detail = "banner prepended to the draft body" if ok else f"Graph returned {status_code}"
+        else:
+            label = f"Security warning: {severity} risk"
+            categories = [c for c in (msg.get("categories") or []) if c != label] + [label]
+            status_code, _ = self._graph_request("PATCH", path, json_data={"categories": categories})
+            ok = status_code == 200
+            detail = (f"delivered message tagged '{label}' (Graph does not allow editing a delivered message's body)"
+                      if ok else f"Graph returned {status_code}")
 
         if ok:
-            logger.info(
-                "Warning banner applied",
-                user=user_principal_name,
-                severity=severity,
-            )
+            logger.info("Warning applied", user=user_principal_name, severity=severity, detail=detail)
         else:
-            logger.warning(
-                "Banner application failed",
-                user=user_principal_name,
-                status_code=status_code,
-                severity=severity,
-            )
+            logger.warning("Warning could not be applied", user=user_principal_name, status_code=status_code,
+                           severity=severity, detail=detail)
 
         return GraphActionResult(
             ok=ok,
@@ -435,7 +435,7 @@ class GraphActionBot:
                 detail="Graph client not configured",
             )
 
-        status_code, resp_json = self._graph_request(
+        status_code, _resp_json = self._graph_request(
             "PATCH",
             f"/users/{user_principal_name}/messages/{graph_message_id}",
             json_data={"categories": categories},
@@ -496,7 +496,7 @@ class GraphActionBot:
 
 
 # Convenience function for use in action layer
-_GRAPH_CLIENT: Optional[GraphActionBot] = None
+_GRAPH_CLIENT: GraphActionBot | None = None
 
 
 def get_graph_client() -> GraphActionBot:

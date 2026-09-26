@@ -2,6 +2,7 @@
 
 from soc_platform.domains.phishing.engine.action_layer.graph_client import GraphActionBot, GraphActionResult
 
+
 class MockGraphActionBot(GraphActionBot):
     def __init__(self):
         super().__init__()
@@ -37,11 +38,36 @@ def test_graph_quarantine_email():
     assert res.action == "quarantine"
     assert res.graph_message_id == "graph_msg_123"
 
-def test_graph_apply_warning_banner():
-    bot = MockGraphActionBot()
+class _MessageGraph(GraphActionBot):
+    """Records requests; answers the message read with the given draft state and body."""
+
+    def __init__(self, is_draft):
+        super().__init__()
+        self.tenant_id, self.client_id, self.client_secret = "t", "c", "s"
+        self.is_draft, self.calls = is_draft, []
+
+    def _graph_request(self, method, endpoint, json_data=None, params=None):
+        self.calls.append((method, endpoint, json_data))
+        if method == "GET":
+            return 200, {"isDraft": self.is_draft, "categories": ["Finance"],
+                         "body": {"contentType": "text", "content": "Pay <now>"}}
+        return 200, {}
+
+
+def test_graph_apply_warning_banner_on_a_delivered_message_tags_it():
+    bot = _MessageGraph(is_draft=False)
     res = bot.apply_warning_banner("user@test.com", "graph_msg_123", "High")
-    assert res.ok is True
-    assert res.action == "apply_warning_banner"
+    assert res.ok is True and res.action == "apply_warning_banner" and "tagged" in res.detail
+    method, _, body = bot.calls[-1]
+    assert method == "PATCH" and body == {"categories": ["Finance", "Security warning: High risk"]}
+
+
+def test_graph_apply_warning_banner_on_a_draft_prepends_the_banner():
+    bot = _MessageGraph(is_draft=True)
+    res = bot.apply_warning_banner("user@test.com", "graph_msg_123", "High")
+    assert res.ok is True and "prepended" in res.detail
+    content = bot.calls[-1][2]["body"]["content"]
+    assert "Security Warning: High Risk" in content and "Pay &lt;now&gt;" in content   # original text kept, escaped
 
 def test_graph_add_categories():
     bot = MockGraphActionBot()

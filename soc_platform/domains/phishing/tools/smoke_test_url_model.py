@@ -2,13 +2,14 @@
 """Smoke test for URL model quality and prediction robustness."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import importlib.util
 from pathlib import Path
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 ML_RUNTIME_PATH = REPO_ROOT / "agents" / "ml_runtime.py"
 FEAT_EXTRACTOR_PATH = REPO_ROOT / "agents" / "url_agent" / "feature_extractor.py"
 

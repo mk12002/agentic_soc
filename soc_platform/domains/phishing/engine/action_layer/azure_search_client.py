@@ -13,11 +13,11 @@ This module is optional but significantly enhances threat intel capabilities.
 
 from __future__ import annotations
 
-from typing import Any, Optional
-from datetime import datetime
+import importlib
+from datetime import UTC, datetime
+from typing import Any
 
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
-import importlib
 
 
 # Resolve settings dynamically to respect tests or alternate import paths
@@ -69,7 +69,7 @@ class AzureSearchClient:
         self.api_version = api_version
         self.endpoint = f"https://{search_service}.search.windows.net"
         
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._index_created = False
         self.stats = {
             "queries": 0,
@@ -78,14 +78,14 @@ class AzureSearchClient:
             "semantic_searches": 0,
         }
     
-    def _get_client(self) -> Optional[Any]:
+    def _get_client(self) -> Any | None:
         """Lazy initialize Azure Search client."""
         if self._client is not None:
             return self._client
         
         try:
-            from azure.search.documents import SearchClient
             from azure.core.credentials import AzureKeyCredential
+            from azure.search.documents import SearchClient
             
             credential = AzureKeyCredential(self.api_key)
             self._client = SearchClient(
@@ -114,18 +114,18 @@ class AzureSearchClient:
             return True
         
         try:
+            from azure.core.credentials import AzureKeyCredential
             from azure.search.documents.indexes import SearchIndexClient
             from azure.search.documents.indexes.models import (
-                SearchIndex,
-                SearchFieldDataType,
-                SimpleField,
                 SearchableField,
+                SearchFieldDataType,
+                SearchIndex,
                 SemanticConfiguration,
-                SemanticPrioritizedFields,
                 SemanticField,
+                SemanticPrioritizedFields,
                 SemanticSearch,
+                SimpleField,
             )
-            from azure.core.credentials import AzureKeyCredential
             
             credential = AzureKeyCredential(self.api_key)
             index_client = SearchIndexClient(
@@ -201,11 +201,11 @@ class AzureSearchClient:
                 # Ensure ISO format with Z for DateTimeOffset fields
                 first_seen = ioc.get("first_seen_ts")
                 if isinstance(first_seen, (int, float)):
-                    first_seen = datetime.fromtimestamp(first_seen).isoformat() + "Z"
+                    first_seen = datetime.fromtimestamp(first_seen, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                 
                 last_seen = ioc.get("last_seen_ts")
                 if isinstance(last_seen, (int, float)):
-                    last_seen = datetime.fromtimestamp(last_seen).isoformat() + "Z"
+                    last_seen = datetime.fromtimestamp(last_seen, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
                 doc = {
                     "id": f"{ioc['indicator_type']}:{ioc['indicator']}".replace("/", "_").replace(":", "_"),
@@ -255,7 +255,7 @@ class AzureSearchClient:
     def semantic_search(
         self,
         query: str,
-        indicator_type: Optional[str] = None,
+        indicator_type: str | None = None,
         severity_min: str = "low",
         limit: int = 10,
     ) -> list[dict[str, Any]]:
@@ -284,7 +284,8 @@ class AzureSearchClient:
         try:
             filters = []
             if indicator_type:
-                filters.append(f"indicator_type eq '{indicator_type}'")
+                safe_type = str(indicator_type).replace("'", "''")          # OData string literal escaping
+                filters.append(f"indicator_type eq '{safe_type}'")
             
             severity_levels = {"low": 0, "medium": 1, "high": 2, "critical": 3}
             min_level = severity_levels.get(severity_min.lower(), 0)
@@ -300,6 +301,8 @@ class AzureSearchClient:
             
             results = []
             for result in search_results:
+                if severity_levels.get(str(result.get("severity") or "").lower(), 0) < min_level:
+                    continue                                                      # below the requested minimum
                 results.append({
                     "indicator": result.get("indicator"),
                     "type": result.get("indicator_type"),
@@ -322,7 +325,7 @@ class AzureSearchClient:
     def vector_search(
         self,
         embedding: list[float],
-        indicator_type: Optional[str] = None,
+        indicator_type: str | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """
@@ -356,7 +359,7 @@ class AzureSearchClient:
     def faceted_search(
         self,
         query: str = "*",
-        facets: Optional[list[str]] = None,
+        facets: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Faceted search for threat landscape analysis.
@@ -413,10 +416,10 @@ class AzureSearchClient:
 
 
 # Global Azure Search client instance
-_azure_search_client: Optional[AzureSearchClient] = None
+_azure_search_client: AzureSearchClient | None = None
 
 
-def get_azure_search_client() -> Optional[AzureSearchClient]:
+def get_azure_search_client() -> AzureSearchClient | None:
     """Get or create the global Azure Search client."""
     global _azure_search_client
     

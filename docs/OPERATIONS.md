@@ -67,6 +67,24 @@ plan, suppliers, volumes) with its own tenant connector settings (`fixtures/sett
 with `SOC_FIXTURES_DIR=OUT/fixtures SOC_SUPPLIERS_FILE=OUT/suppliers.yaml SOC_ORG_DOMAINS=<org>`, and the browser tour
 with `SOC_TOUR_ESTATE=OUT/estate.json`.
 
+## Testing on PostgreSQL and across time
+
+- **PostgreSQL (the production engine):** `SOC_TEST_POSTGRES=postgresql://user:pw@host:port/postgres pytest
+  soc_platform/tests` runs the whole suite on PostgreSQL. Each test database becomes a fresh PostgreSQL database.
+  Without a server, `pip install pgserver` gives an embedded one. The normal SQLite run already enforces
+  PostgreSQL's rules: text wider than its column, 32-bit integer overflow and NUL characters fail the test. So bugs
+  that only production would show are caught on every run.
+- **Time travel (tests only):** `SOC_CLOCK_OFFSET_SECONDS` moves the platform clock forward. It is ignored when
+  `SOC_ENVIRONMENT=prod`. `test_time.py` uses it to check:
+  - SLAs falling due, with every screen agreeing at each point in time
+  - the token budget rolling over at the month boundary
+  - retention pruning old mail while keeping mail of open cases
+  - risk decay
+- **Schema upgrades:** on PostgreSQL, start-up widens any text column that the current model defines wider than
+  the existing table. This is always safe and loses no data. Columns are never narrowed or dropped automatically.
+- **Accessibility:** the browser tour runs axe-core (WCAG 2.1 A/AA) on every screen in both themes. Serious and
+  critical findings fail the tour.
+
 ## Platform self-check
 
 `self_check` runs hourly (`SOC_JOB_SELF_CHECK_SECONDS`). It recomputes each shared figure through every code path,

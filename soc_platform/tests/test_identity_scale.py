@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -30,23 +31,23 @@ def _ctx():
 
 
 def _entra(oid, upn, sam=None, aliases=()):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from soc_platform.core.schema import NormalizedRecord
 
     return NormalizedRecord(kind="identity", tool="entra", source_type="user", source_id=oid,
-                            observed_at=datetime.now(timezone.utc),
+                            observed_at=datetime.now(UTC),
                             keys={"entra_object_id": oid, "upn": upn, "email": upn, "sam": sam},
                             attributes={"display_name": upn, "email_aliases": [upn, *aliases]})
 
 
 def _event(tool, ref, i):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from soc_platform.core.schema import NormalizedRecord
 
     return NormalizedRecord(kind="alert", tool=tool, source_type="evt", source_id=f"{tool}-{i}",
-                            observed_at=datetime.now(timezone.utc), refs=[ref])
+                            observed_at=datetime.now(UTC), refs=[ref])
 
 
 def _identities(s):

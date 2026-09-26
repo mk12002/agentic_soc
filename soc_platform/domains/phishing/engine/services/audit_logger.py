@@ -1,6 +1,7 @@
-from loguru import logger
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
+
+from loguru import logger
 
 
 class AuditLogger:
@@ -15,7 +16,7 @@ class AuditLogger:
     ):
         logger.bind(event="api_call").info(
             json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "endpoint": endpoint,
                 "client_ip": client_ip,
                 "status_code": status_code,
@@ -29,7 +30,7 @@ class AuditLogger:
     def log_validation_error(client_ip: str, error_type: str, error_detail: str):
         logger.bind(event="validation_error").warning(
             json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "client_ip": client_ip,
                 "error_type": error_type,
                 "error_detail": error_detail,
@@ -40,7 +41,7 @@ class AuditLogger:
     def log_rate_limit_exceeded(client_ip: str):
         logger.bind(event="rate_limit_exceeded").warning(
             json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "client_ip": client_ip,
             })
         )
@@ -49,7 +50,7 @@ class AuditLogger:
     def log_malicious_input(client_ip: str, issue: str, input_type: str):
         logger.bind(event="malicious_input").warning(
             json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "client_ip": client_ip,
                 "issue": issue,
                 "input_type": input_type,

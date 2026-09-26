@@ -12,17 +12,18 @@ Optimized for 30GB RAM / 4 vCPUs (NO GPU):
    to simulate effective batch of 64, fully utilizing available RAM.
 """
 
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
-import os
-import sys
-import json
-import shutil
 import hashlib
+import json
+import os
+import shutil
+import sys
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 # pin the Hugging Face model revision (commit hash) for reproducible, tamper-evident downloads
 HF_REVISION = os.environ.get("HF_MODEL_REVISION", "main")
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
 
 # Set thread counts to match available CPU cores (4 cores on 30GB system)
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -32,23 +33,23 @@ os.environ["MKL_NUM_THREADS"] = "4"
 # IMPORTANT: Import third-party packages BEFORE modifying sys.path.
 # The parent directory contains a local `datasets/` package that would
 # shadow the HuggingFace `datasets` library if it were on sys.path first.
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from datasets import Dataset
 from sklearn.metrics import (
+    ConfusionMatrixDisplay,
     accuracy_score,
-    precision_recall_fscore_support,
     classification_report,
     confusion_matrix,
-    ConfusionMatrixDisplay,
+    precision_recall_fscore_support,
 )
 from sklearn.model_selection import train_test_split
-from datasets import Dataset
 from tqdm.auto import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
-    BertTokenizer,
     BertForSequenceClassification,
+    BertTokenizer,
     DataCollatorWithPadding,
     Trainer,
     TrainingArguments,
@@ -58,7 +59,7 @@ from transformers.trainer_utils import get_last_checkpoint
 # Now add parent directory to sys.path for email_security imports.
 # This MUST come after HuggingFace `datasets` import above.
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 PROCESSED_DIR = REPO_ROOT.parent / "datasets_processed"
 OUTPUT_DIR = REPO_ROOT.parent / "models" / "content_agent_slm_checkpoints"
 FINAL_MODEL_DIR = REPO_ROOT.parent / "models" / "content_agent"
@@ -146,7 +147,9 @@ def _ensure_canonical_dataset(csv_path: Path) -> None:
         return
 
     print("Canonical SLM CSV missing. Regenerating content preprocessing outputs...")
-    from soc_platform.domains.phishing.engine.preprocessing.content_preprocessing import run as run_content_preprocessing
+    from soc_platform.domains.phishing.engine.preprocessing.content_preprocessing import (
+        run as run_content_preprocessing,
+    )
 
     run_content_preprocessing(base_dir="datasets", output_dir="datasets_processed")
 
@@ -406,7 +409,7 @@ def main():
     trainer.save_model(str(FINAL_MODEL_DIR))
 
     RUN_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     state_json_path = RUN_LOG_DIR / f"trainer_state_{ts}.json"
     metrics_json_path = RUN_LOG_DIR / f"metrics_{ts}.json"
     report_txt_path = FINAL_MODEL_DIR / "training_report.txt"

@@ -6,7 +6,9 @@ frameworks (NIST CSF, ISO 27001, SOC 2, GDPR).
 """
 
 from __future__ import annotations
+
 from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("compliance_mapper")

@@ -13,11 +13,14 @@ full LangGraph pipeline.
 
 from typing import Any
 
+from soc_platform.domains.phishing.engine.orchestrator.counterfactual_engine import (
+    calculate_counterfactual,
+    threshold_for_verdict,
+)
 from soc_platform.domains.phishing.engine.orchestrator.llm_reasoner import generate_reasoning
 from soc_platform.domains.phishing.engine.orchestrator.scoring_engine import calculate_threat_score
-from soc_platform.domains.phishing.engine.orchestrator.threat_correlation import correlate_threats
-from soc_platform.domains.phishing.engine.orchestrator.counterfactual_engine import calculate_counterfactual, threshold_for_verdict
 from soc_platform.domains.phishing.engine.orchestrator.storyline_engine import generate_storyline
+from soc_platform.domains.phishing.engine.orchestrator.threat_correlation import correlate_threats
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("decision_engine")
@@ -89,10 +92,7 @@ def _has_weak_malicious_compound_warning(agent_results: list[dict[str, Any]]) ->
     user_warning = user_risk >= 0.25 and _contains_indicator(user_behavior, "unfamiliar_sender_domain")
 
     warning_votes = sum((header_warning, content_warning, url_warning, user_warning))
-    if warning_votes < 3 or not (header_warning and user_warning):
-        return False
-
-    return True
+    return not (warning_votes < 3 or not (header_warning and user_warning))
 
 
 def _has_uncertain_conflict_pattern(agent_results: list[dict[str, Any]], normalized_score: float) -> bool:

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self
 
-from soc_platform.domains.phishing.engine.garuda_integration import retry_queue
-from soc_platform.domains.phishing.engine.garuda_integration import bridge
+from soc_platform.domains.phishing.engine.garuda_integration import bridge, retry_queue
 from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
 
 
@@ -23,7 +22,7 @@ def test_trigger_garuda_investigation_success(monkeypatch) -> None:
         def __init__(self, timeout: float):
             self.timeout = timeout
 
-        def __enter__(self) -> "_FakeClient":
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, _exc_type, _exc, _tb) -> None:
@@ -60,7 +59,7 @@ def test_trigger_garuda_investigation_queues_retry_on_failure(monkeypatch) -> No
         def __init__(self, timeout: float):
             self.timeout = timeout
 
-        def __enter__(self) -> "_FailingClient":
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, _exc_type, _exc, _tb) -> None:

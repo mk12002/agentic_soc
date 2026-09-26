@@ -18,13 +18,12 @@ Controls (in addition to the gateway's redaction, approved endpoints, model pinn
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.models import Case, LLMCall
+from soc_platform.core.models import Case, LLMCall, utcnow
 from soc_platform.intelligence.story import evidence_for_llm
 from soc_platform.llm.gateway import BudgetExceeded, LLMGateway, supported_summary, unsupported_numbers
 from soc_platform.llm.redaction import Redactor
@@ -143,7 +142,7 @@ def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway |
               "open_questions": questions, "priorities": priorities, "dropped_statements": dropped,
               "disagreement": disagreement, "fingerprint": story["fingerprint"],
               "model": call.model if call else None, "provider": llm.provider.name,
-              "generated_at": datetime.now(timezone.utc).isoformat(), "generated_by": actor, "cached": False}
+              "generated_at": utcnow().isoformat(), "generated_by": actor, "cached": False}
     asm = dict(case.assessment or {})
     asm["deep_analysis"] = result
     case.assessment = asm

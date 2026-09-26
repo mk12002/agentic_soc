@@ -6,13 +6,14 @@ for core integration paths instead of relying on ad-hoc local runs.
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 ANALYSIS_ROOT = REPO_ROOT / "analysis_reports"
@@ -58,7 +59,7 @@ COMMAND_CHECKS = {
 
 def _run_pytest(paths: list[str]) -> dict[str, object]:
     cmd = [sys.executable, "-m", "pytest", "-q", *paths]
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     env = dict(os.environ)
     env["IOC_DB_PATH"] = str(REPO_ROOT / "data" / "ioc_store_ci.db")
     proc = subprocess.run(
@@ -69,7 +70,7 @@ def _run_pytest(paths: list[str]) -> dict[str, object]:
         env=env,
         check=False,
     )
-    finished = datetime.now(timezone.utc)
+    finished = datetime.now(UTC)
     return {
         "command": " ".join(cmd),
         "started_utc": started.isoformat(),
@@ -82,7 +83,7 @@ def _run_pytest(paths: list[str]) -> dict[str, object]:
 
 
 def _run_command(command: list[str]) -> dict[str, object]:
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     proc = subprocess.run(
         command,
         cwd=str(REPO_ROOT),
@@ -91,7 +92,7 @@ def _run_command(command: list[str]) -> dict[str, object]:
         env=dict(os.environ),
         check=False,
     )
-    finished = datetime.now(timezone.utc)
+    finished = datetime.now(UTC)
     return {
         "command": " ".join(command),
         "started_utc": started.isoformat(),
@@ -104,12 +105,12 @@ def _run_command(command: list[str]) -> dict[str, object]:
 
 
 def main() -> int:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     out_dir = ANALYSIS_ROOT / f"quality_gate_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, object] = {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "python": sys.executable,
         "groups": {},
     }

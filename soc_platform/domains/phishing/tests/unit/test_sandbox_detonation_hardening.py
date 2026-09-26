@@ -24,7 +24,7 @@ class _FakeContainer:
     def start(self) -> None:
         self.started = True
 
-    def exec_run(self, cmd, detach: bool = False, **kwargs):  # noqa: ANN001
+    def exec_run(self, cmd, detach: bool = False, **kwargs):
         self.exec_calls.append(cmd)
         if isinstance(cmd, list) and cmd[:3] == ["mkdir", "-p", "/sandbox/input"]:
             return _ExecResult(0, b"")
@@ -66,10 +66,10 @@ class _FakeDockerClient:
                 return None
 
         class _Containers:
-            def __init__(self, outer: "_FakeDockerClient") -> None:
+            def __init__(self, outer: _FakeDockerClient) -> None:
                 self.outer = outer
 
-            def create(self, **kwargs):  # noqa: ANN003
+            def create(self, **kwargs):
                 self.outer.create_calls.append(dict(kwargs))
                 if self.outer.fail_first_create and len(self.outer.create_calls) == 1:
                     raise TypeError("unsupported option")
@@ -159,7 +159,7 @@ def test_host_watchdog_kills_runaway_sample(monkeypatch, tmp_path: Path) -> None
     fake_client.container.kill = lambda: killed.setdefault("yes", True)
     monkeypatch.setattr(sandbox_agent.settings, "sandbox_timeout_seconds", -4, raising=False)  # deadline = 1s
     monkeypatch.setattr(sandbox_agent, "SANDBOX_RUNTIME_CSV", tmp_path / "rt.csv")
-    score, indicators, behavior, _ = sandbox_agent._detonate_attachment(fake_client, sample)
+    _score, indicators, _behavior, _ = sandbox_agent._detonate_attachment(fake_client, sample)
     assert "host_watchdog_killed_detonation" in indicators and killed.get("yes")
     assert fake_client.container.removed is True
 

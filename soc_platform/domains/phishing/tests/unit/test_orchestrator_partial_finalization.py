@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.orchestrator.runner import EXPECTED_AGENTS, OrchestratorWorker
@@ -18,7 +18,7 @@ def test_should_finalize_when_complete() -> None:
 
     should_finalize, reason = worker._should_finalize(
         results,
-        datetime.now(timezone.utc).timestamp(),
+        datetime.now(UTC).timestamp(),
     )
 
     assert should_finalize is True
@@ -29,7 +29,7 @@ def test_should_finalize_partial_on_timeout() -> None:
     worker = OrchestratorWorker.__new__(OrchestratorWorker)
     subset = sorted(EXPECTED_AGENTS)[: settings.orchestrator_min_agents_for_decision]
     results = [_mk_result(name) for name in subset]
-    first_seen = datetime.now(timezone.utc).timestamp() - (
+    first_seen = datetime.now(UTC).timestamp() - (
         settings.orchestrator_partial_timeout_seconds + 1
     )
 
@@ -42,7 +42,7 @@ def test_should_finalize_partial_on_timeout() -> None:
 def test_should_wait_when_not_enough_agents() -> None:
     worker = OrchestratorWorker.__new__(OrchestratorWorker)
     results = [_mk_result("header_agent")]
-    first_seen = datetime.now(timezone.utc).timestamp() - (
+    first_seen = datetime.now(UTC).timestamp() - (
         settings.orchestrator_partial_timeout_seconds + 30
     )
 

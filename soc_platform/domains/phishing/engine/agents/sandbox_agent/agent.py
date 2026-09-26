@@ -1,7 +1,6 @@
 """Sandbox behavior agent with Create -> Detonate -> Monitor -> Destroy lifecycle."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import csv
 import hashlib
@@ -21,6 +20,7 @@ from docker.errors import DockerException, ImageNotFound, NotFound
 from soc_platform.domains.phishing.engine.agents.sandbox_agent.inference import predict
 from soc_platform.domains.phishing.engine.agents.sandbox_agent.model_loader import load_model
 from soc_platform.domains.phishing.engine.configs.settings import settings
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 
 logger = get_agent_logger("sandbox_agent")
@@ -138,7 +138,6 @@ def _classify_malware_family(behavior: dict[str, Any]) -> str:
 
 def _generate_console_screenshot(behavior: dict[str, Any], target_name: str) -> list[dict[str, str]]:
     screens = []
-    base_time = int(time.time())
     
     screens.append({
         "timestamp": "T+0s",
@@ -189,7 +188,7 @@ def _parse_docker_timestamp(raw: str | None) -> float | None:
         return None
     try:
         # Docker timestamps commonly end with "Z" and may include subsecond precision.
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        return datetime.fromisoformat(raw).timestamp()
     except Exception:
         return None
 
@@ -230,7 +229,7 @@ def _cleanup_stale_detonation_containers(docker_client: Any, stale_seconds: int)
 
 
 def _is_private_ip(ip: str) -> bool:
-    if ip.startswith("10.") or ip.startswith("127."):
+    if ip.startswith(("10.", "127.")):
         return True
     if ip.startswith("192.168."):
         return True
@@ -548,7 +547,7 @@ def _detonate_attachment(docker_client: Any, target: Path) -> tuple[float, list[
             try:
                 container.kill()
             except Exception:
-                pass
+                logger.opt(exception=True).debug("could not kill a timed-out detonation container")
             worker.join(5)
         exec_result = box.get("result")
         if box.get("error") is not None and exec_result is None:
@@ -574,7 +573,7 @@ def _detonate_attachment(docker_client: Any, target: Path) -> tuple[float, list[
             try:
                 container.kill()
             except Exception:
-                pass
+                logger.opt(exception=True).debug("could not kill a timed-out detonation container")
             
         behavior = _extract_behavior_from_strace(raw_logs)
 

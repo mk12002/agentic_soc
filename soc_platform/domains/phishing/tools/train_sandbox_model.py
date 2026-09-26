@@ -2,16 +2,17 @@
 """Train sandbox behavior model with imbalance-aware selection, rich metrics, and visual reports."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 os.environ.setdefault("OMP_NUM_THREADS", "2")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
@@ -44,7 +45,7 @@ matplotlib.use("Agg")
 
 REPO_ROOT = PHISHING_HOME
 WORKSPACE_ROOT = REPO_ROOT.parent
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 from soc_platform.domains.phishing.engine.preprocessing.sandbox_feature_contract import (
     SANDBOX_FEATURE_VERSION,
     SANDBOX_NUMERIC_FEATURE_COLUMNS,
@@ -54,7 +55,7 @@ RANDOM_STATE = 42
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def _setup_logger(report_dir: Path) -> logging.Logger:
@@ -139,7 +140,7 @@ def _load_dataset(path: Path) -> pd.DataFrame:
     if "split" not in df.columns:
         from sklearn.model_selection import train_test_split
 
-        train_idx, val_idx = train_test_split(df.index, test_size=0.2, random_state=RANDOM_STATE, stratify=df["label"])
+        _train_idx, val_idx = train_test_split(df.index, test_size=0.2, random_state=RANDOM_STATE, stratify=df["label"])
         df["split"] = "train"
         df.loc[val_idx, "split"] = "val"
 
@@ -272,7 +273,7 @@ def _candidate_models(pos_weight: float) -> list[dict[str, Any]]:
             },
         )
     except Exception:
-        pass
+        logging.getLogger(__name__).warning("training metadata could not be recorded", exc_info=True)
 
     return candidates
 
@@ -436,9 +437,9 @@ def train(dataset_path: Path, report_dir: Path, model_dir: Path) -> dict[str, An
     logger.info(
         "Training setup",
         extra={
-            "rows_train": int(len(train_df)),
+            "rows_train": len(train_df),
             "rows_train_before_rebalance": int(train_df_before),
-            "rows_val": int(len(val_df)),
+            "rows_val": len(val_df),
             "class_distribution_train": {str(k): int(v) for k, v in label_counts.items()},
             "pos_weight": pos_weight,
             "max_class_ratio": max_class_ratio,
@@ -522,7 +523,7 @@ def train(dataset_path: Path, report_dir: Path, model_dir: Path) -> dict[str, An
         "features": SANDBOX_NUMERIC_FEATURE_COLUMNS,
         "threshold": threshold,
         "feature_version": SANDBOX_FEATURE_VERSION,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "trained_at": datetime.now(UTC).isoformat(),
         "selection_metric": "0.55*balanced_accuracy + 0.45*macro_f1",
         "class_labels": {"0": "benign", "1": "malicious"},
     }
@@ -540,10 +541,10 @@ def train(dataset_path: Path, report_dir: Path, model_dir: Path) -> dict[str, An
         },
         "dataset": {
             "path": str(dataset_path),
-            "rows_total": int(len(df)),
-            "rows_train": int(len(train_df)),
+            "rows_total": len(df),
+            "rows_train": len(train_df),
             "rows_train_before_rebalance": int(train_df_before),
-            "rows_val": int(len(val_df)),
+            "rows_val": len(val_df),
             "max_class_ratio": max_class_ratio,
             "label_distribution_total": {str(k): int(v) for k, v in df["label"].value_counts().to_dict().items()},
             "source_distribution_total": {str(k): int(v) for k, v in df["source"].value_counts().to_dict().items()},

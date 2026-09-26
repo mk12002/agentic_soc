@@ -5,9 +5,13 @@ Runs the loaded XGBoost model against extracted features to produce predictions.
 """
 
 from typing import Any
+
 import pandas as pd
 
-from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import MESSAGE_FEATURE_COLUMNS, get_zero_features
+from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import (
+    MESSAGE_FEATURE_COLUMNS,
+    get_zero_features,
+)
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 
 logger = get_agent_logger("threat_intel_agent")

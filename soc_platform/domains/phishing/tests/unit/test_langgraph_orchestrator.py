@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
 from soc_platform.domains.phishing.engine.orchestrator.evidence_collector import evidence_ids
+from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
 
 
 def test_langgraph_orchestrator_produces_decision() -> None:

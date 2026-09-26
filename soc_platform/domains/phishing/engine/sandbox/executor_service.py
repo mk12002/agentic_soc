@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 import docker
+import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
-import uvicorn
 
 from soc_platform.domains.phishing.engine.agents.sandbox_agent.agent import _detonate_attachment
 from soc_platform.domains.phishing.engine.configs.settings import settings

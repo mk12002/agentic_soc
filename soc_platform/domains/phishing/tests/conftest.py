@@ -1,13 +1,14 @@
 """Pytest shared setup for consistent import paths."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
+import importlib
 import os
 import sys
 import tempfile
 from pathlib import Path
-import importlib
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 # Engine endpoint tests exercise functionality directly; auth itself is covered by test_api_security.py,
 # which enables it explicitly. Pin the setting so results do not depend on a developer's .env.

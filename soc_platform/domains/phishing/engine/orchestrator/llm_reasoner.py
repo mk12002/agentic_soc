@@ -4,11 +4,11 @@ LLM reasoner for final risk explanation (Azure OpenAI with local fallback).
 
 from __future__ import annotations
 
-from typing import Any
-
 import functools
 import json
 import re
+from typing import Any
+
 from openai import AzureOpenAI
 
 from soc_platform.domains.phishing.engine.configs.settings import settings

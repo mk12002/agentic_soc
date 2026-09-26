@@ -52,7 +52,7 @@ def test_user_behavior_high_risk_tld_does_not_crash_and_sets_indicator(monkeypat
         @staticmethod
         def whois(_domain: str):
             return types.SimpleNamespace(
-                creation_date=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+                creation_date=datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=7)
             )
 
     import sys

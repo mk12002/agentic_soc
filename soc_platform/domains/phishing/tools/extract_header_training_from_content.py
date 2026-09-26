@@ -16,18 +16,20 @@ Notes:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
+import logging
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr
 from pathlib import Path
 
 import pandas as pd
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 WORKSPACE_ROOT = PHISHING_HOME
 TRUSTED_KEYWORDS = ("microsoft", "google", "paypal", "amazon", "apple")
@@ -43,7 +45,7 @@ def _entropy(text: str) -> float:
     if not text:
         return 0.0
     probs = [text.count(ch) / len(text) for ch in set(text)]
-    return -sum(p * math.log(p, 2) for p in probs)
+    return -sum(p * math.log2(p) for p in probs)
 
 
 def _domain_from_address(address: str) -> str:
@@ -136,6 +138,7 @@ def _extract_from_phishing_csv(
         try:
             frame = pd.read_csv(csv_path, low_memory=False)
         except Exception:
+            logging.getLogger(__name__).warning("skipping an unreadable CSV", exc_info=True)
             continue
 
         if frame.empty:
@@ -250,7 +253,7 @@ def build_dataset(
     frame.to_csv(output_csv, index=False)
 
     stats = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "content_dir": str(content_dir),
         "output_csv": str(output_csv),
         "counts": {
@@ -258,7 +261,7 @@ def build_dataset(
             "spam_rows": len(spam_rows),
             "phishing_rows": len(phishing_rows),
             "total_before_balance": before_balance,
-            "total_after_balance": int(len(frame)),
+            "total_after_balance": len(frame),
         },
         "label_distribution": frame["label"].value_counts().to_dict(),
         "settings": {

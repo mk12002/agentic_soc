@@ -8,9 +8,8 @@ from pathlib import Path
 import pytest
 
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent.agent import analyze, get_ioc_store_status
-
-
 from soc_platform.domains.phishing.engine.configs import settings
+
 
 def _find_ioc_db() -> Path:
     return Path(settings.ioc_db_path)

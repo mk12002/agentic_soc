@@ -6,9 +6,12 @@ interoperability with SIEMs, SOAR platforms, and threat intelligence sharing.
 """
 
 from __future__ import annotations
-import hashlib, uuid
-from datetime import datetime, timezone
+
+import hashlib
+import uuid
+from datetime import UTC, datetime
 from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("stix_generator")
@@ -25,7 +28,7 @@ def _deterministic_id(stix_type: str, *parts: str) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def generate_stix_bundle(

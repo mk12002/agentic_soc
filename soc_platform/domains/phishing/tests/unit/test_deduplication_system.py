@@ -1,10 +1,11 @@
 """Tests for the email deduplication system."""
 
 from soc_platform.domains.phishing.engine.orchestrator.deduplication import (
-    compute_email_fingerprint,
     DeduplicationCache,
+    compute_email_fingerprint,
     dedup_email_analysis,
 )
+
 
 def test_compute_email_fingerprint_stability():
     """Verify that fingerprint computation is stable and order-independent."""

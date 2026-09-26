@@ -1,7 +1,9 @@
 """Tests for the IOC multi-tier cache system."""
 
 import time
+
 from soc_platform.domains.phishing.engine.action_layer.ioc_cache import MultiTierIOCCache
+
 
 class MockIOCStore:
     class MockConn:

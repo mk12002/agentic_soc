@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
+from soc_platform.config import Settings
 from soc_platform.connectors.base import BaseConnector, RateLimited, SyncRunner, iter_records, with_backoff
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.entity_resolution import EntityResolver
 from soc_platform.core.models import UnresolvedItem
 from soc_platform.core.schema import EntityRef, NormalizedRecord
-from soc_platform.llm.gateway import LLMGateway, Provider, Completion, deterministic_grounded
+from soc_platform.llm.gateway import Completion, LLMGateway, Provider, deterministic_grounded
 from soc_platform.llm.redaction import Redactor
-from soc_platform.config import Settings
 
-T0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+T0 = datetime(2026, 9, 1, tzinfo=UTC)
 
 
 def asset(tool, sid, keys=None, **attrs):

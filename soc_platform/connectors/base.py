@@ -18,8 +18,9 @@ import random
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, TypeVar
+from typing import Any, TypeVar
 
 from sqlalchemy.orm import Session
 
@@ -193,7 +194,7 @@ class SyncRunner:
         cp.last_attempt_at = utcnow()
         try:
             for _ in range(max_pages):
-                page = connector.call(lambda: connector.fetch_page(stream, cursor))
+                page = connector.call(lambda cur=cursor: connector.fetch_page(stream, cur))
                 report.pages += 1
                 report.source_records += len(page.records)
                 if page.source_total is not None:

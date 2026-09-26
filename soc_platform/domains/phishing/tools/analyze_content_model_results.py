@@ -11,10 +11,9 @@ Outputs under models/content_agent/run_logs/eval_<timestamp>/:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -30,12 +29,13 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from transformers import pipeline
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 LABEL_NAMES = {0: "Legitimate", 1: "Spam", 2: "Phishing"}
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def _compact_text(text: str, max_words: int = 220) -> str:
@@ -217,7 +217,7 @@ def main() -> None:
     summary = {
         "model_dir": str(model_dir),
         "dataset_path": str(dataset_path),
-        "test_samples": int(len(test_df)),
+        "test_samples": len(test_df),
         "accuracy": acc,
         "f1_macro": f1_macro,
         "per_class": {
@@ -241,7 +241,7 @@ def main() -> None:
             },
         },
         "avg_confidence": float(np.mean(y_conf)),
-        "misclassified_count": int(len(mis)),
+        "misclassified_count": len(mis),
     }
     (run_dir / "evaluation_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

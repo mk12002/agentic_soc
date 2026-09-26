@@ -1,4 +1,8 @@
-from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import map_indicator_to_techniques, map_agent_results_to_attack
+from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import (
+    map_agent_results_to_attack,
+    map_indicator_to_techniques,
+)
+
 
 def test_map_indicator_to_techniques():
     # Test DMARC failure mapping

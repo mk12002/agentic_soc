@@ -27,8 +27,15 @@ from sqlalchemy.orm import Session
 from soc_platform.config import Settings
 from soc_platform.core.access import AccessService, kill_switch_on, permissions_matrix
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.models import (ActionRequest, AuditRecord, ConnectorCheckpoint, LLMCall, PolicyVersion,
-                                      TokenRevocation, utcnow)
+from soc_platform.core.models import (
+    ActionRequest,
+    AuditRecord,
+    ConnectorCheckpoint,
+    LLMCall,
+    PolicyVersion,
+    TokenRevocation,
+    utcnow,
+)
 from soc_platform.core.retention import export_audit
 
 

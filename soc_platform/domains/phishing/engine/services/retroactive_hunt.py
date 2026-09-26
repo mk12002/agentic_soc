@@ -6,9 +6,11 @@ emails that contained those indicators.
 """
 
 from __future__ import annotations
+
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("retroactive_hunt")
@@ -44,21 +46,20 @@ class RetroactiveHuntEngine:
         Returns:
             Hunt results with matching analyses.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
+        cutoff = datetime.now(UTC) - timedelta(days=days_back)
         ioc_lower = ioc_value.lower().strip()
 
         try:
-            with self._connect() as conn:
-                with conn.cursor() as cur:
-                    # Search reports containing the IOC in the JSON report column
-                    cur.execute("""
+            with self._connect() as conn, conn.cursor() as cur:
+                # Search reports containing the IOC in the JSON report column
+                cur.execute("""
                         SELECT analysis_id, report, created_at
                         FROM threat_reports
                         WHERE created_at >= %s
                         ORDER BY created_at DESC
                         LIMIT %s
                     """, (cutoff, max_results * 5))  # Fetch more to filter
-                    rows = cur.fetchall()
+                rows = cur.fetchall()
 
             matches: list[dict[str, Any]] = []
             for analysis_id, report_data, created_at in rows:
@@ -94,7 +95,7 @@ class RetroactiveHuntEngine:
                 "reports_scanned": len(rows),
                 "matches_found": len(matches),
                 "matches": matches,
-                "hunted_at": datetime.now(timezone.utc).isoformat(),
+                "hunted_at": datetime.now(UTC).isoformat(),
             }
 
         except Exception as e:

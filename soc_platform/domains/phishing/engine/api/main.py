@@ -5,66 +5,68 @@ Exposes health check and email analysis endpoints.
 This service will be extended in later phases with full agent orchestration.
 """
 
+import asyncio
 import base64
 import binascii
-import asyncio
 import hashlib
 import hmac
 import io
 import ipaddress
+import logging
+import os
 import re
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-import tempfile
 from typing import Any
 from urllib.parse import urlparse
-import os
 
-from fastapi import FastAPI
-from fastapi import Depends, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+import redis.asyncio as redis_async
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-import redis.asyncio as redis_async
-from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from pydantic import BaseModel
+
 try:
     from slowapi import Limiter
-    from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
     from slowapi.middleware import SlowAPIMiddleware
+    from slowapi.util import get_remote_address
     _RATE_LIMIT_AVAILABLE = True
 except ImportError:
     _RATE_LIMIT_AVAILABLE = False
     logger = __import__('loguru').logger  # keep reference
     logger.warning("slowapi not installed — rate limiting disabled. Run: pip install slowapi")
 
+import json
+import time
+
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
 from soc_platform.domains.phishing.engine.api.schemas import (
     AgentDirectTestRequest,
     AgentDirectTestResponse,
-    DiskHealth,
-    EmailAnalysisRequest,
-    EmailAnalysisResponse,
     AnalysisFeedbackRequest,
     BatchAnalysisRequest,
     BatchAnalysisResponse,
+    DiskHealth,
+    EmailAnalysisRequest,
+    EmailAnalysisResponse,
     HealthResponse,
     RabbitMQHealth,
 )
 from soc_platform.domains.phishing.engine.configs.settings import settings
+from soc_platform.domains.phishing.engine.services.audit_logger import AuditLogger
 from soc_platform.domains.phishing.engine.services.database import connect_database
 from soc_platform.domains.phishing.engine.services.email_parser import EmailParserService
+from soc_platform.domains.phishing.engine.services.email_validator import EmailValidator
 from soc_platform.domains.phishing.engine.services.logging_service import setup_logging
 from soc_platform.domains.phishing.engine.services.messaging_service import RabbitMQClient
-from soc_platform.domains.phishing.engine.services.email_validator import EmailValidator
-from soc_platform.domains.phishing.engine.services.audit_logger import AuditLogger
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-import json
-import time
-
 
 URL_REGEX = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 IP_REGEX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -209,8 +211,10 @@ def _warmup_ml_models() -> None:
         # Warm up content agent (TinyBERT SLM)
         logger.info("  → Warming up Content Agent (NLP/TinyBERT SLM)...")
         try:
-            from soc_platform.domains.phishing.engine.agents.content_agent.model_loader import load_model as load_content_model
             from soc_platform.domains.phishing.engine.agents.content_agent.inference import predict as predict_content
+            from soc_platform.domains.phishing.engine.agents.content_agent.model_loader import (
+                load_model as load_content_model,
+            )
 
             content_model = load_content_model()
             if content_model:
@@ -225,8 +229,8 @@ def _warmup_ml_models() -> None:
         # Warm up URL agent (XGBoost/RF)
         logger.info("  → Warming up URL Agent (XGBoost/Random Forest)...")
         try:
-            from soc_platform.domains.phishing.engine.agents.url_agent.model_loader import load_model as load_url_model
             from soc_platform.domains.phishing.engine.agents.url_agent.inference import predict as predict_url
+            from soc_platform.domains.phishing.engine.agents.url_agent.model_loader import load_model as load_url_model
 
             url_model = load_url_model()
             if url_model:
@@ -314,7 +318,7 @@ async def lifespan(app: FastAPI):
         try:
             await task
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("background task ended with an error during shutdown", exc_info=True)
     logger.info("Agentic Email Security API shutting down")
 
 
@@ -572,6 +576,7 @@ def _extract_domains(urls: list[str]) -> list[str]:
         try:
             host = (urlparse(candidate).hostname or "").lower()
         except Exception:
+            logging.getLogger(__name__).debug("could not parse a URL candidate", exc_info=True)
             continue
         if not host:
             continue
@@ -598,8 +603,6 @@ def _extract_ips(content: str, urls: list[str]) -> list[str]:
             ipaddress.ip_address(host)
             found.add(host)
         except ValueError:
-            continue
-        except Exception:
             continue
     return sorted(found)
 
@@ -695,42 +698,41 @@ def _soc_queue_names() -> list[str]:
 
 def _fetch_recent_reports(limit: int = 50) -> list[dict]:
     rows: list[dict] = []
-    with connect_database(settings.database_url, logger=logger) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
+    with connect_database(settings.database_url, logger=logger) as conn, conn.cursor() as cursor:
+        cursor.execute(
+            """
                 SELECT analysis_id, created_at, overall_risk_score, verdict, report
                 FROM threat_reports
                 ORDER BY created_at DESC
                 LIMIT %s
                 """,
-                (max(1, int(limit)),),
-            )
-            for analysis_id, created_at, risk_score, verdict, report in cursor.fetchall():
-                if isinstance(report, dict):
-                    report_dict = report
-                elif isinstance(report, str):
-                    try:
-                        import json
+            (max(1, int(limit)),),
+        )
+        for analysis_id, created_at, risk_score, verdict, report in cursor.fetchall():
+            if isinstance(report, dict):
+                report_dict = report
+            elif isinstance(report, str):
+                try:
+                    import json
 
-                        report_dict = json.loads(report)
-                    except Exception:
-                        report_dict = {}
-                else:
+                    report_dict = json.loads(report)
+                except Exception:
                     report_dict = {}
-                rows.append(
-                    {
-                        "analysis_id": analysis_id,
-                        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
-                        "overall_risk_score": float(risk_score or 0.0),
-                        "verdict": verdict,
-                        "threat_level": report_dict.get("threat_level", "unknown"),
-                        "sender": report_dict.get("sender", ""),
-                        "subject": report_dict.get("subject", ""),
-                        "recommended_actions": report_dict.get("recommended_actions", []) or [],
-                        "agent_results": report_dict.get("agent_results", []) or [],
-                    }
-                )
+            else:
+                report_dict = {}
+            rows.append(
+                {
+                    "analysis_id": analysis_id,
+                    "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+                    "overall_risk_score": float(risk_score or 0.0),
+                    "verdict": verdict,
+                    "threat_level": report_dict.get("threat_level", "unknown"),
+                    "sender": report_dict.get("sender", ""),
+                    "subject": report_dict.get("subject", ""),
+                    "recommended_actions": report_dict.get("recommended_actions", []) or [],
+                    "agent_results": report_dict.get("agent_results", []) or [],
+                }
+            )
     return rows
 
 
@@ -784,7 +786,7 @@ def _build_soc_overview() -> dict:
 
     avg_risk = (total_risk / len(reports)) if reports else 0.0
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "queue_health": queue_stats,
         "reports": {
             "count": len(reports),
@@ -801,7 +803,10 @@ def _build_soc_overview() -> dict:
 
 async def _threat_intel_refresh_loop(stop_event: asyncio.Event) -> None:
     """Periodically refresh IOC store and emit staleness alerts."""
-    from soc_platform.domains.phishing.engine.agents.threat_intel_agent.agent import get_ioc_store_status, refresh_ioc_store
+    from soc_platform.domains.phishing.engine.agents.threat_intel_agent.agent import (
+        get_ioc_store_status,
+        refresh_ioc_store,
+    )
 
     refresh_every = max(30, int(settings.ioc_refresh_seconds))
     logger.info("Threat-intel auto-refresh loop started", refresh_every_seconds=refresh_every)
@@ -816,7 +821,7 @@ async def _threat_intel_refresh_loop(stop_event: asyncio.Event) -> None:
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=refresh_every)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
 
 
@@ -1698,7 +1703,10 @@ def _record_campaign_signal(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         import redis as _redis_sync
 
-        from soc_platform.domains.phishing.engine.services.campaign_detector import domain_from_sender, get_campaign_detector
+        from soc_platform.domains.phishing.engine.services.campaign_detector import (
+            domain_from_sender,
+            get_campaign_detector,
+        )
 
         headers = payload.get("headers", {}) or {}
         sender_domain = domain_from_sender(headers.get("sender", "") or "")
@@ -1791,7 +1799,7 @@ async def analyze_email(request: EmailAnalysisRequest, http_request: Request, _a
         if ocr_urls:
             all_urls = sorted(set(all_urls + ocr_urls))
     except Exception:
-        pass
+        logging.getLogger(__name__).warning("OCR URL extraction from attachments failed", exc_info=True)
 
     ioc_domains = _extract_domains(all_urls)
     ioc_ips = _extract_ips(
@@ -1802,7 +1810,7 @@ async def analyze_email(request: EmailAnalysisRequest, http_request: Request, _a
     payload = {
         "event_type": "NewEmailEvent",
         "analysis_id": analysis_id,
-        "ingested_at": datetime.now(timezone.utc).isoformat(),
+        "ingested_at": datetime.now(UTC).isoformat(),
         "headers": {
             "sender": request.headers.sender,
             "reply_to": request.headers.reply_to,
@@ -1896,7 +1904,7 @@ async def analyze_email(request: EmailAnalysisRequest, http_request: Request, _a
             user_agent=http_request.headers.get("user-agent", ""),
         )
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("API metrics could not be recorded", exc_info=True)
 
     return EmailAnalysisResponse(
         status="received",
@@ -1934,7 +1942,7 @@ async def ingest_raw_email(request: Request, file: UploadFile = File(...), _auth
     if getattr(settings, "local_routing_enabled", False):
         from soc_platform.domains.phishing.engine.services.gdrive_client import get_gdrive_client
         
-        gdrive = get_gdrive_client()
+        get_gdrive_client()                                              # initialise the routing client
         
         staging_dir = Path(settings.local_staging_folder)
         staging_dir.mkdir(parents=True, exist_ok=True)
@@ -1942,8 +1950,7 @@ async def ingest_raw_email(request: Request, file: UploadFile = File(...), _auth
         safe_name = _safe_filename(file.filename)
         staged_path = staging_dir / f"{uuid.uuid4().hex[:8]}_{safe_name}"
         
-        with open(staged_path, "wb") as f:
-            f.write(await file.read())
+        await asyncio.to_thread(staged_path.write_bytes, await file.read())
             
         try:
             event = parser.parse_file(staged_path)
@@ -2128,7 +2135,7 @@ async def analyze_email_batch(
             payload = {
                 "event_type": "NewEmailEvent",
                 "analysis_id": analysis_id,
-                "ingested_at": datetime.now(timezone.utc).isoformat(),
+                "ingested_at": datetime.now(UTC).isoformat(),
                 "headers": {
                     "sender": email_req.headers.sender,
                     "reply_to": email_req.headers.reply_to,
@@ -2165,7 +2172,7 @@ async def analyze_email_batch(
             user_agent=request.headers.get("user-agent", ""),
         )
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("API metrics could not be recorded", exc_info=True)
 
     return BatchAnalysisResponse(
         queued=len(results),
@@ -2178,13 +2185,12 @@ async def analyze_email_batch(
 def _load_report(analysis_id: str) -> dict[str, Any]:
     """Fetch the stored threat report (decision dict) or raise HTTP 404/500."""
     try:
-        with connect_database(settings.database_url, logger=logger) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "SELECT report FROM threat_reports WHERE analysis_id = %s",
-                    (analysis_id,),
-                )
-                row = cursor.fetchone()
+        with connect_database(settings.database_url, logger=logger) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT report FROM threat_reports WHERE analysis_id = %s",
+                (analysis_id,),
+            )
+            row = cursor.fetchone()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch report: {exc}") from exc
     if not row or row[0] is None:

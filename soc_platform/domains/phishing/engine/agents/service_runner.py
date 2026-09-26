@@ -5,15 +5,16 @@ Container entrypoint for agent workers.
 from __future__ import annotations
 
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from soc_platform.domains.phishing.engine.agents.base_agent import BaseAgent
-from soc_platform.domains.phishing.engine.agents.header_agent import analyze as header_analyze
-from soc_platform.domains.phishing.engine.agents.content_agent import analyze as content_analyze
-from soc_platform.domains.phishing.engine.agents.url_agent import analyze as url_analyze
 from soc_platform.domains.phishing.engine.agents.attachment_agent import analyze as attachment_analyze
+from soc_platform.domains.phishing.engine.agents.base_agent import BaseAgent
+from soc_platform.domains.phishing.engine.agents.content_agent import analyze as content_analyze
+from soc_platform.domains.phishing.engine.agents.header_agent import analyze as header_analyze
 from soc_platform.domains.phishing.engine.agents.sandbox_agent import analyze as sandbox_analyze
 from soc_platform.domains.phishing.engine.agents.threat_intel_agent import analyze as threat_intel_analyze
+from soc_platform.domains.phishing.engine.agents.url_agent import analyze as url_analyze
 from soc_platform.domains.phishing.engine.agents.user_behavior_agent.agent import analyze as user_behavior_analyze
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.logging_service import setup_logging

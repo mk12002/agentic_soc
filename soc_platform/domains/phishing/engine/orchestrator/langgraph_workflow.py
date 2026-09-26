@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langgraph.graph import END, StateGraph
 
 from soc_platform.domains.phishing.engine.garuda_integration.bridge import trigger_garuda_investigation
-from soc_platform.domains.phishing.engine.orchestrator.counterfactual_engine import calculate_counterfactual, threshold_for_verdict
+from soc_platform.domains.phishing.engine.orchestrator.counterfactual_engine import (
+    calculate_counterfactual,
+    threshold_for_verdict,
+)
 from soc_platform.domains.phishing.engine.orchestrator.evidence_collector import collect_evidence
-from soc_platform.domains.phishing.engine.orchestrator.llm_reasoner import generate_grounded_reasoning, generate_reasoning
+from soc_platform.domains.phishing.engine.orchestrator.langgraph_state import OrchestratorState
+from soc_platform.domains.phishing.engine.orchestrator.llm_reasoner import (
+    generate_grounded_reasoning,
+    generate_reasoning,
+)
 from soc_platform.domains.phishing.engine.orchestrator.scoring_engine import calculate_threat_score
 from soc_platform.domains.phishing.engine.orchestrator.storyline_engine import generate_storyline
 from soc_platform.domains.phishing.engine.orchestrator.threat_correlation import correlate_threats
-from soc_platform.domains.phishing.engine.orchestrator.langgraph_state import OrchestratorState
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("langgraph_orchestrator")
@@ -95,10 +102,7 @@ def _has_weak_malicious_compound_warning(agent_results: list[dict[str, Any]]) ->
     user_warning = user_risk >= 0.25 and _contains_indicator(user_behavior, "unfamiliar_sender_domain")
 
     warning_votes = sum((header_warning, content_warning, url_warning, user_warning))
-    if warning_votes < 3 or not (header_warning and user_warning):
-        return False
-
-    return True
+    return not (warning_votes < 3 or not (header_warning and user_warning))
 
 
 def _apply_transactional_legitimacy_override(
@@ -213,7 +217,6 @@ def _has_obvious_bec_or_fraud_pattern(agent_results: list[dict[str, Any]]) -> bo
     content_risk = agent_scores.get("content_agent", 0.0)
     header_risk = agent_scores.get("header_agent", 0.0)
     user_behavior_risk = agent_scores.get("user_behavior_agent", 0.0)
-    url_risk = agent_scores.get("url_agent", 0.0)
     
     # Fraud indicators in text
     has_financial_signal = any(term in indicators_text for term in [
@@ -250,10 +253,7 @@ def _has_obvious_bec_or_fraud_pattern(agent_results: list[dict[str, Any]]) -> bo
         return True
     
     # PATTERN 4: Very explicit fraud indicators with ANY multi-agent agreement
-    if "bec_fraud_signals:" in indicators_text and user_behavior_risk >= 0.3:
-        return True
-    
-    return False
+    return bool("bec_fraud_signals:" in indicators_text and user_behavior_risk >= 0.3)
 
 
 class LangGraphOrchestrator:
@@ -311,7 +311,10 @@ class LangGraphOrchestrator:
         try:
             from soc_platform.domains.phishing.engine.configs.settings import settings as _settings
             if getattr(_settings, "org_context_enabled", False):
-                from soc_platform.domains.phishing.engine.services.org_context import apply_org_context, load_roles_config
+                from soc_platform.domains.phishing.engine.services.org_context import (
+                    apply_org_context,
+                    load_roles_config,
+                )
                 recipients = state.get("recipients") or ((state.get("headers") or {}).get("to") or [])
                 org = apply_org_context(score_data.get("overall_score", 0.0), recipients, load_roles_config())
                 if org.get("applied"):
@@ -432,14 +435,18 @@ class LangGraphOrchestrator:
         attack_assessment = {}
         threat_attribution = {}
         try:
-            from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import map_agent_results_to_attack
+            from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import (
+                map_agent_results_to_attack,
+            )
             attack_assessment = map_agent_results_to_attack(agent_results)
         except Exception as exc:
             logger.debug("ATT&CK mapping skipped", error=str(exc))
 
         # --- Enhanced: Threat group attribution ---
         try:
-            from soc_platform.domains.phishing.engine.orchestrator.threat_group_attribution import generate_attribution_summary
+            from soc_platform.domains.phishing.engine.orchestrator.threat_group_attribution import (
+                generate_attribution_summary,
+            )
             threat_attribution = generate_attribution_summary(agent_results, attack_data=attack_assessment or None)
         except Exception as exc:
             logger.debug("Threat group attribution skipped", error=str(exc))
@@ -455,7 +462,10 @@ class LangGraphOrchestrator:
         # --- Enhanced: Playbook selection ---
         playbook_result = None
         try:
-            from soc_platform.domains.phishing.engine.action_layer.playbook_engine import select_playbook, execute_playbook
+            from soc_platform.domains.phishing.engine.action_layer.playbook_engine import (
+                execute_playbook,
+                select_playbook,
+            )
             all_indicators = []
             for r in agent_results:
                 all_indicators.extend(r.get("indicators", []) or [])

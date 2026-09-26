@@ -7,7 +7,7 @@ enabling analysts to visualize detected techniques on the official ATT&CK matrix
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from soc_platform.domains.phishing.engine.orchestrator.mitre_attack_engine import map_agent_results_to_attack
@@ -112,7 +112,7 @@ def generate_navigator_layer(
         "description": (
             f"Auto-generated ATT&CK layer from Agentic Email Security System analysis. "
             f"Analysis ID: {analysis_id}. Verdict: {verdict}. "
-            f"Generated at {datetime.now(timezone.utc).isoformat()}. "
+            f"Generated at {datetime.now(UTC).isoformat()}. "
             f"Techniques detected: {len(nav_techniques)}."
         ),
         "filters": {
@@ -146,7 +146,7 @@ def generate_navigator_layer(
             {"name": "system", "value": "Agentic Email Security System"},
             {"name": "analysis_id", "value": analysis_id},
             {"name": "verdict", "value": verdict},
-            {"name": "generated_at", "value": datetime.now(timezone.utc).isoformat()},
+            {"name": "generated_at", "value": datetime.now(UTC).isoformat()},
             {"name": "technique_count", "value": str(len(nav_techniques))},
         ],
     }

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class VisualURLAgent:
         self.is_loaded = True
         return True
 
-    def analyze(self, url: str) -> Dict[str, Any]:
+    def analyze(self, url: str) -> dict[str, Any]:
         """
         Analyze a URL for visual impersonation.
         """

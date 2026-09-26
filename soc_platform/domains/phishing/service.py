@@ -27,14 +27,19 @@ from soc_platform.connectors.registry import ConnectorRegistry
 from soc_platform.core.actions import ActionRegistry
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.auth import Principal
-from soc_platform.core.crypto import read_protected, write_protected
 from soc_platform.core.cases import CaseService, Recommendation
 from soc_platform.core.context_store import ContextStore
+from soc_platform.core.crypto import read_protected, write_protected
 from soc_platform.core.enrichment import evidence_for_llm
 from soc_platform.core.models import ActionRequest, Case, Entity, Evidence, utcnow
 from soc_platform.core.policy import PolicyEngine
 from soc_platform.core.schema import EntityRef, NormalizedRecord
-from soc_platform.domains.phishing.agents.analyzer import AnalysisResult, CompositeAnalyzer, EngineAnalyzer, HeuristicAnalyzer
+from soc_platform.domains.phishing.agents.analyzer import (
+    AnalysisResult,
+    CompositeAnalyzer,
+    EngineAnalyzer,
+    HeuristicAnalyzer,
+)
 from soc_platform.domains.phishing.agents.decompose import DecomposedEmail, decompose
 from soc_platform.domains.phishing.agents.investigation import campaign_scope, reconcile, user_impact
 from soc_platform.domains.phishing.models import Submission
@@ -46,18 +51,18 @@ SEVERITY = {"malicious": "high", "suspicious": "medium", "spam": "low", "safe": 
 
 FEEDBACK = {
     "malicious": ("Thank you - the email you reported was malicious",
-                  "Thank you for reporting \"{subject}\". Our security team confirmed it was a phishing attempt and has "
+                  ("Thank you for reporting \"{subject}\". Our security team confirmed it was a phishing attempt and has "
                   "removed it from mailboxes across the organisation. If you clicked the link or entered your password, "
-                  "please contact the IT service desk immediately."),
+                  "please contact the IT service desk immediately.")),
     "suspicious": ("Thank you - we are investigating the email you reported",
-                   "Thank you for reporting \"{subject}\". It shows suspicious characteristics and the security team is "
-                   "investigating. Please do not interact with it."),
+                   ("Thank you for reporting \"{subject}\". It shows suspicious characteristics and the security team is "
+                   "investigating. Please do not interact with it.")),
     "spam": ("Thank you - the email you reported is spam",
-             "Thank you for reporting \"{subject}\". It is unsolicited bulk mail rather than a targeted attack. You can "
-             "safely delete it."),
+             ("Thank you for reporting \"{subject}\". It is unsolicited bulk mail rather than a targeted attack. You can "
+             "safely delete it.")),
     "safe": ("Thank you - the email you reported is legitimate",
-             "Thank you for reporting \"{subject}\". Our checks found it to be legitimate. Reporting anything that looks "
-             "unusual is always the right call - thank you for staying vigilant."),
+             ("Thank you for reporting \"{subject}\". Our checks found it to be legitimate. Reporting anything that looks "
+             "unusual is always the right call - thank you for staying vigilant.")),
 }
 
 
@@ -283,7 +288,7 @@ class PhishingService:
     def _recommendations(self, case: Case, sub: Submission, em: DecomposedEmail, r: AnalysisResult, camp: dict,
                          impact: dict, ev_llm: list[dict[str, Any]], evidence: list[Evidence]) -> list[Recommendation]:
         by_row = {e["evidence_row"]: e["id"] for e in ev_llm}
-        cite = lambda *srcs: [by_row[e.id] for e in evidence if e.id in by_row and  # noqa: E731
+        cite = lambda *srcs: [by_row[e.id] for e in evidence if e.id in by_row and
                               any(e.source_tool.startswith(s) for s in srcs)]
         recs: list[Recommendation] = []
         if sub.reporter:

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-import sys, requests
+import sys
+
+import requests
 
 aid = sys.argv[1]
 try:

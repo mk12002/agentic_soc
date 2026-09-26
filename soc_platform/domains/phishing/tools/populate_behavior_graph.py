@@ -13,18 +13,19 @@ Outputs:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import csv
 import datetime as dt
 import email.utils
+import logging
 import re
 import sqlite3
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 WORKSPACE_ROOT = PHISHING_HOME
 EMAIL_ROOT = WORKSPACE_ROOT / "datasets" / "email_content"
@@ -164,7 +165,7 @@ def _iter_email_files(root: Path, max_files: int) -> Iterable[Path]:
 
 
 def build_graph(email_root: Path, max_files: int, max_csv_rows: int) -> tuple[dict[str, str], dict[tuple[str, str], tuple[float, float]]]:
-    now_ts = dt.datetime.now(dt.timezone.utc).timestamp()
+    now_ts = dt.datetime.now(dt.UTC).timestamp()
 
     employees: dict[str, str] = {}
     # interactions[(recipient_email, sender_domain)] = (count, latest_seen_ts)
@@ -185,7 +186,7 @@ def build_graph(email_root: Path, max_files: int, max_csv_rows: int) -> tuple[di
                         if max_csv_rows > 0 and row_count > max_csv_rows:
                             break
 
-                        cols_lower = {str(k).lower(): k for k in row.keys()}
+                        cols_lower = {str(k).lower(): k for k in row}
                         sender = ""
                         recipients: list[str] = []
 
@@ -225,6 +226,7 @@ def build_graph(email_root: Path, max_files: int, max_csv_rows: int) -> tuple[di
                             count, latest = interactions[key]
                             interactions[key] = (count + 1.0, max(latest, now_ts))
             except Exception:
+                logging.getLogger(__name__).warning("skipping an unreadable CSV", exc_info=True)
                 continue
             continue
 
@@ -232,6 +234,7 @@ def build_graph(email_root: Path, max_files: int, max_csv_rows: int) -> tuple[di
         try:
             text = file_path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
+            logging.getLogger(__name__).warning("skipping an unreadable file", exc_info=True)
             continue
 
         sender, recipients = _parse_embedded_headers(text)

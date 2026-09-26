@@ -125,7 +125,9 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
 
     # ARC chain integrity + Received-hop forensics (RFC 8617 + relay timestamp order).
     # These surface forged routing that authentication results alone can miss.
-    from soc_platform.domains.phishing.engine.agents.header_agent.arc_validator import analyze_headers as _analyze_routing
+    from soc_platform.domains.phishing.engine.agents.header_agent.arc_validator import (
+        analyze_headers as _analyze_routing,
+    )
 
     routing = _analyze_routing(headers)
     if routing["risk_contribution"] > 0.0:

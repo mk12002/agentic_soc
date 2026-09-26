@@ -7,11 +7,11 @@ downloading, and moving files between folders (Ingestion, Staging, Approved, etc
 import io
 import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, ClassVar
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
@@ -20,7 +20,7 @@ logger = get_service_logger("gdrive_client")
 
 
 class GDriveClient:
-    SCOPES = ['https://www.googleapis.com/auth/drive']
+    SCOPES: ClassVar[list[str]] = ['https://www.googleapis.com/auth/drive']
 
     def __init__(self):
         self.credentials_path = getattr(settings, "gdrive_credentials_path", "/app/email_security/gdrive_credentials.json")
@@ -50,7 +50,7 @@ class GDriveClient:
     def is_configured(self) -> bool:
         return self.service is not None
 
-    def list_new_emails(self) -> List[Dict[str, Any]]:
+    def list_new_emails(self) -> list[dict[str, Any]]:
         """
         List all .eml files in the Ingestion folder.
         """
@@ -82,7 +82,7 @@ class GDriveClient:
                 downloader = MediaIoBaseDownload(fh, request)
                 done = False
                 while done is False:
-                    status, done = downloader.next_chunk()
+                    _status, done = downloader.next_chunk()
             logger.debug("Downloaded GDrive file", file_id=file_id, dest=dest_path)
             return True
         except Exception as e:
@@ -96,7 +96,7 @@ class GDriveClient:
 
         try:
             # Move the file to the new folder
-            file = self.service.files().update(
+            self.service.files().update(
                 fileId=file_id,
                 addParents=new_parent_id,
                 removeParents=current_parent_id,
@@ -108,7 +108,7 @@ class GDriveClient:
             logger.error("Failed to move GDrive file", file_id=file_id, error=str(e))
             return False
 
-    def upload_file(self, file_path: str, folder_id: str) -> Optional[str]:
+    def upload_file(self, file_path: str, folder_id: str) -> str | None:
         """Upload a local file to a specific GDrive folder."""
         if not self.is_configured() or not folder_id:
             return None
@@ -132,7 +132,7 @@ class GDriveClient:
             return None
 
 
-_GDRIVE_CLIENT: Optional[GDriveClient] = None
+_GDRIVE_CLIENT: GDriveClient | None = None
 
 def get_gdrive_client() -> GDriveClient:
     global _GDRIVE_CLIENT

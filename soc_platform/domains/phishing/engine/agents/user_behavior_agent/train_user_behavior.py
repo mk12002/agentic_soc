@@ -2,24 +2,33 @@
 XGBoost ML Pipeline for User Behavior Agent.
 Trains the contextual vulnerability model on the corporate social graph simulation.
 """
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import json
-from datetime import datetime
 import warnings
-
-import pandas as pd
-import numpy as np
-import xgboost as xgb
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.metrics import (
-    roc_auc_score, brier_score_loss, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, average_precision_score,
-    PrecisionRecallDisplay, RocCurveDisplay
-)
-from sklearn.model_selection import train_test_split
+from datetime import UTC, datetime
 
 # Supress matplotlib GUI warnings in headless execution
 import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import xgboost as xgb
+from sklearn.metrics import (
+    PrecisionRecallDisplay,
+    RocCurveDisplay,
+    accuracy_score,
+    average_precision_score,
+    brier_score_loss,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import train_test_split
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 matplotlib.use('Agg')
 
 try:
@@ -28,7 +37,7 @@ except ImportError:
     PROJECT_ROOT = PHISHING_HOME
 # Path Configuration
 MODEL_DIR = (PROJECT_ROOT / ".." / "models" / "user_behavior_agent").resolve()
-REPORT_DIR = PROJECT_ROOT / "analysis_reports" / f"user_behavior_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+REPORT_DIR = PROJECT_ROOT / "analysis_reports" / f"user_behavior_train_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
 DATA_FILE = (PROJECT_ROOT / ".." / "datasets_processed" / "user_behavior" / "user_behavior_training.csv").resolve()
 
 def run_training():
@@ -172,7 +181,7 @@ def run_training():
 
     # Save Metrics Manifest
     payload = {
-        "training_time_utc": datetime.utcnow().isoformat(),
+        "training_time_utc": datetime.now(UTC).isoformat(),
         "test_n": len(y_test),
         "metrics": {
             "accuracy": acc,

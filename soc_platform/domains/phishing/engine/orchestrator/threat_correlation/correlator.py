@@ -80,12 +80,12 @@ def correlate_threats(agent_results: list[dict[str, Any]]) -> dict[str, Any]:
     correlated = [key for key, count in overlap_counts.items() if count >= 2]
 
     # Legacy patterns from indicator overlap
-    if any("lookalike" in item or "spoof" in item for item in correlated):
-        if "domain_spoofing_campaign" not in patterns:
-            patterns.append("domain_spoofing_campaign")
-    if any("macro" in item or "virtualalloc" in item or "risky_executable" in item for item in correlated):
-        if "malware_delivery_pattern" not in patterns:
-            patterns.append("malware_delivery_pattern")
+    if (any("lookalike" in item or "spoof" in item for item in correlated)
+            and "domain_spoofing_campaign" not in patterns):
+        patterns.append("domain_spoofing_campaign")
+    if (any("macro" in item or "virtualalloc" in item or "risky_executable" in item for item in correlated)
+            and "malware_delivery_pattern" not in patterns):
+        patterns.append("malware_delivery_pattern")
 
     # Score: sum of triggered rule boosts (capped at 1.0)
     correlation_score = round(min(1.0, sum(rule_boosts)), 4)

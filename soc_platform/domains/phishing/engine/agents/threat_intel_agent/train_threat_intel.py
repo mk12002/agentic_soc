@@ -7,24 +7,18 @@ for production inference, and generates detailed visualizations (feature
 importance, ROC, learning curves, correlation).
 """
 
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import json
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime
 
-import pandas as pd
-import numpy as np
-import xgboost as xgb
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
-from sklearn.metrics import (
-    roc_auc_score,
-    roc_curve,
-    brier_score_loss,
-    confusion_matrix,
-    classification_report
-)
+import xgboost as xgb
+from sklearn.metrics import brier_score_loss, classification_report, confusion_matrix, roc_auc_score, roc_curve
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 from soc_platform.domains.phishing.engine.preprocessing.threat_intel_feature_contract import MESSAGE_FEATURE_COLUMNS
 
 # ---------------------------------------------------------------------------
@@ -37,7 +31,7 @@ except ImportError:
 DATA_DIR = PROJECT_ROOT / "datasets_processed" / "threat_intel"
 # We save models in the root 'models/' directory alongside other agents
 MODEL_DIR = (PROJECT_ROOT / ".." / "models" / "threat_intel_agent").resolve()
-REPORT_DIR = PROJECT_ROOT / "analysis_reports" / f"threat_intel_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+REPORT_DIR = PROJECT_ROOT / "analysis_reports" / f"threat_intel_train_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
 
 
 def load_dataset(split: str) -> pd.DataFrame:
@@ -120,7 +114,7 @@ def plot_learning_curves(evals_result: dict, out_path: Path):
         return
     
     epochs = len(evals_result['validation_0']['logloss'])
-    x_axis = range(0, epochs)
+    x_axis = range(epochs)
     
     plt.figure(figsize=(8, 5))
     plt.plot(x_axis, evals_result['validation_0']['logloss'], label='Train')
@@ -207,7 +201,7 @@ def train_model():
 
     # Save detailed metrics to JSON
     metrics = {
-        "training_time_utc": datetime.utcnow().isoformat(),
+        "training_time_utc": datetime.now(UTC).isoformat(),
         "test_n": len(y_test),
         "roc_auc": float(auc),
         "brier_score": float(brier),

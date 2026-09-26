@@ -1,9 +1,13 @@
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 #!/usr/bin/env python3
+import logging
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 """Comprehensive E2E system test — ingest 5 diverse emails and collect full analysis."""
 
 import sys
 import time
+
 import requests
 
 API = "http://localhost:8000"
@@ -58,7 +62,7 @@ def get_report(analysis_id, retries=6, delay=5):
             if resp.status_code == 200:
                 return resp.json()
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("report not ready yet; retrying", exc_info=True)
         time.sleep(delay)
     return None
 

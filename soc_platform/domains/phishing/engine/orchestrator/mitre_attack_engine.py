@@ -318,7 +318,6 @@ def map_agent_results_to_attack(
         - kill_chain_phases: ordered kill chain phase mapping
         - technique_count: total unique techniques detected
     """
-    all_matches: list[TechniqueMatch] = []
     technique_aggregation: dict[str, TechniqueMatch] = {}
 
     for result in agent_results:

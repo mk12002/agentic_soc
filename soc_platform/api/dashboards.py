@@ -7,7 +7,7 @@ number shown to a client can be explained and drilled into.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from statistics import median
 from typing import Any
 
@@ -16,8 +16,15 @@ from sqlalchemy.orm import Session
 
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.entity_resolution import EntityResolver
-from soc_platform.core.models import (ActionRequest, Case, CaseEntity, ConnectorCheckpoint, Entity, UnresolvedItem,
-                                      utcnow)
+from soc_platform.core.models import (
+    ActionRequest,
+    Case,
+    CaseEntity,
+    ConnectorCheckpoint,
+    Entity,
+    UnresolvedItem,
+    utcnow,
+)
 
 # expected freshness per stream kind (NFR-13): alert streams must be near-real-time, inventories daily
 FRESHNESS_HOURS = {"alerts": 1, "incidents": 1, "detections": 1, "risk_detections": 1, "email_alerts": 1,
@@ -27,7 +34,7 @@ DEFAULT_FRESHNESS_HOURS = 26
 
 
 def _aware(dt: datetime | None) -> datetime | None:
-    return dt.replace(tzinfo=timezone.utc) if dt is not None and dt.tzinfo is None else dt
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
 def overview(s: Session, domains: frozenset[str], *, days: int = 14) -> dict[str, Any]:
@@ -47,7 +54,8 @@ def overview(s: Session, domains: frozenset[str], *, days: int = 14) -> dict[str
                **{d: trend[(since + timedelta(days=i + 1)).date().isoformat()].get(d, 0)
                   for d in ("phishing", "incident", "vulnerability")}} for i in range(days)]
     ttc = [(_aware(c.closed_at) - _aware(c.created_at)).total_seconds() / 3600 for c in cases if c.closed_at]
-    acts = list(s.execute(select(ActionRequest).where(ActionRequest.created_at >= since)).scalars())
+    in_scope = [] if "*" in domains else [ActionRequest.domain.in_(sorted(domains))]      # same scope as the action list
+    acts = list(s.execute(select(ActionRequest).where(ActionRequest.created_at >= since, *in_scope)).scalars())
     autonomous = sum(1 for a in acts if str(a.approver or "").startswith("policy:"))
     from soc_platform.intelligence.models import Insight
 
@@ -74,7 +82,9 @@ def overview(s: Session, domains: frozenset[str], *, days: int = 14) -> dict[str
                   "verdicts": dict(Counter(c.verdict or "undetermined" for c in cases if _aware(c.created_at) >= since))},
         "trend": series,
         "actions": {"in_window": len(acts), "by_status": dict(Counter(a.status for a in acts)),
-                    "pending_approval": sum(1 for a in acts if a.status in {"pending_approval", "recommended"}),
+                    # a backlog, not a window statistic: an approval still waiting after 90 days is still waiting
+                    "pending_approval": s.execute(select(func.count()).select_from(ActionRequest).where(
+                        ActionRequest.status.in_(("pending_approval", "recommended")), *in_scope)).scalar(),
                     "autonomous": autonomous,
                     "automation_rate_pct": round(100 * autonomous / len(acts), 1) if acts else 0.0},
         "insights": {"open": len(ins), "by_severity": dict(Counter(i.severity for i in ins)),
@@ -92,7 +102,7 @@ def _pct(xs: list[float], q: float) -> float | None:
     if not xs:
         return None
     xs = sorted(xs)
-    return round(xs[min(len(xs) - 1, int(round(q * (len(xs) - 1))))], 1)
+    return round(xs[min(len(xs) - 1, round(q * (len(xs) - 1)))], 1)
 
 
 def performance(s: Session, cases: list[Case]) -> dict[str, Any]:
@@ -212,8 +222,8 @@ def prometheus(s: Session, registry: Any) -> str:
         if c.last_success_at:
             fr.append(({"connector": c.connector, "stream": c.stream}, round((now - _aware(c.last_success_at)).total_seconds(), 1)))
     g("soc_connector_last_success_age_seconds", "Seconds since the last successful sync per stream", fr)
-    from soc_platform.core.access import kill_switch_on
     from soc_platform.config import get_settings
+    from soc_platform.core.access import kill_switch_on
 
     g("soc_kill_switch", "1 when all automated actions are halted", [({}, 1.0 if kill_switch_on(s, get_settings()) else 0.0)])
     g("soc_connectors_enabled", "Enabled connectors", [({}, len(registry.enabled_names()))])

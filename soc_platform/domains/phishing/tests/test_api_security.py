@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
-from soc_platform.domains.phishing.engine.api.main import app
 
+from soc_platform.domains.phishing.engine.api.main import app
 
 
 class DummyMQ:

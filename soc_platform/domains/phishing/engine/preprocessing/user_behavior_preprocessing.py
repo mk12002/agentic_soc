@@ -4,12 +4,13 @@ Synthesizes a full virtual enterprise network (roster, social graph, inbound mai
 and outputs a compiled feature dataset ready for XGBoost.
 """
 
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
-import sqlite3
 import random
-import pandas as pd
+import sqlite3
 from pathlib import Path
 
+import pandas as pd
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 from soc_platform.domains.phishing.engine.preprocessing.user_behavior_feature_contract import extract_behavior_features
 
 # ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ def synthesize_email_payloads(conn: sqlite3.Connection, employees: list) -> pd.D
     for i in range(50000):
         # 80% Benign, 20% Anomalous
         is_anomalous = random.random() < 0.20
-        recipient, dept = random.choice(employees)
+        recipient, _dept = random.choice(employees)
         
         if not is_anomalous:
             # Benign

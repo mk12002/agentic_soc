@@ -1,5 +1,6 @@
 from soc_platform.domains.phishing.engine.orchestrator.storyline_engine import generate_storyline
 
+
 def test_storyline_generation():
     agent_results = [
         {"agent_name": "header_agent", "risk_score": 0.7, "confidence": 0.9, "indicators": ["Spoofed Domain", "Failed DMARC"]},

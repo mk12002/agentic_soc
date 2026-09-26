@@ -11,7 +11,6 @@ Output:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 from pathlib import Path
@@ -21,8 +20,10 @@ import xgboost as xgb
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import train_test_split
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 PROCESSED_DIR = REPO_ROOT.parent / "datasets_processed"
 MODEL_DIR = REPO_ROOT.parent / "models" / "user_behavior_agent"
 
@@ -131,7 +132,7 @@ def main() -> None:
 
     metrics = {
         "dataset": str(csv_path),
-        "rows": int(len(df)),
+        "rows": len(df),
         "features": FEATURE_COLS,
         "auc": auc,
         "classification_report": report,

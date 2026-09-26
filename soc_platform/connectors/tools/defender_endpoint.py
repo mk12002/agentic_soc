@@ -7,7 +7,7 @@ investigation package, custom indicators (block URL / domain / IP / file) with r
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
@@ -25,8 +25,8 @@ INDICATOR_TYPES = {"domain": "DomainName", "url": "Url", "ip": "IpAddress", "sha
 def _ts(at: Any) -> str:
     """findbyip needs an ISO-8601 UTC timestamp: the IP owner is looked up +-15 min around it."""
     if isinstance(at, datetime):
-        return at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return str(at) if at else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return str(at) if at else __import__("soc_platform.core.models", fromlist=["utcnow"]).utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 class DefenderEndpointConnector(MicrosoftConnector):
     name = "defender_endpoint"

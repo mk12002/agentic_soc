@@ -1,12 +1,13 @@
-from fastapi import HTTPException
-from pathlib import Path
 import email
+from pathlib import Path
+
+from fastapi import HTTPException
 
 
 class EmailValidator:
     MAX_EMAIL_SIZE = 50 * 1024 * 1024  # 50 MB
     MAX_ATTACHMENTS = 20
-    ALLOWED_MIME_TYPES = {
+    ALLOWED_MIME_TYPES = frozenset({
         'text/plain',
         'text/html',
         'application/pdf',
@@ -17,7 +18,7 @@ class EmailValidator:
         'image/jpeg',
         'image/png',
         'image/gif',
-    }
+    })
 
     @staticmethod
     def validate_email_size(email_data: bytes):

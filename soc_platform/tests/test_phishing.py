@@ -182,7 +182,7 @@ def test_auto_closed_reports_do_not_spend_llm_tokens(session, ph, monkeypatch):
         def complete(self, system, user, *, tier):
             import re as _re
             self.workflows.append(tier)
-            ids = _re.findall(r"^\[([A-Z]\d+)\]", user, _re.M) or ["E1"]
+            ids = _re.findall(r"^\[([A-Z]\d+)\]", user, _re.MULTILINE) or ["E1"]
             return Completion(_json.dumps({"summary": "s", "claims": [{"text": "x", "kind": "fact", "evidence_ids": ids[:1]}]}), 5, 5, "m")
 
     prov = Counting()

@@ -5,8 +5,8 @@ Calculates the minimum perturbation required to revert a malicious decision
 into a safe decision for explainability.
 """
 
-from typing import Any
 import copy
+from typing import Any
 
 from soc_platform.domains.phishing.engine.orchestrator.scoring_engine.scorer import calculate_threat_score
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger

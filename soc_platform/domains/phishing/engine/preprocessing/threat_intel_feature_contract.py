@@ -157,7 +157,7 @@ def extract_features_from_matches(
         freshness_ratio = 0.0
 
     # Type diversity
-    matched_types = set(r.get("ioc_type", "") for r in matched_rows)
+    matched_types = {r.get("ioc_type", "") for r in matched_rows}
 
     return {
         "candidate_domain_count":    float(n_cand_d),

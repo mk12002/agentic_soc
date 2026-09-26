@@ -4,8 +4,10 @@ Ensures zero train-serve skew by enforcing that both the offline generator
 and the real-time agent use the exact same feature engineering pipeline.
 """
 
-from typing import Any
+import logging
 import sqlite3
+from typing import Any
+
 import numpy as np
 
 URGENCY_TERMS = {"urgent", "wire", "invoice", "payment", "password", "reset", "immediately", "action"}
@@ -63,7 +65,7 @@ def extract_behavior_features(payload: dict[str, Any], cursor: sqlite3.Cursor) -
         if emp_row and emp_row[0]:
             dept_risk_tier = DEPT_RISK_MAP.get(emp_row[0].lower(), 0.5)
     except Exception:
-        pass  # Failsafe if running in tests without populated tables
+        logging.getLogger(__name__).debug("department lookup unavailable; default risk tier used", exc_info=True)
 
     # Query B: Historical Interaction Edge
     contact_count = 0.0
@@ -78,7 +80,7 @@ def extract_behavior_features(payload: dict[str, Any], cursor: sqlite3.Cursor) -
             contact_count = float(interact_row[0])
             days_since_last_contact = float(interact_row[1])
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("interaction history unavailable; defaults used", exc_info=True)
 
     # Basic business hour approximation (ideally passed in timestamp, but we'll mock based on existence of timestamp in headers)
     # The payload generally doesn't have an explicit arrival timestamp in the standard dict format yet, so we assume 1.0 (Day) unless specified.

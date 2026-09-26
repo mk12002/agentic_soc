@@ -14,13 +14,13 @@ import io
 import json
 import sys
 import zipfile
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from email.utils import format_datetime, make_msgid
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ORG = "acme-demo.com"
-T0 = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
 
 
 def _base(label: str, frm: str, display: str, to: str, subject: str, *, auth: str, relay: str, ip: str,

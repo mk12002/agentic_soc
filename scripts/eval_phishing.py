@@ -51,7 +51,6 @@ def main() -> None:
     from soc_platform.connectors.registry import ConnectorRegistry
     from soc_platform.domains.phishing.agents.analyzer import EngineAnalyzer, HeuristicAnalyzer
     from soc_platform.domains.phishing.agents.decompose import decompose
-
     from soc_platform.domains.phishing.supplier import load_suppliers
 
     heur = HeuristicAnalyzer(org_domains=["acme-demo.com"], threat_intel=ConnectorRegistry.all_fake().get("threat_intel"),
@@ -73,7 +72,7 @@ def main() -> None:
                 e = eng.analyze(em, raw)
                 row.update({"engine": e.verdict, "engine_score": e.score, "engine_ms": round((time.perf_counter() - t) * 1000, 1),
                             "engine_missing_agents": e.missing_agents, "agent_scores": e.raw.get("agent_scores")})
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - recorded in the evaluation row as an engine error
                 row.update({"engine": "error", "engine_error": f"{type(exc).__name__}: {exc}"[:200]})
         rows.append(row)
     summary = {}

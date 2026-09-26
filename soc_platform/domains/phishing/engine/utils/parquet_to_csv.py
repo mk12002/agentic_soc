@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 PARQUET_ENGINE_HINT = (
     "Parquet support requires 'pyarrow' or 'fastparquet'. "
     "Install one with: pip install pyarrow"

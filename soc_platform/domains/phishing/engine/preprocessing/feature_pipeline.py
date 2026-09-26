@@ -66,7 +66,7 @@ def _entropy(value: str) -> float:
     if not value:
         return 0.0
     probs = [value.count(char) / len(value) for char in set(value)]
-    return float(-sum(prob * math.log(prob, 2) for prob in probs))
+    return float(-sum(prob * math.log2(prob) for prob in probs))
 
 
 def _is_ip_host(host: str) -> bool:

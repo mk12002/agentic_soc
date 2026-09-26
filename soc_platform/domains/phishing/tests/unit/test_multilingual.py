@@ -3,11 +3,11 @@ integration into the content agent and grounded evidence."""
 
 from __future__ import annotations
 
+from soc_platform.domains.phishing.engine.agents.content_agent.agent import analyze as content_analyze
 from soc_platform.domains.phishing.engine.agents.content_agent.multilingual import (
     analyze_multilingual,
     detect_language,
 )
-from soc_platform.domains.phishing.engine.agents.content_agent.agent import analyze as content_analyze
 from soc_platform.domains.phishing.engine.orchestrator.evidence_collector import collect_evidence
 
 SPANISH_PHISH = (

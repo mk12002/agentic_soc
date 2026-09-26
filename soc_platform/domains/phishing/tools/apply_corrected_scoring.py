@@ -6,8 +6,8 @@ without needing to rebuild Docker containers.
 """
 import json
 import sys
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 
@@ -47,16 +47,16 @@ def apply_corrected_logic(report: dict[str, Any]) -> dict[str, Any]:
         return report
     
     # If suspicious AND shows BEC signals -> escalate to high_risk
-    if current_verdict == 'suspicious' and current_score >= 0.40:
-        if _contains_bec_signals(agent_results) or _has_multi_agent_fraud_agreement(agent_results):
-            report['verdict'] = 'high_risk'
-            report['overall_risk_score'] = max(current_score, 0.60)
-            report['corrected'] = True
-            report['correction_reason'] = 'bec_fraud_escalation'
-            if 'recommended_actions' not in report:
-                report['recommended_actions'] = []
-            if 'quarantine' not in report['recommended_actions']:
-                report['recommended_actions'].extend(['quarantine', 'soc_alert', 'trigger_garuda'])
+    if current_verdict == 'suspicious' and current_score >= 0.40 and (
+            _contains_bec_signals(agent_results) or _has_multi_agent_fraud_agreement(agent_results)):
+        report['verdict'] = 'high_risk'
+        report['overall_risk_score'] = max(current_score, 0.60)
+        report['corrected'] = True
+        report['correction_reason'] = 'bec_fraud_escalation'
+        if 'recommended_actions' not in report:
+            report['recommended_actions'] = []
+        if 'quarantine' not in report['recommended_actions']:
+            report['recommended_actions'].extend(['quarantine', 'soc_alert', 'trigger_garuda'])
     
     return report
 

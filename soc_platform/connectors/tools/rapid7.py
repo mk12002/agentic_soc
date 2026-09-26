@@ -61,7 +61,8 @@ class Rapid7Connector(ToolConnector):
         return self._vuln_cache[vuln_id]
 
     def _csv_page(self, stream: str, cursor: str | None) -> Page:
-        rows = list(csv.DictReader(Path(self.settings["export_csv"]).open(encoding="utf-8")))
+        with Path(self.settings["export_csv"]).open(encoding="utf-8", newline="") as fh:
+            rows = list(csv.DictReader(fh))
         if stream == "assets":
             seen: dict[str, dict] = {}
             for r in rows:

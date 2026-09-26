@@ -1,3 +1,4 @@
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -7,12 +8,10 @@ import pandas as pd
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
 
+
 def _install_ember_module():
     """Install the official lief/ember module required to vectorize the raw JSONL."""
-    try:
-        import ember
-        return
-    except ImportError:
+    if importlib.util.find_spec("ember") is None:
         print("Installing the `ember` module from elasticity repository...")
         subprocess.check_call([
             sys.executable, "-m", "pip", "install", 

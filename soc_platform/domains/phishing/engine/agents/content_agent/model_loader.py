@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import pickle
-
-from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
-from typing import Any, Optional
+from typing import Any
 
 import joblib
 
 from soc_platform.domains.phishing.engine.agents.ml_runtime import resolve_model_path
 from soc_platform.domains.phishing.engine.configs.settings import settings
+from soc_platform.domains.phishing.engine.integrity import verify as verify_artifact
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 
 logger = get_agent_logger("content_agent")
@@ -24,7 +23,7 @@ class ModelLoader:
             model_path or settings.content_model_path,
             required_files=("config.json", "model.joblib", "model.pkl"),
         )
-        self._model: Optional[Any] = None
+        self._model: Any | None = None
 
     def _load_transformer_pipeline(self) -> Any:
         try:

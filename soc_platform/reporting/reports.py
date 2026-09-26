@@ -182,8 +182,8 @@ class ReportService:
                 for r in p.runs:
                     r.font.size = PPt(18)
 
-        bullets("Vulnerability exposure", [f"Open findings: {m['open']} (P1 {m['by_priority'].get('P1', 0)}, "
-                                           f"P2 {m['by_priority'].get('P2', 0)})",
+        bullets("Vulnerability exposure", [(f"Open findings: {m['open']} (P1 {m['by_priority'].get('P1', 0)}, "
+                                           f"P2 {m['by_priority'].get('P2', 0)})"),
                                            f"KEV-listed open: {m['kev_open']}; internet-exposed: {m['internet_exposed_open']}",
                                            f"Past SLA: {m['sla_breached']}; MTTR: {m['mttr_days'] or 'n/a'} days",
                                            f"Asset match rate: {(m['asset_match_rate'] or 0) * 100:.1f}%"])
@@ -195,8 +195,8 @@ class ReportService:
                                   f"Closed this week: {h['closed_this_shift']}"])
         if phishing is not None:
             p = phishing.metrics()
-            bullets("Reported phishing", [f"Reports: {p['reported']}; auto-closed: {p['auto_closed']} "
-                                          f"(QA-sampled {p['sampled_for_qa']})",
+            bullets("Reported phishing", [(f"Reports: {p['reported']}; auto-closed: {p['auto_closed']} "
+                                          f"(QA-sampled {p['sampled_for_qa']})"),
                                           "Verdicts: " + ", ".join(f"{k} {v}" for k, v in p["verdict_mix"].items()),
                                           f"Campaigns: {p['campaigns']}; repeat clickers: {len(p['repeat_clickers'])}",
                                           f"Median time to containment: {p['time_to_containment_minutes']['median'] or 'n/a'} min"])

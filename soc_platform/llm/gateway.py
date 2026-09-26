@@ -17,7 +17,6 @@ import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -183,7 +182,9 @@ class LLMGateway:
     # ------------------------------------------------------------------ budget
 
     def tokens_this_month(self) -> int:
-        now = datetime.now(timezone.utc)
+        from soc_platform.core.models import utcnow
+
+        now = utcnow()
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         total = self.s.execute(select(func.coalesce(func.sum(LLMCall.prompt_tokens + LLMCall.completion_tokens), 0))
                                .where(LLMCall.ts >= start)).scalar()
@@ -211,7 +212,7 @@ class LLMGateway:
             return None
         try:
             out = self.provider.complete(system, prompt, tier=tier)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - logged; the caller falls back to the deterministic text
             _Breaker.record(False)
             self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error")
             return None

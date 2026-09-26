@@ -9,8 +9,10 @@ Uses analyst feedback (true_positive, false_positive, etc.) to:
 """
 
 from __future__ import annotations
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("active_learning")
@@ -45,11 +47,10 @@ class ActiveLearningEngine:
         Returns:
             Dict with per-agent TP/FP/FN/TN counts and accuracy.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         try:
-            with self._connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("""
                         SELECT tr.report->>'agent_results' AS agent_results,
                                tr.report->>'verdict' AS verdict,
                                af.analyst_verdict
@@ -57,7 +58,7 @@ class ActiveLearningEngine:
                         JOIN analyst_feedback af ON tr.analysis_id = af.analysis_id
                         WHERE af.submitted_at >= %s
                     """, (cutoff,))
-                    rows = cur.fetchall()
+                rows = cur.fetchall()
 
             if not rows:
                 return {"status": "no_feedback", "period_days": days, "agents": {}}
@@ -71,6 +72,7 @@ class ActiveLearningEngine:
                 try:
                     agent_results = json.loads(agent_results_json) if isinstance(agent_results_json, str) else (agent_results_json or [])
                 except Exception:
+                    logger.opt(exception=True).debug("skipping a feedback row with unreadable agent results")
                     continue
 
                 is_actually_bad = analyst_verdict in ("true_positive", "false_negative")
@@ -113,7 +115,7 @@ class ActiveLearningEngine:
                 "status": "computed", "period_days": days,
                 "feedback_count": len(rows),
                 "agents": agent_metrics,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
             }
         except Exception as e:
             logger.warning("Failed to compute agent accuracy", error=str(e))
@@ -177,7 +179,7 @@ class ActiveLearningEngine:
             "status": "computed",
             "recommendations": recommendations,
             "period_days": days,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
 
     def get_drift_report(self, days: int = 30) -> dict[str, Any]:
@@ -211,22 +213,21 @@ class ActiveLearningEngine:
             "has_drift": len(drift_alerts) > 0,
             "recent_period_days": 7,
             "baseline_period_days": days,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
 
     def get_feedback_summary(self, days: int = 30) -> dict[str, Any]:
         """Get summary statistics of analyst feedback."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         try:
-            with self._connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("""
                         SELECT analyst_verdict, COUNT(*) as cnt
                         FROM analyst_feedback
                         WHERE submitted_at >= %s
                         GROUP BY analyst_verdict
                     """, (cutoff,))
-                    rows = cur.fetchall()
+                rows = cur.fetchall()
             verdict_counts = {row[0]: row[1] for row in rows}
             total = sum(verdict_counts.values())
             fp_rate = verdict_counts.get("false_positive", 0) / total if total > 0 else 0
@@ -239,7 +240,7 @@ class ActiveLearningEngine:
             return {"status": "error", "error": str(e)}
 
 
-_engine: Optional[ActiveLearningEngine] = None
+_engine: ActiveLearningEngine | None = None
 
 def get_active_learning_engine() -> ActiveLearningEngine:
     global _engine

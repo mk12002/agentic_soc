@@ -10,19 +10,21 @@ and evaluates:
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
+import logging
 import math
 import os
 import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib import error, request
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 BASE_URL = os.getenv("EMAIL_SECURITY_BASE_URL", "http://127.0.0.1:8000")
 EMAIL_DROP_DIR = (PHISHING_HOME / "email_drop")
@@ -75,6 +77,7 @@ def _parse_root_limits() -> dict[Path, int | None]:
         try:
             root = Path(str(key)).expanduser().resolve()
         except Exception:
+            logging.getLogger(__name__).warning("ignoring an invalid path in the limits file", exc_info=True)
             continue
 
         if value is None:
@@ -84,6 +87,7 @@ def _parse_root_limits() -> dict[Path, int | None]:
         try:
             limit = int(value)
         except Exception:
+            logging.getLogger(__name__).warning("ignoring a non-numeric limit in the limits file", exc_info=True)
             continue
         limits[root] = max(0, limit)
 
@@ -142,6 +146,7 @@ def _api_reachable() -> tuple[bool, str]:
             with request.urlopen(req, timeout=5):  # nosec B310 - scheme restricted to http(s) by _http_url
                 return True, probe_url
         except Exception:
+            logging.getLogger(__name__).debug("probe URL not reachable", exc_info=True)
             continue
     return False, ""
 
@@ -152,12 +157,12 @@ def _ingest_eml(path: Path) -> dict[str, Any]:
         payload_data = handle.read()
 
     body_parts = [
-        f"--{boundary}\r\n".encode("utf-8"),
-        f"Content-Disposition: form-data; name=\"file\"; filename=\"{path.name}\"\r\n".encode("utf-8"),
+        f"--{boundary}\r\n".encode(),
+        f"Content-Disposition: form-data; name=\"file\"; filename=\"{path.name}\"\r\n".encode(),
         b"Content-Type: message/rfc822\r\n\r\n",
         payload_data,
         b"\r\n",
-        f"--{boundary}--\r\n".encode("utf-8"),
+        f"--{boundary}--\r\n".encode(),
     ]
     body = b"".join(body_parts)
 
@@ -408,7 +413,7 @@ def _binary_reliability(scores: list[float], labels: list[int], threshold: float
 
 
 def _build_markdown(results: list[EmailAuditResult], repetitive: dict[str, Any], reliability: dict[str, Any]) -> str:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines: list[str] = []
     lines.append("# Batch EML Audit Report")
     lines.append("")
@@ -511,7 +516,7 @@ def main() -> int:
         print("No .eml files found under the configured email audit roots.")
         return 1
 
-    run_id = datetime.now(timezone.utc).strftime("batch_eml_audit_%Y%m%d_%H%M%S")
+    run_id = datetime.now(UTC).strftime("batch_eml_audit_%Y%m%d_%H%M%S")
     out_dir = OUTPUT_ROOT / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -735,7 +740,7 @@ def main() -> int:
     json_path.write_text(
         json.dumps(
             {
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
                 "base_url": BASE_URL,
                 "email_drop_dir": str(EMAIL_DROP_DIR),
                 "adjudicated_labels_file": str(ADJUDICATED_LABELS_PATH),
@@ -753,7 +758,7 @@ def main() -> int:
     md_path.write_text(_build_markdown(results, repetitive, reliability), encoding="utf-8")
 
     history_record = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "run_id": run_id,
         "output_dir": str(out_dir),
         "email_count": len(email_files),

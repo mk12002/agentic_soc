@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any, ClassVar
 
 from soc_platform.domains.phishing.engine.configs.settings import settings
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
@@ -56,14 +56,14 @@ class MultiTierIOCCache:
     """
     
     # Define cache tiers with TTLs
-    TIERS = {
+    TIERS: ClassVar[dict[str, IOCCacheTier]] = {
         "burst": IOCCacheTier("burst", 300, "High-frequency burst traffic"),
         "common": IOCCacheTier("common", 1800, "Standard threat intel lookups"),
         "long": IOCCacheTier("long", 3600, "Long-lived known indicators"),
         "negative": IOCCacheTier("negative", 86400, "Verified safe/clean indicators"),
     }
     
-    def __init__(self, redis_client: Optional[Any] = None, max_memory_mb: int = 1024):
+    def __init__(self, redis_client: Any | None = None, max_memory_mb: int = 1024):
         """
         Initialize multi-tier IOC cache.
         
@@ -88,7 +88,7 @@ class MultiTierIOCCache:
             "memory_evictions": 0,
         }
     
-    def _get_redis(self) -> Optional[Any]:
+    def _get_redis(self) -> Any | None:
         """Lazy initialize Redis if needed."""
         if self.redis_client is None:
             try:
@@ -141,7 +141,7 @@ class MultiTierIOCCache:
         indicator: str,
         indicator_type: str,
         tier: str = "common",
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Retrieve IOC from cache (memory first, then Redis, then database).
         
@@ -348,7 +348,7 @@ class MultiTierIOCCache:
 
 
 # Global multi-tier IOC cache instance
-_ioc_cache: Optional[MultiTierIOCCache] = None
+_ioc_cache: MultiTierIOCCache | None = None
 
 
 def get_ioc_cache() -> MultiTierIOCCache:
@@ -368,18 +368,18 @@ def preload_iocs_at_startup() -> dict[str, Any]:
         Status dict with preload metrics
     """
     try:
-        cache = get_ioc_cache()
+        get_ioc_cache()                                                  # initialise the cache
         logger.info("IOC cache warming not yet implemented, framework ready")
         
         return {
             "success": True,
             "iocs_loaded": 0,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error("Error preloading IOCs", error=str(e))
         return {
             "success": False,
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }

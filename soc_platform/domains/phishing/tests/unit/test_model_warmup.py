@@ -2,6 +2,7 @@
 
 from soc_platform.domains.phishing.engine.agents.model_warmup import ModelWarmup
 
+
 class MockModelWarmup(ModelWarmup):
     def _warmup_header_agent(self): return "mock_header"
     def _warmup_content_agent(self): return "mock_content"
@@ -9,7 +10,7 @@ class MockModelWarmup(ModelWarmup):
     def _warmup_attachment_agent(self): return "mock_attachment"
     def _warmup_sandbox_agent(self): return "mock_sandbox"
     def _warmup_threat_intel_agent(self): return "mock_threat"
-    def _warmup_user_behavior_agent(self): raise Exception("Simulated Failure")
+    def _warmup_user_behavior_agent(self): raise RuntimeError("Simulated Failure")
 
 def test_warmup_all_models():
     from soc_platform.domains.phishing.engine.configs.settings import settings

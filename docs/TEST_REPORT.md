@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-09-25 (round 3; rounds 1-2 on 2026-09-24) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-09-26 (round 8; earlier rounds 2026-09-24 to 2026-09-25) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,48 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 7 (2026-09-25) - latest results: new data sets, failure modes, cost
+## 0. Round 8 (2026-09-26) - latest results: PostgreSQL, time, accessibility, code quality
+
+| Check | Result |
+|---|---|
+| Platform test suite on **SQLite**, with PostgreSQL's rules enforced (column widths, 32-bit integers, NUL characters) | **235 passed**, 0 failed |
+| The same suite on **PostgreSQL 16** (the production engine) | **236 passed**, 0 failed (one test runs on PostgreSQL only) |
+| Phishing engine suite (unit + integration) | 205 passed |
+| Time-travel tests on 3 estates: SLAs falling due, budget month roll-over, retention with legal hold, risk decay | all passed |
+| Browser tour: 19 screens, light + dark, 1440 / 1280 / 1024 / 768 px, axe-core WCAG 2.1 A/AA | 0 problems, 0 accessibility findings (was 18 serious / critical) |
+| Lint (ruff 0.16, whole repository) | 0 findings (was ~1,250) |
+
+**Found and fixed on PostgreSQL** (SQLite hid these):
+- A manual job run by a user with a long e-mail address failed.
+- `%00` in an id answered 500 on 20 routes.
+- A NUL character in a reported e-mail would have failed its case write.
+- Free text wider than its column would have failed the write.
+
+**Found by moving the clock:**
+- Approvals waiting longer than 14 days dropped out of the dashboard and reports.
+- Open vulnerabilities and incidents faded from risk while still open.
+- The "privileged user at risk" amplifier never faded.
+- The dashboard's action figures were not scoped to the viewer's domains.
+
+**Found by the accessibility scan:**
+- Unlabelled back links, verdict selector and file input.
+- In-text links told apart by colour only.
+- Low-contrast tab counts.
+
+**Found by code review and lint:**
+- 40 silent error handlers now log.
+- The warning-banner action did not change the message.
+- A search ignored its severity filter.
+- IOC times were mislabelled as UTC.
+- A blocking write sat in an async handler.
+- A file handle was leaked.
+- Several dead variables were removed.
+
+**Test harness:**
+- A failed estate fixture could leak its environment into later tests; cleanup is now registered before setup.
+- Tests run on every sample estate, with day counts taken from settings rather than written into the tests.
+
+## 0z. Round 7 (2026-09-25): new data sets, failure modes, cost
 
 | Check | Result |
 |---|---|

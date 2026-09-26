@@ -20,9 +20,9 @@ Rules and the requirement / use case each serves:
 
 from __future__ import annotations
 
-import json
-
 import hashlib
+import json
+import logging
 import re
 from collections import defaultdict
 from datetime import timedelta
@@ -152,7 +152,7 @@ class CorrelationEngine:
         if not (attack and vuln):
             return None
         kev = any(f.signal == "kev_exposure" for f in vuln)
-        exploit = any(re.search(r"exploit|T1190|public-facing", f.detail or "", re.I) for f in attack)
+        exploit = any(re.search(r"exploit|T1190|public-facing", f.detail or "", re.IGNORECASE) for f in attack)
         what = "an exploitation attempt" if exploit else "active attack"
         return Insight(rule="exposed_host_under_attack", dedupe_key=_key("exp", p.entity_id),
                        title=f"{p.name} shows {what} and carries {'KEV-listed' if kev else 'priority'} vulnerabilities",
@@ -285,7 +285,8 @@ class CorrelationEngine:
 
         try:
             return drift_insights(self.s)
-        except Exception:  # noqa: BLE001
+        except Exception:
+            logging.getLogger(__name__).warning("drift rule failed; its findings are missing this run", exc_info=True)
             return []
 
     def _supplier_risk(self) -> list[Insight]:
@@ -293,10 +294,11 @@ class CorrelationEngine:
 
         try:
             report = SupplierMonitor(self.s).assess()
-        except Exception:  # noqa: BLE001 - a bad supplier file must not stop the other rules
+        except Exception:
+            logging.getLogger(__name__).warning("supplier rule failed; its findings are missing this run", exc_info=True)
             return []
-        steps = {"supplier_account_compromise": ["Call the supplier on a number on file: their mailbox/tenant is likely "
-                                                 "compromised", "Hold pending payments to this supplier",
+        steps = {"supplier_account_compromise": [("Call the supplier on a number on file: their mailbox/tenant is likely "
+                                                 "compromised"), "Hold pending payments to this supplier",
                                                  "Search and purge other messages from the sender"],
                  "supplier_payment_diversion": ["Do not change bank details on email instructions",
                                                 "Verify with the supplier by phone (number from the vendor master)",

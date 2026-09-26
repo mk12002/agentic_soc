@@ -9,7 +9,6 @@ import pandas as pd
 from soc_platform.domains.phishing.engine.preprocessing.content_preprocessing import run
 
 
-
 def test_content_preprocessing_outputs_tri_class_schema(tmp_path: Path) -> None:
     base = tmp_path / "datasets"
     legit = base / "email_content" / "legitimate"

@@ -21,7 +21,7 @@ import random
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.db import Database
@@ -29,7 +29,7 @@ from soc_platform.core.entity_resolution import EntityResolver
 from soc_platform.core.models import SourceRecord, UnresolvedItem
 from soc_platform.core.schema import NormalizedRecord
 
-T0 = datetime(2026, 9, 20, tzinfo=timezone.utc)
+T0 = datetime(2026, 9, 20, tzinfo=UTC)
 OSES = ["Windows 11 Enterprise", "Windows Server 2019", "Windows Server 2022", "Ubuntu 22.04 LTS", "RHEL 8.9",
         "macOS 14.5"]
 
@@ -64,9 +64,9 @@ def observations(hosts: list[dict], rnd: random.Random) -> list[tuple[int, Norma
                                 observed_at=T0 - timedelta(days=age_days))
 
     for h in hosts:
-        drift_ip = lambda: h["ip"] if rnd.random() < 0.75 else f"10.99.{rnd.randrange(256)}.{rnd.randrange(1, 255)}"  # noqa
-        name_case = lambda: rnd.choice([h["name"], h["name"].upper(), h["fqdn"], h["fqdn"].upper()])  # noqa
-        os_ = lambda: h["os"] if rnd.random() < 0.9 else None  # noqa
+        drift_ip = lambda h=h: h["ip"] if rnd.random() < 0.75 else f"10.99.{rnd.randrange(256)}.{rnd.randrange(1, 255)}"
+        name_case = lambda h=h: rnd.choice([h["name"], h["name"].upper(), h["fqdn"], h["fqdn"].upper()])
+        os_ = lambda h=h: h["os"] if rnd.random() < 0.9 else None
         if h["decom"]:
             obs.append((h["gt"], rec("servicenow", f"ci-{h['gt']}", {"serial_number": h["serial"]},
                                      {"hostname": h["name"], "fqdn": h["fqdn"], "ip": h["ip"], "os": h["os"]}, 60)))

@@ -25,10 +25,11 @@ import importlib
 import os
 import pkgutil
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 
@@ -190,13 +191,13 @@ class ConnectorRegistry:
         self._instances: dict[str, ConnectorInstance] = {}
 
     @classmethod
-    def from_file(cls, path: str | Path | None = None, *, default_mode: str | None = None) -> "ConnectorRegistry":
+    def from_file(cls, path: str | Path | None = None, *, default_mode: str | None = None) -> ConnectorRegistry:
         path = Path(path or os.environ.get("SOC_CONNECTORS_CONFIG", "config/connectors.yaml"))
         cfg = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
         return cls(cfg or {}, default_mode=default_mode or os.environ.get("SOC_CONNECTOR_MODE", "fake"))
 
     @classmethod
-    def all_fake(cls) -> "ConnectorRegistry":
+    def all_fake(cls) -> ConnectorRegistry:
         """Every discovered connector enabled in fixture mode (demos, tests, local dev)."""
         manifests = discover()
         return cls({"connectors": {n: {"enabled": True, "mode": "fake"} for n in manifests}},

@@ -23,8 +23,9 @@ fabrication — so it feeds the grounded-evidence explainability layer faithfull
 
 from __future__ import annotations
 
+import itertools
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -50,13 +51,13 @@ def _parse_received_date(received: str) -> datetime | None:
         return None
     # Normalize to aware UTC so comparisons never mix naive/aware datetimes.
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def analyze_received_hops(received: list[str], now: datetime | None = None) -> dict[str, Any]:
     """Analyze the Received chain for ordering, future-date, and gap anomalies."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     indicators: list[str] = []
     risk = 0.0
 
@@ -80,7 +81,7 @@ def analyze_received_hops(received: list[str], now: datetime | None = None) -> d
     # A later (lower) hop newer than an earlier (upper) hop beyond skew = forgery.
     out_of_order = False
     large_gap = False
-    for upper, lower in zip(parsed, parsed[1:]):
+    for upper, lower in itertools.pairwise(parsed):
         if lower > upper + _ORDER_SKEW_TOLERANCE:
             out_of_order = True
         if abs(upper - lower) > _LARGE_GAP:

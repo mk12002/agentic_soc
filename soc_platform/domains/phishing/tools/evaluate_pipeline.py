@@ -21,8 +21,8 @@ import json
 from pathlib import Path
 
 # Ensure the package root is importable when run as a script.
-pass  # (package import; no sys.path hack needed)
-from soc_platform.domains.phishing.engine.orchestrator.evaluation import evaluate_corpus  # noqa: E402
+# (package import; no sys.path hack needed)
+from soc_platform.domains.phishing.engine.orchestrator.evaluation import evaluate_corpus
 
 
 def load_records(path: str | Path) -> list[dict]:

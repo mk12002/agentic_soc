@@ -25,7 +25,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -49,7 +49,7 @@ PHASES = [("contain", "Contain", {"endpoint.isolate", "identity.revoke_sessions"
 
 
 def _aware(dt: datetime | None) -> datetime | None:
-    return dt.replace(tzinfo=timezone.utc) if dt is not None and dt.tzinfo is None else dt
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
 def _parse(ts: Any) -> datetime | None:
@@ -58,7 +58,7 @@ def _parse(ts: Any) -> datetime | None:
     if not ts:
         return None
     try:
-        return _aware(datetime.fromisoformat(str(ts).replace("Z", "+00:00")))
+        return _aware(datetime.fromisoformat(str(ts)))
     except ValueError:
         return None
 
@@ -543,7 +543,8 @@ class AttackStory:
             verdict, conf, why = "likely_compromise", "medium" if benign_open else "high", \
                 f"{reached} across {len(tools)} tool(s)" + (f"; {len(benign_open)} benign explanation(s) still plausible" if benign_open else "")
         else:
-            verdict, conf, why = "suspicious_activity", "low", "a single initial step without follow-on activity"
+            verdict, conf, why = "suspicious_activity", "low", ("a single initial step; follow-on attempts were blocked"
+                                                                if blocked_only else "a single initial step without follow-on activity")
         return {"verdict": verdict, "label": verdict.replace("_", " ").capitalize(), "confidence": conf, "reason": why}
 
     def _summary(self, a, steps, blast, gaps, plan, span, principals) -> str:

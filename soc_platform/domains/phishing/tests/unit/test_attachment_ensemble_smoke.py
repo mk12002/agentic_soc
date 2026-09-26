@@ -1,5 +1,4 @@
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import importlib.util
 from pathlib import Path
@@ -7,8 +6,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
+
 REPO_ROOT = PHISHING_HOME
-pass  # (package import; no sys.path hack needed)
+# (package import; no sys.path hack needed)
 ML_RUNTIME_PATH = Path(__file__).resolve().parents[2] / "engine" / "agents" / "ml_runtime.py"
 _SPEC = importlib.util.spec_from_file_location("ml_runtime_standalone", ML_RUNTIME_PATH)
 if _SPEC is None or _SPEC.loader is None:

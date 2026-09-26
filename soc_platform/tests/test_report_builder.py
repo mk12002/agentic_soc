@@ -129,7 +129,7 @@ def test_report_builder_over_http_scope_and_encryption(tmp_path, monkeypatch):
     appmod.registry.cache_clear()
     try:
         c = TestClient(appmod.app)
-        H = lambda u, r, d="*": {"Authorization": "Bearer " + c.get(f"/api/v1/dev/token?user={u}&roles={r}&domains={d}").json()["token"]}  # noqa: E731
+        H = lambda u, r, d="*": {"Authorization": "Bearer " + c.get(f"/api/v1/dev/token?user={u}&roles={r}&domains={d}").json()["token"]}
         lead, vm_analyst, ph_analyst = H("lena", "lead"), H("vic", "analyst", "vulnerability"), H("pia", "analyst", "phishing")
         c.post("/api/v1/incidents/run", headers=lead)
         c.post("/api/v1/phishing/ingest", headers=lead)

@@ -9,11 +9,14 @@ incomplete instead of failing or silently omitting them.
 
 from __future__ import annotations
 
+import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutTimeout
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Iterable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -113,7 +116,7 @@ class EnrichmentOrchestrator:
                     results[i] = fut.result(timeout=max(0.01, deadline - time.perf_counter()))
                 except FutTimeout:
                     results[i] = LookupResult(c.tool, c.dimension, False, error=f"timeout after {self.timeout_s}s")
-                except Exception as exc:  # connector bug: never fail the investigation
+                except Exception as exc:  # noqa: BLE001 - a connector bug is reported as 'unavailable', never fails the case
                     results[i] = LookupResult(c.tool, c.dimension, False, error=f"{type(exc).__name__}: {exc}")
 
         evidence: list[Evidence] = []
@@ -135,7 +138,7 @@ class EnrichmentOrchestrator:
                     with self.s.begin_nested():
                         self.store.ingest(rec)
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).warning("an enrichment record could not be stored in the context store", exc_info=True)
             ev = Evidence(case_id=case_id, entity_id=t.entity_id, dimension=r.dimension or c.dimension,
                           source_tool=c.tool, summary=r.summary, deep_link=r.deep_link,
                           data={"lookup": t.etype, "value": t.value, "elapsed_ms": r.elapsed_ms, "signals": r.signals,
@@ -156,7 +159,7 @@ def evidence_for_llm(evidence: list[Evidence]) -> list[dict[str, Any]]:
 
     Numbering is deterministic (collection time, then row id) so the case view can show the same E-numbers
     that the explanation cites, whatever order the caller loaded the rows in."""
-    evidence = sorted(evidence, key=lambda e: (e.collected_at.replace(tzinfo=None) if e.collected_at else datetime.min, e.id))
+    evidence = sorted(evidence, key=lambda e: (e.collected_at or datetime.min.replace(tzinfo=UTC), e.id))
     return [{"id": f"E{i + 1}", "evidence_row": e.id, "claim": e.summary, "source": e.source_tool,
              "dimension": e.dimension, "deep_link": e.deep_link, "is_inference": e.is_inference}
             for i, e in enumerate(evidence) if e.summary]

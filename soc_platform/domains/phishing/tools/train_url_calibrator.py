@@ -1,21 +1,22 @@
 """Train URL-agent probability calibrator (Platt vs Isotonic) and persist best model."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from pathlib import Path
 import os
 import sys
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 
 import joblib
 import pandas as pd
+from loguru import logger
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
 from sklearn.model_selection import train_test_split
-from loguru import logger
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 SCRIPT_PATH = Path(__file__).resolve()
 WORKSPACE_ROOT = SCRIPT_PATH.parents[2]
@@ -103,7 +104,7 @@ def main() -> int:
     payload = {
         "method": chosen_method,
         "model": chosen_model,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "trained_at": datetime.now(UTC).isoformat(),
         "metrics": {
             "platt": asdict(platt_metrics),
             "isotonic": asdict(iso_metrics),

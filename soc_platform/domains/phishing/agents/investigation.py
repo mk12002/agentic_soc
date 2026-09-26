@@ -87,16 +87,16 @@ def reconcile(reg: ConnectorRegistry, em: DecomposedEmail, our_verdict: str) -> 
 
 
 def _subject_template(s: str) -> str:
-    s = re.sub(r"^\s*((re|fw|fwd|aw|tr)\s*:\s*)+", "", s or "", flags=re.I).lower()
+    s = re.sub(r"^\s*((re|fw|fwd|aw|tr)\s*:\s*)+", "", s or "", flags=re.IGNORECASE).lower()
     s = re.sub(r"\d+", "#", s)
     return re.sub(r"\s+", " ", s).strip()
 
 
 def _url_skeleton(u: str) -> str:
-    u = re.sub(r"^https?://", "", u or "", flags=re.I)
+    u = re.sub(r"^https?://", "", u or "", flags=re.IGNORECASE)
     host, _, path = u.partition("/")
     path = re.sub(r"[?#].*$", "", path)
-    path = re.sub(r"[0-9a-f]{8,}|\d+", "#", path, flags=re.I)
+    path = re.sub(r"[0-9a-f]{8,}|\d+", "#", path, flags=re.IGNORECASE)
     return f"{host.lower()}/{path}"
 
 

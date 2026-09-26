@@ -122,7 +122,7 @@ def _rename_eml(raw: bytes, rx, table, rename_text) -> bytes:
         body = mt.group(2)
         try:
             dec = base64.b64decode("".join(body.split()), validate=True).decode("utf-8")
-        except Exception:
+        except (ValueError, UnicodeDecodeError):              # not base64 text (binascii.Error is a ValueError)
             return mt.group(0)
         new = rename_text(dec, rx, table)
         if new == dec:
@@ -132,7 +132,7 @@ def _rename_eml(raw: bytes, rx, table, rename_text) -> bytes:
         eol = "\r\n" if "\r\n" in body else "\n"
         return mt.group(1) + eol.join(enc[i:i + width] for i in range(0, len(enc), width)) + eol
 
-    text = re.sub(r"(Content-Transfer-Encoding:\s*base64[^\n]*\n(?:[^\n]+\n)*?\r?\n)((?:[A-Za-z0-9+/=]+\r?\n)+)", block, text, flags=re.I)
+    text = re.sub(r"(Content-Transfer-Encoding:\s*base64[^\n]*\n(?:[^\n]+\n)*?\r?\n)((?:[A-Za-z0-9+/=]+\r?\n)+)", block, text, flags=re.IGNORECASE)
     return rename_text(text, rx, table).encode("utf-8", errors="surrogateescape")
 
 

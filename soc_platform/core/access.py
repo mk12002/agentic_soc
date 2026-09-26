@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import secrets
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -34,7 +35,7 @@ SERVICE_ROLES = {Role.ANALYST, Role.AUDITOR, Role.AUTOMATION_ADMIN}
 
 
 def _aware(dt: datetime | None) -> datetime | None:
-    return dt.replace(tzinfo=timezone.utc) if dt is not None and dt.tzinfo is None else dt
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
 def _domains(values: list[str] | None) -> list[str]:
@@ -85,7 +86,7 @@ class AccessService:
             .order_by(TokenRevocation.not_before.desc())).scalars().first()
         if nb is None:
             return False
-        issued = datetime.fromtimestamp(p.issued_at, tz=timezone.utc) if p.issued_at else None
+        issued = datetime.fromtimestamp(p.issued_at, tz=UTC) if p.issued_at else None
         return issued is None or issued < _aware(nb)
 
     # ------------------------------------------------------------------ role assignments
@@ -238,8 +239,8 @@ class AccessService:
                         next_steps=["Confirm the use was authorised (incident ticket / on-call lead)",
                                     "Rotate the sealed break-glass secret", "Review the access log for the session"],
                         requirement_refs=["NFR-09"]))
-        except Exception:  # noqa: BLE001 - alerting must never block emergency access
-            pass
+        except Exception:
+            logging.getLogger(__name__).exception("break-glass use could not be raised as a finding; access still granted")
         return Principal(id="break-glass", name="Break-glass administrator",
                          roles=frozenset({Role.LEAD, Role.ADMIN}), mfa=True, break_glass=True, auth_method="break_glass")
 

@@ -107,7 +107,7 @@ def crowdstrike() -> None:
         if "cs" not in h:
             continue
         devices.append({"device_id": h["cs"], "hostname": h["hostname"], "local_ip": h["ip"],
-                        "external_ip": "203.0.113.10", "mac_address": h["mac"] if "mac" in h else None,
+                        "external_ip": "203.0.113.10", "mac_address": h.get("mac", None),
                         "serial_number": h["serial"], "os_version": h["os"], "platform_name": h["platform"],
                         "agent_version": "7.18.18209.0", "status": "normal", "last_seen": f"{D}10:00:00Z",
                         "tags": ["FalconGroupingTags/Finance"] if k == "jane" else []})
@@ -135,7 +135,7 @@ def crowdstrike() -> None:
     vulns = []
     for hk, cves in EXPOSURE.items():
         h = HOSTS[hk]
-        if "cs" not in h or hk == "web01" and False:
+        if "cs" not in h:
             continue
         for cve in cves:
             if hk == "web01" and cve == "CVE-2023-38408":
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from fixture_builders import BUILDERS  # noqa: E402
+    from fixture_builders import BUILDERS
 
     for b in [crowdstrike, *BUILDERS]:
         b()

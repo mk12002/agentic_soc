@@ -8,6 +8,89 @@ from soc_platform.core.actions import ActionRegistry, ActionSpec
 from soc_platform.core.auth import Principal, Role
 from soc_platform.core.db import Database
 
+# ------------------------------------------------------------------------------------------------ PostgreSQL runs
+# SOC_TEST_POSTGRES=postgresql://user:pw@host:port/postgres runs the whole suite on PostgreSQL (the production
+# engine): every SQLite database a test creates becomes a fresh PostgreSQL database - the same file URL maps to the
+# same database, each in-memory database gets its own. Engines do not pool, so ~200 tests stay within limits.
+_PG = __import__("os").environ.get("SOC_TEST_POSTGRES")
+if _PG:
+    import hashlib as _hashlib
+    import uuid as _uuid
+
+    import psycopg2 as _pg
+    from sqlalchemy import create_engine as _create_engine
+    from sqlalchemy.orm import sessionmaker as _sessionmaker
+    from sqlalchemy.pool import NullPool as _NullPool
+
+    _orig_init = Database.__init__
+    _made: set[str] = set()
+
+    def _pg_url(url: str) -> str:
+        name = ("t_" + _uuid.uuid4().hex[:16]) if url in {"sqlite://", "sqlite:///:memory:"} else             "f_" + _hashlib.sha256(url.encode()).hexdigest()[:16]
+        if name not in _made:
+            conn = _pg.connect(_PG)
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("select 1 from pg_database where datname = %s", (name,))
+                if not cur.fetchone():
+                    cur.execute(f'create database "{name}"')
+            conn.close()
+            _made.add(name)
+        return _PG.rsplit("/", 1)[0] + "/" + name
+
+    def _pg_init(self, url: str) -> None:
+        if not url.startswith("sqlite"):
+            return _orig_init(self, url)
+        self.engine = _create_engine(_pg_url(url).replace("postgresql://", "postgresql+psycopg2://"), future=True, poolclass=_NullPool)
+        self._factory = _sessionmaker(bind=self.engine, expire_on_commit=False, future=True)
+
+    Database.__init__ = _pg_init
+else:
+    # SQLite is lax where PostgreSQL (production) is strict. Hold every SQLite test to PostgreSQL's rules so the fast
+    # suite catches what would only fail in production: text longer than its column, integers beyond 32 bits in an
+    # Integer column, and NUL characters (PostgreSQL rejects them in text, in writes and in query parameters).
+    from sqlalchemy import BigInteger as _BigInteger
+    from sqlalchemy import Integer as _Integer
+    from sqlalchemy import String as _String
+    from sqlalchemy import event as _event
+    from sqlalchemy import inspect as _inspect
+    from sqlalchemy.engine import Engine as _Engine
+    from sqlalchemy.orm import Session as _Session
+
+    class PostgresRuleViolation(Exception):
+        pass
+
+    @_event.listens_for(_Session, "before_flush")
+    def _pg_strict_flush(session, _ctx, _instances) -> None:
+        for obj in list(session.new) + list(session.dirty):
+            for col in _inspect(obj).mapper.columns:
+                v = getattr(obj, col.key, None)
+                if v is None:
+                    continue
+                t = col.type
+                if getattr(t, "truncates", False):          # BoundedText: kept to width and NUL-free on the way in
+                    continue
+                if isinstance(v, str):                     # (NUL is stripped for every column by core.db._strip_nul)
+                    if isinstance(t, _String) and t.length and len(v) > t.length:
+                        raise PostgresRuleViolation(f"{obj.__tablename__}.{col.key}: {len(v)} chars > {t.length}: {v[:60]!r}")
+                elif isinstance(v, int) and isinstance(t, _Integer) and not isinstance(t, _BigInteger) and not -2**31 <= v < 2**31:
+                    raise PostgresRuleViolation(f"{obj.__tablename__}.{col.key}: {v} exceeds a 32-bit Integer")
+
+    @_event.listens_for(_Engine, "before_cursor_execute")
+    def _pg_strict_params(_conn, _cursor, _stmt, params, _ctx, _many) -> None:
+        def values(p):                                   # dict, tuple, list of either, or a scalar (bulk inserts)
+            if isinstance(p, dict):
+                return p.values()
+            return p if isinstance(p, (list, tuple)) else (p,)
+
+        stack = list(values(params))
+        while stack:
+            v = stack.pop()
+            if isinstance(v, (dict, list, tuple)):
+                stack.extend(values(v))
+            elif isinstance(v, str) and "\x00" in v:
+                raise PostgresRuleViolation("NUL character in a query parameter")
+
 
 @pytest.fixture()
 def db() -> Database:

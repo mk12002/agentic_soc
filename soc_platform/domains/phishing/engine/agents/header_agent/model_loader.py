@@ -5,7 +5,7 @@ Uses the shared ml_runtime loader for consistency across agents.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from soc_platform.domains.phishing.engine.agents.ml_runtime import load_model_bundle, resolve_model_path
 from soc_platform.domains.phishing.engine.configs.settings import settings
@@ -19,7 +19,7 @@ class ModelLoader:
 
     def __init__(self, model_path: str | None = None):
         self.model_path = resolve_model_path(model_path or settings.header_model_path)
-        self._model: Optional[Any] = None
+        self._model: Any | None = None
 
     def load_model(self) -> Any:
         if self._model is not None:

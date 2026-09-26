@@ -6,13 +6,14 @@ Symlinks are used to avoid duplicating the dataset on disk.
 """
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 import random
 import shutil
 from pathlib import Path
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 
 def _gather_files(folder: Path) -> list[Path]:

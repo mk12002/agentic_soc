@@ -1,10 +1,11 @@
 """Run all agent-specific preprocessing pipelines and emit a manifest."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 from pathlib import Path
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 from .attachment_preprocessing import run as run_attachment_preprocessing
 from .content_preprocessing import run as run_content_preprocessing

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from soc_platform.domains.phishing.engine.agents.ml_runtime import clamp as _clamp
+from soc_platform.domains.phishing.engine.agents.trust_signals import assess_transactional_legitimacy
 from soc_platform.domains.phishing.engine.agents.user_behavior_agent.feature_extractor import extract_features
 from soc_platform.domains.phishing.engine.agents.user_behavior_agent.inference import predict
 from soc_platform.domains.phishing.engine.agents.user_behavior_agent.model_loader import load_model
-from soc_platform.domains.phishing.engine.agents.ml_runtime import clamp as _clamp
-from soc_platform.domains.phishing.engine.agents.trust_signals import assess_transactional_legitimacy
 from soc_platform.domains.phishing.engine.services.logging_service import get_agent_logger
 
 logger = get_agent_logger("user_behavior_agent")
@@ -60,7 +60,7 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
             click_probability += 0.25
             indicators.append(f"new_domain_age:{age_days}d")
     except Exception:
-        pass  # WHOIS lookup unavailable or timed out — skip silently
+        logger.opt(exception=True).debug("WHOIS enrichment unavailable; domain-age signal skipped")
 
     if legitimacy.level == "strong" and legitimacy.credential_bait_hits == 0:
         click_probability -= 0.18

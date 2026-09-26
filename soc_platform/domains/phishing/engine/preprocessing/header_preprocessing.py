@@ -1,11 +1,12 @@
 """Header-agent preprocessing."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 from pathlib import Path
 
 import pandas as pd
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 from .feature_pipeline import write_processed_dataset
 

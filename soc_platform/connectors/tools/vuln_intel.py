@@ -53,9 +53,12 @@ class NvdConnector(ToolConnector):
                 "exploit_references": [r["url"] for r in c.get("references") or [] if "Exploit" in (r.get("tags") or [])]}
 
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
-        return self.timed_lookup(lambda: (lambda d: ok_lookup(
-            self, [], f"{value}: CVSS {d['cvss']} {d['severity']} - {d['description'][:160]}" if d else f"{value} not in NVD",
-            f"https://nvd.nist.gov/vuln/detail/{value}"))(self.cve_detail(value)))
+        def run() -> LookupResult:
+            d = self.cve_detail(value)
+            summary = f"{value}: CVSS {d['cvss']} {d['severity']} - {d['description'][:160]}" if d else f"{value} not in NVD"
+            return ok_lookup(self, [], summary, f"https://nvd.nist.gov/vuln/detail/{value}")
+
+        return self.timed_lookup(run)
 
 
 class EpssConnector(ToolConnector):

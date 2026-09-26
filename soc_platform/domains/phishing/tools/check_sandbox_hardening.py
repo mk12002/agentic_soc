@@ -2,15 +2,15 @@
 """Fail-fast sandbox hardening checks intended for CI and release gates."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import argparse
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 REPO_ROOT = PHISHING_HOME
 def _load_dotenv(path: Path) -> dict[str, str]:
@@ -95,7 +95,7 @@ def run_checks(
     )
 
     return {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "checks": checks,
         "violations": violations,
         "passed": len(violations) == 0,

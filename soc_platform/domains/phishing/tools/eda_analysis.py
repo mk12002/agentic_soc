@@ -3,11 +3,12 @@ Exploratory Data Analysis (EDA) for Processed Email Security Datasets.
 Generates statistical summaries and Matplotlib visualizations for all training datasets.
 """
 
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 import warnings
 
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 warnings.filterwarnings("ignore")
 
@@ -43,7 +44,7 @@ def analyze_url_dataset():
     
     # Feature Distributions
     features = ["url_length", "subdomain_count", "special_char_count", "host_entropy"]
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    _fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     axes = axes.flatten()
     
     for i, feature in enumerate(features):

@@ -1,15 +1,16 @@
 """URL-agent preprocessing."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 import json
 import os
-from pathlib import Path
 import random
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pandas as pd
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 from .feature_pipeline import build_url_features, normalize_url, write_processed_dataset
 

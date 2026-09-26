@@ -291,7 +291,7 @@ def test_brief_is_reused_while_its_facts_are_unchanged(session, world):
 
         def complete(self, system, user, *, tier):
             self.calls += 1
-            ids = re.findall(r"^\[([A-Z]\d+)\]", user, re.M)
+            ids = re.findall(r"^\[([A-Z]\d+)\]", user, re.MULTILINE)
             return Completion(json.dumps({"summary": "brief", "claims": [{"text": "x", "kind": "fact", "evidence_ids": ids[:1]}]}), 5, 5, "m")
 
     an._BRIEF_CACHE.clear()

@@ -1,9 +1,10 @@
 """Attachment-agent preprocessing (EMBER conversion/check)."""
 
 from __future__ import annotations
-from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 from pathlib import Path
+
+from soc_platform.domains.phishing.engine.paths import PHISHING_HOME
 
 from .convert_ember_jsonl import convert_ember_jsonl_to_parquet
 

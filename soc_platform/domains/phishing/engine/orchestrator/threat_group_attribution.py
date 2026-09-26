@@ -5,8 +5,10 @@ Cross-references detected ATT&CK techniques against known threat group profiles.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any
+
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("threat_group_attribution")

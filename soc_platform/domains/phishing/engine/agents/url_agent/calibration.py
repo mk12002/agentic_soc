@@ -7,7 +7,6 @@ from typing import Any
 
 from soc_platform.domains.phishing.engine.configs.settings import PROJECT_ROOT, settings
 
-
 _CALIBRATOR_CACHE: dict[str, dict[str, Any] | None] = {}
 
 
