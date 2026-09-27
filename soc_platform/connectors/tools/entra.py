@@ -8,6 +8,7 @@ force password change at next sign-in.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
@@ -133,18 +134,26 @@ class EntraConnector(MicrosoftConnector):
     # ------------------------------------------------------------------ identity context (PH-F08, IM-F04)
 
     def identity_context(self, upn: str, since_iso: str | None = None) -> dict[str, Any]:
-        u = self.get(f"/v1.0/users/{upn}", params={"$select": "id,userPrincipalName,displayName,department,jobTitle,"
-                                                               "accountEnabled,createdDateTime"})
-        membership = self.odata_all(f"/v1.0/users/{upn}/transitiveMemberOf", limit=2000)
+        flt = f"userPrincipalName eq '{upn}'" + (f" and createdDateTime ge {since_iso}" if since_iso else "")
+        reads = {   # independent Graph reads: issued together (each still goes through the rate budget)
+            "user": lambda: self.get(f"/v1.0/users/{upn}", params={"$select": "id,userPrincipalName,displayName,"
+                                                                              "department,jobTitle,accountEnabled,createdDateTime"}),
+            "membership": lambda: self.odata_all(f"/v1.0/users/{upn}/transitiveMemberOf", limit=2000),
+            "methods": lambda: self.get(f"/v1.0/users/{upn}/authentication/methods").get("value", []),
+            "signins": lambda: self.get("/v1.0/auditLogs/signIns", params={"$filter": flt, "$top": 50}).get("value", []),
+            "risky": lambda: self.get("/v1.0/identityProtection/riskyUsers",
+                                      params={"$filter": f"userPrincipalName eq '{upn}'"}).get("value", []),
+            "rules": lambda: self.get(f"/v1.0/users/{upn}/mailFolders/inbox/messageRules").get("value", []),
+            "devices": lambda: self.get(f"/v1.0/users/{upn}/registeredDevices").get("value", []),
+        }
+        with ThreadPoolExecutor(max_workers=len(reads)) as pool:
+            futures = {k: pool.submit(fn) for k, fn in reads.items()}
+            got = {k: f.result() for k, f in futures.items()}   # any failure propagates, as before
+        u, membership, signins, risky, rules, devices = (got[k] for k in ("user", "membership", "signins", "risky",
+                                                                          "rules", "devices"))
         roles = [r.get("displayName") for r in membership if r.get("@odata.type", "").endswith("directoryRole")]
         groups = [g.get("displayName") for g in membership if g.get("@odata.type", "").endswith("group")]
-        methods = [m.get("@odata.type", "").split(".")[-1] for m in
-                   self.get(f"/v1.0/users/{upn}/authentication/methods").get("value", [])]
-        flt = f"userPrincipalName eq '{upn}'" + (f" and createdDateTime ge {since_iso}" if since_iso else "")
-        signins = self.get("/v1.0/auditLogs/signIns", params={"$filter": flt, "$top": 50}).get("value", [])
-        risky = self.get("/v1.0/identityProtection/riskyUsers", params={"$filter": f"userPrincipalName eq '{upn}'"}).get("value", [])
-        rules = self.get(f"/v1.0/users/{upn}/mailFolders/inbox/messageRules").get("value", [])
-        devices = self.get(f"/v1.0/users/{upn}/registeredDevices").get("value", [])
+        methods = [m.get("@odata.type", "").split(".")[-1] for m in got["methods"]]
         suspicious_rules = [r for r in rules if (r.get("actions") or {}).get("forwardTo") or
                             (r.get("actions") or {}).get("redirectTo") or (r.get("actions") or {}).get("delete")
                             or (r.get("actions") or {}).get("moveToFolder") in {"RSS Feeds", "Archive", "Conversation History"}]

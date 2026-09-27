@@ -148,6 +148,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | Document | For |
 |---|---|
 | [docs/RUN_GUIDE.md](docs/RUN_GUIDE.md) | Run the complete system: setup, configuration, loading the sample data, ingesting live during a demo, resetting, Docker, troubleshooting |
+| [docs/ENGINEERING.md](docs/ENGINEERING.md) | Every engineering choice: architecture, stack, connector SDK, entity resolution, data model, domains, intelligence, action layer, LLM gateway, security, reliability, performance, testing, deployment, decision log |
 | [docs/PRESENTER_GUIDE.md](docs/PRESENTER_GUIDE.md) | Everything needed to present, demo and defend the platform: walkthroughs, formulas, guardrails, hard questions, limits |
 | [docs/FEATURES.md](docs/FEATURES.md) | Complete feature list with screenshots |
 | [docs/LLM_TOKENS_AND_COST.md](docs/LLM_TOKENS_AND_COST.md) | Measured tokens per component, unit costs, monthly cost by SOC size, budget sizing |

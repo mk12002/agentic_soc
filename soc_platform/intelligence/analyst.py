@@ -296,28 +296,53 @@ class IntelligenceAnalyst:
                 "insufficient_evidence": answer.get("insufficient_evidence", False), "source": answer.get("source"),
                 "results": results}
 
-    def narrate(self, insight: Insight) -> Insight:
+    def _narration_request(self, insight: Insight) -> tuple[str, list[dict[str, Any]]]:
         evidence = [{"id": f"E{i + 1}", "claim": f"{e.get('signal')}: {e.get('summary')} ({e.get('source')}, "
                                                  f"{e.get('when') or 'n/a'})", "source": e.get("source")}
                     for i, e in enumerate(insight.evidence)]
-        if self.llm is not None:
-            g = self.llm.grounded("intelligence.narrate",
-                                  f"Explain this correlated finding to a SOC analyst in 3-5 sentences: "
-                                  f"{_SCORE_IN_TITLE.sub('', insight.title)}. Do not state numeric risk scores (the UI "
-                                  "shows the live score). "
-                                  "What happened, in what order, why it matters, and what is uncertain.", evidence,
-                                  tier="small")      # routine, high-volume narrative: the small-tier deployment
-            if g.get("source") == "llm":
-                insight.narrative = g["summary"] + ("\n" + "\n".join(f"- {c['text']} [{', '.join(c['evidence_ids'])}]"
-                                                                     for c in g["claims"]) if g["claims"] else "")
-                insight.narrative_source = "llm"
-                return insight
+        question = (f"Explain this correlated finding to a SOC analyst in 3-5 sentences: "
+                    f"{_SCORE_IN_TITLE.sub('', insight.title)}. Do not state numeric risk scores (the UI "
+                    "shows the live score). "
+                    "What happened, in what order, why it matters, and what is uncertain.")
+        return question, evidence
+
+    def _ask_model(self, request: tuple[str, list[dict[str, Any]]]) -> dict[str, Any] | None:
+        question, evidence = request
+        # routine, high-volume narrative: the small-tier deployment
+        return self.llm.grounded("intelligence.narrate", question, evidence, tier="small") if self.llm else None
+
+    def narrate_many(self, insights: list[Insight]) -> None:
+        """Narrate several findings: the model calls run in parallel, each result is applied in order."""
+        if not insights:
+            return
+        requests = [self._narration_request(i) for i in insights]
+        if self.llm is not None and len(insights) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            from soc_platform.llm.gateway import llm_concurrency
+
+            with ThreadPoolExecutor(max_workers=llm_concurrency()) as pool:
+                answers = list(pool.map(self._ask_model, requests))
+        else:
+            answers = [self._ask_model(r) for r in requests]
+        for insight, g in zip(insights, answers, strict=True):
+            self._apply_narration(insight, g)
+
+    def narrate(self, insight: Insight) -> Insight:
+        self.narrate_many([insight])
+        return insight
+
+    def _apply_narration(self, insight: Insight, g: dict[str, Any] | None) -> None:
+        if g is not None and g.get("source") == "llm":
+            insight.narrative = g["summary"] + ("\n" + "\n".join(f"- {c['text']} [{', '.join(c['evidence_ids'])}]"
+                                                                 for c in g["claims"]) if g["claims"] else "")
+            insight.narrative_source = "llm"
+            return
         ordered = sorted(insight.evidence, key=lambda e: e.get("when") or "")
         insight.narrative = (f"{insight.title}. Sequence: " +
                              "; ".join(f"{(e.get('when') or '')[:16]} {e.get('summary')} [{e.get('source')}]"
                                        for e in ordered[:8]) + ".")
         insight.narrative_source = "deterministic"
-        return insight
 
     def brief(self, *, hours: int = 24) -> dict[str, Any]:
         """Cross-domain situation brief for the SOC lead / CISO (U05, U01)."""
@@ -484,7 +509,6 @@ class IntelligenceService:
     def refresh(self, entity_ids: list[str] | None = None, *, narrate: bool = True) -> list[Insight]:
         insights = self.correlation.run(entity_ids)
         if narrate:
-            for i in insights:
-                if not i.narrative or i.narrative_source in {"deterministic", "stale"}:
-                    self.analyst.narrate(i)
+            self.analyst.narrate_many([i for i in insights
+                                       if not i.narrative or i.narrative_source in {"deterministic", "stale"}])
         return insights

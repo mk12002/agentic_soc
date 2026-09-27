@@ -308,6 +308,7 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
     env = {**os.environ, "SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": "verify-" + os.urandom(16).hex(), "SOC_ENVIRONMENT": "dev",
            "SOC_DATABASE_URL": f"sqlite:///{tmp / 'soc.db'}", "SOC_ORG_DOMAINS": "acme-demo.com",
            "SOC_REPORT_OUTPUT_DIR": str(tmp / "reports"), "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"),
+           "SOC_EMBEDDED_SCHEDULER": "0",   # the tour drives every pipeline itself; background jobs would move its figures
            **(llm_env() if with_llm else {"SOC_LLM_PROVIDER": "none"})}
     shots = shots or tmp / "shots"
     server = subprocess.Popen([sys.executable, "-m", "uvicorn", "soc_platform.api.app:app", "--host", "127.0.0.1", "--port", str(port)],

@@ -75,7 +75,9 @@ services:
   platform-api:
     build: {context: .., dockerfile: deploy/Dockerfile, args: {WITH_PHISHING_ENGINE: "${WITH_PHISHING_ENGINE:-false}"}}
     image: soc-platform:${SOC_IMAGE_TAG:-latest}
-    environment: *platform-env
+    environment:
+      <<: *platform-env
+      SOC_EMBEDDED_SCHEDULER: "0"        # platform-scheduler below runs the jobs; one scheduler service per deployment
     ports: ["${SOC_API_BIND:-127.0.0.1}:${SOC_API_PORT:-8080}:8080"]   # expose via a TLS reverse proxy, not directly
     volumes: [platform_data:/app/data]
     depends_on: {postgres: {condition: service_healthy}}

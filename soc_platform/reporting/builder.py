@@ -545,8 +545,18 @@ def build_report(session: Session, registry: Any, spec: dict, out_dir: str | Pat
             continue
         if dom:
             used.add(dom)
-        narrative = _narrate(llm, spec, sec, data)
-        built.append({"source": sec["source"], "title": sec.get("title") or SOURCES[sec["source"]][0], "data": data, "narrative": narrative})
+        built.append({"source": sec["source"], "title": sec.get("title") or SOURCES[sec["source"]][0], "data": data,
+                      "_section": sec})
+    # figures were computed above, in order and on this session; only the narrative is written in parallel
+    from concurrent.futures import ThreadPoolExecutor
+
+    from soc_platform.llm.gateway import llm_concurrency
+
+    with ThreadPoolExecutor(max_workers=llm_concurrency() if llm is not None else 1) as pool:
+        narratives = list(pool.map(lambda b: _narrate(llm, spec, b["_section"], b["data"]), built))
+    for b, narrative in zip(built, narratives, strict=True):
+        b["narrative"] = narrative
+        del b["_section"]
     writers = {s["narrative"]["source"] for s in built}
     meta = {"at": f"{utcnow():%Y-%m-%d %H:%M}",
             "writer": ("LLM (" + (llm.provider.name if llm else "") + "), grounded on computed facts") if "llm" in writers else "deterministic templates"}

@@ -11,6 +11,7 @@ fixture transport keyed by path prefix.
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
@@ -111,16 +112,19 @@ class ThreatIntelConnector(ToolConnector):
         return None, f"Shodan: {len(ports)} open port(s) {ports[:8]}, org={body.get('org')}, tags={body.get('tags')}"
 
     def enrich(self, ioc_type: str, value: str) -> dict[str, Any]:
-        results: dict[str, Any] = {}
-        for src, meta in SOURCES.items():
-            if src not in self.transports or ioc_type not in meta["types"]:
-                continue
+        wanted = [src for src, meta in SOURCES.items() if src in self.transports and ioc_type in meta["types"]]
+
+        def ask(src: str) -> dict[str, Any]:
             fn: Callable = getattr(self, f"_{src}")
             try:
                 score, summary = fn(ioc_type, value)
-                results[src] = {"ok": True, "score": score, "summary": summary}
+                return {"ok": True, "score": score, "summary": summary}
             except Exception as exc:
-                results[src] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+                return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+        # every source is asked at once; each keeps its own rate budget, and results keep the fixed source order
+        with ThreadPoolExecutor(max_workers=max(1, len(wanted))) as pool:
+            results: dict[str, Any] = dict(zip(wanted, pool.map(ask, wanted), strict=True))
         scored = [r["score"] for r in results.values() if r.get("ok") and r.get("score") is not None]
         verdict_score = max(scored) if scored else None
         hits = sum(1 for s in scored if s >= 0.5)

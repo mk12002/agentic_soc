@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -70,12 +71,19 @@ def post_with_retry(url: str, *, headers: dict[str, str], json: dict[str, Any], 
     return resp
 
 
+def llm_concurrency() -> int:
+    """How many model calls a batch (narratives, report sections) may have in flight. Keep it under the provider's
+    rate limit; throttled calls are retried once and then fall back to deterministic text."""
+    return max(1, int(os.environ.get("SOC_LLM_CONCURRENCY", "4")))
+
+
 class _Breaker:
     """After repeated failures stop calling the model for a while: screens fall back to the deterministic path at
     once instead of each waiting for a timeout (per process; resets on the first success)."""
 
     failures = 0
     open_until = 0.0
+    _lock = threading.Lock()
 
     @classmethod
     def is_open(cls) -> bool:
@@ -87,12 +95,13 @@ class _Breaker:
     def record(cls, ok: bool) -> None:
         import time as _time
 
-        if ok:
-            cls.failures, cls.open_until = 0, 0.0
-            return
-        cls.failures += 1
-        if cls.failures >= int(os.environ.get("SOC_LLM_BREAKER_FAILURES", "3")):
-            cls.open_until = _time.monotonic() + float(os.environ.get("SOC_LLM_BREAKER_SECONDS", "60"))
+        with cls._lock:
+            if ok:
+                cls.failures, cls.open_until = 0, 0.0
+                return
+            cls.failures += 1
+            if cls.failures >= int(os.environ.get("SOC_LLM_BREAKER_FAILURES", "3")):
+                cls.open_until = _time.monotonic() + float(os.environ.get("SOC_LLM_BREAKER_SECONDS", "60"))
 
 
 class Provider(ABC):
@@ -170,6 +179,9 @@ class LLMGateway:
     def __init__(self, session: Session, settings: Settings, provider: Provider | None = None,
                  redactor: Redactor | None = None) -> None:
         self.s = session
+        # The session is used only for the budget check and the call log, under this lock. The model calls themselves
+        # run outside it, so several can be in flight at once (parallel narratives and report sections).
+        self._lock = threading.RLock()
         self.settings = settings
         if provider is None:
             provider = build_provider(settings)
@@ -186,8 +198,9 @@ class LLMGateway:
 
         now = utcnow()
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        total = self.s.execute(select(func.coalesce(func.sum(LLMCall.prompt_tokens + LLMCall.completion_tokens), 0))
-                               .where(LLMCall.ts >= start)).scalar()
+        with self._lock:
+            total = self.s.execute(select(func.coalesce(func.sum(LLMCall.prompt_tokens + LLMCall.completion_tokens), 0))
+                                   .where(LLMCall.ts >= start)).scalar()
         return int(total or 0)
 
     def budget_status(self) -> dict[str, Any]:
@@ -259,10 +272,11 @@ class LLMGateway:
         return deterministic_grounded(evidence)
 
     def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str) -> None:
-        self.s.add(LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
-                           response=response, prompt_tokens=pt, completion_tokens=ct, status=status,
-                           grounded=True))
-        self.s.flush()
+        with self._lock:
+            self.s.add(LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
+                               response=response, prompt_tokens=pt, completion_tokens=ct, status=status,
+                               grounded=True))
+            self.s.flush()
 
 
 # Standalone quantities in model text (counts, scores, percentages, times). Digits inside names, IPs, CVE ids,

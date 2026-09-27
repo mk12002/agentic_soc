@@ -25,6 +25,7 @@ import importlib
 import os
 import pkgutil
 import re
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -189,6 +190,7 @@ class ConnectorRegistry:
         self.config = (config or {}).get("connectors", {}) if config else {}
         self.default_mode = default_mode
         self._instances: dict[str, ConnectorInstance] = {}
+        self._instance_lock = threading.RLock()
 
     @classmethod
     def from_file(cls, path: str | Path | None = None, *, default_mode: str | None = None) -> ConnectorRegistry:
@@ -235,6 +237,12 @@ class ConnectorRegistry:
     def instance(self, name: str) -> ConnectorInstance:
         if name in self._instances:
             return self._instances[name]
+        with self._instance_lock:                            # lookups now run in parallel: build each connector once
+            if name in self._instances:
+                return self._instances[name]
+            return self._build(name)
+
+    def _build(self, name: str) -> ConnectorInstance:
         if name not in self.manifests:
             raise KeyError(f"no connector named {name!r}; discovered: {sorted(self.manifests)}")
         m = self.manifests[name]

@@ -126,6 +126,7 @@ Monthly (30 days):
 | `SOC_BRIEF_CACHE_SECONDS` | 900 | The longest time an unchanged brief is reused. |
 | `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` | 30 / 120 | Read timeouts: small-tier calls are short; large-tier calls (deep analysis, reports) can produce ~2,000 tokens, about 30 s at ~70 tokens/s. Connect timeout is 10 s. One retry is made on throttling or transient server errors. |
 | `SOC_LLM_BREAKER_FAILURES` / `SOC_LLM_BREAKER_SECONDS` | 3 / 60 | After 3 consecutive failures, model calls are skipped for 60 s and screens answer instantly from the deterministic path. |
+| `SOC_LLM_CONCURRENCY` | 4 | Narratives and report sections are sent in parallel, up to this many at once. It changes speed, not cost: the same calls are made. |
 
 **Sizing the budget:** take the monthly tokens for your profile from section 3 and add 50 % headroom. The 50 M
 default fits a small or mid-size SOC. A large SOC should set roughly 250-300 M. (The previous default of 5 M would

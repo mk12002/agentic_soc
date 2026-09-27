@@ -130,6 +130,10 @@ def _strip_nul(session: Session, _ctx: Any, _instances: Any) -> None:
 def _sqlite_pragmas(dbapi_conn, _record) -> None:
     cur = dbapi_conn.cursor()
     cur.execute("PRAGMA foreign_keys=ON")
+    # The server runs the scheduler alongside requests: let readers work during a write (WAL) and make a writer wait
+    # for a busy database instead of failing at once. In-memory databases do not support WAL and ignore it.
+    cur.execute("PRAGMA busy_timeout=30000")
+    cur.execute("PRAGMA journal_mode=WAL")
     cur.close()
 
 

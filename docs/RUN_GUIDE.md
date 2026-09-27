@@ -38,7 +38,7 @@ cd "D:\Code_stuff\Agentic SOC"
 . .\scripts\load_env.ps1                  # note the leading dot
 python -m soc_platform init-db
 python -m soc_platform demo              # loads the sample organisation (about 1 minute)
-python -m soc_platform serve             # leave this window open
+python -m soc_platform serve             # the whole platform, jobs included - leave this window open
 ```
 
 Open **http://127.0.0.1:8080**. Sign in with work email `lena@acme-demo.com` and role **Lead**.
@@ -110,7 +110,7 @@ phishing ML engine. The platform ignores them.
 
 ## 4. Start the platform
 
-### Window 1 - the server (required)
+### Start the server
 
 ```powershell
 cd "D:\Code_stuff\Agentic SOC"
@@ -128,19 +128,24 @@ python -m soc_platform serve              # http://127.0.0.1:8080  - Ctrl+C stop
 - the top correlated findings, one analyst answer and three reports
 - `[AUDIT] {'ok': True, ...}`
 
-### Window 2 - the scheduler (optional)
+### The scheduler runs inside the server
 
-The scheduler runs the recurring jobs (§5 lists them) the way production would.
+`serve` also runs the scheduler: the recurring jobs (§5) run in the background, on their intervals, as in
+production. **There is no second window to open and nothing to remember.**
 
-```powershell
-cd "D:\Code_stuff\Agentic SOC"; .\.venv\Scripts\Activate.ps1; . .\scripts\load_env.ps1
-python -m soc_platform scheduler
-```
+- **Jobs start 5 seconds after the server.** Only jobs that are due run. A restart does not re-run everything, because
+  the database records what ran and when.
+- **`/health` shows `"scheduler": {"state": "running", "mode": "embedded", ...}`.** The server writes a heartbeat
+  every 30 seconds, even while a long job runs.
+- **If a job hangs for more than 30 minutes, the banner reads "Scheduler stuck (job name)".** If the scheduler stops
+  altogether, it reads "Scheduler stopped". Neither can happen quietly.
+- **An error in a job is recorded and retried, and the other jobs carry on.** If the scheduler thread itself ever
+  stops, it is restarted automatically.
+- **Running a separate scheduler as well is safe** (`python -m soc_platform scheduler`). The database decides what is
+  due, and a lease stops any job from running twice.
 
-**Either keep it running for the whole demo, or don't start it.** After it has run once, the console expects a job
-at least every 30 minutes. If you stop it, every screen shows a **"Scheduler stopped"** banner after 30 minutes. That
-is the monitoring working, but not what you want mid-demo. Without a scheduler, you trigger the same work with
-buttons (§6.4).
+To run the server **without** background jobs (for example, to keep every figure still while you present), start it
+with `$env:SOC_EMBEDDED_SCHEDULER = "0"`. The buttons in §6.4 still run any job on demand.
 
 ### Signing in
 
@@ -417,8 +422,9 @@ docker compose -f deploy\docker-compose.yml down        # stop (data kept)
 docker compose -f deploy\docker-compose.yml down -v     # stop and delete the database volume
 ```
 
-The scheduler runs continuously in its own container here, so the "Scheduler stopped" banner won't appear. The
-phishing ML microservices are a separate profile (`--profile engine`) and are not needed for the demo.
+Here the jobs run in their own `platform-scheduler` container, and the API container's built-in scheduler is
+switched off (`SOC_EMBEDDED_SCHEDULER=0`). That is one scheduler service per deployment; more replicas would still be
+safe. The phishing ML microservices are a separate profile (`--profile engine`) and are not needed for the demo.
 
 ---
 
@@ -432,7 +438,7 @@ After the demo, when the client provides access. Summary here; the full procedur
    for example a vault mount.
 3. Set `SOC_CONNECTOR_MODE=live` and restart.
 4. **Integrations** → **Test** on each connector. It authenticates and reads one page.
-5. Run the scheduler. Freshness is then watched per stream.
+5. Leave the server running: its scheduler pulls from each tool on schedule, and freshness is watched per stream.
 
 Keep automation at L2 (recommend) until shadow mode shows agreement with your analysts.
 
@@ -468,7 +474,8 @@ The browser tour needs Node.js and Chrome or Edge. It installs its own two packa
 | Screens are empty | `demo` wasn't run on *this* database. Check `SOC_DATABASE_URL`, then run `init-db` and `demo`. |
 | Internal senders flagged as external, or look-alikes missed | `SOC_ORG_DOMAINS` isn't set. Set it to the organisation's domain. |
 | "deterministic" when you expected the LLM | See §8. |
-| "Scheduler stopped" banner | The scheduler ran earlier and has stopped. Start it (§4, window 2), or reset (§10). |
+| "Scheduler stopped" banner | No heartbeat for 3 minutes. The server was started with `SOC_EMBEDDED_SCHEDULER=0` and no separate scheduler runs, or the process stopped. Restart `serve` normally. |
+| "Scheduler stuck (job)" banner | That job has run for more than 30 minutes, typically a tool that stopped answering. Check **Integrations** (job history and connector status); the job's lease expires and it is retried. |
 | "database is locked" | Two processes are writing one SQLite file (for example two servers). Stop one. Use PostgreSQL (§11) for more. |
 | Upload refused (413) | The file is larger than 30 MB. |
 | "rate limit exceeded" (429) while scripting | Default 20 requests/s per client. Slow the script, or set `SOC_RATE_LIMIT_RPS=200` for a local demo. |
@@ -488,7 +495,7 @@ HEALTH       http://127.0.0.1:8080/health
 UPLOAD       Phishing > Analyse a message > .eml       new samples: cred_phish_lookalike, html_attachment_phish,
                                                         iso_dropper, malspam_macro, legit_github, legit_internal
 PUSH ALERT   POST /api/v1/ingest/alerts  then  Cases > Run incident pipeline
-PIPELINES    Cases / Phishing / Vulnerabilities / Cloud / Intelligence buttons; Integrations > Run now
+PIPELINES    run automatically inside the server; on demand: Cases / Phishing / Vulnerabilities / Cloud / Intelligence buttons; Integrations > Run now
 TOKEN        python -m soc_platform token lena@acme-demo.com lead
 LLM?         Reports page callout, or GET /api/v1/llm/status
 RESET        stop server; delete soc_platform.db, data\raw, data\reports; init-db; demo

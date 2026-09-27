@@ -14,6 +14,7 @@ from soc_platform.core.db import Database
 # same database, each in-memory database gets its own. Engines do not pool, so ~200 tests stay within limits.
 # Tests never write into the project folder: raw payloads and reports go to a per-run temporary directory unless a
 # test chooses its own.
+__import__("os").environ.setdefault("SOC_EMBEDDED_SCHEDULER", "0")     # tests drive jobs explicitly
 __import__("os").environ.setdefault("SOC_RAW_PAYLOAD_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-raw-"))
 __import__("os").environ.setdefault("SOC_REPORT_OUTPUT_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-reports-"))
 

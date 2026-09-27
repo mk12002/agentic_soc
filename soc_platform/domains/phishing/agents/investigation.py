@@ -8,6 +8,7 @@ source tool and deep link needed for the consolidated investigation view.
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -203,10 +204,16 @@ def user_impact(reg: ConnectorRegistry, em: DecomposedEmail, recipients: list[st
         except Exception as exc:
             unavailable.append(f"defender_office365 clicks: {exc}")
     if umb:
-        for d in em.url_domains:
+        def dns(d: str):
             try:
-                rows = umb.activity(domain=d)
+                return umb.activity(domain=d), None
             except Exception as exc:
+                return None, exc
+
+        with ThreadPoolExecutor(max_workers=8) as pool:      # one DNS query per domain, in parallel
+            dns_rows = list(pool.map(dns, em.url_domains))
+        for d, (rows, exc) in zip(em.url_domains, dns_rows, strict=True):
+            if exc is not None:
                 unavailable.append(f"umbrella: {exc}")
                 continue
             for r in rows:
@@ -222,10 +229,19 @@ def user_impact(reg: ConnectorRegistry, em: DecomposedEmail, recipients: list[st
     affected = sorted(u for u, x in per_user.items() if x["clicked"] or x["reached_site"])
     mde, cs, entra = _get(reg, "defender_endpoint"), _get(reg, "crowdstrike"), _get(reg, "entra")
     iocs = em.urls + em.url_domains + [a.sha256 for a in em.attachments]
-    for u in affected:
+
+    def check(u: str) -> tuple[list[EvidenceItem], list[str]]:
+        """Endpoint and identity checks for one user; users are checked in parallel, results merged in order."""
+        ev: list[EvidenceItem] = []
+        unavailable: list[str] = []
         row = per_user[u]
         since = str(row.get("click_time") or em.date or "")[:19] or None
-        if mde:
+
+        def endpoint_mde() -> tuple[list[EvidenceItem], list[str]]:
+            ev: list[EvidenceItem] = []
+            unavailable: list[str] = []
+            if not mde:
+                return ev, unavailable
             try:
                 devices = mde.lookup("user", u).records
                 hits = []
@@ -242,7 +258,13 @@ def user_impact(reg: ConnectorRegistry, em: DecomposedEmail, recipients: list[st
                                            {"user": u, "events": hits[:10]}))
             except Exception as exc:
                 unavailable.append(f"defender_endpoint ({u}): {exc}")
-        if cs:
+            return ev, unavailable
+
+        def endpoint_cs() -> tuple[list[EvidenceItem], list[str]]:
+            ev: list[EvidenceItem] = []
+            unavailable: list[str] = []
+            if not cs:
+                return ev, unavailable
             try:
                 r = cs.lookup("user", u)
                 row["endpoint"]["crowdstrike_alerts"] = r.signals.get("endpoint_alerts", 0)
@@ -250,7 +272,13 @@ def user_impact(reg: ConnectorRegistry, em: DecomposedEmail, recipients: list[st
                     ev.append(EvidenceItem(f"Endpoint: {r.summary}", "crowdstrike", "endpoint", {"user": u}))
             except Exception as exc:
                 unavailable.append(f"crowdstrike ({u}): {exc}")
-        if entra:
+            return ev, unavailable
+
+        def identity() -> tuple[list[EvidenceItem], list[str]]:
+            ev: list[EvidenceItem] = []
+            unavailable: list[str] = []
+            if not entra:
+                return ev, unavailable
             try:
                 ctx = entra.identity_context(u, since)
                 risky = [s for s in ctx["signins"] if s.get("riskLevelDuringSignIn") not in (None, "none", "hidden")]
@@ -266,6 +294,20 @@ def user_impact(reg: ConnectorRegistry, em: DecomposedEmail, recipients: list[st
                         {"user": u, **row["identity"]}))
             except Exception as exc:
                 unavailable.append(f"entra ({u}): {exc}")
+            return ev, unavailable
+
+        # the three tools are independent: ask them at the same time, merge in a fixed order
+        with ThreadPoolExecutor(max_workers=3) as tools:
+            for fut in [tools.submit(f) for f in (endpoint_mde, endpoint_cs, identity)]:
+                tool_ev, tool_unavailable = fut.result()
+                ev += tool_ev
+                unavailable += tool_unavailable
+        return ev, unavailable
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for user_ev, user_unavailable in pool.map(check, affected):
+            ev += user_ev
+            unavailable += user_unavailable
     compromised = sorted(u for u, x in per_user.items()
                          if x["identity"].get("risky_signins") or x["identity"].get("suspicious_inbox_rules"))
     endpoint_hit = sorted(u for u, x in per_user.items() if x["endpoint"].get("ioc_activity")

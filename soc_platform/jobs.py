@@ -70,7 +70,17 @@ def _body(name: str, s: Session) -> dict[str, Any]:
         exp = sv["vulnerability"].expire_exceptions()
         return {"tickets": sync, "escalations": len(fu["escalations"]), "expired_exceptions": len(exp)}
     if name == "intelligence":
-        return {"insights": len(_intel(s).refresh())}
+        svc = _intel(s)
+        n = len(svc.refresh())
+        try:   # prepare the situation brief now, so the first person to open Intelligence does not wait for it
+            svc.analyst.brief()
+            warmed = True
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning("situation brief could not be prepared", exc_info=True)
+            warmed = False
+        return {"insights": n, "brief_ready": warmed}
     if name == "daily_report":
         from soc_platform.reporting.reports import ReportService
 
@@ -91,35 +101,49 @@ def _body(name: str, s: Session) -> dict[str, Any]:
     raise KeyError(f"unknown job {name}")
 
 
+def _holder() -> str:
+    """Lease owner: this process *and* thread, so a scheduler thread and a manual replay in the same server are
+    told apart like two machines would be."""
+    import threading
+
+    return f"{HOLDER}:{threading.get_ident()}"
+
+
 def _lease(db: Any, name: str, *, release: bool = False) -> bool:
     key = f"job_lease:{name}"
+    me = _holder()
     with db.session() as s:
         f = s.get(SystemFlag, key)
         now = utcnow()
         if release:
-            if f is not None and (f.value or {}).get("holder") == HOLDER:
+            if f is not None and (f.value or {}).get("holder") == me:
                 f.value = {"holder": None, "until": now.isoformat()}
             return True
         if f is not None:
             v = f.value or {}
             until = datetime.fromisoformat(v["until"]) if v.get("until") else now
-            if v.get("holder") not in (None, HOLDER) and _aware(until) > now:
+            if v.get("holder") not in (None, me) and _aware(until) > now:
                 return False
         else:
             f = SystemFlag(name=key, value={}, updated_by="scheduler")
             s.add(f)
-        f.value = {"holder": HOLDER, "until": (now + timedelta(seconds=LEASE_SECONDS)).isoformat()}
+        f.value = {"holder": me, "until": (now + timedelta(seconds=LEASE_SECONDS)).isoformat()}
         f.updated_by, f.updated_at = "scheduler", now
     return True
 
 
 def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Callable[[float], None] = time.sleep,
-            body: Callable[[str, Session], dict[str, Any]] | None = None) -> JobRun | None:
-    """Run one job with lease, retries, run record and dead-lettering. Returns None if another replica holds it."""
+            body: Callable[[str, Session], dict[str, Any]] | None = None,
+            still_due: Callable[[], bool] | None = None) -> JobRun | None:
+    """Run one job with lease, retries, run record and dead-lettering. Returns None if another scheduler holds it
+    or - checked again once the lease is held - has just run it (``still_due``)."""
     from soc_platform.core.db import get_database
 
     db = db or get_database()
     if not _lease(db, name):
+        return None
+    if still_due is not None and not still_due():
+        _lease(db, name, release=True)                       # someone else ran it between our check and the lease
         return None
     fn = body or _body
     started = utcnow()
@@ -135,20 +159,23 @@ def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Call
                 err = f"{type(exc).__name__}: {exc}"[:1000] + "\n" + traceback.format_exc(limit=3)[-1500:]
                 if attempts < RETRIES:
                     sleep(min(60.0, 2.0 ** attempts))
+        # record the run *before* releasing the lease: otherwise another scheduler could take the lease in between,
+        # find no record of this run and run the job a second time
+        with db.session() as s:
+            recent = list(s.execute(select(JobRun).where(JobRun.job == name).order_by(JobRun.ordinal.desc())
+                                    .limit(DEAD_LETTER_AFTER - 1)).scalars())
+            failures_in_row = 0 if err is None else 1 + sum(1 for _ in _takewhile_failed(recent))
+            status = "ok" if err is None else ("dead_letter" if failures_in_row >= DEAD_LETTER_AFTER else "error")
+            run = JobRun(job=name, trigger=trigger, ordinal=_next_ordinal(s), started_at=started, finished_at=utcnow(),
+                         attempts=attempts, status=status, error=err, summary=_jsonable(summary),
+                         consecutive_failures=failures_in_row)
+            s.add(run)
+            s.flush()
+            if status == "dead_letter":
+                _alert(s, name, err or "", failures_in_row)
+            s.expunge(run)
     finally:
         _lease(db, name, release=True)
-    with db.session() as s:
-        recent = list(s.execute(select(JobRun).where(JobRun.job == name).order_by(JobRun.ordinal.desc())
-                                .limit(DEAD_LETTER_AFTER - 1)).scalars())
-        failures_in_row = 0 if err is None else 1 + sum(1 for _ in _takewhile_failed(recent))
-        status = "ok" if err is None else ("dead_letter" if failures_in_row >= DEAD_LETTER_AFTER else "error")
-        run = JobRun(job=name, trigger=trigger, ordinal=_next_ordinal(s), started_at=started, finished_at=utcnow(), attempts=attempts,
-                     status=status, error=err, summary=_jsonable(summary), consecutive_failures=failures_in_row)
-        s.add(run)
-        s.flush()
-        if status == "dead_letter":
-            _alert(s, name, err or "", failures_in_row)
-        s.expunge(run)
     return run
 
 

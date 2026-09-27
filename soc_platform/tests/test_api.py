@@ -147,22 +147,25 @@ def test_intelligence_endpoints(client, seeded):
 
 
 def test_health_reports_a_stopped_scheduler(client):
-    """Failure point: if the scheduler dies, no job runs - so none can fail or alert. /health watches it."""
+    """Failure point: if the scheduler dies, no job runs - so none can fail or alert. /health watches its heartbeat."""
     from datetime import timedelta
 
     from soc_platform.core import db as dbm
-    from soc_platform.core.models import JobRun, utcnow
+    from soc_platform.core.models import JobRun, SystemFlag, utcnow
+    from soc_platform.scheduler import KEY_PREFIX
 
     with dbm.get_database().session() as s:
         s.query(JobRun).delete()
+        s.query(SystemFlag).filter(SystemFlag.name.like(KEY_PREFIX + "%")).delete(synchronize_session=False)
     assert client.get("/health").json()["scheduler"]["state"] == "never"
-    with dbm.get_database().session() as s:
+    with dbm.get_database().session() as s:                                        # jobs ran once, then nothing
         s.add(JobRun(job="intelligence", trigger="schedule", status="ok", attempts=1, ordinal=1,
                      started_at=utcnow() - timedelta(hours=3), finished_at=utcnow() - timedelta(hours=3)))
     h = client.get("/health").json()["scheduler"]
     assert h["state"] == "stale" and h["age_seconds"] > 3600
-    with dbm.get_database().session() as s:
-        s.add(JobRun(job="intelligence", trigger="schedule", status="ok", attempts=1, ordinal=2, started_at=utcnow(), finished_at=utcnow()))
+    with dbm.get_database().session() as s:                                        # a live scheduler's heartbeat
+        s.add(SystemFlag(name=KEY_PREFIX + "test", value={"holder": "h", "mode": "embedded", "at": utcnow().isoformat()},
+                         updated_by="scheduler"))
     assert client.get("/health").json()["scheduler"]["state"] == "running"
 
 

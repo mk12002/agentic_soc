@@ -5,7 +5,7 @@
 | Task | Command |
 |---|---|
 | API + console | `python -m soc_platform serve` (or the `api` container) |
-| Scheduled jobs | `python -m soc_platform scheduler` (or the `scheduler` container; several replicas are safe) |
+| Scheduled jobs | Built into `serve` (on by default). For a dedicated service set `SOC_EMBEDDED_SCHEDULER=0` on the API and run `python -m soc_platform scheduler` (the `platform-scheduler` container). Any number of schedulers is safe. |
 | Run every job once | `python -m soc_platform scheduler --once` |
 | Create schema | `python -m soc_platform init-db` |
 | Demo on fixtures | `python -m soc_platform demo` |
@@ -52,9 +52,12 @@ failing 3 runs in a row is marked **dead_letter** and raises a high insight; fix
 |---|---|---|
 | `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` / `SOC_LLM_CONNECT_TIMEOUT_SECONDS` | 30 / 120 / 10 | Read timeout for small-tier (short) and large-tier (long answers, ~2,000 tokens) calls; connect timeout. One retry on 429 / 5xx |
 | `SOC_LLM_BREAKER_FAILURES` / `SOC_LLM_BREAKER_SECONDS` | 3 / 60 | Circuit breaker: skip the model after repeated failures, answer from the deterministic path |
+| `SOC_LLM_CONCURRENCY` | 4 | Model calls in flight at once for batches (finding narratives, report sections); keep under the provider's rate limit |
 | `SOC_BRIEF_CACHE_SECONDS` | 900 | Reuse an unchanged situation brief |
 | `SOC_LLM_EXPLAIN_AUTO_CLOSED` | 0 | 1 = the model also explains reports that auto-close |
-| `SOC_SCHEDULER_STALE_SECONDS` | 1800 | `/health` reports the scheduler as stopped (banner on every screen) |
+| `SOC_EMBEDDED_SCHEDULER` | 1 | The API server runs the scheduler itself; 0 when a separate scheduler service runs the jobs |
+| `SOC_SCHEDULER_START_DELAY` | 5 | Seconds after start-up before the built-in scheduler begins |
+| `SOC_SCHEDULER_STALE_SECONDS` | 180 | No scheduler heartbeat for this long: `/health` reports `stale` and every screen shows "Scheduler stopped" (a job running past its 30-minute lease shows "Scheduler stuck") |
 | `SOC_SELF_CHECK_CONFIRM_SECONDS` | 2 | The self-check re-runs a failing check before alerting |
 
 Failure behaviour for each dependency: [FAILURE_MODES.md](FAILURE_MODES.md). Cost and budget sizing:

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from soc_platform.core.models import AuditRecord, utcnow
 
 GENESIS = "0" * 64
+CHAIN_LOCK = "audit_chain_head"
 
 ACTOR_AGENT = "agent"
 ACTOR_HUMAN = "human"
@@ -50,6 +51,28 @@ class AuditLog:
         last = self.s.execute(select(AuditRecord.hash).order_by(AuditRecord.seq.desc()).limit(1)).scalar()
         return last or GENESIS
 
+    def _lock_chain(self) -> None:
+        """Take the chain's write lock before reading its head, held until this transaction ends.
+
+        Appending reads the last hash and links the new record to it. Two transactions doing that at the same moment
+        (a scheduled job and a user's approval) would read the same head and fork the chain, which ``verify()`` then
+        reports as tampering. Updating one head row first serialises appenders on every database: PostgreSQL locks
+        the row, SQLite takes its write lock. The next appender waits, then reads the head this one wrote."""
+        from sqlalchemy import update
+        from sqlalchemy.exc import IntegrityError
+
+        from soc_platform.core.models import SystemFlag
+
+        stmt = update(SystemFlag).where(SystemFlag.name == CHAIN_LOCK).values(updated_at=utcnow())
+        if self.s.execute(stmt).rowcount:
+            return
+        try:
+            with self.s.begin_nested():                      # first append ever: create the head row
+                self.s.add(SystemFlag(name=CHAIN_LOCK, value={}, updated_by="audit"))
+        except IntegrityError:
+            pass                                             # another appender created it first
+        self.s.execute(stmt)
+
     def append(
         self,
         *,
@@ -63,6 +86,7 @@ class AuditLog:
         if actor_type not in {ACTOR_AGENT, ACTOR_HUMAN, ACTOR_SYSTEM}:
             raise ValueError(f"invalid actor_type {actor_type!r}")
         payload = json.loads(_canonical(payload or {}))
+        self._lock_chain()
         ts = utcnow()
         prev = self._last_hash()
         rec = AuditRecord(

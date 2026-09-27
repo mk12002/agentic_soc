@@ -3,18 +3,16 @@
   init-db     create tables in SOC_DATABASE_URL
   demo        run all three workflows end to end on fixture connectors and write reports
   serve       start the API + console (uvicorn)
-  scheduler   run recurring jobs (syncs, investigations, follow-ups, reports)
+  scheduler   run recurring jobs as a separate service (serve already runs them unless SOC_EMBEDDED_SCHEDULER=0)
   token       mint a dev token:  python -m soc_platform token alice@acme-demo.com analyst,lead
   fixtures    regenerate connector fixtures and the labelled email corpus
 """
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,21 +118,11 @@ def cmd_fixtures() -> None:
 
 
 def cmd_scheduler(once: bool = False) -> None:
-    """Run due jobs forever (or once). Each run is leased, retried, recorded and dead-lettered (see jobs.py)."""
-    from soc_platform import jobs
+    """Run the scheduler as its own service (the server also runs one unless SOC_EMBEDDED_SCHEDULER=0). Both are
+    safe together: the database decides what is due and a lease stops any job running twice at once."""
+    from soc_platform import scheduler
 
-    last: dict[str, float] = {}
-    while True:
-        for name in jobs.due(time.time(), last):
-            last[name] = time.time()
-            run = jobs.run_job(name)
-            print(json.dumps({"job": name, "status": run.status if run else "skipped (lease held elsewhere)",
-                              "attempts": run.attempts if run else 0,
-                              "error": (run.error or "").splitlines()[0] if run and run.error else None,
-                              "at": time.time()}), flush=True)
-        if once:
-            return
-        time.sleep(15)
+    scheduler.run_forever(once=once)
 
 
 def main(argv: list[str]) -> None:

@@ -184,13 +184,21 @@ class HeuristicAnalyzer:
             if a.has_macros_hint:
                 add("macro_attachment", 0.3, f"attachment {a.filename} contains VBA macros", "attachment")
         if self.ti is not None:
-            iocs = [("domain", d) for d in {em.sender_domain, *em.url_domains} if d] + \
+            # sorted: the same e-mail always checks the same indicators (a set's order changes between runs)
+            iocs = [("domain", d) for d in sorted({em.sender_domain, *em.url_domains} - {None, ""})] + \
                    [("hash", a.sha256) for a in em.attachments] + ([("ip", em.origin_ip)] if em.origin_ip else [])
-            for itype, v in iocs[:12]:
+
+            def enrich(ioc: tuple[str, str]) -> dict | None:
                 try:
-                    e = self.ti.enrich(itype, v)
+                    return self.ti.enrich(*ioc)
                 except Exception:
                     logging.getLogger(__name__).warning("threat-intel lookup failed for an indicator; source treated as unavailable", exc_info=True)
+                    return None
+
+            with ThreadPoolExecutor(max_workers=8) as pool:  # lookups in parallel, results in a fixed order
+                found = list(pool.map(enrich, iocs[:12]))
+            for (itype, v), e in zip(iocs[:12], found, strict=True):
+                if e is None:
                     continue
                 if e.get("verdict") == "malicious":
                     add("threat_intel_malicious", 0.35, f"{itype} {v} rated malicious by "

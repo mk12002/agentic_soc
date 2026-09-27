@@ -8,6 +8,7 @@ Every state change goes through the policy-gated ActionService and lands in the 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -41,7 +42,24 @@ from soc_platform.llm.gateway import LLMGateway
 
 STATIC = Path(__file__).parent / "static"
 _PROD = get_settings().environment == "prod"
-app = FastAPI(title="Agentic SOC Platform", version=__version__,
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """The server runs the job scheduler itself (SOC_EMBEDDED_SCHEDULER=1, the default), so one process is the whole
+    platform. Deployments with a dedicated scheduler service set SOC_EMBEDDED_SCHEDULER=0; running both is also safe."""
+    from soc_platform import scheduler as sched
+
+    sch = None
+    if sched.enabled_embedded():
+        sch = sched.Scheduler(mode="embedded")
+        sch.start(start_delay=float(__import__("os").environ.get("SOC_SCHEDULER_START_DELAY", "5")))
+    try:
+        yield
+    finally:
+        if sch is not None:
+            sch.shutdown()
+
+
+app = FastAPI(title="Agentic SOC Platform", version=__version__, lifespan=_lifespan,
               docs_url=None if _PROD else "/docs", redoc_url=None, openapi_url=None if _PROD else "/openapi.json")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -373,20 +391,10 @@ def health(s: Session = Depends(db_session)) -> dict[str, Any]:
 
 
 def _scheduler_heartbeat(s: Session) -> dict[str, Any]:
-    """If the scheduler process dies no job runs, so none can fail or alert: watch it from the API side."""
-    import os
+    """If the scheduler stops, no job runs, so nothing can fail or alert: report its heartbeat here instead."""
+    from soc_platform import scheduler as sched
 
-    from sqlalchemy import func
-
-    from soc_platform.core.models import JobRun
-
-    last = s.execute(select(func.max(JobRun.finished_at))).scalar()
-    if last is None:
-        return {"state": "never", "last_run": None}
-    last = last if last.tzinfo else last.replace(tzinfo=__import__("datetime").timezone.utc)
-    age = (__import__("soc_platform.core.models", fromlist=["x"]).utcnow() - last).total_seconds()
-    stale = age > float(os.environ.get("SOC_SCHEDULER_STALE_SECONDS", "1800"))
-    return {"state": "stale" if stale else "running", "last_run": last.isoformat(), "age_seconds": round(age)}
+    return sched.status(s)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

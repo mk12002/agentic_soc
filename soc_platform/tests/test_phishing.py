@@ -197,3 +197,29 @@ def test_auto_closed_reports_do_not_spend_llm_tokens(session, ph, monkeypatch):
     again = ph.submit_raw((ROOT / "artifacts/phishing/corpus/marketing_spam.eml").read_bytes(), source="test")
     ph.process(again.id)
     assert len(prov.workflows) == 2                                                   # opt back in
+
+
+def test_phishing_analysis_asks_the_tools_in_parallel(session, monkeypatch, tmp_path):
+    """Latency: with every vendor call taking 150 ms, one analysis must take a fraction of the time its calls would
+    take one after another (threat-intel sources, reconciliation, clicks, DNS and per-user checks overlap)."""
+    import threading
+    import time
+
+    from soc_platform.connectors import http as H
+
+    calls, lock, orig = [0], threading.Lock(), H.FixtureTransport.request
+
+    def slow(self, method, path, **kw):
+        with lock:
+            calls[0] += 1
+        time.sleep(0.15)
+        return orig(self, method, path, **kw)
+
+    monkeypatch.setattr(H.FixtureTransport, "request", slow)
+    svc = PhishingService(session, ConnectorRegistry.all_fake(), org_domains=["acme-demo.com"], raw_dir=tmp_path)
+    sub = svc.submit_raw((ROOT / "artifacts/phishing/corpus/cred_phish_lookalike.eml").read_bytes(), source="upload")
+    t0 = time.perf_counter()
+    svc.process(sub.id)
+    elapsed = time.perf_counter() - t0
+    sequential = calls[0] * 0.15
+    assert calls[0] >= 20 and elapsed < 0.5 * sequential, (calls[0], round(elapsed, 2), round(sequential, 2))

@@ -31,6 +31,9 @@ from soc_platform.core.schema import NormalizedRecord
 T = TypeVar("T")
 
 
+MAX_RETRY_AFTER = 120.0   # seconds; a longer Retry-After is capped (the call is retried, then given up)
+
+
 class ConnectorError(Exception):
     pass
 
@@ -79,7 +82,8 @@ def with_backoff(fn: Callable[[], T], *, retries: int = 5, base: float = 0.5, ca
         try:
             return fn()
         except RateLimited as exc:
-            delay = exc.retry_after if exc.retry_after is not None else min(cap, base * 2 ** attempt)
+            # honour the vendor's Retry-After, but never let one answer stall a job indefinitely
+            delay = min(exc.retry_after, MAX_RETRY_AFTER) if exc.retry_after is not None else min(cap, base * 2 ** attempt)
         except TransientError:
             delay = min(cap, base * 2 ** attempt) * (0.5 + random.random() / 2)
         attempt += 1

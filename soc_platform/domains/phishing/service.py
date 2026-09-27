@@ -17,6 +17,7 @@ import hashlib
 import os
 import statistics
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -181,14 +182,19 @@ class PhishingService:
             self.cases.add_evidence(case.id, summary=f"Decomposition warning: {w}", source="phishing.decompose",
                                     dimension="email", is_inference=True)
         unavailable: list[str] = []
-        rec = reconcile(self.registry, em, result.verdict)
+        # reconciliation (the other e-mail control) runs alongside campaign scope and user impact
+        pool = ThreadPoolExecutor(max_workers=1)
+        rec_future = pool.submit(reconcile, self.registry, em, result.verdict)
         camp = {"members": [], "recipients": [], "evidence": [], "unavailable": []}
         impact = {"per_user": {}, "clicked": [], "reached_site": [], "identity_compromise": [], "endpoint_impact": [],
                   "evidence": [], "unavailable": []}
-        if result.verdict in {"malicious", "suspicious"} or rec["disagreements"]:
+        rec = None if result.verdict in {"malicious", "suspicious"} else rec_future.result()   # needed to decide
+        if rec is None or rec["disagreements"]:
             camp = campaign_scope(self.registry, em, threshold=self.campaign_threshold)
             recips = sorted(set(camp["recipients"]) | set(em.to) | ({sub.reporter} if sub.reporter else set()))
             impact = user_impact(self.registry, em, recips)
+        rec = rec if rec is not None else rec_future.result()
+        pool.shutdown()
         for upn in sorted(set(camp["recipients"]) | set(impact["clicked"]) | set(impact["identity_compromise"])):
             ent = self.store.find("identity", "upn", upn)
             if ent is not None:

@@ -54,7 +54,7 @@
 ## Deployment
 
 * `api` - stateless FastAPI app (scale horizontally behind TLS).
-* `scheduler` - runs the jobs in `soc_platform/jobs.py`; several replicas are safe (per-job DB lease).
+* `scheduler` - runs the jobs in `soc_platform/jobs.py` (`soc_platform/scheduler.py`). Built into the API server by default; can run as its own service. Any number is safe: the database decides what is due, a per-job lease stops concurrent runs, and a heartbeat feeds `/health`.
 * `postgres` - relational store (SQLite for dev). Raw payloads / reports on a volume or blob storage.
 * optional `engine` profile - phishing ML microservices; detonation on an isolated host / CAPEv2.
 

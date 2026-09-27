@@ -179,3 +179,18 @@ def test_redaction_before_any_model_call(session):
     gw.grounded("t", "q", [{"id": "E1", "claim": "priya.nair@acme-demo.com (+91 98765 43210) clicked"}],
                 redactor=Redactor(internal_domains={"acme-demo.com"}))
     assert "priya.nair@acme-demo.com" not in seen["prompt"] and "98765" not in seen["prompt"]
+
+
+def test_a_huge_retry_after_never_stalls_a_job():
+    from soc_platform.connectors.base import MAX_RETRY_AFTER, RateLimited, with_backoff
+
+    waits, calls = [], []
+
+    def throttled():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RateLimited(retry_after=86400)                                   # "come back tomorrow"
+        return "ok"
+
+    assert with_backoff(throttled, sleep=waits.append) == "ok"
+    assert waits == [MAX_RETRY_AFTER, MAX_RETRY_AFTER]

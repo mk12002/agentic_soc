@@ -4,8 +4,7 @@ single tool can see. Each rule emits an ``Insight`` with the exact evidence it r
 
 Rules and the requirement / use case each serves:
   phishing_compromise_chain   U08 phishing -> endpoint -> identity chaining
-  privileged_after_compromise U07 privileged credential access after compromise indicators
-  privileged_after_compromise U07 identity-centric risk (privileged access after compromise indicators)
+  privileged_after_compromise U07 identity-centric risk (privileged credential access after compromise indicators)
   deception_corroborated      U04 / IM deception hit corroborated by other telemetry
   exposed_host_under_attack   U06 exposure-informed triage (KEV / P1 vuln on an attacked host)
   attacked_host_without_edr   VM-F17 / IM coverage gap on a host that is being attacked

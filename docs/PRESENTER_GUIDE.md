@@ -105,7 +105,7 @@ Draw it as four layers (full diagram in [ARCHITECTURE.md](ARCHITECTURE.md)):
 scoring, optional cited narrative) → recommend actions through the policy → correlate across domains → prove
 (audit, reports, evidence packs).
 
-**Deployment:** stateless API (scale horizontally), scheduler (several replicas are safe: per-job database lease),
+**Deployment:** stateless API (scale horizontally) with the job scheduler built in (any number of schedulers is safe: the database decides what is due and a lease stops a job running twice),
 PostgreSQL, a volume or blob store for encrypted raw payloads and reports, and an optional phishing ML engine with
 an isolated detonation host.
 
@@ -582,7 +582,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 264 passed on SQLite (with PostgreSQL's rules enforced) and 265 on PostgreSQL 16 (one test runs on PostgreSQL only), plus opt-in live tests |
+| Platform test suite | 275 passed on SQLite (with PostgreSQL's rules enforced) and 276 on PostgreSQL 16 (one test runs on PostgreSQL only), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -719,7 +719,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 264 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 275 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -739,6 +739,16 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Could a malicious e-mail crash the analysis? | Fuzzing found three ways, and all are fixed: a hostile `From:` header (a bug in Python's own parser, now worked around), hostile MIME, and NUL characters. The parser is now fuzzed with arbitrary bytes on every run. |
 | Do you depend on vulnerable packages? | pip-audit and npm audit report no known vulnerabilities. bandit reports no medium or high findings. |
 | Is it accessible? | Every screen passes an automated WCAG 2.1 A/AA scan in both themes. A manual screen-reader review has not been done. |
+
+### About speed
+
+| Question | Answer |
+|---|---|
+| How long does an analysis take? | Measured with every vendor API call taking 400 ms (typical for cloud security APIs): a reported phishing e-mail is fully analysed (campaign, who clicked, endpoint and identity impact) in about **3 s**, or 9-12 s with the LLM writing the explanation. An incident investigation across the tools takes about **2 s** (8-16 s with the LLM summary). A benign e-mail takes about 1 s and costs no tokens. |
+| Does the analyst wait for that? | No. Analysis runs in the background as data arrives. Opening a case, story or list takes under 0.1 s, because the results are stored. What an analyst does wait for: an analyst question (~7 s), a first deep analysis (~14 s, then cached) and a report (~7 s). The situation brief is prepared in the background. |
+| How quickly does a reported e-mail become a case? | The reporting mailbox is checked every 2 minutes (configurable), then analysis takes seconds. Uploads in the console are analysed immediately. |
+| What made it fast? | Within one analysis the tools are asked in parallel: threat-intel sources, the other e-mail control, click and DNS checks, and per user Defender, CrowdStrike and Entra. LLM narratives and report sections are also written in parallel. A phishing analysis went from 12.5 s to 2.9 s and a report from 22 s to 7 s. Results are merged in a fixed order, so they are identical every run, and every vendor's rate limit is still respected. A test fails if analysis ever goes back to asking tools one by one. |
+| What if a tool is slow? | Each lookup has its own 20-second limit. A slow tool delays one case by at most that, and is then reported as unavailable while the rest of the analysis completes. |
 
 ### About the database and scale
 
@@ -762,7 +772,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 264 SQLite, 265 PostgreSQL / 205 |
+| Platform tests / engine tests | 275 SQLite, 276 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 17 / 11, all passing |
 | Features verified | 89 of 89 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
@@ -927,8 +937,15 @@ and the result is recorded.
 | `retention` | daily | Prune old raw payloads, closed-case e-mails and LLM prompt text; keep legal holds |
 
 Every run is recorded. A run that fails is retried with backoff; after 3 failed runs it is **dead-lettered** and a
-finding is raised. Any job can be replayed from Integrations. Several scheduler replicas are safe, because each job
-takes a database lease. If the scheduler stops, every screen shows a "Scheduler stopped" banner.
+finding is raised. Any job can be replayed from Integrations.
+
+The scheduler runs **inside the API server**, so starting the platform starts it; there is no separate process to
+forget.
+- It restarts its own thread if it ever stops, and one failing pass never stops the schedule.
+- The database decides what is due, so restarts and extra schedulers never re-run or double-run a job.
+- A heartbeat every 30 seconds feeds `/health`. If the scheduler stops, every screen shows "Scheduler stopped"; if a
+  job hangs past its 30-minute lease, "Scheduler stuck (job)".
+- A dedicated scheduler service is optional (`SOC_EMBEDDED_SCHEDULER=0` on the API).
 
 ### 15.5 The data model in one paragraph
 
@@ -1044,8 +1061,8 @@ Every screen works in light and dark themes and at 768 px and above. All times a
 | A tool's API down or rate-limited | Backoff and retry; the source shows as *unavailable* in investigations and *stale* on Integrations |
 | A malformed vendor record | Set aside; the rest of the stream continues |
 | A job keeps failing | Retried; dead-lettered after 3 runs with a finding; replayable |
-| Scheduler stopped | "Scheduler stopped" banner on every screen; `/health` reports it |
-| Two schedulers | A database lease means each job runs once |
+| Scheduler stopped or stuck | Built into the server and self-restarting; if it still stops, "Scheduler stopped" (no heartbeat) or "Scheduler stuck (job)" (a job past its lease) on every screen |
+| Two schedulers, restarts | The database decides what is due and a lease is held until the run is recorded: no job runs twice |
 | Something ran twice | Every pipeline is idempotent; the self-check watches for duplicates |
 | Figures drift between screens | The hourly self-check recomputes them and raises a finding (only if confirmed on a re-run) |
 | Hostile input | NUL characters stripped; over-long free text kept to width; malformed ids refused with 400; malformed e-mail headers read raw |
@@ -1057,7 +1074,7 @@ Full detail: [FAILURE_MODES.md](FAILURE_MODES.md).
 
 - **Components:**
   - `platform-api` (stateless; scale out behind a load balancer)
-  - `platform-scheduler` (one or more)
+  - the scheduler: built into `platform-api`, or a dedicated `platform-scheduler` service (as in the compose file)
   - PostgreSQL
   - a volume or blob store for encrypted raw payloads and reports
   - optionally the phishing ML engine with RabbitMQ and Redis, and an isolated detonation host
@@ -1094,7 +1111,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 264 platform tests (265 on PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 275 platform tests (276 on PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |
