@@ -214,6 +214,7 @@ soc_platform/
     crypto.py            DataCipher (Fernet/MultiFernet), write_protected (atomic)
     retention.py         retention and legal hold
     selfcheck.py         cross-surface consistency proof, budget alert
+    notify.py            Teams / Slack / webhook notifications for findings (notifications table)
     asset_types.py       which assets are expected to run an EDR agent
   domains/
     phishing/            service.py, models.py, supplier.py, agents/{decompose,analyzer,investigation}.py, engine/ (optional ML)
@@ -392,16 +393,16 @@ unresolved, by design.
 
 ## 8. Data model and persistence
 
-### 8.1 Tables (35)
+### 8.1 Tables (37)
 
 | Area | Tables |
 |---|---|
 | Context store | `entities`, `entity_keys`, `entity_hints`, `source_records`, `relations`, `evidence` |
 | Resolution | `resolution_overrides`, `unresolved_items` |
-| Cases | `cases`, `case_entities`, `dispositions` |
+| Cases | `cases`, `case_entities`, `case_notes`, `dispositions` |
 | Actions and policy | `action_requests`, `policy_versions` |
 | Governance | `audit_log`, `llm_calls`, `access_log`, `role_assignments`, `api_keys`, `token_revocations`, `system_flags` |
-| Operations | `connector_checkpoints`, `enrichment_cache`, `job_runs` |
+| Operations | `connector_checkpoints`, `enrichment_cache`, `job_runs`, `notifications` |
 | Phishing | `ph_submissions` |
 | Vulnerability | `vm_findings`, `vm_vuln_intel`, `vm_campaigns`, `vm_action_plans`, `vm_exceptions`, `vm_risk_register`, `vm_validations`, `vm_misconfigurations` |
 | Intelligence | `insights` |
@@ -446,11 +447,18 @@ unresolved, by design.
 ### 8.4 Schema management
 
 - `Database.create_all()` creates missing tables.
+- `_add_missing_columns()` (both engines) then compares each existing table with the model and adds every column
+  the model defines that the table lacks, **when that is safe: the column is nullable**, so existing rows simply
+  get NULL. The DDL type is compiled for the running dialect and identifiers are quoted by the dialect. A new
+  NOT NULL column is not added; it is logged as needing a scripted migration. This is how an existing database
+  gained `llm_calls.latency_ms` (§12.2) with no manual step.
 - On PostgreSQL, `_widen_columns()` then compares every VARCHAR column's length with the model and widens columns
-  the model has made longer. That is always safe and loses no data. **Nothing is ever narrowed or dropped
+  the model has made longer. That is always safe and loses no data. **Nothing is ever narrowed, renamed or dropped
   automatically.**
-- There is no migration framework yet (see §26). Additive changes (new tables, wider columns) are handled
-  automatically; anything else needs a scripted migration.
+- Tested on both engines (`test_schema.py`): an "old" database loses a column, the new release starts, the column
+  is back, existing data is intact, and a second start is a no-op.
+- There is no migration framework yet (see §26). Additive changes (new tables, new optional columns, wider
+  columns) are handled automatically; anything else needs a scripted migration.
 
 ### 8.5 SQLite specifics (dev and demo)
 
@@ -541,6 +549,30 @@ runs. In-memory databases use `StaticPool` so every session sees the same data.
    sign-in → T1078, secret copied → T1555...).
 6. **Recommendations**, ranked and policy-gated; similar past incidents by signature; handover report.
 
+### 9.2.1 Deferred explanations (incident and phishing jobs)
+
+The written explanation is the only part of an investigation that needs the model, and it is the slowest part
+(§16.1). Nothing else depends on it: verdict, severity, confidence, MITRE mapping, evidence numbering and
+recommendations are all computed in code. So the scheduled jobs split the work:
+
+1. `investigate(case_id, narrate=False)` / `process(sub_id, narrate=False)` do everything, store the deterministic
+   cited explanation (`deterministic_grounded`), and record in `case.assessment["narration_pending"]` what the model
+   will need: the workflow, the question, the tier and **the exact evidence row ids** the case was assessed on.
+2. The job **commits**. The cases are on screen and actionable, with recommendations waiting for approval.
+3. `narrate_pending(ids)` (`CaseService.narrate_pending`, shared by both domains) rebuilds the evidence list from
+   the stored row ids - so the E-numbers are identical, even if evidence was added since - and asks the model for
+   all cases at once in a thread pool (`SOC_LLM_CONCURRENCY`). Results are applied in order on the job's thread.
+   A grounded answer replaces the summary and claims and is audited as `case.narrated`; an answer that fails
+   grounding, or no model, leaves the deterministic explanation. Either way the pending marker is removed.
+4. If a job stops between steps 2 and 3, the next run picks up every pending case of the last 7 days
+   (`pending_narration`).
+
+The bulk API endpoints (`POST /incidents/run`, `POST /phishing/ingest`) use the same two steps within the request,
+so a batch's explanations are generated in parallel instead of one after another. Single-case calls (investigate
+one incident, upload one e-mail) still narrate inline. Tested: decisions are identical before and after
+narration, calls overlap, evidence ids match, and nothing is left pending (`test_incident.py`,
+`test_phishing.py`).
+
 ### 9.3 Vulnerability (`domains/vulnerability/`)
 
 1. **Consolidate** Rapid7, CrowdStrike Spotlight, Defender TVM and Wiz findings, after entity resolution, into one
@@ -570,6 +602,34 @@ runs. In-memory databases use `StaticPool` so every session sees the same data.
    team). The generated filter is shown with the answer. It is never SQL.
 
 ---
+
+### 9.4 Shared case work: ownership, notes and search
+
+- **Ownership.** `cases.assignee` (a work e-mail, lower-cased). `CaseService.assign`:
+  - taking a case yourself needs `investigate`
+  - giving it to someone else, or taking it off someone else, needs `approve_high_impact` (a lead)
+  - releasing your own case needs only `investigate`
+  - every change is audited (`case.assigned`, with the previous owner)
+
+  `GET /cases?assignee=me|unassigned|<email>` filters; `GET /cases/summary` adds `mine` and `unassigned` counts.
+  The case list has an *Owner* column and Everyone / Mine / Unassigned filters; the case page has *Take case* and
+  *Unassign*.
+- **Notes.** `case_notes` (case, author, text up to 4,000 characters, time). Append-only like an investigation log:
+  a correction is a new note, nothing is edited or deleted. `POST /cases/{id}/notes` needs `investigate` and the
+  case in scope; audited as `case.note_added` (length only, not the text). Shown newest first on the case page;
+  each note's time is forced strictly after the case's previous note, so the order holds even for two notes in one
+  clock tick (Windows' clock advances in ~15 ms steps; a full-suite run caught the random order).
+- **Global search.** `GET /search?q=` (2-200 characters) from the box in the top bar. One query per group, each
+  limited (default 10, max 50) and **each limited to what the caller may see**:
+  - cases, by title or exact id (domain scope applied)
+  - people, hosts and indicators, by display name **or any identifier from any tool** (UPN, e-mail, hostname,
+    serial, MAC, cloud id...) through `entity_keys` - all-domain users only, because entities span domains
+  - correlated findings (all-domain users)
+  - vulnerabilities, by CVE or asset name (all-domain or vulnerability scope)
+
+  Matching is case-insensitive substring with `LIKE ... ESCAPE '\'`; the user's `%`, `_` and `\` are escaped, so
+  input is always literal (tested with `%` and `_`, which must not match everything). Each search is audited with
+  its length only.
 
 ## 10. Intelligence layer
 
@@ -770,6 +830,10 @@ model)`).
   thread, so the output is the same as sequential.
 - **Measured:** a first full re-correlation with 19 new narratives went from 67 s to 19 s, and a CISO report from
   22 s to 7 s.
+- **Case explanations are deferred** in the incident and phishing jobs and batched in parallel (§9.2.1).
+- **Response times are recorded.** Every call's duration is stored in `llm_calls.latency_ms`, and
+  `GET /api/v1/llm/status` returns the median and 95th percentile per workflow over 30 days
+  (`LLMGateway.latency_status`), so the figures in §16.1 can be checked against production.
 
 **Design rule:** callers pass computed figures in as evidence; the model never produces figures. Turning the LLM off
 changes no number, verdict or action; the test suite proves it on three estates.
@@ -834,7 +898,7 @@ changes no number, verdict or action; the test suite proves it on three estates.
   an allow-list (`ALLOWED`) of functions via `data-fn`, never `eval` or inline handlers. The stored-XSS probe (8
   screens, CSP disabled) executed nothing.
 - **No SSRF surface.** No code path fetches URLs taken from e-mail content; outbound calls go only to configured
-  vendor endpoints. The unwired visual-URL scaffold returns "unavailable" instead of a made-up verdict.
+  vendor endpoints and configured notification webhooks (HTTPS only, from settings, never from data). The unwired visual-URL scaffold returns "unavailable" instead of a made-up verdict.
 - **No template injection.** No template engine renders user text.
 
 ### 13.4 Data protection
@@ -875,10 +939,11 @@ changes no number, verdict or action; the test suite proves it on three estates.
 
 ### 14.1 Jobs (`jobs.py`)
 
-Eight jobs:
+Nine jobs:
 
 | Job | Default interval |
 |---|---|
+| notify | 1 min |
 | phishing | 2 min |
 | incident | 5 min |
 | intelligence | 10 min |
@@ -892,7 +957,11 @@ Intervals are set by `SOC_JOB_*_SECONDS`.
 
 `run_job(name)`:
 1. **Lease:** `system_flags[job_lease:<name>]` with holder = `hostname:pid:thread-id` and a 30-minute expiry. If
-   another holder has a live lease, skip.
+   another holder has a live lease, skip. Taking it is atomic: an existing row is changed with a compare-and-swap
+   (`UPDATE ... WHERE updated_at = <value read>`, one row changed or the lease is lost), and the first-ever lease is
+   an insert that only one scheduler can win; the loser gets "not acquired", never an exception. (A first version
+   read then wrote: two schedulers starting together both inserted the row and one pass crashed. It hid behind a
+   thread warning in a passing test; the scheduler tests now fail on any exception in a background thread.)
 2. **Check again once the lease is held** (`still_due`). If someone ran the job between the due check and the lease,
    skip.
 3. **Run** the body in its own session, retrying up to 3 attempts with exponential backoff (2ⁿ s, capped at 60 s).
@@ -901,6 +970,30 @@ Intervals are set by `SOC_JOB_*_SECONDS`.
    schedule, so it recovers on its own.
 5. **Release** the lease. This happens **after** the record is written; releasing before it let a second scheduler
    run the job again, which a race test found.
+
+### 14.1.1 Notifications (`core/notify.py`)
+
+Important findings are pushed to Teams, Slack or any webhook by the `notify` job (every minute):
+
+- **What:** every finding (`insights`) with status `new` and severity at or above `SOC_NOTIFY_MIN_SEVERITY`
+  (default `high`). Operational alerts are findings, so a dead-lettered job, break-glass use, a failing self-check
+  and the LLM budget are sent too - no separate alerting path.
+- **Where:** only the channels in `SOC_NOTIFY_WEBHOOKS` / `SOC_NOTIFY_WEBHOOKS_FILE` (`kind|url`, kinds `teams`,
+  `slack`, `json`). Only `https://` is accepted (`http://` only to localhost). No address ever comes from data,
+  so an e-mail or alert cannot make the platform call out somewhere (no SSRF path). Invalid entries are skipped
+  with a warning, never a start-up failure.
+- **Once per channel:** `notifications` has a UNIQUE (`dedupe_key`, `severity`, `channel`). The same finding is not
+  repeated; an escalation to a higher severity is a new row, so it is sent again.
+- **Failures:** recorded on the row (`failed`, `attempts`, `last_error`) and retried each run, up to 5 attempts.
+  10 s read / 5 s connect timeout. A delivery failure never affects the job that raised the finding.
+- **Secrets:** the channel is stored and shown as `kind:host` only. The webhook URL, which contains its credential,
+  is never stored, logged or returned by the API.
+- **Payload:** Teams and Slack get `{"text": "[HIGH] title\n- next step..."}` with a link to the console when
+  `SOC_PUBLIC_URL` is set; `json` gets a structured record (id, rule, severity, title, status, domains, next steps,
+  first seen) for a SIEM or SOAR.
+- **Visible:** Integrations → *Notifications* card and `GET /api/v1/admin/notifications` (audit-read, all-domain).
+- Tested in `test_notify.py`: threshold, once per channel, escalation, retry cap, HTTPS-only parsing, secret file,
+  and the job wiring.
 
 ### 14.2 Scheduler (`scheduler.py`)
 
@@ -1008,6 +1101,10 @@ speeds.
 | Deep analysis | analyst (on request) | 0 | - | ~14 s once, then instant (cached) |
 | Report (CISO weekly, all sections) | analyst | 0 | 0.2 s | ~7 s (was 22 s) |
 
+**With deferred explanations (§9.2.1)** the case is on screen at the "Without LLM" time even when the model is on;
+the model's explanation follows a few seconds later, and in a batch the explanations for all of a run's cases are
+written in parallel (a run of 10 incidents waits for about 3 model calls' time with `SOC_LLM_CONCURRENCY=4`, not 10).
+
 **Time from a user pressing *Report* to a case on screen** = up to the phishing job interval (default 2 minutes;
 lower `SOC_JOB_PHISHING_SECONDS` for faster pickup) + the analysis above. Uploads through the console are analysed
 immediately.
@@ -1035,7 +1132,7 @@ immediately.
   identical figures on all three estates.
 - **Rate limits are respected:** every call still goes through its connector's token bucket, which is thread-safe,
   so parallelism never exceeds a vendor's budget.
-- **Parallel LLM batches** and the prepared brief (§12.3, §10.5).
+- **Parallel LLM batches**, the prepared brief and deferred case explanations (§12.3, §10.5, §9.2.1).
 - **A regression test** (`test_phishing_analysis_asks_the_tools_in_parallel`) fails if an analysis takes more than
   half the time its vendor calls would take one after another.
 
@@ -1046,7 +1143,9 @@ immediately.
 - **REST under `/api/v1`**, JSON, grouped by domain:
   - `/cases`, `/actions`, `/phishing`, `/incidents`, `/vm`, `/intelligence`, `/reports`, `/admin`, `/audit`,
     `/jobs`, `/connectors`, `/dashboard`, `/entities`, `/resolution`, `/policy`, `/kill-switch`, `/llm`,
-    `/ingest/alerts`
+    `/ingest/alerts`, `/search`
+  - collaboration: `POST /cases/{id}/assign`, `POST /cases/{id}/notes`; notifications:
+    `GET /admin/notifications`
   - `/health` (unauthenticated: status, audit chain, kill switch, scheduler) and `/metrics` (Prometheus text,
     audit-read permission)
 - **Permissions are declared per route** with `Depends(need(Perm.X, "domain"))`. Record-level scope is checked in
@@ -1236,7 +1335,7 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 8 | Hash-chained, append-only audit; appends serialised by locking a chain-head row before reading the last hash | A plain audit table; a database sequence only | Tamper evidence and a verifiable export; without serialisation, concurrent appends forked the chain (reproduced on both databases) | Appends queue behind each other (microseconds; fine at SOC volumes) |
 | 9 | Fernet/MultiFernet for files | Database-level encryption only | Raw e-mails and payloads are the most sensitive data; rotation without re-encryption | Key management in the vault |
 | 10 | Conditional updates for state transitions | Application locks | Exactly-once across replicas without distributed locks | - |
-| 11 | Scheduler embedded in the API, coordinated by the database: due-ness from job history, a lease per job, a re-check once the lease is held, the lease released only after the run is recorded, and a heartbeat | Separate mandatory process; Celery/Redis; in-memory "last run" | Nothing to forget; no extra infrastructure; restarts and extra schedulers never re-run a job (two races were found and closed by tests) | The API process also runs jobs (turn off with one setting) |
+| 11 | Scheduler embedded in the API, coordinated by the database: due-ness from job history, an atomic (compare-and-swap) lease per job, a re-check once the lease is held, the lease released only after the run is recorded, and a heartbeat | Separate mandatory process; Celery/Redis; in-memory "last run" | Nothing to forget; no extra infrastructure; restarts and extra schedulers never re-run a job (two races were found and closed by tests) | The API process also runs jobs (turn off with one setting) |
 | 12 | Vanilla JS SPA without a build step | React/Vue | Strict CSP, a minimal supply chain, easy to audit | More manual DOM code; no component library |
 | 13 | Evidence ids and citation validation for every model output | Trust the model | Grounding is enforceable in code | Some model statements are dropped (the count is shown) |
 | 14 | Numeric-fidelity guardrail | Prompt instructions only | Found real stale figures in model output | Occasional false removal of a legitimate figure, erring on the safe side |
@@ -1244,24 +1343,32 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 16 | Risk as a saturating sum of decayed weights, with standing signals | ML risk model | Every point arguable; tunable in one place | Weights are expert-set, and validated in shadow mode |
 | 17 | Idempotency by natural keys everywhere | Exactly-once messaging | Replays, restarts and double clicks are harmless | Unique constraints to maintain |
 | 18 | Domain scope answers 404, not 403 | 403 | Hides the existence of records outside scope | - |
-| 19 | `create_all` + automatic widening, no migration framework yet | Alembic from day one | Additive schema evolution covered automatically during build-out | Non-additive changes will need Alembic (§26) |
+| 19 | `create_all` + automatic column addition and widening, no migration framework yet | Alembic from day one | Additive schema evolution covered automatically during build-out | Non-additive changes will need Alembic (§26) |
 | 20 | Tests hold SQLite to PostgreSQL's rules and run the suite on PostgreSQL | Separate PostgreSQL CI only | Production-only bugs surface on every developer run | A small listener in the test harness |
 | 21 | Parallel vendor I/O in all three modules (syncs, intel feeds, per-analysis lookups), with bounded thread pools; database work stays on one thread in a fixed order | Sequential calls; async/await rewrite | Latency is dominated by vendor round trips (a phishing analysis went from 12.5 s to 2.9 s); threads suit the synchronous connector code and httpx client | More threads per analysis (bounded); results must be merged deterministically |
 | 22 | LLM batches in parallel, with the gateway's database use behind a lock | One call at a time; a separate session per thread | Narratives and report sections are independent; a lock keeps the budget check and call log on one session | Throughput is bounded by `SOC_LLM_CONCURRENCY` and the provider's rate limit |
 | 23 | The background job prepares the situation brief | Compute on first view only | Nobody waits for the most-viewed LLM output | Prepared per process (with a separate scheduler service, the API's first view still computes it) |
 | 24 | Honour a vendor's `Retry-After`, capped at 120 s | Honour it fully; ignore it | Be a good API citizen without letting one answer stall a job for hours | Very long throttles are retried a few times, then reported |
+| 25 | Jobs commit a case before asking the model for its explanation; explanations for a batch run in parallel | Narrate inline, case by case | The explanation changes no decision, so nobody should wait for it; a batch is bounded by concurrency, not count | A case briefly shows the deterministic explanation (marked "being prepared") |
+| 26 | Notifications from findings, through configured HTTPS webhooks only, deduplicated per channel and severity | A separate alerting subsystem; e-mail; destinations per rule | One path for detection and operational alerts; no SSRF path; no spam from unchanged findings | Channel set is platform-wide (no per-team routing yet) |
+| 27 | Case ownership and append-only notes in the platform | Rely on the ITSM ticket for ownership | Analysts triage in the console; ownership must filter the queue; notes must be audit-grade | Two places a case can be discussed when a ticket exists (the ticket link is on the case) |
+| 28 | Global search with escaped `LIKE` over names and every tool identifier, scope-filtered per group | A search engine (OpenSearch); full-text indexes | No extra infrastructure; any identifier from any tool finds the entity; scope rules reused | Substring scans; fine to hundreds of thousands of rows, a search index is the next step beyond |
+| 29 | Automatic *nullable* column addition at start-up on both engines | Alembic immediately | New optional fields reach existing databases with no manual step | Required columns, renames and drops still need a scripted migration |
 
 ---
 
 ## 26. Known limitations and trade-offs
 
 - **Not yet run against the client's tenants.** Connectors follow documented APIs and are exercised through fixtures.
-- **No schema migration framework.** Additive changes are automatic; renames and drops need Alembic, which should be
-  introduced before the first non-additive change in production.
+- **No schema migration framework.** Additive changes (new tables, new optional columns, wider text) are automatic
+  on both engines; required columns, renames and drops need Alembic, which should be introduced before the first
+  such change in production.
 - **Load at client volume untested.** Scale benchmarks go to 20,000 entities and actions.
 - **SQLite is for demos and development only.** On SQLite, a job that calls the LLM inside its transaction holds the
-  write lock for the call's duration, so a user's write can wait up to the 30 s busy timeout. PostgreSQL (row
-  locks) is unaffected; use it for anything beyond a laptop demo.
+  write lock for the call's duration, so a user's write can wait up to the 30 s busy timeout. The incident and
+  phishing jobs now commit their cases before the model is asked, which shortens this, but the explanation step
+  still writes its call log as it goes. PostgreSQL (row locks) is unaffected; use it for anything beyond a laptop
+  demo.
 - **The dev sign-in keeps its token in `localStorage`.** That is acceptable in dev behind a strict CSP; production
   uses Entra sign-in (MSAL), where token handling follows Microsoft's guidance.
 - **Security testing is internal** (automated pentest, fuzzing, XSS probe). An independent third-party test is still
@@ -1270,8 +1377,10 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 - **Latency depends on the client's APIs.** The measurements in §16.1 assume 400 ms per vendor call; real tenants
   can be slower (large advanced-hunting queries in particular). Enrichment has a 20 s deadline per source, so a slow
   tool delays one case by at most that and is then reported as unavailable.
-- **LLM call durations are not stored** in the call log (only tokens and status); they are measured by the latency
-  script. Adding a duration column is a schema change for a future release.
+- **Notifications are platform-wide:** one threshold and one set of channels; no per-team or per-domain routing
+  and no quiet hours yet.
+- **Search is substring matching**, not ranked full-text; results are ordered by recency (priority for
+  vulnerabilities).
 - **Other LLM providers:** only Azure AI Foundry is verified live.
 - **The detonation host** is not run in the demo; its hardening is unit-tested.
 - **The optional ML engine** is an earlier code base: tested and lint-clean, but not reviewed line by line like the

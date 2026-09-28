@@ -15,7 +15,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import statistics
 import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -203,6 +205,23 @@ class LLMGateway:
                                    .where(LLMCall.ts >= start)).scalar()
         return int(total or 0)
 
+    def latency_status(self, *, days: int = 30) -> dict[str, dict[str, Any]]:
+        """Measured model response times per workflow over the last ``days``: calls, median and 95th percentile."""
+        from datetime import timedelta
+
+        from soc_platform.core.models import utcnow
+
+        with self._lock:
+            rows = self.s.execute(select(LLMCall.workflow, LLMCall.latency_ms).where(
+                LLMCall.ts >= utcnow() - timedelta(days=days), LLMCall.latency_ms.is_not(None),
+                LLMCall.status == "ok")).all()
+        per: dict[str, list[int]] = {}
+        for wf, ms in rows:
+            per.setdefault(wf, []).append(int(ms))
+        return {wf: {"calls": len(xs), "median_ms": round(statistics.median(xs)),
+                     "p95_ms": sorted(xs)[min(len(xs) - 1, round(0.95 * (len(xs) - 1)))]}
+                for wf, xs in sorted(per.items())}
+
     def budget_status(self) -> dict[str, Any]:
         used = self.tokens_this_month()
         budget = self.settings.llm_monthly_token_budget
@@ -223,18 +242,22 @@ class LLMGateway:
             self._log(workflow, prompt, "model endpoint failing - circuit open, deterministic path used", 0, 0, "none",
                       status="circuit_open")
             return None
+        started = time.perf_counter()
         try:
             out = self.provider.complete(system, prompt, tier=tier)
         except Exception as exc:  # noqa: BLE001 - logged; the caller falls back to the deterministic text
             _Breaker.record(False)
-            self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error")
+            self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error",
+                      latency_ms=round((time.perf_counter() - started) * 1000))
             return None
+        latency = round((time.perf_counter() - started) * 1000)
         if out is None:
             return None
         _Breaker.record(True)
         pinned = self.settings.llm_model_version
         status = "ok" if not pinned or pinned in out.model else "model_version_mismatch"
-        self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status)
+        self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status,
+                  latency_ms=latency)
         parsed = _parse_json(out.text)
         if parsed is None:
             return None
@@ -271,11 +294,12 @@ class LLMGateway:
                         "dropped_unsupported_figures": len(claims) - len(checked) + removed}
         return deterministic_grounded(evidence)
 
-    def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str) -> None:
+    def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str,
+             latency_ms: int | None = None) -> None:
         with self._lock:
             self.s.add(LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
                                response=response, prompt_tokens=pt, completion_tokens=ct, status=status,
-                               grounded=True))
+                               grounded=True, latency_ms=latency_ms))
             self.s.flush()
 
 

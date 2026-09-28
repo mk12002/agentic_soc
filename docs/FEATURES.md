@@ -36,7 +36,9 @@ dark mode (the choice is remembered per browser).
 Navigation is grouped by job - *Operate* (overview, intelligence, cases, approvals), *Domains* (phishing,
 vulnerabilities, cloud posture), *Insight* (ATT&CK coverage, shadow IT, supplier risk) and *Govern* (integrations,
 automation policy, reports, access, audit). The top bar always shows whether automation is active or halted
-(kill switch), the signed-in user, their role and MFA status. Every page has a stable URL (`#/cases/<id>`,
+(kill switch), the signed-in user, their role and MFA status, and a **search box**: type any name, e-mail, hostname,
+serial, MAC, cloud id, CVE or case title and get matching cases, people, hosts, indicators, correlated findings and
+vulnerabilities in one place - only what your role and data scope allow. Every page has a stable URL (`#/cases/<id>`,
 `#/entity/<id>`), so links can be shared and the browser back button works.
 
 | Sign-in | Overview (light) | Overview (dark) |
@@ -80,6 +82,15 @@ Every investigation is a case with a plain-language assessment, **facts separate
 citing numbered evidence (hover a reference to see the evidence text and source), MITRE ATT&CK mapping,
 completeness (sources that were unavailable are named, never hidden), recommended actions, entities, a unified
 timeline across tools, analyst decision capture and the case's audit trail.
+
+**Working a case as a team.** Every case has an **owner**: *Take case* assigns it to you, and a lead can give it
+to someone else or take it back. The case list shows the owner and filters to *Mine* or *Unassigned*, with counts.
+**Analyst notes** keep the team's working notes on the case - kept permanently and never edited (a correction is a
+new note), each with author and time, and every assignment and note is in the audit trail.
+
+**No waiting for the model.** The scheduled jobs put a case on screen as soon as its verdict, evidence and
+recommendations are decided; the AI-written explanation is added a few seconds later (the case says so meanwhile),
+and for a batch all explanations are written in parallel. Nothing the model writes changes a decision.
 
 | Phishing case | Incident case | Case (dark) |
 |---|---|---|
@@ -309,9 +320,15 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
   compared; every stored reference is resolved; nothing that must be unique is duplicated; the audit chain is
   verified. Runs hourly (a failure raises a *platform integrity* finding, which resolves itself once consistent),
   on demand at `GET /api/v1/admin/self-check`, and as a card on the Integrations screen.
+* **Notifications** - important findings (default: high and critical) are posted to **Microsoft Teams, Slack or any
+  webhook** (JSON for a SIEM or SOAR) within a minute: correlated attacks, dead-lettered jobs, break-glass use, a
+  failing self-check, the LLM budget. Each finding is sent once per channel and again if it escalates; failed
+  deliveries are retried and shown on the Integrations screen. Destinations come only from configuration (HTTPS),
+  and the webhook secret is never stored or displayed.
 * **Durable jobs** - every scheduled run recorded; retries with backoff; dead letter after 3 failed runs with an
   alert; database lease so replicas never double-run; replay from the console.
-* **Observability** - connector freshness and reconciliation, job health, enrichment latency, drift,
+* **Observability** - connector freshness and reconciliation, job health, enrichment latency, **measured model
+  response times per workflow** (median and p95, `GET /api/v1/llm/status`), drift,
   Prometheus `/metrics` (scraped with an auditor service-account key).
 * **Reports** - the [report builder](#71-ai-report-builder) plus fixed exports (daily exposure, weekly VM,
   management deck, investigation records); your own templates plug in.

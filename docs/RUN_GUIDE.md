@@ -147,13 +147,92 @@ production. **There is no second window to open and nothing to remember.**
 To run the server **without** background jobs (for example, to keep every figure still while you present), start it
 with `$env:SOC_EMBEDDED_SCHEDULER = "0"`. The buttons in §6.4 still run any job on demand.
 
-### Signing in
+### Signing in (admin and every other user)
 
-- **Work email:** any address at the organisation's domain, for example `lena@acme-demo.com`.
-- **Role:** Lead, Analyst, Auditor, Automation admin or Admin.
+Open http://127.0.0.1:8080. In a demo there are no passwords: the **development sign-in** form asks who you are
+and which role to act in. (It works only with `SOC_AUTH_MODE=dev`, only from this machine, and never in production,
+where people sign in with Microsoft Entra ID and MFA.)
 
-For the four-eyes demo, open a second browser profile (or a private window) and sign in as a *different* person,
-for example `alice@acme-demo.com` as Lead. Nobody can approve their own request.
+| Field | What to enter |
+|---|---|
+| **Work email** | Any address at the organisation's domain, e.g. `lena@acme-demo.com`. It does not need to exist anywhere; it is the name that appears in approvals, notes and the audit log. |
+| **Role** | Lead, Analyst, Auditor, Automation admin or Admin (what each can do is below). |
+| **Data scope** | *All domains* (normal), or *Phishing only* / *Incident only* / *Vulnerability only* to show a person limited to one team's data. |
+
+Press **Continue**. The sidebar footer shows the role and scope you are signed in with. A sign-in lasts 8 hours and
+includes MFA, so approvals and other step-up actions work.
+
+**Switch user:** click your name (top right) → **Sign out**, then sign in as someone else.
+
+**Two users side by side** (needed for four-eyes): tabs of one browser share the sign-in, so signing in on a
+second tab replaces the first. Use a **private / InPrivate window**, a **second browser profile**, or a different
+browser (Edge and Chrome) for the second person.
+
+#### Demo accounts
+
+Use these so the names match the rest of this guide and the presenter guide:
+
+| Sign in as | Role | Scope | What they can do | Use it to show |
+|---|---|---|---|---|
+| `lena@acme-demo.com` | **Lead** | All domains | Everything an analyst can, plus approve high-impact actions, assign cases to others, roll back, approve policy changes, kill switch, export evidence | The main walkthrough (default on the form) |
+| `alice@acme-demo.com` | **Lead** | All domains | Same as Lena | A second Lead, e.g. to approve an action Lena requested herself |
+| `ann@acme-demo.com` | **Analyst** | All domains | Investigate, take cases and add notes, request and approve normal actions, resolve entities, read the audit log | Day-to-day triage; an analyst cannot approve high-impact actions or reassign someone else's case |
+| `pia@acme-demo.com` | **Analyst** | Phishing only | As Ann, but sees only phishing | Data scoping: other domains disappear from the menu and their records answer "not found" |
+| `ada@acme-demo.com` | **Admin** | All domains | Manage access (grant / revoke roles, service-account keys), connectors (test, run jobs), kill switch, export evidence | Access management and separation of duties |
+| `max@acme-demo.com` | **Automation admin** | All domains | Propose automation-policy changes, connectors and jobs, kill switch | Policy change control: they propose, a Lead approves |
+| `audrey@acme-demo.com` | **Auditor** | All domains | Read everything, audit log and verification, compliance pack and audit export | Audit and compliance, read-only |
+
+The permissions of every role are listed on **Access → Role permissions**, so you can show them on screen.
+
+#### Logging in as admin
+
+1. Sign in as `ada@acme-demo.com` with role **Admin**.
+2. Open **Access** (under *Govern*). An admin sees:
+   - **Role assignments**: grant a role to anyone (for example `sam@acme-demo.com` → Analyst, scope, days, and a
+     required justification). It applies on that person's next click. *Revoke* removes it.
+   - **Service accounts**: create an API key for an integration (Auditor, Analyst or Automation admin only). The key
+     is shown once.
+   - **Role permissions**: what every role may do.
+3. Show separation of duties: the admin has **no Approve buttons** (Approvals, case pages) and cannot change their
+   own access. Administering the platform and approving changes to security tools are different jobs.
+4. **Integrations** as admin: *Test* each connector and *Run now* any job.
+
+To show a grant working: as Ada, grant `sam@acme-demo.com` the **Lead** role for 1 day. In a private window, sign
+in as `sam@acme-demo.com` with role **Auditor**. Sam now has the Lead's permissions too (for example the Approve
+buttons), and the grant is in the audit log with Ada's justification.
+
+#### The approvals and four-eyes demo
+
+The platform recommends actions; nothing runs until a person with the right role approves.
+- **Normal actions** (e.g. purge a phishing message): an Analyst or a Lead may approve.
+- **High-impact actions** need a **Lead**: host isolation and account disable (both marked *four-eyes* in the
+  policy), actions on VIP targets, and anything over its blast-radius limit.
+- **Four-eyes** means the approver must be a different person from whoever requested the action. When a person
+  (not the platform) requests an isolation or an account disable, they can never approve it themselves.
+
+1. Window 1: `ann@acme-demo.com`, Analyst. **Approvals** → find an **Isolate host** (`endpoint.isolate`) action
+   and press *Approve*. It is refused: an analyst cannot approve a high-impact action.
+2. Window 2 (private): `lena@acme-demo.com`, Lead. **Approvals** → approve the same action. It executes (in fake
+   mode, against the fixture EDR).
+3. Approve a normal action as Ann to show that routine work does not wait for a Lead.
+4. **Audit log**: the request, the refused attempt's absence of effect, the approval by Lena and the execution,
+   all in the hash chain.
+
+#### Showing data scope
+
+Sign in as `pia@acme-demo.com`, Analyst, **Phishing only**.
+- The menu loses Vulnerabilities, Cloud posture and Shadow IT.
+- Cases and Approvals list only phishing.
+- Intelligence (which spans every domain) is refused with "cross-domain data requires all-domain access"; the
+  self-check and notifications cards on Integrations are not shown.
+- Open an incident case's address (copy it from Lena's window): it answers "not found", which also hides that the
+  record exists.
+
+#### Tokens for scripts and the API
+
+The same people and roles are available as tokens for the API (§7):
+`python -m soc_platform token ada@acme-demo.com admin`, or with a scope,
+`/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing`.
 
 ---
 
@@ -308,6 +387,35 @@ Everything is idempotent: pressing a button twice never duplicates cases, campai
 - **Entity 360** for the host or person: the risk score and *Why this score* have moved.
 - **Approvals:** the new actions are waiting. The count matches on every screen.
 - **Audit log:** every step, verified.
+- **Take the case and add a note:** on the case, *Take case*, then write a note and *Add note*. Cases → *Mine* now
+  counts it. Sign in as a second analyst to show they can take an unassigned case but not someone else's; a Lead
+  can reassign.
+- **Search:** type a name, e-mail, hostname, CVE or part of a case title in the box at the top and press Enter.
+- **With the LLM on and the jobs running:** a new case can briefly say *"The written explanation is being
+  prepared"*. The verdict, evidence and recommendations are already final; refresh a few seconds later for the
+  model's text.
+
+### 6.6 Notifications to Teams or Slack (optional)
+
+To show findings arriving in a chat channel:
+
+1. Create an incoming webhook: in Teams, a channel's *Workflows* → "Post to a channel when a webhook request is
+   received" (or a classic incoming webhook); in Slack, an app with *Incoming Webhooks*.
+2. Add it to `.env` (or a vault file named by `SOC_NOTIFY_WEBHOOKS_FILE`) - it contains a secret, never commit it:
+
+   ```
+   SOC_NOTIFY_WEBHOOKS=teams|https://<your-webhook-url>
+   SOC_NOTIFY_MIN_SEVERITY=high         # medium to see more during a demo
+   SOC_PUBLIC_URL=http://127.0.0.1:8080  # messages link back to the console
+   ```
+   Several channels: separate them with commas (`teams|https://...,slack|https://...,json|https://...`).
+3. Reload the environment and restart `serve`. Within a minute (the `notify` job) every open finding at or above the
+   threshold is posted once. Push an alert (§6.3) or upload a phishing e-mail (§6.1) and the resulting finding
+   follows.
+4. **Integrations → Notifications** shows the channels (host only) and each delivery: sent, or failed with the
+   error and attempt number. *Run now* on the `notify` job sends immediately.
+
+Only `https://` addresses are accepted (`http://` only to localhost, for testing with a local receiver).
 
 ---
 
@@ -329,7 +437,10 @@ python -m soc_platform token lena@acme-demo.com lead            # prints a token
 
 **Useful endpoints:** `GET /api/v1/cases`, `GET /api/v1/cases/{id}/story`, `GET /api/v1/actions?status=pending_approval`,
 `POST /api/v1/actions/{id}/approve` (body `{}`), `GET /api/v1/dashboard/overview`, `POST /api/v1/intelligence/ask`
-(body `{"question": "..."}`), `GET /api/v1/audit/verify`.
+(body `{"question": "..."}`), `GET /api/v1/audit/verify`, `GET /api/v1/search?q=jane`,
+`POST /api/v1/cases/{id}/assign` (body `{"assignee": "ann@acme-demo.com"}`, or `null` to clear),
+`POST /api/v1/cases/{id}/notes` (body `{"text": "..."}`), `GET /api/v1/cases?assignee=me`,
+`GET /api/v1/admin/notifications`.
 
 ---
 
@@ -341,7 +452,8 @@ python -m soc_platform token lena@acme-demo.com lead            # prints a token
   analysis are written by gpt-4.1-mini, grounded on the evidence and cited.
 
 **Check which mode you're in:** open **Reports**. It says either *"Narrative is written by the approved LLM
-(azure_foundry)"* or *deterministic*. Or call `GET /api/v1/llm/status`.
+(azure_foundry)"* or *deterministic*. Or call `GET /api/v1/llm/status`, which also shows the measured model response
+times per workflow (median and 95th percentile).
 
 **If you expected the LLM but see deterministic:**
 - The `.env` wasn't loaded in *this* window (run `. .\scripts\load_env.ps1` before `serve`), or
@@ -469,6 +581,9 @@ The browser tour needs Node.js and Chrome or Edge. It installs its own two packa
 | Symptom | Cause and fix |
 |---|---|
 | Sign-in does nothing, or "not available" | `SOC_DEV_JWT_SECRET` is missing in this window. Add it to `.env` (§3), run `. .\scripts\load_env.ps1`, restart `serve`. |
+| Signed in as the wrong person / the other window changed user | Tabs of one browser share the sign-in. Use a private window or another browser profile for the second person (§4, *Signing in*). |
+| No Approve buttons | You are signed in as Admin, Auditor or Automation admin (none of them approve, by design), or the action needs a Lead. Sign in as `lena@acme-demo.com`, Lead. |
+| A screen says it needs all-domain scope | You signed in with a *... only* data scope. Sign out and choose *All domains*. |
 | Sign-in fails from another computer | By design, dev sign-in is served only to this machine. For a demo on a big screen, present from this laptop. |
 | "Only one usage of each socket address" / port in use | Another server is on 8080. Find it with `netstat -ano \| findstr :8080`, then stop that process: `Stop-Process -Id <PID>`. Or use `$env:SOC_PORT = "8081"`. |
 | Screens are empty | `demo` wasn't run on *this* database. Check `SOC_DATABASE_URL`, then run `init-db` and `demo`. |
@@ -476,6 +591,8 @@ The browser tour needs Node.js and Chrome or Edge. It installs its own two packa
 | "deterministic" when you expected the LLM | See §8. |
 | "Scheduler stopped" banner | No heartbeat for 3 minutes. The server was started with `SOC_EMBEDDED_SCHEDULER=0` and no separate scheduler runs, or the process stopped. Restart `serve` normally. |
 | "Scheduler stuck (job)" banner | That job has run for more than 30 minutes, typically a tool that stopped answering. Check **Integrations** (job history and connector status); the job's lease expires and it is retried. |
+| Notifications not arriving | Integrations → *Notifications*: "No channels configured" means `SOC_NOTIFY_WEBHOOKS` is not set in this window, or the entry was rejected (it must be `kind\|https://...`, kind `teams`, `slack` or `json`; the server log names the rejected entry). A *failed* row shows the channel's error; after 5 attempts it stops retrying. Only findings rated at or above `SOC_NOTIFY_MIN_SEVERITY` (default high) and still *new* are sent. |
+| A case says "the written explanation is being prepared" for long | The model is slow or unavailable; the next incident / phishing job run retries it. The verdict and recommendations are already final. Check `GET /api/v1/llm/status`. |
 | "database is locked" | Two processes are writing one SQLite file (for example two servers). Stop one. Use PostgreSQL (§11) for more. |
 | Upload refused (413) | The file is larger than 30 MB. |
 | "rate limit exceeded" (429) while scripting | Default 20 requests/s per client. Slow the script, or set `SOC_RATE_LIMIT_RPS=200` for a local demo. |
@@ -491,11 +608,16 @@ The browser tour needs Node.js and Chrome or Edge. It installs its own two packa
 ```text
 START        . .\scripts\load_env.ps1 ; python -m soc_platform init-db ; python -m soc_platform demo ; python -m soc_platform serve
 OPEN         http://127.0.0.1:8080   (lena@acme-demo.com, Lead)      second approver: alice@acme-demo.com, Lead
+USERS        ann Analyst · pia Analyst + "Phishing only" · ada Admin · max Automation admin · audrey Auditor  (@acme-demo.com)
+SWITCH USER  your name (top right) > Sign out ; second person at once: private window
 HEALTH       http://127.0.0.1:8080/health
 UPLOAD       Phishing > Analyse a message > .eml       new samples: cred_phish_lookalike, html_attachment_phish,
                                                         iso_dropper, malspam_macro, legit_github, legit_internal
 PUSH ALERT   POST /api/v1/ingest/alerts  then  Cases > Run incident pipeline
 PIPELINES    run automatically inside the server; on demand: Cases / Phishing / Vulnerabilities / Cloud / Intelligence buttons; Integrations > Run now
+SEARCH       box at the top of every screen (names, e-mails, hosts, CVEs, case titles)
+OWN A CASE   case > Take case ; Cases > Mine / Unassigned ; notes on the case page
+NOTIFY       SOC_NOTIFY_WEBHOOKS=teams|https://... (then Integrations > Notifications)
 TOKEN        python -m soc_platform token lena@acme-demo.com lead
 LLM?         Reports page callout, or GET /api/v1/llm/status
 RESET        stop server; delete soc_platform.db, data\raw, data\reports; init-db; demo

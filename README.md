@@ -73,10 +73,10 @@ API - no Node build step, no external CDNs - and works in current Chrome, Edge, 
 
 | Area | Screens |
 |---|---|
-| Operate | Overview · Intelligence (brief, cited Q&A, correlated findings, risk) · Cases (+ case detail, attack story, entity 360) · Approvals |
+| Operate | Overview · Intelligence (brief, cited Q&A, correlated findings, risk) · Cases (owner, Mine / Unassigned, notes, attack story, entity 360) · Approvals · global search in the top bar |
 | Domains | Phishing (+ supplier risk) · Vulnerabilities · Cloud posture |
 | Insight | ATT&CK coverage · Shadow IT · Supplier risk |
-| Govern | Integrations (connector health, freshness, jobs) · Automation policy (levels, kill switch, proposals) · Reports (standard reports, "describe a report", exports, compliance pack) · Access · Audit log |
+| Govern | Integrations (connector health, freshness, notifications, jobs) · Automation policy (levels, kill switch, proposals) · Reports (standard reports, "describe a report", exports, compliance pack) · Access · Audit log |
 
 ## Connecting real tools (plug and play)
 

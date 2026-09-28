@@ -32,7 +32,8 @@ if _PG:
     _made: set[str] = set()
 
     def _pg_url(url: str) -> str:
-        name = ("t_" + _uuid.uuid4().hex[:16]) if url in {"sqlite://", "sqlite:///:memory:"} else             "f_" + _hashlib.sha256(url.encode()).hexdigest()[:16]
+        in_memory = url in {"sqlite://", "sqlite:///:memory:"}
+        name = ("t_" + _uuid.uuid4().hex[:16]) if in_memory else "f_" + _hashlib.sha256(url.encode()).hexdigest()[:16]
         if name not in _made:
             conn = _pg.connect(_PG)
             conn.autocommit = True
@@ -51,6 +52,20 @@ if _PG:
         self._factory = _sessionmaker(bind=self.engine, expire_on_commit=False, future=True)
 
     Database.__init__ = _pg_init
+
+    def _drop_test_databases() -> None:
+        """Each run creates ~40 throwaway databases; drop them at the end so the server does not accumulate them."""
+        try:
+            conn = _pg.connect(_PG)
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                for name in sorted(_made):
+                    cur.execute(f'drop database if exists "{name}" with (force)')
+            conn.close()
+        except Exception as exc:  # noqa: BLE001 - cleanup only; never fail a finished test run over it
+            print(f"note: test databases not dropped ({type(exc).__name__}: {exc})")
+
+    __import__("atexit").register(_drop_test_databases)
 else:
     # SQLite is lax where PostgreSQL (production) is strict. Hold every SQLite test to PostgreSQL's rules so the fast
     # suite catches what would only fail in production: text longer than its column, integers beyond 32 bits in an

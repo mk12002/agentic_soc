@@ -155,7 +155,7 @@ const NAV = [
   ['Govern', [['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['reports', 'Reports', 'reports'],
     ['access', 'Access', 'access'], ['audit', 'Audit log', 'audit']]],
 ];
-const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity'};
+const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity', search: 'Search'};
 
 function route() {
   const parts = (location.hash.replace(/^#\/?/, '') || 'overview').split('/').map(decodeURIComponent);
@@ -175,6 +175,7 @@ function shell() {
     <div class="main">
       <header class="topbar">
         <div class="crumbs" id="crumbs"></div><div class="spacer"></div>
+        <input class="input search-box" id="global-q" type="search" data-enter="runSearch" aria-label="Search cases, people, hosts, CVEs" placeholder="Search cases, people, hosts, CVEs…">
         <span class="status-pill halt" id="sched-status" hidden><span class="dot"></span><span id="sched-text">Scheduler stopped</span></span>
         <span class="status-pill" id="kill-status" title="Automated action status"><span class="dot"></span>Automation active</span>
         <button class="icon-btn" data-fn="toggleTheme" data-args="[]" title="Toggle light / dark" aria-label="Toggle theme" id="theme-btn"></button>
@@ -213,7 +214,7 @@ async function render() {
   document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === name));
   const title = TITLES[name] || cap(name);
   const parent = {story: 'cases', entity: 'cases'}[name] || name;
-  $('#crumbs').innerHTML = params.length ? `<a href="#/${esc(parent)}">${esc(TITLES[parent] || title)}</a> <span class="muted">/</span> <b>${esc(name === 'story' ? 'Attack story' : name === 'entity' ? 'Entity 360' : 'Detail')}</b>` : `<b>${esc(title)}</b>`;
+  $('#crumbs').innerHTML = name === 'search' ? '<b>Search</b>' : params.length ? `<a href="#/${esc(parent)}">${esc(TITLES[parent] || title)}</a> <span class="muted">/</span> <b>${esc(name === 'story' ? 'Attack story' : name === 'entity' ? 'Entity 360' : 'Detail')}</b>` : `<b>${esc(title)}</b>`;
   document.title = title + ' · Agentic SOC';
   const view = (window.VIEWS || {})[name];
   const main = $('#main');
@@ -242,6 +243,7 @@ function signInScreen() {
     <h1>Sign in</h1>
     <div class="field"><label for="si-user">Work email</label><input class="input" id="si-user" value="lena@acme-demo.com" autocomplete="username"></div>
     <div class="field"><label for="si-role">Role</label><select id="si-role">${['lead', 'analyst', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${cap(r)}</option>`).join('')}</select></div>
+    <div class="field"><label for="si-scope">Data scope</label><select id="si-scope">${[['', 'All domains'], ['phishing', 'Phishing only'], ['incident', 'Incident only'], ['vulnerability', 'Vulnerability only']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
     <button class="btn primary" data-fn="signIn" data-args="[]" style="justify-content:center;height:36px">Continue</button>
     <div class="foot">Development sign-in. In production the console uses Microsoft Entra ID single sign-on with MFA; this form is only available when <code>SOC_AUTH_MODE=dev</code>.</div>
     <button class="btn ghost sm" data-fn="toggleTheme" data-args="[]" id="theme-btn" style="align-self:flex-start"></button>
@@ -249,8 +251,8 @@ function signInScreen() {
   paintThemeButton();
 }
 async function signIn() {
-  const u = $('#si-user').value.trim(), role = $('#si-role').value;
-  const r = await fetch(`/api/v1/dev/token?user=${encodeURIComponent(u)}&roles=${encodeURIComponent(role)}`);
+  const u = $('#si-user').value.trim(), role = $('#si-role').value, scope = $('#si-scope').value;
+  const r = await fetch(`/api/v1/dev/token?user=${encodeURIComponent(u)}&roles=${encodeURIComponent(role)}${scope ? '&domains=' + encodeURIComponent(scope) : ''}`);
   if (!r.ok) { toast('Development sign-in is disabled on this server. Use Entra ID SSO.', true); return; }
   TOKEN = (await r.json()).token;
   try { localStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
@@ -281,7 +283,8 @@ function toggleMenu() { const m = $('#user-menu'); if (m) m.hidden = !m.hidden; 
 function goTo(h) { location.hash = h; }
 
 // ---------------------------------------------------------------- delegation
-const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signOut, dl, refreshPage: () => render()};
+function runSearch() { const q = ($('#global-q').value || '').trim(); if (q.length >= 2) location.hash = '#/search/' + encodeURIComponent(q); }
+const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signOut, dl, runSearch, refreshPage: () => render()};
 document.addEventListener('click', ev => {
   const menu = $('#user-menu');
   if (menu && !menu.hidden && !ev.target.closest('.user')) menu.hidden = true;

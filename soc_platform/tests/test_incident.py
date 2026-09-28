@@ -113,3 +113,56 @@ def test_noisy_detection_is_suppressed(session, world, analyst):
     web = next(c for c in cases if "outbound" in c.title)
     assert web.attributes["suppressed"] is True and web.status == "closed"
     assert session.get(Case, web.id).verdict == "suppressed_noise"
+
+
+def test_deferred_narration_keeps_the_case_usable_then_adds_the_written_explanation(session, world):
+    """The scheduled job commits verdict, severity, evidence and recommendations first and adds the model's
+    explanation afterwards, for the whole batch in parallel - with the same evidence numbering and the same
+    decisions as when the model is asked inline."""
+    import json as _json
+    import re as _re
+    import threading
+    import time
+
+    from soc_platform.config import Settings
+    from soc_platform.llm.gateway import Completion, LLMGateway, Provider
+
+    class Slow(Provider):
+        name = "scripted"
+
+        def __init__(self):
+            self.live, self.peak = 0, 0
+            self.lock = threading.Lock()
+
+        def complete(self, system, user, *, tier):
+            with self.lock:
+                self.live += 1
+                self.peak = max(self.peak, self.live)
+            time.sleep(0.05)
+            with self.lock:
+                self.live -= 1
+            ids = _re.findall(r"^\[(E\d+)\]", user, _re.MULTILINE)
+            return Completion(_json.dumps({"summary": "Model narrative.", "claims": [
+                {"text": "Cited fact", "kind": "fact", "evidence_ids": ids[:1]}]}), 5, 5, "m")
+
+    _, svc = world
+    prov = Slow()
+    svc.llm = LLMGateway(session, Settings(), provider=prov)
+    cases = [c for c in svc.cluster() if c.status != "closed"]
+    assert len(cases) >= 2
+    first = {c.id: svc.investigate(c.id, narrate=False)["case"] for c in cases}
+    assert prov.peak == 0                                                             # no model call yet
+    for c in cases:
+        assert c.assessment["narration_pending"]["workflow"] == "incident.summary"
+        assert c.summary and c.assessment["claims"]                                   # cited, deterministic, usable
+    assert CaseService(session).pending_narration("incident") == [c.id for c in sorted(cases, key=lambda x: x.created_at)]
+    assert svc.narrate_pending([c.id for c in cases]) == len(cases)
+    assert prov.peak > 1                                                              # model calls overlapped
+    for c in cases:
+        session.refresh(c)
+        assert c.summary == "Model narrative." and "narration_pending" not in c.assessment
+        assert c.assessment["claims"][0]["evidence_ids"] == ["E1"]
+        assert set(c.assessment["evidence_index"]) >= {"E1"}
+        assert (c.verdict, c.severity) == (first[c.id]["verdict"], first[c.id]["severity"])   # decisions unchanged
+    assert CaseService(session).pending_narration("incident") == []
+    assert svc.narrate_pending([c.id for c in cases]) == 0                            # nothing left to do

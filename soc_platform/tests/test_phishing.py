@@ -223,3 +223,35 @@ def test_phishing_analysis_asks_the_tools_in_parallel(session, monkeypatch, tmp_
     elapsed = time.perf_counter() - t0
     sequential = calls[0] * 0.15
     assert calls[0] >= 20 and elapsed < 0.5 * sequential, (calls[0], round(elapsed, 2), round(sequential, 2))
+
+
+def test_deferred_narration_for_reported_email(session, ph):
+    """The job decides verdict, severity and recommendations without the model, commits, then writes explanations."""
+    import json as _json
+    import re as _re
+
+    from soc_platform.config import Settings
+    from soc_platform.llm.gateway import Completion, LLMGateway, Provider
+
+    class Scripted(Provider):
+        name = "scripted"
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, system, user, *, tier):
+            self.calls += 1
+            assert tier == "small"
+            ids = _re.findall(r"^\[(E\d+)\]", user, _re.MULTILINE)
+            return Completion(_json.dumps({"summary": "Written explanation.", "claims": [
+                {"text": "Cited", "kind": "fact", "evidence_ids": ids[:1]}]}), 5, 5, "m")
+
+    prov = Scripted()
+    ph.llm = LLMGateway(session, Settings(), provider=prov)
+    bad = ph.submit_raw((ROOT / "artifacts/phishing/corpus/bec_ceo_fraud.eml").read_bytes(), source="test")
+    v = ph.process(bad.id, narrate=False)
+    assert prov.calls == 0 and v["case"]["verdict"] in {"malicious", "suspicious"} and v["case"]["summary"]
+    assert ph.narrate_pending() == 1 and prov.calls == 1                             # found by the pending scan
+    after = ph.cases.view(v["case"]["id"])["case"]
+    assert after["summary"] == "Written explanation." and after["verdict"] == v["case"]["verdict"]
+    assert ph.narrate_pending() == 0

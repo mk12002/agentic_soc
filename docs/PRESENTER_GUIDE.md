@@ -201,6 +201,10 @@ it, who clicked, and whether any device or account shows compromise."
 7. **MITRE ATT&CK** techniques, each with its basis.
 8. **Recommended actions**, with blast radius, reversibility, autonomy level and four-eyes. *Nothing has run.*
 9. The **Timeline** across tools, and the **Audit trail** for this case.
+10. **Owner and notes.** Press *Take case*: the owner line now shows you, and the case list's *Mine* tab counts it.
+    Add a note ("Called Jane, she entered her password at 09:12"). Notes are kept for good - never edited - and the
+    assignment and the note both appear in the audit trail. A lead can hand the case to someone else; an analyst
+    can only take or release their own.
 **Justify the verdict:** "It's a weighted, explainable signal model - not a black box. The score is the sum of
 named signals, each with its evidence, and the thresholds are fixed (§6.3)."
 
@@ -320,7 +324,15 @@ switch, integration freshness."
 **Say:** "Twenty connectors, each with a Test button that authenticates and reads one page, and freshness checked
 against each stream's expected cadence. Here they're in fake mode. In your environment each is switched to live
 with its own least-privilege service principal."
-**Point at:** the scheduled jobs (retries with backoff; dead letter after 3 failures raises an alert).
+**Point at:** the scheduled jobs (retries with backoff; dead letter after 3 failures raises an alert), and the
+**Notifications** card: "Anything rated high or critical - an attack chain, a dead job, break-glass use - is posted
+to your Teams or Slack channel within a minute, once, and again only if it gets worse. Failed deliveries are
+retried and shown here. The webhook address is a secret, so the platform only ever shows the host."
+(With no channel configured the card says how to add one: `SOC_NOTIFY_WEBHOOKS`.)
+
+**Then show search:** type `jane` in the search box at the top. "One box for everything - any identifier from any
+tool: an e-mail, a hostname, a serial number, a CVE. It finds her cases, her identity, the correlated finding and
+related vulnerabilities, and only what your role may see."
 
 ### W12 - "Is this hard-coded to the demo?" (1 min, on request)
 
@@ -582,7 +594,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 275 passed on SQLite (with PostgreSQL's rules enforced) and 276 on PostgreSQL 16 (one test runs on PostgreSQL only), plus opt-in live tests |
+| Platform test suite | 292 passed on SQLite (with PostgreSQL's rules enforced) and 293 on PostgreSQL 16 (one test runs on PostgreSQL only), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -719,7 +731,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 275 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 292 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -748,7 +760,19 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Does the analyst wait for that? | No. Analysis runs in the background as data arrives. Opening a case, story or list takes under 0.1 s, because the results are stored. What an analyst does wait for: an analyst question (~7 s), a first deep analysis (~14 s, then cached) and a report (~7 s). The situation brief is prepared in the background. |
 | How quickly does a reported e-mail become a case? | The reporting mailbox is checked every 2 minutes (configurable), then analysis takes seconds. Uploads in the console are analysed immediately. |
 | What made it fast? | Within one analysis the tools are asked in parallel: threat-intel sources, the other e-mail control, click and DNS checks, and per user Defender, CrowdStrike and Entra. LLM narratives and report sections are also written in parallel. The same applies to incident and vulnerability syncs: every tool downloads at once while the data is stored in order. A phishing analysis went from 12.5 s to 2.9 s, alert ingest from 4.5 s to 0.9 s, a vulnerability refresh from 13 s to 6.5 s and a report from 22 s to 7 s. Results are merged in a fixed order, so they are identical every run, and every vendor's rate limit is still respected. A test fails if analysis ever goes back to asking tools one by one. |
+| And with the LLM on - does a case wait for the model? | No. The background jobs put the case on screen as soon as its verdict, evidence and recommendations are decided (the "without LLM" times above), then add the model's written explanation. For a batch, all explanations are written in parallel, so 10 new incidents wait for about three model calls, not ten. The case page says "the written explanation is being prepared" meanwhile. The model never changes a decision, so nothing is lost by not waiting. |
+| Can we see real model response times? | Yes. Every model call's duration is stored, and `GET /api/v1/llm/status` shows the median and 95th percentile per workflow over 30 days. |
 | What if a tool is slow? | Each lookup has its own 20-second limit. A slow tool delays one case by at most that, and is then reported as unavailable while the rest of the analysis completes. |
+
+### About teamwork and alerting
+
+| Question | Answer |
+|---|---|
+| How do analysts avoid working the same case? | Every case has an owner. *Take case* assigns it to you; the list filters to *Mine* and *Unassigned* with counts. Only a lead can assign a case to someone else or take it off them. Every change is audited. |
+| Where do analysts write down what they did? | Analyst notes on the case: author and time, kept permanently, never edited (a correction is a new note), in the audit trail. The ITSM ticket stays the system of record for remediation work. |
+| How do we find something quickly? | The search box at the top: cases by title or id; people, hosts and indicators by any identifier from any tool; correlated findings; vulnerabilities by CVE or asset. Scoped to what the user may see; the typed text is always treated literally. |
+| Will it alert us, or must someone watch the screen? | It posts findings rated high or above (configurable) to Teams, Slack or any webhook (JSON for a SIEM or SOAR) within a minute: correlated attacks and the platform's own alarms (a dead job, break-glass use, a failed self-check, the LLM budget). Each finding is sent once per channel, again only if it escalates. |
+| Could an attacker make it call out somewhere? | No. Destinations come only from configuration and must be HTTPS; nothing in an e-mail or alert can set one. Webhook URLs are secrets, kept in the vault, and never stored or shown - the screen shows only the host. |
 
 ### About the database and scale
 
@@ -756,7 +780,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 |---|---|
 | Does it run on PostgreSQL? | Yes, that is the production engine, and the full suite runs on it. The faster SQLite runs enforce PostgreSQL's rules too, which found several production-only bugs, all now fixed (§16). |
 | How big can it get? | Measured at 20,000 entities: risk ranking 0.06 s, correlation 0.09 s, a case's actions 0.005 s. The API is stateless and scales out; jobs are leased. It has not been load-tested at the client's volumes (§10). |
-| What happens during an upgrade? | Start-up creates new tables and widens text columns a new release has made longer. It never narrows or drops anything automatically. |
+| What happens during an upgrade? | Start-up creates new tables, adds new optional columns and widens text columns a new release has made longer, on SQLite and PostgreSQL alike. It never narrows, renames or drops anything automatically; a new required column is flagged for a scripted migration. Tested on both engines. |
 
 ---
 
@@ -772,9 +796,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 275 SQLite, 276 PostgreSQL / 205 |
+| Platform tests / engine tests | 292 SQLite, 293 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 17 / 11, all passing |
-| Features verified | 89 of 89 |
+| Features verified | 96 of 96 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
 | Risk half-life / bands | 7 days / critical ≥ 80, high ≥ 60, medium ≥ 30 |
@@ -927,11 +951,12 @@ and the result is recorded.
 
 | Job | Default interval | What it does |
 |---|---|---|
-| `phishing` | 2 minutes | Pull newly reported e-mails and analyse them |
-| `incident` | 5 minutes | Ingest alerts, cluster them into incidents, investigate |
+| `phishing` | 2 minutes | Pull newly reported e-mails and analyse them; the cases are saved first, the model's explanations follow in parallel |
+| `incident` | 5 minutes | Ingest alerts, cluster them into incidents, investigate; the cases are saved first, the model's explanations follow in parallel |
 | `intelligence` | 10 minutes | Re-correlate: risk, 12 rules, brief |
 | `vulnerability` | 6 hours | Refresh the four scanners, prioritise, update SLAs |
 | `self_check` | 1 hour | Prove every shared figure agrees everywhere; check the LLM budget |
+| `notify` | 1 minute | Post new findings at or above the threshold to Teams / Slack / webhooks; retry failed deliveries (up to 5 attempts) |
 | `follow_up` | daily | Chase unacknowledged remediation plans; sync tickets; catch false closures |
 | `daily_report` | daily | The SOC daily report |
 | `retention` | daily | Prune old raw payloads, closed-case e-mails and LLM prompt text; keep legal holds |
@@ -954,14 +979,16 @@ Tools send **source records** (the raw payload is kept encrypted, for evidence).
   from every tool, linked by **relations**.
 - A **case** (phishing, incident or vulnerability) links to entities with a role, and holds **evidence** rows (E#).
 - Recommended changes are **action requests**, decided by the **policy version** in force.
-- Analyst **dispositions** feed shadow-mode agreement and drift monitoring.
+- Analyst **dispositions** feed shadow-mode agreement and drift monitoring. A case has an **owner** and analyst
+  **notes** (append-only).
 - Cross-domain **insights** come from the correlation rules.
 - The vulnerability domain adds consolidated **findings**, **remediation campaigns** with per-team **action plans**,
   **exceptions**, a **risk register** and **cloud misconfigurations**.
 - Reported e-mails are **submissions**.
 
 Everything that changes state writes an **audit record** in a hash chain. Every request writes an **access-log** row,
-and every model call writes an **LLM call** row.
+and every model call writes an **LLM call** row (with its duration). Every notification attempt writes a
+**notification** row (channel host, severity, outcome - never the webhook address).
 
 ### 15.6 Screen by screen
 
@@ -969,8 +996,9 @@ and every model call writes an **LLM call** row.
 |---|---|---|---|
 | **Overview** | Open cases, awaiting approval, automation rate, median time to close, open insights, open vulnerabilities; new cases per day; open cases by severity; top insights; riskiest users and hosts; data quality; integrations; enrichment latency; verdict quality | Cases, actions, insights and findings counted in the database. Awaiting approval counts the whole backlog, not a time window. Scoped to the viewer's domains. | All |
 | **Intelligence** | Situation brief; ask the analyst; risk by user and host; correlated findings with next steps | Brief facts computed in code (cached while unchanged); answers from read-only tools; risk from the engine (§6.1) | All-domain scope (it spans every domain) |
-| **Cases** | Every case with domain, severity, verdict, status; domain tabs with true totals | Cases table; tab counts from the summary endpoint | All (scoped) |
-| **Case** | Assessment with E# citations, facts vs inferences; evidence; cross-domain context; entities; recommended actions with policy reasons; analyst decision; timeline; audit trail; links to the Attack story and a case report | Evidence rows and the case assessment | All (scoped) |
+| **Cases** | Every case with domain, severity, verdict, status, owner; domain tabs and Everyone / Mine / Unassigned tabs with true totals | Cases table; tab counts from the summary endpoint | All (scoped) |
+| **Case** | Owner (take / unassign); assessment with E# citations, facts vs inferences; evidence; cross-domain context; entities; recommended actions with policy reasons; analyst decision; analyst notes; timeline; audit trail; links to the Attack story and a case report | Evidence rows, the case assessment, notes | All (scoped); taking a case and notes need `investigate`, assigning others needs a lead |
+| **Search** (top bar) | Matching cases, people / hosts / indicators, correlated findings, vulnerabilities | Case titles and ids, entity names and every tool identifier, insight titles, CVEs and asset names | All; each group limited to the viewer's scope |
 | **Attack story** | Kill-chain stages, steps, users reached, hosts, privileged secrets, gaps checked; kill-chain row; what happened; response plan (bulk approve); blast radius; benign explanations; gaps; exposure; deep analysis | Rebuilt on demand from stored records (§6.6), never stored | All (scoped) |
 | **Entity 360** | Why this score; timeline across tools; identifiers; cases; insights; vulnerabilities; related entities; per-tool attributes | The context store and the risk engine | All (records outside the viewer's scope answer 404) |
 | **Approvals** | Every action awaiting a decision, with targets, rationale and policy; domain tabs | Action requests, scoped to the viewer | All can view; approving needs `approve_action` (high-impact: `approve_high_impact`) |
@@ -980,7 +1008,7 @@ and every model call writes an **LLM call** row.
 | **Cloud posture** | Open, past SLA, false closures, teams involved; misconfigurations with route / mark fixed / validate | Wiz issues through the same lifecycle as findings | Vulnerability scope |
 | **ATT&CK coverage** | Weighted coverage, priority blind spots, single-source techniques, firing; the matrix; blind spots to close | The enabled tools' detection capabilities (56 techniques) and what has fired | All |
 | **Shadow IT** | Unsanctioned services, high-risk services, users involved, risky sites; by category; risky destinations | Umbrella DNS against `config/sanctioned_services.yaml`; aggregated, never stored | Incident scope |
-| **Integrations** | Each connector's freshness and a Test button; platform self-check; scheduled jobs with history and replay | Connector checkpoints; job runs; the self-check | All can view; Test, Sync and job replay need `manage_connectors` |
+| **Integrations** | Each connector's freshness and a Test button; platform self-check; notification channels and recent deliveries; scheduled jobs with history and replay | Connector checkpoints; job runs; the self-check; the notification log | All can view (self-check and notifications: all-domain scope); Test, Sync and job replay need `manage_connectors` |
 | **Automation policy** | Every action type with level, limits, four-eyes, reversible; kill switch; pending policy changes | The active policy version | All; changes by role |
 | **Reports** | Seven standard reports; describe a report in words; compliance evidence pack; audit export | The 16-source catalogue (§6.8) | All (scoped); evidence exports need `export_evidence` |
 | **Access** | Your access; role assignments; service accounts; role permissions | Role grants and API keys | Admin (manage), all (own access) |
@@ -1111,7 +1139,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 275 platform tests (276 on PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 292 platform tests (293 on PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |

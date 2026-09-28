@@ -77,14 +77,46 @@ class Database:
 
     def create_all(self) -> None:
         from soc_platform.core import models  # noqa: F401  (register tables)
+        from soc_platform.core import notify as _notify  # noqa: F401
         from soc_platform.domains.phishing import models as _ph  # noqa: F401
         from soc_platform.domains.vulnerability import models as _vm  # noqa: F401
         from soc_platform.intelligence import models as _intel  # noqa: F401
         from soc_platform.reporting import models as _rep  # noqa: F401
 
         Base.metadata.create_all(self.engine)
+        self._add_missing_columns()
         if self.engine.dialect.name == "postgresql":
             self._widen_columns()
+
+    def _add_missing_columns(self) -> list[str]:
+        """create_all creates missing *tables* but never changes existing ones. Add each column the model defines that
+        an existing table lacks - only when that is safe: the column is nullable (existing rows get NULL). Nothing is
+        ever dropped, renamed or narrowed; a new NOT NULL column without a default needs a scripted migration and is
+        reported instead. Works on SQLite and PostgreSQL."""
+        import logging
+
+        insp = inspect(self.engine)
+        existing = set(insp.get_table_names())
+        quote = self.engine.dialect.identifier_preparer.quote
+        added: list[str] = []
+        with self.engine.begin() as conn:
+            for table in Base.metadata.sorted_tables:
+                if table.name not in existing:
+                    continue
+                have = {c["name"] for c in insp.get_columns(table.name)}
+                for col in table.columns:
+                    if col.name in have:
+                        continue
+                    if not col.nullable or col.primary_key:
+                        logging.getLogger(__name__).warning(
+                            "schema: %s.%s is new and NOT NULL - add it with a scripted migration", table.name, col.name)
+                        continue
+                    ddl = col.type.compile(dialect=self.engine.dialect)
+                    conn.execute(text(f"ALTER TABLE {quote(table.name)} ADD COLUMN {quote(col.name)} {ddl}"))
+                    added.append(f"{table.name}.{col.name}")
+        if added:
+            logging.getLogger(__name__).info("schema: added column(s) %s", ", ".join(added))
+        return added
 
     def _widen_columns(self) -> None:
         """create_all never changes an existing table: widen VARCHAR columns the model has since made longer (always

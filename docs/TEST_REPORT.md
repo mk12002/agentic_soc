@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-09-26 (round 8; earlier rounds 2026-09-24 to 2026-09-25) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-09-28 (round 10; earlier rounds 2026-09-24 to 2026-09-26) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,53 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 9 (2026-09-26) - latest results: penetration testing, fuzzing, types, coverage
+## 0. Round 10 (2026-09-28) - latest results: scheduler, speed, teamwork, notifications
+
+New in this round:
+- the built-in scheduler
+- parallel vendor I/O in all three modules
+- deferred case explanations
+- case ownership and notes
+- global search
+- Teams / Slack / webhook notifications
+- automatic addition of new optional columns
+- recorded model response times
+
+| Check | Result |
+|---|---|
+| Platform test suite on **SQLite** (PostgreSQL's rules enforced) | **292 passed**, 0 failed, 15 skipped (opt-in live / PostgreSQL-only) |
+| The same suite on **PostgreSQL 16** | **293 passed**, 0 failed, 14 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **96 of 96 features verified**; 232 test cases incl. live LLM and live feed tests; engine 162 passed; browser tour with the LLM on: 0 problems |
+| Lint (ruff, whole repository) / bandit (platform) / `node --check` | 0 findings / no platform findings / clean |
+
+**New tests:**
+- `test_notify.py`: threshold, once per channel, escalation, retry cap, HTTPS-only parsing, secret file, job wiring.
+- `test_schema.py`: an old database gains a new column with its data intact, on both engines; model response times
+  recorded and summarised.
+- Deferred narration (`test_incident.py`, `test_phishing.py`): decisions unchanged, model calls overlap, evidence
+  numbers match, nothing left pending.
+- API tests for ownership and notes, search scope and literal wildcards, and the notification settings (never the
+  secret).
+- `test_scheduler.py`: first leases taken at the same moment.
+- `test_core_governance.py`: note order under a frozen clock.
+
+**Found and fixed in this round:**
+- **Two schedulers could run one job twice.** Two separate races, both found by a test running two schedulers:
+  - due-ness was checked before the lease was taken, and the lease holder was per process
+  - the lease was released before the run was recorded
+
+  Fixed with a per-thread holder, a re-check once the lease is held, and releasing only after the run is recorded.
+- **The audit chain could fork** under concurrent appends (reproduced on SQLite and PostgreSQL). Appends now lock
+  the chain head first.
+- **Taking a first lease or writing a first heartbeat at the same moment crashed one scheduler's pass.** Both
+  threads inserted the row. The test still passed, because the crash only raised a thread warning. Leases are now
+  a compare-and-swap, a lost insert means "not acquired", and the heartbeat retries onto the existing row. The
+  scheduler tests now fail on any exception in a background thread.
+- **Notes written within one clock tick came back in random order** (Windows' clock advances in ~15 ms steps).
+  Found by the full suite. Each case's note times are now strictly increasing.
+- **A vendor's `Retry-After` of hours could stall a job.** It is now capped at 120 s.
+
+## 0a. Round 9 (2026-09-26): penetration testing, fuzzing, types, coverage
 
 | Check | Result |
 |---|---|
@@ -26,7 +72,7 @@ the client's own analyst dispositions (PH-T08, NFR-15), which the platform recor
 - Concurrent writes of the same message failed on Windows.
 - An unwired scaffold claimed "benign 95 %".
 
-## 0a. Round 8 (2026-09-26): PostgreSQL, time, accessibility, code quality
+## 0b. Round 8 (2026-09-26): PostgreSQL, time, accessibility, code quality
 
 | Check | Result |
 |---|---|
@@ -67,7 +113,7 @@ the client's own analyst dispositions (PH-T08, NFR-15), which the platform recor
 - A failed estate fixture could leak its environment into later tests; cleanup is now registered before setup.
 - Tests run on every sample estate, with day counts taken from settings rather than written into the tests.
 
-## 0z. Round 7 (2026-09-25): new data sets, failure modes, cost
+## 0c. Round 7 (2026-09-25): new data sets, failure modes, cost
 
 | Check | Result |
 |---|---|
@@ -88,7 +134,7 @@ correlation and case-action lookups degraded linearly with tenant size; the situ
 every page view (cached by fact fingerprint); auto-closed benign mail spent tokens (deterministic explanation);
 routine narratives now use the small tier.
 
-## 0a. Round 6 (2026-09-25): testing from every angle
+## 0d. Round 6 (2026-09-25): testing from every angle
 
 | Angle | Result |
 |---|---|
@@ -109,7 +155,7 @@ incident endpoint); case page vs actions API listing different actions; badge/ta
 list (true totals now, with "showing N of M"); timestamps without timezone; run-to-run changes in the QA sample;
 an intermittent guardrail hole (digits inside ids counted as support for invented figures).
 
-## 0b. Round 5 (2026-09-25)
+## 0e. Round 5 (2026-09-25)
 
 Added: Azure AI Foundry provider (live), full live-LLM test suite, numeric-fidelity guardrail, output review of a
 complete run with the real model, client name removed from the repository.
@@ -148,7 +194,7 @@ Found and fixed in this round (each with a regression test where it is code):
 * **Repository hygiene** - client name removed from every file and file name (identifiers → fictional "Acme"),
   including emails embedded as base64; a real mailbox email moved out of the repository.
 
-## 0c. Round 4 (2026-09-25)
+## 0f. Round 4 (2026-09-25)
 
 Added: attack story, evidence-bound deep analysis, AI report builder, reports encrypted at rest, generalisation test.
 Full per-feature evidence: [FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md) (generated by `scripts/verify_features.py`).
@@ -172,7 +218,7 @@ report files and compliance packs stored in plaintext (now sealed); duplicate re
 (merged, approved together); 9 bandit medium findings in offline phishing tools (HF revision pinning, http(s)-only
 URLs).
 
-## 0d. Round 3 (2026-09-25)
+## 0g. Round 3 (2026-09-25)
 
 | Area | Result |
 |---|---|

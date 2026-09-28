@@ -11,8 +11,8 @@ it, the conventions the code relies on, and the traps that have already cost tim
 1. **Never write the client's name or its abbreviations** (the real client is anonymised) anywhere in the repo: code,
    docs, file names, commit messages, test data. The demo organisation is **Acme** (`acme-demo.com`); variant
    estates are generated names (Veridian Foods, Tidewell Insurance...). Before every push, scan tracked files for the
-   banned names. (`artifacts/phishing/models/content_agent/tokenizer.json` contains the word-piece `##cci`, which is
-   ML vocabulary, not the name.)
+   banned names. (`artifacts/phishing/models/content_agent/tokenizer.json` contains a word-piece that matches one
+   banned abbreviation; it is ML vocabulary, not the name.)
 2. **Never commit secrets.** `.env` (holds the Azure AI Foundry key as `SOC_LLM_*`, plus engine keys) is gitignored;
    never print its values. Before every push, check that no `.env` secret value appears in any tracked or staged
    file (§9 has the snippet). Also keep out: `gdrive_credentials.json`, anything under `test_reports/private/` (real
@@ -55,6 +55,8 @@ An **agentic SOC platform**: one investigation and automation layer over an orga
   ATT&CK coverage, shadow IT, drift monitoring, and a report builder (Word/PowerPoint).
 - **Governance**: RBAC + domain scope + step-up MFA, four-eyes, versioned autonomy policy, durable kill switch,
   hash-chained audit log, encryption at rest, retention with legal hold, self-check.
+- **Teamwork and alerting**: case owner (take / assign), append-only analyst notes, global search over cases, every
+  tool identifier, findings and CVEs, and Teams / Slack / webhook notifications for findings above a threshold.
 - Every connector has **fake mode** (vendor-shaped fixtures through the same parsing code) so the whole platform runs
   and demos with no tenant access.
 - Optional **phishing ML engine** (`soc_platform/domains/phishing/engine/`, ~24k lines, earlier code base): 7-agent
@@ -89,7 +91,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 89 features
+python scripts/verify_features.py                                 # tests mapped to 96 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -131,11 +133,13 @@ soc_platform/
   connectors/tools/      one module per tool; _common.py (ToolConnector, parse_ts, ok_lookup), _microsoft.py (Graph/OData)
   core/schema.py         NormalizedRecord / EntityRef - the canonical schema every connector emits
   core/models.py         core ORM tables; utcnow() (THE clock); new_id() (uuid4 hex)
-  core/db.py             Database, sessions, UTCDateTime, BoundedText, NUL stripping, SQLite pragmas, PG column widening
+  core/db.py             Database, sessions, UTCDateTime, BoundedText, NUL stripping, SQLite pragmas, add missing
+                         nullable columns (both engines), PG column widening
   core/context_store.py  ingest(), neighbours, timelines, keys_of
   core/entity_resolution.py  deterministic keys -> scored fuzzy (0.85 auto, 0.1 margin, 0.55 review) -> queue
   core/identity.py       user_ref(): cross-tool user naming -> upn/sam keys; built-in accounts are not people
-  core/cases.py          CaseService: cases, evidence, recommendations, decisions, actions_for_case
+  core/cases.py          CaseService: cases, evidence, recommendations, decisions, actions_for_case, assign/add_note,
+                         deferred narration (narration_request / pending_narration / narrate_pending)
   core/enrichment.py     EnrichmentOrchestrator: parallel lookups (16 workers, 20 s deadline, 30 min cache)
   core/actions.py        ActionSpec/Registry/Service - the ONLY execution path; idempotency keys; conditional updates
   core/policy.py         L0-L4 levels, PolicyEngine.decide(), PolicyStore (propose/approve), DEFAULT_POLICY
@@ -144,6 +148,7 @@ soc_platform/
   core/audit.py          hash-chained append-only audit; _lock_chain serialises appends
   core/crypto.py         Fernet/MultiFernet, write_protected (atomic, 0600, Windows replace retry), read_protected
   core/retention.py      retention + legal hold;  core/selfcheck.py  cross-surface consistency proof
+  core/notify.py         Notification table + Teams/Slack/JSON webhook delivery (notify job); HTTPS-only config
   domains/phishing/      service.py (pipeline), models.py, supplier.py, agents/{decompose,analyzer,investigation}.py, engine/
   domains/incident/service.py
   domains/vulnerability/ service.py, misconfig.py, models.py
@@ -183,9 +188,11 @@ token bucket 20/s burst 120 → 429) → `current_user` (Bearer / X-API-Key / X-
 - Services take a `Session` and **never commit**; the API request or job run owns the transaction.
 - Free text from vendors/people → `BoundedText(n)` (kept to width with "…", NUL stripped). **Identifiers** stay strict
   `String(n)` so a mismatch fails loudly. NUL is stripped from every text column by a `before_flush` listener.
-- Schema changes: `create_all` creates tables; on PostgreSQL, start-up **widens** VARCHARs the model made longer.
-  There is **no migration framework** - adding a column to an existing table will NOT reach existing databases.
-  Prefer new tables or JSON fields; a real column addition needs a migration plan (Alembic) first.
+- Schema changes: `create_all` creates tables; `_add_missing_columns` then adds **nullable** columns the model defines
+  but an existing table lacks (SQLite and PG); on PostgreSQL start-up also **widens** VARCHARs the model made longer.
+  So a new table or a new *nullable* column reaches existing databases automatically. There is **no migration
+  framework**: a NOT NULL column, a rename or a drop needs a scripted migration (Alembic) first. A new model module
+  must be imported in `Database.create_all` (see the `# noqa: F401` imports) or its table is never created.
 - `system_flags` holds durable cross-replica state (kill switch, `job_lease:*`, `scheduler:*` heartbeats,
   `audit_chain_head`). Its key column is 64 chars - hash long keys.
 - Exactly-once transitions use conditional `UPDATE ... WHERE status IN (...)` and check `rowcount`.
@@ -219,7 +226,9 @@ fingerprints hash the evidence.
 - Routes declare `Depends(need(Perm.X, "domain"))`; record-level scope checks in handlers (`_case_in_scope`).
 - Human-only permissions (approvals, policy, access management, rollback) never go to API-key principals.
 - UI: interpolate with `esc()`; clicks go through `data-fn` + the `ALLOWED` map (no inline handlers, strict CSP).
-- Nothing fetches URLs taken from e-mail content (no SSRF surface) - keep it that way.
+- Nothing fetches URLs taken from e-mail content (no SSRF surface) - keep it that way. The only configurable
+  outbound destinations are connector endpoints and `SOC_NOTIFY_WEBHOOKS` (HTTPS only, from settings); never store,
+  log or return a webhook URL (it holds a credential) - use `Channel.label` (`kind:host`).
 - Error handling: no silent `except: pass` anywhere (ruff enforces). A catch-all must log or record the failure and,
   outside the resilience-boundary folders listed in `pyproject.toml`, carry `# noqa: BLE001 - <reason>`.
 
@@ -244,13 +253,14 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `test_story.py`, `test_phishing.py` (incl. a latency test that fails if lookups become sequential),
   `test_incident.py`, `test_vulnerability.py`, `test_intelligence.py`, `test_report_builder.py`, `test_api.py`,
   `test_access_security.py`, `test_resilience_security.py`, `test_connectors.py`, `test_core_*.py`, `test_jobs.py`,
+  `test_notify.py` (webhooks), `test_schema.py` (column addition on both engines),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): ~276 platform tests on SQLite / ~277 on PostgreSQL, 205
-  engine tests, 89/89 features verified.
+- Current counts (keep docs in sync when they change): ~292 platform tests on SQLite / ~293 on PostgreSQL, 205
+  engine tests, 96/96 features verified.
 
 ---
 
@@ -337,12 +347,24 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **Sweeping every route in a test with one token** hits `/auth/logout` and revokes it - use a fresh token per route.
 - **Background writers bind to a database when the work is queued**, not when flushed (the access log once wrote rows
   into the wrong database).
-- **Leases are released only after the run is recorded**, and due-ness is re-checked after taking the lease - both
-  closed real double-run races.
+- **Leases are released only after the run is recorded**, due-ness is re-checked after taking the lease, and taking a
+  lease is a compare-and-swap whose insert race returns "not acquired" - each closed a real race.
+- **"First insert" of a `system_flags` row races** (two threads both see no row): catch `IntegrityError` and treat
+  it as lost / retry onto the existing row (`jobs._lease`, `Scheduler._beat`, `audit._lock_chain`).
+- **Thread exceptions only warn in pytest** (`PytestUnhandledThreadExceptionWarning`) - a crashed background thread
+  can hide behind a green test. `test_scheduler.py` turns them into errors; do the same in new concurrency tests.
+- **Equal timestamps on Windows**: the clock advances in ~15 ms steps, so "newest first" by time alone is random
+  within a tick - make times strictly increasing (case notes, `JobRun.ordinal`).
 - **`demo` expectations** in the guides (7+3 cases, 34 approvals, 6 findings) are real; if you change fixtures or
   pipelines, re-count and update RUN_GUIDE / PRESENTER_GUIDE.
 - **Browser tour** runs with `SOC_EMBEDDED_SCHEDULER=0` so background jobs don't move figures under the
   screen-vs-API check; `docs/screenshots` is refreshed only deliberately (`SOC_SHOTS`).
+- **Job bodies may commit mid-way.** The incident and phishing jobs commit the investigated cases, then call
+  `narrate_pending` (parallel model calls). Anything that reads a case must cope with
+  `assessment["narration_pending"]` (deterministic explanation in place, model text still to come). Pass
+  `narrate=False` only where a later `narrate_pending` is guaranteed (job or bulk endpoint).
+- **Notifications are deduplicated by (`dedupe_key`, `severity`, `channel`)**: don't delete `notifications` rows in
+  retention, or every open finding is sent again.
 - **Risk "now"** is the latest observation in the data, not wall time; open exposures/incidents never decay
   (`STANDING_SIGNALS`); amplifiers fade with their triggers.
 

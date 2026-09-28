@@ -96,26 +96,33 @@ function intelAll() { INTEL_ALL = true; Intelligence(); }
 
 // ================================================================= Cases
 let CASE_FILTER = 'all';
+let OWNER_FILTER = 'all';
 async function Cases(id) {
   const __g = GEN;
   if (id) return CaseDetail(id);
-  const [cs, csum] = await Promise.all([api('/api/v1/cases' + (CASE_FILTER === 'all' ? '' : '?domain=' + encodeURIComponent(CASE_FILTER))),
-    api('/api/v1/cases/summary')]);
-  const shown = CASE_FILTER === 'all' ? csum.total : (csum.by_domain[CASE_FILTER] || 0);
+  const qs = new URLSearchParams();
+  if (CASE_FILTER !== 'all') qs.set('domain', CASE_FILTER);
+  if (OWNER_FILTER !== 'all') qs.set('assignee', OWNER_FILTER);
+  const [cs, csum] = await Promise.all([api('/api/v1/cases' + (qs.toString() ? '?' + qs : '')), api('/api/v1/cases/summary')]);
+  const shown = OWNER_FILTER !== 'all' ? csum[OWNER_FILTER === 'me' ? 'mine' : 'unassigned']
+    : CASE_FILTER === 'all' ? csum.total : (csum.by_domain[CASE_FILTER] || 0);
   const rows = cs.map(c => `
     <tr class="click" data-fn="goTo" data-args="${arg('#/cases/' + c.id)}"><td>${chip(c.severity)}</td>
       <td><div class="t-title">${esc(c.title)}</div><div class="t-sub">${esc(cap(c.domain))}</div></td>
       <td>${esc(cap(c.verdict || 'pending'))}</td><td class="num">${c.confidence != null ? pct(c.confidence) : '–'}</td>
-      <td>${esc(cap(c.status))}</td><td class="muted">${dt(c.created_at)}</td></tr>`);
+      <td>${esc(cap(c.status))}</td><td class="small">${c.assignee ? esc(c.assignee) : '<span class="muted">unassigned</span>'}</td><td class="muted">${dt(c.created_at)}</td></tr>`);
   const actions = (can('investigate') && inDomain('incident') ? btn('Run incident pipeline', 'runInc', [], '', 'play') : '') +
     (can('investigate') && inDomain('phishing') ? btn('Pull reported email', 'runPh', [], '', 'phishing') : '');
   setMainG(__g, page('Cases', 'Investigations across all domains. Open a case for the evidence, reasoning and recommended actions.', actions,
     card(null, `<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="seg">${['all', 'phishing', 'incident', 'vulnerability'].map(f =>
-      `<button class="${f === CASE_FILTER ? 'on' : ''}" data-fn="caseFilter" data-args="${arg(f)}">${cap(f)} <span class="muted">${f === 'all' ? csum.total : (csum.by_domain[f] || 0)}</span></button>`).join('')}</div></div>` +
-      table([{h: 'Severity'}, {h: 'Case'}, {h: 'Verdict'}, {h: 'Confidence', num: 1}, {h: 'Status'}, {h: 'Opened'}], rows, {empty: 'No cases yet - run a pipeline to ingest alerts and reported email.'}) +
+      `<button class="${f === CASE_FILTER ? 'on' : ''}" data-fn="caseFilter" data-args="${arg(f)}">${cap(f)} <span class="muted">${f === 'all' ? csum.total : (csum.by_domain[f] || 0)}</span></button>`).join('')}</div>
+      <div class="seg" style="margin-left:10px" role="group" aria-label="Owner">${[['all', 'Everyone', csum.total], ['me', 'Mine', csum.mine], ['unassigned', 'Unassigned', csum.unassigned]].map(([f, label, n]) =>
+      `<button class="${f === OWNER_FILTER ? 'on' : ''}" data-fn="ownerFilter" data-args="${arg(f)}">${label} <span class="muted">${n}</span></button>`).join('')}</div></div>` +
+      table([{h: 'Severity'}, {h: 'Case'}, {h: 'Verdict'}, {h: 'Confidence', num: 1}, {h: 'Status'}, {h: 'Owner'}, {h: 'Opened'}], rows, {empty: OWNER_FILTER === 'me' ? 'No cases assigned to you.' : 'No cases yet - run a pipeline to ingest alerts and reported email.'}) +
       (cs.length < shown ? `<div class="small muted" style="padding:10px 14px">Showing the ${cs.length} most recent of ${shown} cases.</div>` : ''), {flush: true})));
 }
 function caseFilter(f) { CASE_FILTER = f; Cases(); }
+function ownerFilter(f) { OWNER_FILTER = f; Cases(); }
 async function runInc() { toast('Running incident pipeline…'); const r = await post('/api/v1/incidents/run'); toast(`${r.new_incidents} new incident(s), ${r.investigated.length} investigated`); render(); }
 async function runPh() { toast('Pulling reported email…'); const r = await post('/api/v1/phishing/ingest'); toast(`${(r.processed || []).length} message(s) analysed`); render(); }
 
@@ -137,12 +144,15 @@ async function CaseDetail(id) {
   const intel = v.intelligence || {};
   setMainG(__g, `<div class="page-head"><div>
       <div class="inline" style="margin-bottom:8px"><a href="#/cases" class="small" aria-label="Back to cases" title="Back to cases">${icon('back', '')}</a>${chip(c.severity)}${chip(c.verdict || 'pending', 'plain')}<span class="muted small">${esc(cap(c.domain))} · ${esc(cap(c.status))} · opened ${dt(c.created_at)}</span></div>
-      <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} · automation mode ${esc(cap(c.autonomy_mode || 'recommend'))}</p></div>
+      <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} · automation mode ${esc(cap(c.autonomy_mode || 'recommend'))} ·
+        owner <b>${c.assignee ? esc(c.assignee) : 'unassigned'}</b>
+        ${can('investigate') && c.assignee !== ME.id.toLowerCase() ? btn('Take case', 'assignCase', [id, 'me'], 'sm') : ''}
+        ${can('investigate') && c.assignee && (c.assignee === ME.id.toLowerCase() || can('approve_high_impact')) ? btn('Unassign', 'assignCase', [id, ''], 'sm ghost') : ''}</p></div>
       <div class="actions"><a class="btn primary" href="#/story/${encodeURIComponent(id)}">${icon('intel')}Attack story</a>${btn('Investigation record', 'dl', [`/api/v1/cases/${id}/report`], '', 'download')}</div></div>
     ${un.length ? `<div class="callout"><b>Incomplete picture.</b>&nbsp;Unavailable sources: ${un.map(u => esc(u.source)).join(', ')}. Conclusions below exclude them.</div>` : ''}
     <div class="grid g-2">
       <div class="stack">
-        ${card('Assessment', `<div class="prose">${esc(c.summary)}</div>
+        ${card('Assessment', `<div class="prose">${esc(c.summary)}</div>${a.narration_pending ? '<div class="t-sub" style="margin-top:6px">The written explanation is being prepared; the verdict, evidence and recommendations below are final. Refresh in a moment.</div>' : ''}
           ${(a.facts || []).length ? `<h3 class="small strong" style="margin:16px 0 4px">Facts</h3>${a.facts.map(x => `<div class="fact small">${esc(x.text)} ${cite(x)}</div>`).join('')}` : ''}
           ${(a.inferences || []).length ? `<h3 class="small strong" style="margin:16px 0 4px">Inferences</h3>${a.inferences.map(x => `<div class="inf small">${esc(x.text)} ${cite(x)}</div>`).join('')}` : ''}
           ${(a.mitre || []).length ? `<h3 class="small strong" style="margin:16px 0 6px">MITRE ATT&amp;CK</h3>${a.mitre.map(m => `<span class="tag">${esc(m.technique)} ${esc(m.name || '')}</span>`).join('')}` : ''}`,
@@ -161,13 +171,36 @@ async function CaseDetail(id) {
         ${can('investigate') ? card('Analyst decision', `<div class="stack" style="gap:10px"><select id="dv" aria-label="Analyst verdict">${['true_positive', 'malicious', 'suspicious', 'false_positive', 'benign'].map(o => `<option value="${o}">${cap(o)}</option>`).join('')}</select>
           <textarea id="dr" rows="3" placeholder="Reasoning (used as feedback for tuning)"></textarea>${btn('Record decision', 'decide', [id], 'primary')}</div>
           ${v.dispositions.map(d => `<div class="list-row small"><span class="grow">${esc(d.analyst)}: <b>${esc(cap(d.verdict))}</b> - ${esc(d.reasoning)}</span><span class="muted">${dt(d.at)}</span></div>`).join('')}`) : ''}
+        ${card(`Analyst notes <span class="muted">(${(v.notes || []).length})</span>`, (can('investigate') ? `<div class="stack" style="gap:8px;margin-bottom:10px">
+          <textarea id="note-text" rows="3" maxlength="4000" aria-label="New note" placeholder="Add a note for the team (notes are kept, never edited)"></textarea>${btn('Add note', 'addNote', [id], 'primary')}</div>` : '') +
+          ((v.notes || []).map(n => `<div class="list-row small" style="align-items:flex-start"><div class="grow"><div class="t-sub">${esc(n.author)} · ${dt(n.at)}</div><div style="white-space:pre-wrap">${esc(n.text)}</div></div></div>`).join('') || empty('No notes yet')))}
         ${card('Timeline', v.timeline.slice(-30).reverse().map(t => `<div class="tl-row"><div class="tl-meta"><span class="mono muted">${dt(t.ts)}</span><span class="tag">${esc(t.tool || '')}</span></div><div class="tl-title">${esc(t.title)}</div></div>`).join('') || empty('No events'))}
         ${card('Audit trail', `<details><summary>${v.audit.length} audited events</summary>${v.audit.map(x => `<div class="list-row small"><span class="mono muted">#${x.seq}</span><span class="grow">${esc(x.event)}</span><span class="muted">${esc(x.actor)}</span></div>`).join('')}</details>`)}
       </div>
     </div>`);
 }
 async function act(aid, verb, cid) { await post(`/api/v1/actions/${aid}/${verb}`, {note: 'via console'}); toast(`Action ${verb === 'approve' ? 'approved' : verb === 'reject' ? 'rejected' : 'rolled back'}`); refreshStatus(); cid ? CaseDetail(cid) : Approvals(); }
+async function assignCase(id, who) { await post(`/api/v1/cases/${id}/assign`, {assignee: who === 'me' ? ME.id : (who || null)}); toast(who ? 'Case assigned' : 'Case unassigned'); CaseDetail(id); }
+async function addNote(id) { const t = $('#note-text').value.trim(); if (!t) { toast('Write a note first', true); return; } await post(`/api/v1/cases/${id}/notes`, {text: t}); toast('Note added'); CaseDetail(id); }
 async function decide(id) { await post(`/api/v1/cases/${id}/disposition`, {verdict: $('#dv').value, reasoning: $('#dr').value}); toast('Decision recorded'); CaseDetail(id); }
+
+// ================================================================= Search
+async function Search(q) {
+  const __g = GEN;
+  q = (q || '').trim();
+  const box = $('#global-q'); if (box) box.value = q;
+  if (q.length < 2) { setMainG(__g, page('Search', 'Type at least two characters in the search box.', '', empty('Nothing to search for'))); return; }
+  const r = await api('/api/v1/search?q=' + encodeURIComponent(q));
+  const group = (title, rows, empty_) => card(`${title} <span class="muted">(${rows.length})</span>`, rows.join('') || empty(empty_));
+  const sections = [
+    group('Cases', r.cases.map(c => `<div class="list-row click" data-fn="goTo" data-args="${arg('#/cases/' + c.id)}">${chip(c.severity)}<div class="grow"><div class="t-title">${esc(c.title)}</div><div class="t-sub">${esc(cap(c.domain))} · ${esc(cap(c.status))}${c.assignee ? ' · ' + esc(c.assignee) : ''}</div></div></div>`), 'No matching cases'),
+  ];
+  if (r.entities) sections.push(group('People, hosts and indicators', r.entities.map(e => `<div class="list-row"><span class="tag">${esc(e.kind)}</span><div class="grow">${['asset', 'identity'].includes(e.kind) ? entLink(e.id, e.name) : esc(e.name)}</div></div>`), 'No matching people, hosts or indicators'));
+  if (r.insights) sections.push(group('Correlated findings', r.insights.map(i => `<div class="list-row">${chip(i.severity)}<div class="grow small">${esc(i.title)}</div><span class="muted small">${esc(cap(i.status))}</span></div>`), 'No matching findings'));
+  if (r.findings) sections.push(group('Vulnerabilities', r.findings.map(f => `<div class="list-row"><span class="tag">${esc(f.priority)}</span><div class="grow"><div class="t-title mono">${esc(f.cve)}</div><div class="t-sub">${esc(f.asset)} · ${esc(cap(f.status))}</div></div></div>`), 'No matching vulnerabilities'));
+  setMainG(__g, page(`Search: “${esc(q)}”`, 'Matches in cases, identifiers from every connected tool, correlated findings and vulnerabilities - limited to what your role and data scope allow.', '',
+    `<div class="grid g-2">${sections.join('')}</div>`));
+}
 
 // ================================================================= Entity 360
 async function Entity(id) {
@@ -330,8 +363,9 @@ async function ShadowIt() {
 async function Integrations() {
   const __g = GEN;
   const canCheck = can('read_audit') && window.ME.domains.includes('*');
-  const [cs, jr, sc] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200'),
-    canCheck ? api('/api/v1/admin/self-check') : Promise.resolve(null)]);
+  const [cs, jr, sc, nt] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200'),
+    canCheck ? api('/api/v1/admin/self-check') : Promise.resolve(null),
+    canCheck ? api('/api/v1/admin/notifications') : Promise.resolve(null)]);
   const last = {}; jr.runs.forEach(r => { if (!last[r.job]) last[r.job] = r; });
   const stc = {healthy: 'ok', on_demand: 'info', stale: 'medium', error: 'high', misconfigured: 'high', disabled: 'info'};
   const jst = {ok: 'ok', error: 'high', dead_letter: 'critical'};
@@ -344,6 +378,12 @@ async function Integrations() {
       <td><span class="tag">${esc(c.mode || '')}</span></td>
       <td class="small">${c.streams.map(s => `<div>${esc(s.stream)}: <span class="mono">${s.age_hours == null ? 'never' : hours(s.age_hours)}</span> <span class="muted">/ within ${s.expected_within_hours} h</span>${s.fresh ? '' : ' ' + chip('stale', 'medium plain')}${s.last_error ? `<div class="t-sub" style="color:var(--crit)">${esc(s.last_error)}</div>` : ''}</div>`).join('') || '<span class="muted">queried on demand during investigations</span>'}</td>
       <td>${c.enabled && can('manage_connectors') ? btn('Test', 'testConn', [c.name], 'sm') : ''}</td></tr>`)), {flush: true})}
+    ${nt ? `<div class="mt">${card('Notifications', (nt.channels.length
+        ? `<div class="small" style="margin-bottom:8px">Findings rated <b>${esc(nt.min_severity)}</b> or higher are sent to ${nt.channels.map(c => `<span class="tag">${esc(c)}</span>`).join(' ')} - once per channel, again if a finding escalates.</div>`
+        : `<div class="small muted" style="margin-bottom:8px">No channels configured. Set <span class="mono">SOC_NOTIFY_WEBHOOKS</span> (Teams, Slack or JSON webhooks) to be told about important findings.</div>`) +
+      (nt.recent.length ? table(['When', 'Channel', 'Severity', 'Outcome'], nt.recent.map(r => `<tr><td class="mono small muted">${dt(r.at)}</td><td class="small">${esc(r.channel)}</td><td>${chip(r.severity)}</td>
+        <td>${status(r.status === 'sent' ? 'ok' : 'high', cap(r.status))}${r.error ? `<div class="t-sub" style="color:var(--high)">${esc(r.error.slice(0, 140))} · attempt ${r.attempts} of ${nt.max_attempts}</div>` : ''}</td></tr>`), {flush: true}) : ''),
+      {sub: 'sent by the notify job every minute'})}</div>` : ''}
     <div class="mt">${card('Scheduled jobs', table(['Job', 'Last run', 'Outcome', {h: 'Duration', num: 1}, 'Detail', ''], Object.keys(jr.jobs).map(j => { const r = last[j]; return `<tr>
       <td class="t-title">${esc(cap(j))}</td><td class="mono small muted">${r ? dt(r.started_at) : 'never'}</td>
       <td>${r ? status(jst[r.status], cap(r.status)) + `${r.attempts > 1 ? `<div class="t-sub">${r.attempts} attempts</div>` : ''}` : ''}</td>
@@ -607,8 +647,8 @@ async function approveBundle(id) {
 }
 
 // ================================================================= registry
-window.VIEWS = {story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
+window.VIEWS = {search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
-Object.assign(ALLOWED, {reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});

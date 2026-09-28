@@ -178,7 +178,9 @@ class IncidentService:
 
     # ------------------------------------------------------------------ IM-F04..F07 investigation
 
-    def investigate(self, case_id: str) -> dict[str, Any]:
+    def investigate(self, case_id: str, *, narrate: bool = True) -> dict[str, Any]:
+        """Enrich, score and recommend. ``narrate=False`` (the scheduled job) stores the deterministic, cited
+        explanation now and leaves the model's written one to ``narrate_pending`` - the case is usable at once."""
         case = self.s.get(Case, case_id)
         if case is None:
             raise KeyError(f"unknown incident {case_id}")
@@ -199,7 +201,9 @@ class IncidentService:
         mitre = self._mitre(case_id, evidence, ev_llm)
         question = (f"Assess this security incident '{case.title}'. Summarise what happened, which accounts and hosts are "
                     "affected, whether this is a true positive, and what is uncertain.")
-        grounded = self.llm.grounded("incident.summary", question, ev_llm) if self.llm else deterministic_grounded(ev_llm)
+        defer = self.llm is not None and not narrate
+        grounded = self.llm.grounded("incident.summary", question, ev_llm) if self.llm and not defer \
+            else deterministic_grounded(ev_llm)
         verdict = "true_positive" if severity_rank(severity) >= 3 and confidence >= 0.6 else \
             "needs_review" if severity_rank(severity) >= 2 else "likely_benign"
         self.cases.set_assessment(case, verdict=verdict, severity=severity, confidence=confidence,
@@ -207,11 +211,18 @@ class IncidentService:
                                   assessment={"claims": grounded["claims"], "mitre": mitre, "scoring": factors,
                                               "insufficient_evidence": grounded.get("insufficient_evidence", False),
                                               "evidence_index": {e["id"]: e["evidence_row"] for e in ev_llm},
-                                              "similar_incidents": self.similar(case_id)},
+                                              "similar_incidents": self.similar(case_id),
+                                              **({"narration_pending": self.cases.narration_request(
+                                                  "incident.summary", question, ev_llm)} if defer else {})},
                                   completeness=outcome.completeness(), actor=f"agent:{AGENT}")
         recs = self._recommendations(case, evidence, ev_llm, severity)
         self.cases.recommend(case, recs, self.actions, self.policy, agent=AGENT)
         return self.cases.view(case_id)
+
+    def narrate_pending(self, case_ids: list[str] | None = None) -> int:
+        """Add the model's written explanation to cases investigated with ``narrate=False`` (parallel model calls)."""
+        ids = list(dict.fromkeys((case_ids or []) + self.cases.pending_narration("incident")))
+        return self.cases.narrate_pending(ids, self.llm, actor=f"agent:{AGENT}")
 
     def _kev_findings_on_case_hosts(self, case_id: str) -> list[dict[str, Any]]:
         kev_conn = self.registry.get("cisa_kev") if "cisa_kev" in self.registry.enabled_names() else None

@@ -362,3 +362,7 @@ svg.graph line { stroke: var(--border-strong); stroke-width: 1; }
 .rep-sec p { margin: 0 0 8px; line-height: 1.55; overflow-wrap: anywhere; }
 .rep-sec dl.kv dt { overflow-wrap: anywhere; }
 .mb { margin-bottom: 16px; }
+
+/* global search in the top bar */
+.search-box { width: 260px; max-width: 32vw; height: 32px; margin-right: 8px; }
+@media (max-width: 900px) { .search-box { width: 150px; } }

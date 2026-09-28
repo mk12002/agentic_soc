@@ -276,6 +276,18 @@ class PolicyVersion(Base):
     activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
+class CaseNote(Base):
+    """An analyst's note on a case. Append-only, like an investigation log: a correction is a new note."""
+
+    __tablename__ = "case_notes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    case_id: Mapped[str] = mapped_column(String(32), index=True)
+    author: Mapped[str] = mapped_column(String(256))
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+
+
 class Disposition(Base):
     """Analyst decision capture (IM-F08, PH-T08, NFR-15) — the feedback & shadow-mode ground truth."""
 
@@ -339,6 +351,7 @@ class LLMCall(Base):
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     grounded: Mapped[bool] = mapped_column(Boolean, default=False)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)   # time the model took to answer
     status: Mapped[str] = mapped_column(String(32), default="ok")
 
 

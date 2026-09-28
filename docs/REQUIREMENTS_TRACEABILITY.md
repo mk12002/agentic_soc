@@ -164,6 +164,20 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | U17 | Compliance and audit evidence automation | ✅ | `reporting/compliance.py`: control tests + evidence.json + chained audit export + summary.docx | test_demo_walkthrough, test_access_security |
 | U18 | Third-party and vendor email risk monitoring | ✅ | `domains/phishing/supplier.py`: supplier compromise, payment diversion, impersonation, spoofing; supplier look-alikes protected in analysis | test_phishing::test_supplier_email_risk_u18 |
 
+## Added beyond the stated requirements
+
+Operational features added during the build. They are not requirement IDs, but they are implemented and tested
+in the same way.
+
+| Feature | Implementation | Tests |
+|---|---|---|
+| Case ownership and analyst notes | `CaseService.assign` / `add_note`, `case_notes`, owner filters | test_api::test_case_ownership_and_notes, test_core_governance |
+| Global search (cases, every tool identifier, findings, CVEs) | `GET /api/v1/search`, scope-filtered, escaped `LIKE` | test_api::test_global_search_finds_everything_the_caller_may_see |
+| Teams / Slack / webhook notifications for findings | `core/notify.py`, `notify` job, `notifications` table | test_notify, test_api::test_notification_settings_are_visible_to_auditors_without_the_secret |
+| Deferred case explanations (cases usable before the model writes) | `CaseService.narrate_pending`, `narrate=False` in jobs and bulk endpoints | test_incident, test_phishing |
+| Built-in, self-healing scheduler with heartbeat | `scheduler.py`, `/health` scheduler state | test_scheduler |
+| Automatic addition of new optional columns; recorded model response times | `Database._add_missing_columns`, `llm_calls.latency_ms`, `/api/v1/llm/status` | test_schema |
+
 ## Risks (R01–R16): mitigations in place
 
 | ID | Risk | Mitigation |

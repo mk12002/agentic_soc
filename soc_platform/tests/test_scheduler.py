@@ -14,6 +14,9 @@ from soc_platform import scheduler as sched
 from soc_platform.core.db import Database
 from soc_platform.core.models import JobRun, SystemFlag, utcnow
 
+# a race that only kills a background thread must still fail the test (two such races hid behind a warning)
+pytestmark = pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
+
 
 @pytest.fixture()
 def db(tmp_path):
@@ -194,3 +197,30 @@ def test_old_heartbeats_are_pruned(db):
     with db.session() as s:
         names = [f.name for f in s.query(SystemFlag).filter(SystemFlag.name.like(sched.KEY_PREFIX + "%"))]
     assert names == [sched._key(jobs.HOLDER)]
+
+
+def test_first_leases_taken_at_the_same_moment_have_one_winner_and_never_raise(tmp_path):
+    """Two schedulers taking a job's very first lease together both inserted the row; the loser crashed its pass."""
+    import threading
+
+    from soc_platform.core.db import Database
+
+    for round_ in range(5):
+        db = Database(f"sqlite:///{tmp_path / f'lease{round_}.db'}")
+        db.create_all()
+        start, results, errors = threading.Barrier(4), [], []
+
+        def take(db=db, start=start, results=results, errors=errors):
+            start.wait()
+            try:
+                results.append(jobs._lease(db, "incident"))
+            except Exception as exc:  # noqa: BLE001 - the assertion below reports it
+                errors.append(exc)
+
+        threads = [threading.Thread(target=take) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == [] and results.count(True) == 1, (errors, results)
+        db.engine.dispose()

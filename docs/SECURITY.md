@@ -131,7 +131,13 @@ adds a stored-XSS probe. Every attack below must fail, and does.
 
 **Also checked:**
 - Dependencies: `pip-audit` finds no known vulnerabilities, and `npm audit` reports 0.
-- SSRF: no code path fetches URLs taken from e-mail content. Outbound calls go only to configured vendor endpoints.
+- SSRF: no code path fetches URLs taken from e-mail content. Outbound calls go only to configured vendor endpoints
+  and to the notification webhooks in `SOC_NOTIFY_WEBHOOKS` (HTTPS only; destinations are never taken from data).
+- Notification secrets: a webhook URL contains its own credential. It is never stored, logged or returned; the
+  database and the API show the channel as `kind:host` only. Keep the URLs in the vault (`SOC_NOTIFY_WEBHOOKS_FILE`).
+- Collaboration and search: assigning a case to someone else needs a lead; notes are append-only and audited by
+  length (not content); search escapes `LIKE` wildcards, applies the caller's domain scope to every result group and
+  is audited by length.
 - Template injection: no template engine renders user text.
 
 ## Operator responsibilities (cannot be solved in code)
@@ -143,5 +149,5 @@ adds a stored-XSS probe. Every attack below must fail, and does.
 * Run behind TLS (reverse proxy / App Gateway) and restrict network access to the API and executor.
 * Provision per-tool service principals with read scopes first; add write scopes per approved action.
 * Grant the audit-log database role INSERT/SELECT only; back up and retain per the organisation's policy.
-* Store secrets in a vault (Azure Key Vault) and mount them as `*_FILE`.
+* Store secrets in a vault (Azure Key Vault) and mount them as `*_FILE` (including the notification webhooks).
 * Operate CAPEv2 / the detonation host on an isolated network segment with no route to production.

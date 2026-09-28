@@ -34,17 +34,45 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 
 | Job | Default interval | Does |
 |---|---|---|
-| incident | 5 min | ingest alerts, cluster, investigate |
-| phishing | 2 min | pull reported mail, analyse |
+| incident | 5 min | ingest alerts, cluster, investigate; commit the cases, then add the model's explanations in parallel |
+| phishing | 2 min | pull reported mail, analyse; commit the verdicts, then add the model's explanations in parallel |
 | vulnerability | 6 h | ingest, consolidate, enrich, prioritise, Wiz misconfigurations |
 | follow_up | 24 h | ITSM ticket sync (+ closure validation), follow-ups, exception expiry |
 | intelligence | 10 min | risk + correlation + drift, insight narration |
 | daily_report | 24 h | daily exposure report |
 | retention | 24 h | prune raw payloads / emails / prompts / access log per policy |
+| self_check | 1 h | platform consistency checks (see below) |
+| notify | 1 min | send new findings at or above the threshold to the configured Teams / Slack / webhook channels; retry failures |
 
-Intervals: `SOC_JOB_<NAME>_SECONDS`. Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
+Intervals: `SOC_JOB_<NAME>_SECONDS` (`SOC_JOB_NOTIFY_SECONDS` for notify). Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
 failing 3 runs in a row is marked **dead_letter** and raises a high insight; fix the cause and use
 *Run now* / `POST /api/v1/jobs/{name}/run`. Jobs are idempotent, so replays never duplicate incidents or actions.
+
+**Deferred explanations.** The incident and phishing jobs decide verdict, severity, evidence and recommendations
+without the model, commit, and only then ask the model for the written explanations, all of a run's cases at once
+(`SOC_LLM_CONCURRENCY`). A case is usable seconds earlier; its page says "the written explanation is being prepared"
+until the model's text arrives. If a run stops between the two steps, the next run finishes the explanations
+(cases created in the last 7 days).
+
+## Notifications
+
+Findings at or above a severity are pushed to where people already are.
+
+```
+SOC_NOTIFY_WEBHOOKS=teams|https://<tenant>.webhook.office.com/...,slack|https://hooks.slack.com/services/...,json|https://siem.example/hook
+SOC_NOTIFY_MIN_SEVERITY=high          # informational | low | medium | high | critical
+SOC_PUBLIC_URL=https://soc.example    # optional: messages link to the console
+```
+
+* Destinations come only from this setting and must be `https://` (`http://` only to localhost for testing).
+* Each finding is sent once per channel; an escalation to a higher severity is sent again.
+* Operational alerts are findings too, so a dead-lettered job, break-glass use, a failing self-check and the LLM
+  budget reach the channel as well.
+* A failed delivery is retried every run, up to 5 attempts, then left recorded as failed. The `notifications`
+  table stores the channel as `kind:host` only - the webhook URL (which contains its secret) is never stored or
+  shown.
+* Check: Integrations → *Notifications* card, or `GET /api/v1/admin/notifications` (auditor / admin, all-domain scope).
+  The webhook URLs carry their own credentials: keep them in the vault and mount them as `SOC_NOTIFY_WEBHOOKS_FILE`.
 
 ## Resilience settings
 
@@ -83,8 +111,10 @@ with `SOC_TOUR_ESTATE=OUT/estate.json`.
   - the token budget rolling over at the month boundary
   - retention pruning old mail while keeping mail of open cases
   - risk decay
-- **Schema upgrades:** on PostgreSQL, start-up widens any text column that the current model defines wider than
-  the existing table. This is always safe and loses no data. Columns are never narrowed or dropped automatically.
+- **Schema upgrades:** start-up creates new tables and adds new *optional* (nullable) columns to existing tables,
+  on SQLite and PostgreSQL. On PostgreSQL it also widens any text column that the model defines wider than the
+  table. All of this is safe and loses no data. Columns are never narrowed, renamed or dropped automatically; a new
+  required column is logged as needing a scripted migration. `test_schema.py` checks it on both engines.
 - **Accessibility:** the browser tour runs axe-core (WCAG 2.1 A/AA) on every screen in both themes. Serious and
   critical findings fail the tour.
 

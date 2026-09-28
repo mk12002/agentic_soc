@@ -85,6 +85,16 @@ class Scheduler:
 
     # ------------------------------------------------------------------ liveness
     def _beat(self, *, loop: bool = False, job: str | None = None) -> None:
+        """Write this scheduler's heartbeat. The heartbeat thread and the job thread may create the row at the same
+        moment; the one that loses the insert simply writes again onto the row that now exists."""
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            self._write_beat(loop=loop, job=job)
+        except IntegrityError:
+            self._write_beat(loop=loop, job=job)
+
+    def _write_beat(self, *, loop: bool, job: str | None) -> None:
         with self.db.session() as s:
             f = s.get(SystemFlag, self.key)
             if f is None:

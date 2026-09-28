@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Upload
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -792,6 +792,17 @@ def self_check(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = 
     return run_self_check(s)
 
 
+@app.get("/api/v1/admin/notifications")
+def notifications(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session)):
+    """Configured notification channels (kind and host only - never the webhook URL, which holds a secret) and the
+    most recent deliveries."""
+    from soc_platform.core import notify
+
+    floor = next(k for k, v in notify.SEVERITY_RANK.items() if v == notify.min_severity())
+    return {"channels": [c.label for c in notify.channels()], "min_severity": floor,
+            "max_attempts": notify.MAX_ATTEMPTS, "recent": notify.recent(s)}
+
+
 @app.get("/api/v1/audit/verify")
 def audit_verify(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session)):
     return AuditLog(s).verify()
@@ -852,9 +863,20 @@ def match_rate(kind: str = "asset", _: Principal = Depends(need(Perm.READ, "*"))
 # ----------------------------------------------------------------------------- cases (shared)
 
 
+def _assignee_filter(q: Any, assignee: str | None, p: Principal) -> Any:
+    """``me`` -> the caller's cases, ``unassigned`` -> cases without an owner, an address -> that person's cases."""
+    if not assignee:
+        return q
+    if assignee == "me":
+        return q.where(Case.assignee == p.id.lower())
+    if assignee == "unassigned":
+        return q.where(Case.assignee.is_(None))
+    return q.where(Case.assignee == assignee.strip().lower())
+
+
 @app.get("/api/v1/cases")
-def list_cases(domain: str | None = None, status: str | None = None, p: Principal = Depends(need(Perm.READ)),
-               s: Session = Depends(db_session)):
+def list_cases(domain: str | None = None, status: str | None = None, assignee: str | None = Query(None, max_length=256),
+               p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
     q = select(Case).order_by(Case.created_at.desc()).limit(500)
     if domain:
         q = q.where(Case.domain == domain)
@@ -862,8 +884,9 @@ def list_cases(domain: str | None = None, status: str | None = None, p: Principa
         q = q.where(Case.domain.in_(sorted(p.domains)))
     if status:
         q = q.where(Case.status.in_(status.split(",")))
+    q = _assignee_filter(q, assignee, p)
     return [{"id": c.id, "domain": c.domain, "title": c.title, "status": c.status, "severity": c.severity,
-             "verdict": c.verdict, "confidence": c.confidence, "created_at": _iso(c.created_at)}
+             "verdict": c.verdict, "confidence": c.confidence, "assignee": c.assignee, "created_at": _iso(c.created_at)}
             for c in s.execute(q).scalars()]
 
 
@@ -881,7 +904,93 @@ def cases_summary(status: str | None = None, p: Principal = Depends(need(Perm.RE
     if status:
         q = q.where(Case.status.in_(status.split(",")))
     by = {d: n for d, n in s.execute(q).all()}
-    return {"total": sum(by.values()), "by_domain": by, "list_limit": LIST_LIMIT}
+
+    def count(assignee: str) -> int:
+        cq = select(func.count()).select_from(Case)
+        if "*" not in p.domains:
+            cq = cq.where(Case.domain.in_(sorted(p.domains)))
+        if status:
+            cq = cq.where(Case.status.in_(status.split(",")))
+        return s.execute(_assignee_filter(cq, assignee, p)).scalar()
+
+    return {"total": sum(by.values()), "by_domain": by, "mine": count("me"), "unassigned": count("unassigned"),
+            "list_limit": LIST_LIMIT}
+
+
+@app.get("/api/v1/search")
+def search(q: str = Query(..., min_length=2, max_length=200), limit: int = Query(10, ge=1, le=50),
+           p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)) -> dict[str, Any]:
+    """One search box over cases, people / hosts / indicators (any identifier from any tool), correlated findings and
+    vulnerabilities - each group limited to what the caller may see. Matching is case-insensitive substring; the
+    user's text is escaped, so it is always a literal (``%`` and ``_`` match themselves)."""
+    from soc_platform.core.models import EntityKey
+    from soc_platform.domains.vulnerability.models import ConsolidatedFinding
+    from soc_platform.intelligence.models import Insight
+
+    term = q.strip()
+    like = "%" + term.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+    def has(col: Any) -> Any:
+        return func.lower(col).like(like, escape="\\")
+
+    all_domains = "*" in p.domains
+    cq = select(Case).where(or_(has(Case.title), Case.id == term.lower())).order_by(Case.created_at.desc()).limit(limit)
+    if not all_domains:
+        cq = cq.where(Case.domain.in_(sorted(p.domains)))
+    out: dict[str, Any] = {"q": term, "cases": [
+        {"id": c.id, "domain": c.domain, "title": c.title, "severity": c.severity, "status": c.status,
+         "assignee": c.assignee} for c in s.execute(cq).scalars()]}
+    if all_domains:   # people, hosts and correlated findings span every domain
+        ids = select(EntityKey.entity_id).where(has(EntityKey.key_value))
+        eq = (select(Entity).where(Entity.kind.in_(("asset", "identity", "indicator")),
+                                   or_(has(Entity.display_name), Entity.id.in_(ids)))
+              .order_by(Entity.last_seen.desc()).limit(limit))
+        out["entities"] = [{"id": e.id, "kind": e.kind, "name": e.display_name} for e in s.execute(eq).scalars()]
+        iq = select(Insight).where(has(Insight.title)).order_by(Insight.last_seen.desc()).limit(limit)
+        out["insights"] = [{"id": i.id, "title": i.title, "severity": i.severity, "status": i.status}
+                           for i in s.execute(iq).scalars()]
+    if all_domains or p.in_domain("vulnerability"):
+        fq = (select(ConsolidatedFinding).where(or_(has(ConsolidatedFinding.cve), has(ConsolidatedFinding.asset_name)))
+              .order_by(ConsolidatedFinding.priority_score.desc()).limit(limit))
+        out["findings"] = [{"id": f.id, "cve": f.cve, "asset": f.asset_name, "priority": f.priority_band,
+                            "status": f.status} for f in s.execute(fq).scalars()]
+    AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="search", subject_type="search",
+                       subject_id="search", payload={"chars": len(term)})
+    return out
+
+
+class AssignBody(BaseModel):
+    assignee: str | None = Field(default=None, max_length=256)
+
+
+class NoteBody(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@app.post("/api/v1/cases/{cid}/assign")
+def case_assign(cid: str, body: AssignBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+    """Take a case, give it to someone (lead), or clear the owner (lead, or the current owner)."""
+    _case_in_scope(s, p, cid)
+    try:
+        case = CaseService(s).assign(cid, body.assignee, by=p)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"id": case.id, "assignee": case.assignee}
+
+
+@app.post("/api/v1/cases/{cid}/notes")
+def case_note(cid: str, body: NoteBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+    """Append an analyst note (notes are never edited or deleted; a correction is a new note)."""
+    _case_in_scope(s, p, cid)
+    try:
+        note = CaseService(s).add_note(cid, body.text, by=p)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"id": note.id, "author": note.author, "text": note.text, "at": note.created_at.isoformat()}
 
 
 @app.get("/api/v1/cases/{cid}")
@@ -1007,7 +1116,8 @@ def llm_status(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_
     st = get_settings()
     return {"configured": st.llm_provider != "none", "provider": st.llm_provider,
             "model_pinned": st.llm_model_version, "redaction": st.llm_redact_pii,
-            "budget": LLMGateway(s, st).budget_status() if st.llm_provider != "none" else None}
+            "budget": LLMGateway(s, st).budget_status() if st.llm_provider != "none" else None,
+            "latency": LLMGateway(s, st).latency_status() if st.llm_provider != "none" else None}
 
 
 @app.get("/api/v1/metrics/shadow")
@@ -1038,10 +1148,9 @@ def llm_budget(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_
 def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session)):
     svc = _services(s)["phishing"]
     subs = svc.ingest_reported()
-    out = []
-    for sub in subs:
-        if process and sub.status == "new":
-            out.append(svc.process(sub.id)["case"])
+    ids = [svc.process(sub.id, narrate=False)["case"]["id"] for sub in subs if process and sub.status == "new"]
+    svc.narrate_pending(ids)                     # the model explanations for the whole batch, in parallel
+    out = [svc.cases.view(cid)["case"] for cid in ids]
     if out:
         _intel(s).refresh()
     return {"submissions": [x.id for x in subs], "processed": out}
@@ -1082,7 +1191,9 @@ def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INV
     svc = _services(s)["incident"]
     ing = svc.ingest()
     cases = svc.cluster()
-    done = [svc.investigate(c.id)["case"] for c in cases if investigate and c.status != "closed"]
+    ids = [svc.investigate(c.id, narrate=False)["case"]["id"] for c in cases if investigate and c.status != "closed"]
+    svc.narrate_pending(ids)                     # the model explanations for the whole batch, in parallel
+    done = [svc.cases.view(cid)["case"] for cid in ids]
     _intel(s).refresh()
     return {"ingested": ing.synced, "errors": ing.errors, "new_incidents": len(cases), "investigated": done}
 

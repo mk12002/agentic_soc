@@ -18,7 +18,7 @@ from soc_platform.core.actions import ActionRegistry, ActionService
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.auth import Perm, Principal, agent_principal
 from soc_platform.core.context_store import ContextStore
-from soc_platform.core.models import ActionRequest, Case, CaseEntity, Disposition, Entity, Evidence, utcnow
+from soc_platform.core.models import ActionRequest, Case, CaseEntity, CaseNote, Disposition, Entity, Evidence, utcnow
 from soc_platform.core.policy import PolicyEngine
 
 
@@ -49,6 +49,12 @@ class Recommendation:
     blast_radius: str = ""
     reversible: bool = True
     priority: int = 50  # lower = more urgent; ranking is deterministic
+
+
+def _aware(dt: datetime) -> datetime:
+    from datetime import UTC
+
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 class CaseService:
@@ -97,6 +103,66 @@ class CaseService:
                                                        "claims": assessment.get("claims", []),
                                                        "unavailable_sources": completeness.get("unavailable", [])})
 
+    # ------------------------------------------------------------------ deferred narration
+
+    @staticmethod
+    def narration_request(workflow: str, question: str, ev_llm: list[dict[str, Any]], *, tier: str = "large") -> dict[str, Any]:
+        """What a later model call needs: the exact evidence rows the case was assessed on (so the E-numbers match)."""
+        return {"workflow": workflow, "question": question, "tier": tier, "evidence_rows": [e["evidence_row"] for e in ev_llm]}
+
+    def pending_narration(self, domain: str, *, days: int = 7, limit: int = 200) -> list[str]:
+        """Cases of ``domain`` whose written explanation is still to come (e.g. a job stopped between the two steps)."""
+        rows = self.s.execute(select(Case).where(Case.domain == domain, Case.created_at >= utcnow() - timedelta(days=days))
+                              .order_by(Case.created_at)).scalars()
+        return [c.id for c in rows if (c.assessment or {}).get("narration_pending")][:limit]
+
+    def narrate_pending(self, case_ids: list[str], llm: Any, *, redactor: Any = None, actor: str) -> int:
+        """Write the model's explanation for cases that were committed with the deterministic one. The model calls run
+        in parallel (``SOC_LLM_CONCURRENCY``); the results are applied in order, on this thread. A model answer that
+        fails grounding - or no model - leaves the deterministic, cited explanation in place. Returns cases improved."""
+        from soc_platform.core.enrichment import evidence_for_llm
+
+        todo = []
+        for cid in case_ids:
+            case = self.s.get(Case, cid)
+            req = (case.assessment or {}).get("narration_pending") if case is not None else None
+            if not req:
+                continue
+            rows = self.s.execute(select(Evidence).where(Evidence.id.in_(req["evidence_rows"]))).scalars().all()
+            todo.append((case, req, evidence_for_llm(rows)))
+        if not todo:
+            return 0
+
+        def ask(item: tuple[Case, dict[str, Any], list[dict[str, Any]]]) -> dict[str, Any] | None:
+            _, req, ev = item
+            if llm is None:
+                return None
+            kw = {"redactor": redactor} if redactor is not None else {}
+            return llm.grounded(req["workflow"], req["question"], ev, tier=req.get("tier", "large"), **kw)
+
+        if llm is not None and len(todo) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            from soc_platform.llm.gateway import llm_concurrency
+
+            with ThreadPoolExecutor(max_workers=llm_concurrency()) as pool:
+                answers = list(pool.map(ask, todo))
+        else:
+            answers = [ask(t) for t in todo]
+        improved = 0
+        for (case, _, ev), g in zip(todo, answers, strict=True):
+            assessment = {k: v for k, v in (case.assessment or {}).items() if k != "narration_pending"}
+            if g is not None and g.get("source") == "llm":
+                case.summary = g["summary"]
+                assessment.update({"claims": g["claims"], "insufficient_evidence": g.get("insufficient_evidence", False),
+                                   "evidence_index": {e["id"]: e["evidence_row"] for e in ev}})
+                improved += 1
+                self.audit.append(actor_type="agent", actor_id=actor, event_type="case.narrated", subject_type="case",
+                                  subject_id=case.id, payload={"claims": g["claims"]})
+            case.assessment = assessment
+        self.s.flush()
+        return improved
+
     # ------------------------------------------------------------------ recommendations (IM-F07, PH-F11)
 
     def recommend(self, case: Case, recs: list[Recommendation], registry: ActionRegistry, policy: PolicyEngine,
@@ -122,6 +188,50 @@ class CaseService:
         return out
 
     # ------------------------------------------------------------------ analyst decision (IM-F08)
+
+    # ------------------------------------------------------------------ collaboration
+
+    def assign(self, case_id: str, assignee: str | None, *, by: Principal) -> Case:
+        """Give the case an owner (or none). Taking a case yourself needs ``investigate``; assigning it to someone
+        else, or taking it off someone else, needs ``approve_high_impact`` (a lead)."""
+        case = self._get(case_id)
+        me = by.id.lower()
+        target = (assignee or "").strip().lower() or None
+        current = (case.assignee or "").lower() or None
+        if not by.can(Perm.INVESTIGATE):
+            raise PermissionError("investigate permission required")
+        if (target not in (None, me) or (target is None and current not in (None, me))) and not by.can(Perm.APPROVE_HIGH_IMPACT):
+            raise PermissionError("only a lead can assign a case to someone else or take it off them")
+        if target is not None and ("@" not in target or len(target) > 256):
+            raise ValueError("assignee must be a work e-mail address")
+        case.assignee = target
+        self.audit.append(actor_type=by.actor_type, actor_id=by.id, event_type="case.assigned", subject_type="case",
+                          subject_id=case.id, payload={"assignee": target, "previous": current})
+        self.s.flush()
+        return case
+
+    def add_note(self, case_id: str, text: str, *, by: Principal) -> CaseNote:
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("a note needs text")
+        if len(text) > 4000:
+            raise ValueError("a note is limited to 4,000 characters")
+        if not by.can(Perm.INVESTIGATE):
+            raise PermissionError("investigate permission required")
+        case = self._get(case_id)
+        # strictly after the case's previous note, so "newest first" holds even within one clock tick
+        from sqlalchemy import func
+
+        last = self.s.execute(select(func.max(CaseNote.created_at)).where(CaseNote.case_id == case.id)).scalar()
+        at = utcnow()
+        if last is not None and at <= _aware(last):
+            at = _aware(last) + timedelta(microseconds=1)
+        note = CaseNote(case_id=case.id, author=by.id, text=text, created_at=at)
+        self.s.add(note)
+        self.s.flush()
+        self.audit.append(actor_type=by.actor_type, actor_id=by.id, event_type="case.note_added", subject_type="case",
+                          subject_id=case.id, payload={"note": note.id, "chars": len(text)})
+        return note
 
     def decide(self, case_id: str, analyst: Principal, *, verdict: str, reasoning: str = "",
                close: bool = True) -> Disposition:
@@ -176,7 +286,7 @@ class CaseService:
         return {
             "case": {"id": case.id, "domain": case.domain, "title": case.title, "status": case.status,
                      "severity": case.severity, "confidence": case.confidence, "verdict": case.verdict,
-                     "summary": case.summary, "autonomy_mode": case.autonomy_mode,
+                     "summary": case.summary, "autonomy_mode": case.autonomy_mode, "assignee": case.assignee,
                      "created_at": case.created_at.isoformat(), "attributes": case.attributes},
             "completeness": case.completeness,
             "assessment": {**(case.assessment or {}),
@@ -194,6 +304,9 @@ class CaseService:
                          "priority": (a.result or {}).get("priority")} for a in actions],
             "dispositions": [{"analyst": d.analyst, "verdict": d.analyst_verdict, "reasoning": d.reasoning,
                               "at": d.created_at.isoformat()} for d in dispositions],
+            "notes": [{"id": n.id, "author": n.author, "text": n.text, "at": n.created_at.isoformat()}
+                      for n in self.s.execute(select(CaseNote).where(CaseNote.case_id == case_id)
+                                              .order_by(CaseNote.created_at.desc(), CaseNote.id)).scalars()],
             "audit": [{"seq": r.seq, "ts": r.ts.isoformat(), "actor": f"{r.actor_type}:{r.actor_id}",
                        "event": r.event_type} for r in reversed(self.audit.query(subject_id=case_id, limit=500))],
         }

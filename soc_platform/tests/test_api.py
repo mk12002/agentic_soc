@@ -238,3 +238,69 @@ def test_access_log_rows_go_to_the_database_of_their_own_request():
             assert s.query(AccessLogRecord).count() == 0
     finally:
         dbm._default = saved
+
+
+def test_case_ownership_and_notes(client, seeded):
+    lead = tok(client, "lena@acme-demo.com", "lead")
+    ana = tok(client, "ann@acme-demo.com", "analyst")
+    aud = tok(client, "audrey@acme-demo.com", "auditor")
+    cases = client.get("/api/v1/cases", headers=lead).json()
+    cid = next(c["id"] for c in cases if c["domain"] == "incident")
+    # an analyst takes a case; cannot hand it to someone else or take it off another owner
+    assert client.post(f"/api/v1/cases/{cid}/assign", headers=ana, json={"assignee": "ann@acme-demo.com"}).json()["assignee"] == "ann@acme-demo.com"
+    assert client.post(f"/api/v1/cases/{cid}/assign", headers=ana, json={"assignee": "bob@acme-demo.com"}).status_code == 403
+    # a lead reassigns; the analyst can then no longer clear it
+    assert client.post(f"/api/v1/cases/{cid}/assign", headers=lead, json={"assignee": "Raj@Acme-Demo.com"}).json()["assignee"] == "raj@acme-demo.com"
+    assert client.post(f"/api/v1/cases/{cid}/assign", headers=ana, json={"assignee": None}).status_code == 403
+    assert client.post(f"/api/v1/cases/{cid}/assign", headers=lead, json={"assignee": "not-an-address"}).status_code == 400
+    assert client.post(f"/api/v1/cases/{cid}/assign", headers=aud, json={"assignee": None}).status_code == 403
+    # notes are appended, shown newest first, and audited
+    assert client.post(f"/api/v1/cases/{cid}/notes", headers=ana, json={"text": "Called the user - laptop is with IT."}).status_code == 200
+    assert client.post(f"/api/v1/cases/{cid}/notes", headers=lead, json={"text": "Escalated to the IR retainer."}).status_code == 200
+    assert client.post(f"/api/v1/cases/{cid}/notes", headers=ana, json={"text": ""}).status_code == 422
+    assert client.post(f"/api/v1/cases/{cid}/notes", headers=aud, json={"text": "auditors only read"}).status_code == 403
+    view = client.get(f"/api/v1/cases/{cid}", headers=lead).json()
+    assert view["case"]["assignee"] == "raj@acme-demo.com"
+    assert [n["author"] for n in view["notes"]] == ["lena@acme-demo.com", "ann@acme-demo.com"]
+    events = [a["event"] for a in view["audit"]]
+    assert events.count("case.assigned") == 2 and events.count("case.note_added") == 2
+    # the owner filter and its counts agree with the list
+    raj = tok(client, "raj@acme-demo.com", "analyst")
+    mine = client.get("/api/v1/cases?assignee=me", headers=raj).json()
+    assert [c["id"] for c in mine] == [cid]
+    summ = client.get("/api/v1/cases/summary", headers=raj).json()
+    unassigned = client.get("/api/v1/cases?assignee=unassigned", headers=raj).json()
+    assert summ["mine"] == 1 and summ["unassigned"] == len(unassigned) == summ["total"] - 1
+    # other domains' cases are invisible
+    ph_only = {"Authorization": "Bearer " + client.get("/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing").json()["token"]}
+    assert client.post(f"/api/v1/cases/{cid}/notes", headers=ph_only, json={"text": "x"}).status_code == 404
+    assert client.post(f"/api/v1/cases/{cid}/assign", headers=ph_only, json={"assignee": "pia@acme-demo.com"}).status_code == 404
+
+
+def test_global_search_finds_everything_the_caller_may_see(client, seeded):
+    lead = tok(client, "lena@acme-demo.com", "lead")
+    r = client.get("/api/v1/search?q=password expires", headers=lead).json()
+    assert any("password expires" in c["title"].lower() for c in r["cases"])
+    r = client.get("/api/v1/search?q=jane.doe", headers=lead).json()                # an identifier from any tool
+    assert any(e["kind"] == "identity" and "jane" in e["name"].lower() for e in r["entities"])
+    r = client.get("/api/v1/search?q=cve-2021-44228", headers=lead).json()          # case-insensitive
+    assert r["findings"] and all(f["cve"] == "CVE-2021-44228" for f in r["findings"])
+    assert client.get("/api/v1/search?q=%25%25", headers=lead).json()["cases"] == []   # "%%" is literal, not "any"
+    assert client.get("/api/v1/search?q=x", headers=lead).status_code == 422
+    # a phishing-only analyst sees phishing cases only: no cross-domain people, findings or vulnerabilities
+    ph = {"Authorization": "Bearer " + client.get("/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing").json()["token"]}
+    r = client.get("/api/v1/search?q=re", headers=ph).json()
+    assert r["cases"] and {c["domain"] for c in r["cases"]} == {"phishing"}
+    assert "entities" not in r and "insights" not in r and "findings" not in r
+    aud = tok(client, "audrey@acme-demo.com", "auditor")
+    assert any(a["event_type"] == "search" for a in client.get("/api/v1/audit?event_type=search&limit=50", headers=aud).json())
+
+
+def test_notification_settings_are_visible_to_auditors_without_the_secret(client, monkeypatch):
+    monkeypatch.setenv("SOC_NOTIFY_WEBHOOKS", "teams|https://acme.webhook.office.com/hook/very-secret-token")
+    auditor = tok(client, "aud", "auditor")
+    r = client.get("/api/v1/admin/notifications", headers=auditor)
+    assert r.status_code == 200 and r.json()["channels"] == ["teams:acme.webhook.office.com"]
+    assert r.json()["min_severity"] == "high" and "very-secret-token" not in r.text
+    scoped = {"Authorization": "Bearer " + client.get("/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing").json()["token"]}
+    assert client.get("/api/v1/admin/notifications", headers=scoped).status_code == 403   # a platform-wide setting

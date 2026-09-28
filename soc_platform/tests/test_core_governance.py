@@ -210,3 +210,15 @@ def test_same_short_name_with_different_device_ids_is_not_merged(session, regist
     b = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "web01.us.corp", "crowdstrike_aid": "aid-2"}],
                     requested_by=agent_principal("im"), case_id=c2.id)
     assert a.id != b.id
+
+
+def test_notes_stay_newest_first_even_within_one_clock_tick(session, analyst, monkeypatch):
+    """Two notes written in the same instant (Windows' clock ticks every ~15 ms) once came back in random order."""
+    from soc_platform.core.cases import CaseService
+
+    monkeypatch.setenv("SOC_CLOCK_FREEZE", "2026-09-28T10:00:00+00:00")
+    svc = CaseService(session)
+    case = svc.create("incident", "Frozen-clock case", severity="low", attributes={}, actor="test")
+    for i in range(5):
+        svc.add_note(case.id, f"note {i}", by=analyst)
+    assert [n["text"] for n in svc.view(case.id)["notes"]] == [f"note {i}" for i in reversed(range(5))]

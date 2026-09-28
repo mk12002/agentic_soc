@@ -22,6 +22,7 @@
 │ context store + entity resolution (assets & identities) · cases & evidence · enrichment fan-out              │
 │ autonomy policy (L0-L4) · action layer (preconditions, approvals, idempotency, rollback) · audit hash chain  │
 │ access (grants, keys, revocation, flags) · crypto (Fernet at rest) · retention · jobs (leases, dead letter)  │
+│ notify (Teams / Slack / webhook for findings) · case ownership + notes · schema evolution (add / widen)      │
 └──────────────────────────────────────────────────────┬────────────────────────────────────────────────────────┘
                                                        │ uniform connector SDK (rate budget, backoff, cursors)
   CrowdStrike · Defender for Endpoint · Defender for Office 365 / Exchange · Entra ID · Rapid7 · Wiz · Avanan ·

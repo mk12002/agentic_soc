@@ -33,6 +33,7 @@ JOBS: dict[str, tuple[str, int]] = {  # name -> (interval env var, default secon
     "intelligence": ("SOC_JOB_INTELLIGENCE_SECONDS", 600),
     "retention": ("SOC_JOB_RETENTION_SECONDS", 24 * 3600),
     "self_check": ("SOC_JOB_SELF_CHECK_SECONDS", 3600),
+    "notify": ("SOC_JOB_NOTIFY_SECONDS", 60),
 }
 RETRIES = 3
 DEAD_LETTER_AFTER = 3
@@ -52,13 +53,18 @@ def _body(name: str, s: Session) -> dict[str, Any]:
     if name == "incident":
         ing = sv["incident"].ingest()
         cases = sv["incident"].cluster()
-        done = [sv["incident"].investigate(c.id) for c in cases if c.status != "closed"]
-        return {"synced": ing.synced, "new_incidents": len(cases), "investigated": len(done)}
+        done = [c.id for c in cases if c.status != "closed"]
+        for cid in done:
+            sv["incident"].investigate(cid, narrate=False)
+        s.commit()          # the cases are visible and actionable now; the written explanations follow
+        narrated = sv["incident"].narrate_pending(done)
+        return {"synced": ing.synced, "new_incidents": len(cases), "investigated": len(done), "narrated": narrated}
     if name == "phishing":
         subs = [x for x in sv["phishing"].ingest_reported() if x.status == "new"]
-        for sub in subs:
-            sv["phishing"].process(sub.id)
-        return {"processed": len(subs)}
+        case_ids = [sv["phishing"].process(sub.id, narrate=False)["case"]["id"] for sub in subs]
+        s.commit()          # verdicts, evidence and recommendations are visible now; the explanations follow
+        narrated = sv["phishing"].narrate_pending(case_ids)
+        return {"processed": len(subs), "narrated": narrated}
     if name == "vulnerability":
         out = sv["vulnerability"].refresh()
         mis = _misconfig(s).refresh()
@@ -98,6 +104,10 @@ def _body(name: str, s: Session) -> dict[str, Any]:
         budget = llm_budget_alert(s, get_settings())
         return {"passed": result["passed"], "total": result["total"],
                 "failing": [c["check"] for c in result["checks"] if not c["ok"]], "llm_budget": budget}
+    if name == "notify":
+        from soc_platform.core.notify import deliver
+
+        return deliver(s)
     raise KeyError(f"unknown job {name}")
 
 
@@ -110,26 +120,40 @@ def _holder() -> str:
 
 
 def _lease(db: Any, name: str, *, release: bool = False) -> bool:
+    """Take (or release) a job's lease. Atomic across schedulers: the row is changed with a compare-and-swap on its
+    ``updated_at``, and the first-ever lease is an insert that only one scheduler can win - the loser of either race
+    simply does not get the lease (it never raises)."""
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
     key = f"job_lease:{name}"
     me = _holder()
-    with db.session() as s:
-        f = s.get(SystemFlag, key)
-        now = utcnow()
-        if release:
-            if f is not None and (f.value or {}).get("holder") == me:
-                f.value = {"holder": None, "until": now.isoformat()}
-            return True
-        if f is not None:
-            v = f.value or {}
-            until = datetime.fromisoformat(v["until"]) if v.get("until") else now
-            if v.get("holder") not in (None, me) and _aware(until) > now:
-                return False
-        else:
-            f = SystemFlag(name=key, value={}, updated_by="scheduler")
-            s.add(f)
-        f.value = {"holder": me, "until": (now + timedelta(seconds=LEASE_SECONDS)).isoformat()}
-        f.updated_by, f.updated_at = "scheduler", now
-    return True
+    now = utcnow()
+    mine = {"holder": me, "until": (now + timedelta(seconds=LEASE_SECONDS)).isoformat()}
+    try:
+        with db.session() as s:
+            f = s.get(SystemFlag, key)
+            if f is None:
+                if release:
+                    return True
+                s.add(SystemFlag(name=key, value=mine, updated_by="scheduler", updated_at=now))
+                return True                                   # the commit fails if another scheduler inserted first
+            v, seen = f.value or {}, f.updated_at
+            if release:
+                if v.get("holder") != me:
+                    return True
+                value = {"holder": None, "until": now.isoformat()}
+            else:
+                until = datetime.fromisoformat(v["until"]) if v.get("until") else now
+                if v.get("holder") not in (None, me) and _aware(until) > now:
+                    return False
+                value = mine
+            s.expunge(f)
+            changed = s.execute(update(SystemFlag).where(SystemFlag.name == key, SystemFlag.updated_at == seen)
+                                .values(value=value, updated_by="scheduler", updated_at=now)).rowcount
+            return release or changed == 1                    # 0 rows: someone else changed it first
+    except IntegrityError:
+        return False
 
 
 def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Callable[[float], None] = time.sleep,

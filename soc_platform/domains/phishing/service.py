@@ -155,9 +155,11 @@ class PhishingService:
 
     # ------------------------------------------------------------------ full pipeline
 
-    def process(self, submission_id: str, *, force: bool = False) -> dict[str, Any]:
+    def process(self, submission_id: str, *, force: bool = False, narrate: bool = True) -> dict[str, Any]:
         """Analyse a submission into a case. Idempotent: a submission that already has a case returns that case
-        (re-running an ingest or a job never creates a second case for the same report); ``force`` re-analyses."""
+        (re-running an ingest or a job never creates a second case for the same report); ``force`` re-analyses.
+        ``narrate=False`` (the scheduled job) leaves the model's written explanation to ``narrate_pending``: verdict,
+        severity, evidence and recommendations are all decided without it, so the case is usable at once."""
         sub = self.s.get(Submission, submission_id)
         if sub is None:
             raise KeyError(f"unknown submission {submission_id}")
@@ -218,8 +220,9 @@ class PhishingService:
         # are most reported mail, and the model adds nothing to a closed report (SOC_LLM_EXPLAIN_AUTO_CLOSED=1 to change).
         explain = self.llm is not None and (not self._auto_close_eligible(result, impact, rec)
                                             or os.environ.get("SOC_LLM_EXPLAIN_AUTO_CLOSED", "0") == "1")
-        grounded = (self.llm.grounded("phishing.explanation", q, ev_llm, redactor=redactor, tier="small") if explain
-                    else deterministic_grounded(ev_llm, limit=10))
+        defer = explain and not narrate
+        grounded = (self.llm.grounded("phishing.explanation", q, ev_llm, redactor=redactor, tier="small")
+                    if explain and not defer else deterministic_grounded(ev_llm, limit=10))
         severity = SEVERITY[result.verdict]
         if impact["identity_compromise"] or impact["endpoint_impact"]:
             severity = "critical"
@@ -244,7 +247,9 @@ class PhishingService:
                                                                 "urls": em.urls, "qr_urls": em.qr_urls,
                                                                 "attachments": [a.__dict__ for a in em.attachments],
                                                                 "hops": len(em.received_path)},
-                                              "backend_detail": result.raw},
+                                              "backend_detail": result.raw,
+                                              **({"narration_pending": self.cases.narration_request(
+                                                  "phishing.explanation", q, ev_llm, tier="small")} if defer else {})},
                                   completeness=completeness, actor=f"agent:{AGENT}")
         sub.status, sub.verdict, sub.score = "analysed", result.verdict, result.score
         sub.analysis = {"verdict": result.verdict, "score": result.score, "backend": result.backend,
@@ -254,6 +259,12 @@ class PhishingService:
         self.cases.recommend(case, recs, self.actions, self.policy, agent=AGENT)
         self._apply_auto_close(case, sub, result, camp, impact, rec)
         return self.cases.view(case.id)
+
+    def narrate_pending(self, case_ids: list[str] | None = None) -> int:
+        """Add the model's written explanation to reports processed with ``narrate=False`` (parallel model calls)."""
+        ids = list(dict.fromkeys((case_ids or []) + self.cases.pending_narration("phishing")))
+        return self.cases.narrate_pending(ids, self.llm, redactor=Redactor(internal_domains=set(self.org_domains)),
+                                          actor=f"agent:{AGENT}")
 
     def _fact_summary(self, em: DecomposedEmail, r: AnalysisResult, camp: dict, impact: dict, rec: dict) -> str:
         parts = [f"Verdict {r.verdict} (score {r.score:.2f}, backend {r.backend}) for '{em.subject}' from {em.sender}."]
