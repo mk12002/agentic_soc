@@ -215,8 +215,7 @@ The platform recommends actions; nothing runs until a person with the right role
 2. Window 2 (private): `lena@acme-demo.com`, Lead. **Approvals** → approve the same action. It executes (in fake
    mode, against the fixture EDR).
 3. Approve a normal action as Ann to show that routine work does not wait for a Lead.
-4. **Audit log**: the request, the refused attempt's absence of effect, the approval by Lena and the execution,
-   all in the hash chain.
+4. **Audit log**: the recommendation, Lena's approval and the execution, in the hash chain.
 
 #### Showing data scope
 
