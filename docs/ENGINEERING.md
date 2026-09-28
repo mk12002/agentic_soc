@@ -998,8 +998,9 @@ speeds.
 |---|---|---|---|---|
 | Analyse a reported phishing e-mail (campaign, clicks, impact) | nobody (background) - sets time to case | 31 | **2.9 s** (was 12.5 s) | 9-12 s (the model writes the explanation) |
 | Analyse a benign e-mail (auto-closed) | nobody | 20 | **1.2 s** (was 8.1 s) | 1.2 s (no model call) |
-| Investigate an incident (enrichment across tools) | nobody | 92 | **1.8 s** | 8-16 s (the model's response time varies) |
-| Vulnerability refresh (4 scanners + feeds) | nobody (every 6 h) | 32 | 13 s | 13 s |
+| Ingest alerts from every tool (incident) | nobody (every 5 min) | 11 | **0.9 s** (was 4.5 s) | 0.9 s |
+| Investigate an incident (enrichment across tools) | nobody | 92 | **1.8-2.6 s** (was 3.8 s) | 8-16 s (the model's response time varies) |
+| Vulnerability refresh (4 scanners + feeds) | nobody (every 6 h) | 32 | **6.5 s** (was 13.1 s) | 6.5 s |
 | Re-correlate (risk, 12 rules, narratives) | nobody (every 10 min) | 0 | 0.1 s | 19 s first time (was 67 s); 0.1 s when nothing changed |
 | Open a case, story, 360 view or list | analyst | 0 | < 0.1 s | < 0.1 s (results are stored) |
 | Situation brief | analyst | 0 | < 0.1 s | 0 s when prepared by the job; ~6 s if not yet prepared |
@@ -1013,6 +1014,13 @@ immediately.
 
 ### 16.2 How the latency was brought down
 
+- **Parallel syncs** (all three modules). `SyncRunner.sync_many` downloads every (tool, stream) at once, while the
+  calling thread ingests each stream's pages in the original order, with a checkpoint after every page. The result
+  is identical to syncing one stream after another, in about the time of the slowest stream. Used by incident
+  ingest (inventory still ingested before alerts), the vulnerability refresh (assets before findings) and the
+  scheduler's jobs.
+- **Parallel vulnerability intelligence.** The KEV catalogue, EPSS scores and every due NVD detail are fetched at
+  once, then applied in CVE order. NVD without an API key simply queues on its rate budget.
 - **Parallel vendor lookups.** In one phishing analysis, these all run in parallel in bounded thread pools:
   - the threat-intel indicators, and the 8 sources for each indicator
   - control reconciliation, alongside campaign scope and user impact (reconciliation is awaited first only when
@@ -1238,7 +1246,7 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 18 | Domain scope answers 404, not 403 | 403 | Hides the existence of records outside scope | - |
 | 19 | `create_all` + automatic widening, no migration framework yet | Alembic from day one | Additive schema evolution covered automatically during build-out | Non-additive changes will need Alembic (§26) |
 | 20 | Tests hold SQLite to PostgreSQL's rules and run the suite on PostgreSQL | Separate PostgreSQL CI only | Production-only bugs surface on every developer run | A small listener in the test harness |
-| 21 | Parallel vendor lookups inside one analysis, with bounded thread pools and a fixed merge order | Sequential calls; async/await rewrite | Latency is dominated by vendor round trips (a phishing analysis went from 12.5 s to 2.9 s); threads suit the synchronous connector code and httpx client | More threads per analysis (bounded); results must be merged deterministically |
+| 21 | Parallel vendor I/O in all three modules (syncs, intel feeds, per-analysis lookups), with bounded thread pools; database work stays on one thread in a fixed order | Sequential calls; async/await rewrite | Latency is dominated by vendor round trips (a phishing analysis went from 12.5 s to 2.9 s); threads suit the synchronous connector code and httpx client | More threads per analysis (bounded); results must be merged deterministically |
 | 22 | LLM batches in parallel, with the gateway's database use behind a lock | One call at a time; a separate session per thread | Narratives and report sections are independent; a lock keeps the budget check and call log on one session | Throughput is bounded by `SOC_LLM_CONCURRENCY` and the provider's rate limit |
 | 23 | The background job prepares the situation brief | Compute on first view only | Nobody waits for the most-viewed LLM output | Prepared per process (with a separate scheduler service, the API's first view still computes it) |
 | 24 | Honour a vendor's `Retry-After`, capped at 120 s | Honour it fully; ignore it | Be a good API citizen without letting one answer stall a job for hours | Very long throttles are retried a few times, then reported |

@@ -66,20 +66,15 @@ class IncidentService:
         runner = SyncRunner(self.s, self.store)
         synced: dict[str, int] = {}
         errors: dict[str, list[str]] = {}
-        # Directory and inventory first, so alert references resolve against known users/hosts (order independence).
-        for c in self.registry.enabled():
-            for stream in c.streams:
-                if stream in INVENTORY_STREAMS.get(c.name, ()):
-                    rep = runner.sync(c, stream)
-                    synced[f"{c.name}.{stream}"] = rep.ingested
-        for c in self.registry.enabled():
-            for stream in c.streams:
-                if stream not in ALERT_STREAMS:
-                    continue
-                rep = runner.sync(c, stream)
-                synced[f"{c.name}.{stream}"] = rep.ingested
-                if rep.errors:
-                    errors[f"{c.name}.{stream}"] = rep.errors[:3]
+        enabled = self.registry.enabled()
+        # Directory and inventory are ingested first, so alert references resolve against known users/hosts; every
+        # stream downloads at the same time (sync_many), ingestion keeps this order.
+        inventory = [(c, st) for c in enabled for st in c.streams if st in INVENTORY_STREAMS.get(c.name, ())]
+        alerts = [(c, st) for c in enabled for st in c.streams if st in ALERT_STREAMS]
+        for (c, stream), rep in zip(inventory + alerts, runner.sync_many(inventory + alerts), strict=True):
+            synced[f"{c.name}.{stream}"] = rep.ingested
+            if rep.errors and (c, stream) in alerts:
+                errors[f"{c.name}.{stream}"] = rep.errors[:3]
         return IngestReport(synced, errors)
 
     # ------------------------------------------------------------------ IM-F02 clustering & suppression

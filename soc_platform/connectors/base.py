@@ -18,7 +18,8 @@ import random
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
@@ -190,15 +191,24 @@ class SyncRunner:
             self.s.flush()
         return cp
 
+    @staticmethod
+    def _pages(connector: BaseConnector, stream: str, cursor: str | None, max_pages: int) -> Iterator[Page]:
+        """The network half of a sync: pages in cursor order (each page's cursor comes from the one before)."""
+        for _ in range(max_pages):
+            page = connector.call(lambda cur=cursor: connector.fetch_page(stream, cur))
+            yield page
+            cursor = page.next_cursor or cursor
+            if not page.more:
+                return
+
     def sync(self, connector: BaseConnector, stream: str, *, full_backfill: bool = False,
-             max_pages: int = 1000) -> SyncReport:
+             max_pages: int = 1000, pages: Iterator[Page] | None = None) -> SyncReport:
         cp = self._checkpoint(connector, stream)
         cursor = None if full_backfill else cp.cursor
         report = SyncReport(connector.name, stream)
         cp.last_attempt_at = utcnow()
         try:
-            for _ in range(max_pages):
-                page = connector.call(lambda cur=cursor: connector.fetch_page(stream, cur))
+            for page in (pages if pages is not None else self._pages(connector, stream, cursor, max_pages)):
                 report.pages += 1
                 report.source_records += len(page.records)
                 if page.source_total is not None:
@@ -218,8 +228,6 @@ class SyncRunner:
                 cursor = page.next_cursor or cursor
                 cp.cursor = cursor
                 self.s.flush()
-                if not page.more:
-                    break
             cp.last_success_at = utcnow()
             cp.last_error = None
         except Exception as exc:
@@ -230,6 +238,49 @@ class SyncRunner:
         cp.failed_count = (cp.failed_count or 0) + report.failed
         report.cursor = cursor
         return report
+
+    def sync_many(self, items: list[tuple[BaseConnector, str]], *, full_backfill: bool = False,
+                  max_pages: int = 1000, workers: int = 8) -> list[SyncReport]:
+        """Sync several (connector, stream) pairs: every stream downloads at once, while its pages are ingested here,
+        stream by stream and page by page, in the order given - the same result as calling ``sync`` for each in
+        turn, in about the time of the slowest stream instead of the sum of all of them.
+
+        Only the network half runs in threads (each connector's rate budget still applies). Ingestion stays on this
+        thread and this session, which are not shared."""
+        import queue
+
+        done = object()
+        feeds: list[queue.Queue] = []
+        pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(items))))
+
+        def fetch(connector: BaseConnector, stream: str, cursor: str | None, feed: queue.Queue) -> None:
+            try:
+                for page in self._pages(connector, stream, cursor, max_pages):
+                    feed.put(page)
+            except BaseException as exc:  # handed to the ingesting thread, which records it as sync() does
+                feed.put(exc)
+            feed.put(done)
+
+        for connector, stream in items:
+            cp = self._checkpoint(connector, stream)
+            feed: queue.Queue = queue.Queue()
+            feeds.append(feed)
+            pool.submit(fetch, connector, stream, None if full_backfill else cp.cursor, feed)
+
+        def drain(feed: queue.Queue) -> Iterator[Page]:
+            while True:
+                item = feed.get()
+                if item is done:
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+
+        try:
+            return [self.sync(c, st, full_backfill=full_backfill, max_pages=max_pages, pages=drain(feed))
+                    for (c, st), feed in zip(items, feeds, strict=True)]
+        finally:
+            pool.shutdown(wait=True)
 
 
 def iter_records(records: Iterable[dict[str, Any]], page_size: int, cursor: str | None) -> Page:
