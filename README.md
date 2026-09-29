@@ -49,7 +49,7 @@ Open the console, choose a role and **Continue** (development sign-in; productio
 pipelines from *Cases* and *Vulnerabilities*, or follow the scripted walkthrough in
 [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md). The console opens in light mode; the moon icon switches to dark.
 
-The phishing ML swarm (TinyBERT content model, URL/header/attachment/sandbox/TI/behaviour models) runs automatically
+The phishing ML swarm (content text classifier, URL/header/attachment/TI/behaviour models; sandbox with a detonation host) runs automatically
 once installed (`SOC_PHISHING_ENGINE=auto`; `0` = rule-based analyser only):
 
 ```bash
@@ -180,3 +180,11 @@ soc_platform/
   tests/         platform test suite
 artifacts/phishing/   trained models (Git LFS), corpus emails     config/   deploy/   scripts/   docs/
 ```
+
+## Third-party data
+
+The phishing content model (`artifacts/phishing/models/content_agent/`) was trained with
+`scripts/train_content_model.py` on public data: the phishing corpus by Jose Nazario
+(https://monkey.org/~jose/phishing/, CC BY 4.0), the SpamAssassin public corpus
+(https://spamassassin.apache.org/old/publiccorpus/, non-live testing terms) and the "Safe Email" rows of
+zefang-liu/phishing-email-dataset (LGPL-3.0). The data itself is not in this repository.

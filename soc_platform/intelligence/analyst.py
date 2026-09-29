@@ -39,7 +39,7 @@ def _total(res: Any) -> int:
     return res.total if isinstance(res, Page) else len(res)
 
 
-_SCORE_IN_TITLE = re.compile(r"\s*\(\d+(?:\.\d+)?/100\)")
+_SCORE_IN_TITLE = re.compile(r"\s{0,3}\(\d{1,3}(?:\.\d+)?/100\)")
 
 PLANNER_SYSTEM = (
     "You are a SOC investigation planner. Choose read-only tools to answer the analyst's question. "

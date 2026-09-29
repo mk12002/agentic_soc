@@ -121,7 +121,9 @@ def test_retention_prunes_old_mail_but_keeps_open_cases(session, estate, monkeyp
     r = run_retention(session, Settings())
     closed = [s for s in subs if session.get(Case, s.case_id).status == "closed"]
     held = [s for s in subs if session.get(Case, s.case_id).status != "closed"]
-    assert closed and held and r["emails"] == len(closed) and r["emails_on_hold"] == len(held)
+    state = [(s.subject, session.get(Case, s.case_id).status, s.status, s.verdict, s.auto_closed, s.sampled_for_review)
+             for s in subs]                                                       # shown if this ever fails again
+    assert closed and held and r["emails"] == len(closed) and r["emails_on_hold"] == len(held), state
     assert all(s.raw_path is None for s in closed) and all(s.raw_path and Path(s.raw_path).exists() for s in held)
     _self_check_ok(session)                                                       # figures still agree after pruning
 

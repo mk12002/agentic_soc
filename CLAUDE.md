@@ -11,8 +11,7 @@ it, the conventions the code relies on, and the traps that have already cost tim
 1. **Never write the client's name or its abbreviations** (the real client is anonymised) anywhere in the repo: code,
    docs, file names, commit messages, test data. The demo organisation is **Acme** (`acme-demo.com`); variant
    estates are generated names (Veridian Foods, Tidewell Insurance...). Before every push, scan tracked files for the
-   banned names. (`artifacts/phishing/models/content_agent/tokenizer.json` contains a word-piece that matches one
-   banned abbreviation; it is ML vocabulary, not the name.)
+   banned names.
 2. **Never commit secrets.** `.env` (holds the Azure AI Foundry key as `SOC_LLM_*`, plus engine keys) is gitignored;
    never print its values. Before every push, check that no `.env` secret value appears in any tracked or staged
    file (§9 has the snippet). Also keep out: `gdrive_credentials.json`, anything under `test_reports/private/` (real
@@ -61,7 +60,9 @@ An **agentic SOC platform**: one investigation and automation layer over an orga
   and demos with no tenant access.
 - **Phishing ML engine** (`soc_platform/domains/phishing/engine/`, ~24k lines, earlier code base): 7-agent ML swarm
   (a trained model per e-mail component, `artifacts/phishing/models/`) + LangGraph. **On by default when installed**
-  (`SOC_PHISHING_ENGINE=auto`), fused with the heuristic analyser (`CompositeAnalyzer.fuse`). The test suite pins it
+  (`SOC_PHISHING_ENGINE=auto`), fused with the heuristic analyser (`CompositeAnalyzer.fuse`). The content model is a
+  TF-IDF classifier trained on public data (`scripts/train_content_model.py`; attribution in README). The engine is
+  strictly offline in-platform (`EngineAnalyzer.enforce_offline`): never add a code path that lets it call out. The test suite pins it
   off (conftest) except `test_phishing_engine.py`. scikit-learn is pinned to 1.8 (the models' version).
 
 Scale: ~16.8k lines platform Python, ~5.6k lines platform tests, ~0.9k lines of vanilla JS UI.
@@ -94,7 +95,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 102 features
+python scripts/verify_features.py                                 # tests mapped to 103 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -228,6 +229,10 @@ fingerprints hash the evidence.
 
 **Security**
 - Routes declare `Depends(need(Perm.X, "domain"))`; record-level scope checks in handlers (`_case_in_scope`).
+- **Scope is per role**: `p.in_domain(d)` is *visibility* (union of roles); what `p` may *do* in `d` is
+  `p.acting_in(d).can(perm)`. `need(perm, domain)` already returns the acting principal; a handler that writes to a
+  case/action of a domain not fixed by its route must pass `p.acting_in(case.domain)` to the service. Actions requested
+  on a case carry the case's domain; `ActionService` re-judges every decision in the action's domain.
 - Human-only permissions (approvals, policy, access management, rollback) never go to API-key principals.
 - UI: interpolate with `esc()`; clicks go through `data-fn` + the `ALLOWED` map (no inline handlers, strict CSP).
 - Nothing fetches URLs taken from e-mail content (no SSRF surface) - keep it that way. The only configurable
@@ -252,7 +257,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   a `PostgresRuleViolation` in a test means production would fail.
 - **Test files by concern**: `test_consistency.py` (same figure on every surface; re-runs change nothing; LLM on/off
   identical; every GET route × 7 roles; write-route fuzzing; references resolve), `test_time.py` (clock travel),
-  `test_pentest.py` (17 attack groups), `test_properties.py` (Hypothesis), `test_scheduler.py`,
+  `test_pentest.py` (24 attack tests incl. round 2: per-role scope, ReDoS), `test_properties.py` (Hypothesis), `test_scheduler.py`,
   `test_audit_concurrency.py`, `test_generalisation.py`/`test_variants.py` (no demo names leak on other orgs),
   `test_story.py`, `test_phishing.py` (incl. a latency test that fails if lookups become sequential),
   `test_incident.py`, `test_vulnerability.py`, `test_intelligence.py`, `test_report_builder.py`, `test_api.py`,
@@ -264,8 +269,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): ~321 platform tests on SQLite and on PostgreSQL, 205
-  engine tests, 102/102 features verified.
+- Current counts (keep docs in sync when they change): ~329 platform tests on SQLite and on PostgreSQL, 205
+  engine tests, 103/103 features verified.
 
 ---
 
@@ -328,7 +333,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
    staged=subprocess.run(["git","diff","--cached","--name-only"],capture_output=True,text=True).stdout.split()
    print([f for f in staged if Path(f).is_file() and any(v in Path(f).read_text(errors="ignore") for v in vals if len(v)>=12)])
    ```
-6. Banned-name scan (rule 1): `git grep -n -I -i -E "<banned names>" -- . | grep -v tokenizer.json`.
+6. Banned-name scan (rule 1): `git grep -n -I -i -E "<banned names>" -- .`.
 7. Commit message with the attribution line (rule 4).
 
 ---
@@ -381,6 +386,10 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `narrate=False` only where a later `narrate_pending` is guaranteed (job or bulk endpoint).
 - **Notifications are deduplicated by (`dedupe_key`, `severity`, `channel`)**: don't delete `notifications` rows in
   retention, or every open finding is sent again.
+- **ReDoS in e-mail parsing**: patterns like `<[^>]+>`, `<a…>(.*?)</a>`, `[\w.+-]+@…` or `\d+[.,]?\d*` are
+  quadratic on hostile input (one 240 KB message took 16 s; 25 MB would take hours). Bound every run (`{1,64}`), stop
+  scans at the next tag (`<[^<>]*>`), anchor with a look-behind; `test_hostile_email_content_costs_linear_time` guards it.
+- **`X-Forwarded-For`**: proxies append, so only the right-most untrusted hop is the client (`_client_ip`).
 - **Risk "now"** is the latest observation in the data, not wall time; open exposures/incidents never decay
   (`STANDING_SIGNALS`); amplifiers fade with their triggers.
 

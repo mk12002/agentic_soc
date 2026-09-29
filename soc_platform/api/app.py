@@ -97,7 +97,13 @@ class _RateLimiter:
             ok = tokens >= 1
             self._b[key] = (tokens - 1 if ok else tokens, now)
             if len(self._b) > 50_000:
-                self._b.clear()
+                # drop only buckets idle long enough to be full again: clearing everything let a flood of new
+                # addresses reset the budget of a client that was being limited
+                idle = self.burst / max(self.rate, 1e-9)
+                self._b = {k: v for k, v in self._b.items() if now - v[1] < idle}
+                if len(self._b) > 50_000:
+                    self._b.clear()
+                    self._b[key] = (tokens - 1 if ok else tokens, now)
             return ok
 
 
@@ -109,13 +115,26 @@ _TRUSTED_PROXIES = {x.strip() for x in __import__("os").environ.get("SOC_TRUSTED
 
 
 def _client_ip(request: Request) -> str:
-    """Peer address; X-Forwarded-For is honoured only when the direct peer is a configured trusted proxy."""
+    """Peer address; X-Forwarded-For is honoured only when the direct peer is a configured trusted proxy, and then
+    the right-most hop that is not itself a trusted proxy is the client. Proxies *append* to the header, so its
+    left-most entry is whatever the caller sent: trusting it let anyone pick their address (a fresh rate-limit
+    bucket per request, or "127.0.0.1" to reach the loopback-only dev sign-in)."""
     peer = request.client.host if request.client else "unknown"
-    if peer in _TRUSTED_PROXIES:
-        fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-        if fwd:
-            return fwd
+    if peer not in _TRUSTED_PROXIES:
+        return peer
+    hops = [h.strip() for h in ",".join(request.headers.getlist("x-forwarded-for")).split(",") if h.strip()]
+    for hop in reversed(hops):
+        if hop not in _TRUSTED_PROXIES:
+            return hop[:64]
     return peer
+
+
+def _is_https(request: Request) -> bool:
+    """TLS usually ends at the reverse proxy: believe its X-Forwarded-Proto, but only from a trusted proxy."""
+    if request.url.scheme == "https":
+        return True
+    peer = request.client.host if request.client else ""
+    return peer in _TRUSTED_PROXIES and (request.headers.get("x-forwarded-proto") or "").split(",")[-1].strip() == "https"
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -135,7 +154,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             _log_access(request, response.status_code, (__import__("time").perf_counter() - t0) * 1000)
         for k, v in SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)
-        if request.url.scheme == "https":
+        if _is_https(request):
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response
 
@@ -266,7 +285,7 @@ def _log_access(request: Request, status: int, latency_ms: float) -> None:
                     "principal_id": getattr(request.state, "principal_id", None),
                     "auth_method": getattr(request.state, "auth_method", None),
                     "method": request.method[:8], "path": request.url.path[:512], "status": int(status),
-                    "client_ip": request.client.host if request.client else None,
+                    "client_ip": _client_ip(request),
                     "user_agent": (request.headers.get("user-agent") or "")[:256], "latency_ms": round(latency_ms, 1)})
 
 
@@ -292,7 +311,7 @@ def current_user(request: Request, authorization: str | None = Header(default=No
                  settings: Settings = Depends(get_settings), s: Session = Depends(db_session, scope="function")) -> Principal:
     """Bearer token (Entra / dev), service-account API key, or sealed break-glass credential."""
     acc = AccessService(s, settings)
-    client = request.client.host if request.client else "unknown"
+    client = _client_ip(request)
     try:
         if x_break_glass:
             p = acc.break_glass(x_break_glass, client=client, path=request.url.path)
@@ -310,13 +329,18 @@ def current_user(request: Request, authorization: str | None = Header(default=No
 
 
 def need(perm: Perm, domain: str | None = None):
+    """Route guard. With a domain, the principal is handed on *as it acts in that domain* (only roles whose own
+    scope covers it), so the services' own permission checks are domain-correct too."""
     def dep(p: Principal = Depends(current_user)) -> Principal:
         if not p.can(perm):
             raise HTTPException(403, p.why_not(perm))
         if not p.in_domain(domain):
             raise HTTPException(403, "cross-domain data requires all-domain access" if domain == "*"
                                 else f"not authorised for {domain} data")
-        return p
+        acting = p.acting_in(domain)
+        if not acting.can(perm):
+            raise HTTPException(403, f"{perm.value} is not granted for {'all-domain' if domain == '*' else domain} data")
+        return acting
     return dep
 
 
@@ -379,6 +403,12 @@ def _err(exc: Exception) -> HTTPException:
         return HTTPException(403, str(exc))
     if isinstance(exc, KeyError):
         return HTTPException(404, str(exc))
+    if isinstance(exc, (AttributeError, TypeError, NameError, IndexError, AssertionError)):
+        # a bug, not a bad request: log it, and never echo interpreter internals to the caller
+        import logging
+
+        logging.getLogger(__name__).exception("request failed")
+        return HTTPException(400, "the request could not be completed")
     return HTTPException(400, str(exc))
 
 
@@ -427,7 +457,8 @@ def dev_token(request: Request, user: str = "analyst@acme-demo.com", roles: str 
 def me(p: Principal = Depends(current_user)) -> dict[str, Any]:
     return {"id": p.id, "name": p.name, "roles": sorted(r.value for r in p.roles),
             "permissions": sorted(x.value for x in Perm if p.can(x)), "domains": sorted(p.domains),
-            "mfa": p.mfa, "auth_method": p.auth_method, "service_account": p.is_service, "break_glass": p.break_glass}
+            "role_scopes": p.role_scopes(), "mfa": p.mfa, "auth_method": p.auth_method,
+            "service_account": p.is_service, "break_glass": p.break_glass}
 
 
 # ----------------------------------------------------------------------------- connectors
@@ -565,7 +596,7 @@ def logout(p: Principal = Depends(current_user), s: Session = Depends(db_session
 
 
 @app.get("/api/v1/admin/access-log")
-def admin_access_log(principal_id: str | None = None, status_min: int = 0, limit: int = Query(200, le=2000),
+def admin_access_log(principal_id: str | None = None, status_min: int = 0, limit: int = Query(200, ge=1, le=2000),
                      _: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session, scope="function")):
     # request paths name cases and entities of every domain: all-domain readers only
     ACCESS_LOG.flush(2.0)
@@ -640,7 +671,7 @@ class PolicyProposal(BaseModel):
 @app.post("/api/v1/policy/proposals")
 def propose_policy(body: PolicyProposal, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
     try:
-        v = PolicyStore(s).propose(body.document, p, body.note)
+        v = PolicyStore(s).propose(body.document, p.acting_in("*"), body.note)   # policy governs every domain
     except Exception as exc:
         raise _err(exc) from exc
     return {"id": v.id, "status": v.status}
@@ -649,7 +680,7 @@ def propose_policy(body: PolicyProposal, p: Principal = Depends(current_user), s
 @app.post("/api/v1/policy/proposals/{vid}/approve")
 def approve_policy(vid: int, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
     try:
-        v = PolicyStore(s).approve(vid, p)
+        v = PolicyStore(s).approve(vid, p.acting_in("*"))
     except Exception as exc:
         raise _err(exc) from exc
     return {"id": v.id, "status": v.status}
@@ -732,12 +763,16 @@ def _action_service(s: Session) -> ActionService:
 
 @app.post("/api/v1/actions")
 def request_action(body: ActionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
-    _case_in_scope(s, p, body.case_id)
+    case = _case_in_scope(s, p, body.case_id)
     if body.case_id is None and "*" not in p.domains:
         raise HTTPException(403, "actions outside a case require all-domain access")
+    # The action belongs to its case's domain (it was recorded as "platform", so it fell outside every scoped
+    # approver's queue while its requester could still self-approve it); a case-less action is platform-wide.
+    domain = case.domain if case is not None else "platform"
     try:
         return _action(_action_service(s).request(body.action_type, params=body.params, targets=body.targets,
-                                                  requested_by=p, case_id=body.case_id, rationale=body.rationale))
+                                                  requested_by=p.acting_in(domain), case_id=body.case_id,
+                                                  domain=domain, rationale=body.rationale))
     except Exception as exc:
         raise _err(exc) from exc
 
@@ -991,9 +1026,9 @@ class NoteBody(BaseModel):
 @app.post("/api/v1/cases/{cid}/assign")
 def case_assign(cid: str, body: AssignBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session, scope="function")):
     """Take a case, give it to someone (lead), or clear the owner (lead, or the current owner)."""
-    _case_in_scope(s, p, cid)
+    case = _case_in_scope(s, p, cid)
     try:
-        case = CaseService(s).assign(cid, body.assignee, by=p)
+        case = CaseService(s).assign(cid, body.assignee, by=p.acting_in(case.domain))
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
@@ -1004,9 +1039,9 @@ def case_assign(cid: str, body: AssignBody, p: Principal = Depends(need(Perm.INV
 @app.post("/api/v1/cases/{cid}/notes")
 def case_note(cid: str, body: NoteBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session, scope="function")):
     """Append an analyst note (notes are never edited or deleted; a correction is a new note)."""
-    _case_in_scope(s, p, cid)
+    case = _case_in_scope(s, p, cid)
     try:
-        note = CaseService(s).add_note(cid, body.text, by=p)
+        note = CaseService(s).add_note(cid, body.text, by=p.acting_in(case.domain))
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
@@ -1050,6 +1085,7 @@ class DispositionBody(BaseModel):
 @app.post("/api/v1/cases/{cid}/disposition")
 def case_disposition(cid: str, body: DispositionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
     case = _case_in_scope(s, p, cid)
+    p = p.acting_in(case.domain)
     try:
         if case.domain == "phishing":
             return _services(s)["phishing"].confirm(cid, p, verdict=body.verdict, reasoning=body.reasoning)
@@ -1088,7 +1124,8 @@ def case_story(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = D
 
 @app.post("/api/v1/cases/{cid}/story/approve")
 def story_approve(cid: str, body: BundleBody, p: Principal = Depends(need(Perm.APPROVE_ACTION)), s: Session = Depends(db_session, scope="function")):
-    """Approve several response-plan actions at once. Each goes through the normal policy / four-eyes checks."""
+    """Approve several response-plan actions at once. Each goes through the normal policy / four-eyes checks (and
+    is judged in its own domain by ActionService)."""
     from soc_platform.intelligence.story import story_for_case
 
     _case_in_scope(s, p, cid)
@@ -1126,7 +1163,9 @@ def deep_analysis(cid: str, body: DeepBody | None = None, p: Principal = Depends
     from soc_platform.intelligence.deep_analysis import run_deep_analysis
     from soc_platform.intelligence.story import story_for_case
 
-    _case_in_scope(s, p, cid)
+    case = _case_in_scope(s, p, cid)
+    if not p.acting_in(case.domain).can(Perm.INVESTIGATE):
+        raise HTTPException(403, f"investigate is not granted for {case.domain} data")
     story = story_for_case(s, cid, registry())
     return run_deep_analysis(s, story, llm(s), actor=p.id, force=bool(body and body.force),
                              org_domains=get_settings().org_domains)
@@ -1150,11 +1189,13 @@ def shadow(domain: str, p: Principal = Depends(need(Perm.READ)), s: Session = De
 
 @app.get("/api/v1/metrics/drift")
 def drift(recent_days: int = Query(7, ge=1, le=90), baseline_days: int = Query(28, ge=7, le=365),
-          _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
-    """Verdict-quality drift per domain (R14, NFR-13)."""
+          p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    """Verdict-quality drift per domain (R14, NFR-13), limited to the caller's domains."""
     from soc_platform.intelligence.drift import drift_report
 
-    return drift_report(s, recent_days=recent_days, baseline_days=baseline_days)
+    out = drift_report(s, recent_days=recent_days, baseline_days=baseline_days)
+    out["domains"] = {d: v for d, v in out.get("domains", {}).items() if p.in_domain(d)}
+    return out
 
 
 @app.get("/api/v1/llm/budget")
@@ -1230,7 +1271,7 @@ def incident_investigate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE,
 
 
 @app.get("/api/v1/incidents/handover")
-def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ, "incident")), s: Session = Depends(db_session, scope="function")):
+def incident_handover(hours: int = Query(12, ge=1, le=24 * 90), _: Principal = Depends(need(Perm.READ, "incident")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["incident"].handover(hours=hours)
 
 
@@ -1300,7 +1341,12 @@ class AckBody(BaseModel):
 
 
 @app.post("/api/v1/vm/plans/{pid}/acknowledge")
-def vm_ack(pid: str, body: AckBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
+def vm_ack(pid: str, body: AckBody, p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")),
+           s: Session = Depends(db_session, scope="function")):
+    from soc_platform.domains.vulnerability.models import ActionPlan
+
+    if s.get(ActionPlan, pid) is None:
+        raise HTTPException(404, "unknown plan")
     plan = _services(s)["vulnerability"].acknowledge(pid, p, committed_date=body.committed_date, owner=body.owner,
                                                      dependencies=body.dependencies, response=body.response)
     return {"plan_id": plan.id, "status": plan.status}
@@ -1321,14 +1367,19 @@ def vm_validate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "vulnera
 
 
 class ExceptionBody(BaseModel):
-    finding_id: str
-    justification: str
-    compensating_control: str = ""
-    days: int = 90
+    finding_id: str = Field(max_length=64)
+    justification: str = Field(min_length=3, max_length=4000)
+    compensating_control: str = Field(default="", max_length=4000)
+    days: int = Field(default=90, ge=1, le=365)   # a risk acceptance always expires, and within a year
 
 
 @app.post("/api/v1/vm/exceptions")
-def vm_exception(body: ExceptionBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
+def vm_exception(body: ExceptionBody, p: Principal = Depends(need(Perm.REQUEST_ACTION, "vulnerability")),
+                 s: Session = Depends(db_session, scope="function")):
+    from soc_platform.domains.vulnerability.models import ConsolidatedFinding
+
+    if s.get(ConsolidatedFinding, body.finding_id) is None:
+        raise HTTPException(404, "unknown finding")
     ex = _services(s)["vulnerability"].request_exception(body.finding_id, p, justification=body.justification,
                                                          compensating_control=body.compensating_control, days=body.days)
     return {"exception_id": ex.id, "status": ex.status}
@@ -1379,7 +1430,7 @@ def vm_coverage(_: Principal = Depends(need(Perm.READ, "vulnerability")), s: Ses
 
 
 @app.get("/api/v1/jobs")
-def job_history(job: str | None = None, limit: int = Query(100, le=1000), _: Principal = Depends(need(Perm.READ)),
+def job_history(job: str | None = None, limit: int = Query(100, ge=1, le=1000), _: Principal = Depends(need(Perm.READ)),
                 s: Session = Depends(db_session, scope="function")):
     """Scheduled job runs, retries and dead letters (VM-T11)."""
     from soc_platform import jobs
@@ -1451,7 +1502,7 @@ REPORT_DOMAIN = {"daily_exposure": "vulnerability", "weekly_vm": "vulnerability"
 
 def _report_allowed(p: Principal, kind: str) -> bool:
     dom = REPORT_DOMAIN.get(kind, "*")
-    if kind == "compliance" and not p.can(Perm.EXPORT_EVIDENCE):
+    if kind == "compliance" and not p.acting_in("*").can(Perm.EXPORT_EVIDENCE):
         return False
     return "*" in p.domains if dom == "*" else p.in_domain(dom)
 
@@ -1536,7 +1587,7 @@ def build_custom_report(body: BuildBody, p: Principal = Depends(need(Perm.READ))
         if not body.case_id:
             raise HTTPException(422, "this report is about one case: case_id is required")
         _case_in_scope(s, p, body.case_id)
-    denied = frozenset() if p.can(Perm.EXPORT_EVIDENCE) else frozenset({"compliance"})
+    denied = frozenset() if p.acting_in("*").can(Perm.EXPORT_EVIDENCE) else frozenset({"compliance"})
     r = build_report(s, registry(), spec, get_settings().report_output_dir, llm=llm(s), by=p.id,
                      domains=frozenset(p.domains), case_id=body.case_id, denied_sources=denied)
     return r
@@ -1640,11 +1691,13 @@ def entity360(eid: str, p: Principal = Depends(need(Perm.READ)), s: Session = De
         out["insights"] = []   # correlated findings are cross-domain
         out["risk"] = None     # fused risk mixes every domain
         out["timeline"], out["related"], out["per_tool"], out["activity_by_tool"] = [], {}, {}, {}
+        if not p.in_domain("vulnerability"):
+            out["vulnerabilities"] = []
     return out
 
 
 @app.get("/metrics", include_in_schema=False)
-def metrics(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
+def metrics(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session, scope="function")):
     """Prometheus scrape endpoint; authenticate with an auditor service-account key (X-API-Key)."""
     from fastapi.responses import PlainTextResponse
 
@@ -1700,7 +1753,7 @@ def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGA
 
 
 @app.get("/api/v1/intelligence/risk/top")
-def intel_top(kind: str | None = None, limit: int = 10, _: Principal = Depends(need(Perm.READ, "*")),
+def intel_top(kind: str | None = None, limit: int = Query(10, ge=1, le=500), _: Principal = Depends(need(Perm.READ, "*")),
               s: Session = Depends(db_session, scope="function")):
     from soc_platform.intelligence.risk import RiskEngine
 

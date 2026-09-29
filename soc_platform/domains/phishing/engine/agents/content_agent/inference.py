@@ -52,6 +52,40 @@ _LABEL_RISK = {
 }
 
 
+def _predict_text_classifier(bundle: dict[str, Any], text: str) -> dict[str, Any]:
+    """The three-class text classifier (scripts/train_content_model.py): risk is the expected risk over the classes
+    (legitimate 0, spam 0.65, phishing 0.95), and the words that pushed most towards the predicted class are
+    reported, so an analyst can see why."""
+    import numpy as np
+
+    labels = list(bundle["labels"])
+    risk_by = bundle.get("risk_by_label") or {"Legitimate": 0.0, "Spam": 0.65, "Phishing": 0.95}
+    x = bundle["vectorizer"].transform([text])
+    proba = bundle["model"].predict_proba(x)[0]
+    top = int(np.argmax(proba))
+    label = labels[top]
+    risk = float(sum(p * risk_by.get(lbl, 0.5) for p, lbl in zip(proba, labels, strict=True)))
+    indicators = [f"ml_content_label:{label}"]
+    if label != "Legitimate":
+        try:                                   # contribution of each present term to the predicted class
+            names = bundle.get("_feature_names")
+            if names is None:                  # built once per loaded model (300k names), not per e-mail
+                names = bundle["_feature_names"] = bundle["vectorizer"].get_feature_names_out()
+            contrib = x.multiply(bundle["model"].coef_[top]).tocsr()
+            order = contrib.indices[np.argsort(contrib.data)[::-1]]
+            positive = {int(i) for i, v in zip(contrib.indices, contrib.data, strict=True) if v > 0}
+            words = [str(names[i]).split("__", 1)[-1] for i in order          # whole words only, not char fragments
+                     if int(i) in positive and not str(names[i]).startswith("char__")
+                     and "token" not in str(names[i])][:5]
+            if words:
+                indicators.append(f"content_terms:{', '.join(words)}")
+        except (AttributeError, IndexError, ValueError):
+            logger.debug("term attribution unavailable", agent="content_agent")
+    return {"risk_score": _clamp(risk), "confidence": _clamp(float(proba[top])), "indicators": indicators,
+            "feature_importance": {"text_classifier": 1.0},
+            "class_probabilities": {lbl: round(float(p), 4) for p, lbl in zip(proba, labels, strict=True)}}
+
+
 def predict(features: dict[str, Any], model: Any = None) -> dict[str, Any]:
     """Run model inference and return normalized risk/confidence values."""
     logger.debug("Running inference", agent="content_agent")
@@ -84,6 +118,9 @@ def predict(features: dict[str, Any], model: Any = None) -> dict[str, Any]:
                 "indicators": indicators,
                 "feature_importance": {"text_transformer": 1.0},
             }
+
+        if kind == "sklearn_bundle" and isinstance(model, dict) and model.get("labels"):
+            return _predict_text_classifier(model, features.get("text", ""))
 
         # ── Fallback: sklearn model ──
         base_model = model.get("model") if isinstance(model, dict) else model

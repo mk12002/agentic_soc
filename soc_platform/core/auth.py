@@ -16,11 +16,13 @@ Additional controls (see ``core/access.py``):
                      whose ``amr`` contains ``mfa`` (or the configured Conditional Access auth context)
 * service accounts - API-key principals can never approve, change policy or manage access
 * revocation       - per-token (jti) and per-principal (not-before) revocation
+* per-role scope   - a role acts only inside its own domain scope: a lead for phishing who is also an all-domain
+                     auditor reads every domain but approves phishing actions only (``Principal.acting_in``)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from functools import lru_cache
 
@@ -91,6 +93,8 @@ class Principal:
     issued_at: int | None = None
     break_glass: bool = False
     auth_method: str = "token"
+    # (role, its own domain scope) when roles differ in scope; empty = every role covers ``domains``
+    role_domains: tuple[tuple[Role, frozenset[str]], ...] = ()
 
     @property
     def actor_type(self) -> str:
@@ -116,6 +120,29 @@ class Principal:
             return True
         return domain != "*" and domain in self.domains
 
+    def acting_in(self, domain: str | None) -> Principal:
+        """This principal as it may *act* on ``domain`` data: only the roles whose own scope covers it.
+
+        Visibility is the union of every role's scope, but permissions are not: without this, a lead scoped to
+        phishing who was also made an all-domain auditor could approve incident actions. ``"*"`` (and
+        ``"platform"``, the domain of case-less actions) keeps only all-domain roles; ``None`` = no data scope."""
+        if domain is None:
+            return self
+        dom = "*" if domain == "platform" else domain
+        if not self.role_domains:
+            return self if self.in_domain(dom) else replace(self, roles=frozenset())
+        keep = tuple((r, ds) for r, ds in self.role_domains if "*" in ds or (dom != "*" and dom in ds))
+        return replace(self, roles=frozenset(r for r, _ in keep), role_domains=keep)
+
+    def role_scopes(self) -> dict[str, list[str]]:
+        """Each role and the domains it may act on (for display)."""
+        if not self.role_domains:
+            return {r.value: sorted(self.domains) for r in self.roles}
+        out: dict[str, set[str]] = {}
+        for r, ds in self.role_domains:
+            out.setdefault(r.value, set()).update(ds)
+        return {k: (["*"] if "*" in v else sorted(v)) for k, v in sorted(out.items())}
+
 
 def agent_principal(name: str) -> Principal:
     """Principal used when an agent (not a human) acts. Agents can only request/recommend."""
@@ -126,32 +153,29 @@ class AuthError(Exception):
     pass
 
 
-def _roles_from_claims(claims: dict) -> tuple[frozenset[Role], frozenset[str]]:
+def _roles_from_claims(claims: dict) -> tuple[frozenset[Role], frozenset[str], tuple[tuple[Role, frozenset[str]], ...]]:
     """Entra app roles ``SOC.Lead`` (all domains) or ``SOC.Analyst.Phishing`` (scoped to one domain).
 
-    Unknown role names grant nothing. The domain scope is the union over roles; any unscoped role
-    gives all domains."""
+    Unknown role names grant nothing. What the principal may *see* is the union over roles (any unscoped role
+    gives all domains); what each role may *do* stays inside that role's own scope (returned per role).
+    ``soc_domains`` (dev tokens) scopes every role of the token."""
     raw = claims.get("roles") or []
     if isinstance(raw, str):
         raw = [raw]
-    roles, domains, unscoped = set(), set(), False
+    explicit = frozenset(str(d).lower() for d in (claims.get("soc_domains") or []) if str(d).lower() in DOMAINS)
+    per_role: dict[Role, set[str]] = {}
     for r in raw:
         parts = [x.lower() for x in str(r).split(".") if x]
         role = next((Role(x) for x in parts if x in {m.value for m in Role}), None)
         if role is None:
             continue
-        roles.add(role)
-        dom = [x for x in parts if x in DOMAINS]
-        if dom:
-            domains.update(dom)
-        else:
-            unscoped = True
-    for d in claims.get("soc_domains") or []:  # dev tokens / explicit scope claim
-        if str(d).lower() in DOMAINS:
-            domains.add(str(d).lower())
-    if claims.get("soc_domains"):
-        unscoped = False
-    return frozenset(roles), (frozenset({"*"}) if unscoped or not domains else frozenset(domains))
+        dom = explicit or frozenset(x for x in parts if x in DOMAINS) or frozenset({"*"})
+        per_role.setdefault(role, set()).update(dom)
+    role_domains = tuple(sorted(((r, frozenset({"*"}) if "*" in ds else frozenset(ds)) for r, ds in per_role.items()),
+                                key=lambda x: x[0].value))
+    union = set().union(*(ds for _, ds in role_domains)) if role_domains else set(explicit)
+    domains = frozenset({"*"}) if "*" in union or not union else frozenset(union)
+    return frozenset(per_role), domains, role_domains
 
 
 def _has_mfa(claims: dict, settings: Settings) -> bool:
@@ -205,8 +229,9 @@ def principal_from_token(token: str, settings: Settings) -> Principal:
     if not subject:
         raise AuthError("token has no subject")
     name = claims.get("preferred_username") or claims.get("upn") or claims.get("name") or subject
-    roles, domains = _roles_from_claims(claims)
+    roles, domains, role_domains = _roles_from_claims(claims)
     return Principal(id=str(subject), name=str(name), roles=roles, domains=domains, mfa=_has_mfa(claims, settings),
+                     role_domains=role_domains if len({ds for _, ds in role_domains}) > 1 else (),
                      token_id=str(claims.get("jti") or claims.get("uti") or "") or None,
                      issued_at=int(claims["iat"]) if str(claims.get("iat", "")).isdigit() else None)
 

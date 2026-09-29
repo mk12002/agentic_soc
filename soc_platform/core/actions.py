@@ -163,9 +163,10 @@ class ActionService:
             return self._execute(req, spec, actor=requested_by)
 
         # A human who requests an action they are allowed to approve is giving explicit approval,
-        # unless four-eyes applies (then a different person must approve).
+        # unless four-eyes applies (then a different person must approve). "Allowed" is judged in the action's
+        # domain: a phishing-scoped analyst could otherwise self-approve a platform-wide action.
         if (not requested_by.is_agent and req.status in APPROVABLE and not decision.four_eyes
-                and self._may_approve(requested_by, decision.high_impact)):
+                and self._may_approve(requested_by.acting_in(domain), decision.high_impact)):
             return self.approve(req.id, requested_by, note="requested and approved by analyst", _self_ok=True)
         return req
 
@@ -178,6 +179,7 @@ class ActionService:
         high_impact = bool(req.result.get("high_impact"))
         if approver.is_agent:
             raise PermissionError("agents cannot approve actions")
+        approver = approver.acting_in(req.domain)   # only roles whose scope covers this action's domain count
         if not self._may_approve(approver, high_impact):
             raise PermissionError("approve_high_impact permission required" if high_impact
                                   else "approve_action permission required")
@@ -207,7 +209,7 @@ class ActionService:
         req = self._get(request_id)
         if req.status not in APPROVABLE:
             raise ValueError(f"action {request_id} is {req.status}, not awaiting approval")
-        if approver.is_agent or not approver.can(Perm.APPROVE_ACTION):
+        if approver.is_agent or not approver.acting_in(req.domain).can(Perm.APPROVE_ACTION):
             raise PermissionError("approve_action permission required")
         req.status, req.approver, req.decision_note, req.decided_at = "rejected", approver.id, note, utcnow()
         self.audit.append(actor_type="human", actor_id=approver.id, event_type="action.rejected",
@@ -218,7 +220,7 @@ class ActionService:
         req = self._get(request_id)
         if req.status != "executed":
             raise ValueError("only executed actions can be rolled back")
-        if by.is_agent or not by.can(Perm.ROLLBACK_ACTION):
+        if by.is_agent or not by.acting_in(req.domain).can(Perm.ROLLBACK_ACTION):
             raise PermissionError("rollback_action permission required")
         spec = self.registry.get(req.action_type)
         rev = spec.reverse(req.params, req.targets, req.result) if spec.reversible else None

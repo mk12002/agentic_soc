@@ -249,6 +249,8 @@ FEATURES: list[tuple[str, str, list[str]]] = [
       "test_phishing_engine.py::test_the_behaviour_model_uses_real_history_department_and_arrival_time",
       "test_phishing_engine.py::test_a_models_only_alarm_needs_a_reliable_model_or_the_rules_to_agree",
       "test_phishing_engine.py::test_the_sandbox_agent_runs_only_with_a_detonation_host"]),
+    ("Phishing", "The ML engine stays offline inside the platform: no outbound connection even with keys present",
+     ["test_phishing_engine.py::test_the_engine_makes_no_outbound_connection_in_offline_mode"]),
     ("Vulnerability", "Weekly follow-up per plan, risk register kept current, weekly reports scheduled",
      ["test_vulnerability.py::test_follow_up_is_weekly_per_plan_escalations_count_up_routine_checks_do_not",
       "test_vulnerability.py::test_risk_register_is_kept_current_after_every_refresh",
@@ -402,6 +404,8 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
                 time.sleep(1)
         p = subprocess.run(["node", "tour.js"], cwd=tour, env={**os.environ, "SOC_BASE": f"http://127.0.0.1:{port}", "SOC_SHOTS": str(shots)},
                            capture_output=True, text=True, check=False)
+        if not (shots / "tour-result.json").exists():   # the tour died: show why instead of a missing-file error
+            return False, "tour crashed: " + ((p.stderr or "") + (p.stdout or ""))[-1500:]
         res = json.loads((shots / "tour-result.json").read_text())
         ok = p.returncode == 0 and not res["problems"]
         detail = (("LLM on - " if with_llm else "") + f"{res['screenshots']} screenshots, layout audited at {', '.join(map(str, res['audited_widths']))} px in light + dark, "

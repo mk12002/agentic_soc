@@ -23,6 +23,12 @@ HREF_RE = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 AUTH_RE = re.compile(r"\b(spf|dkim|dmarc|arc|compauth)=(\w+)", re.IGNORECASE)
 RECEIVED_FROM_RE = re.compile(r"from\s+([^\s;()]+)(?:\s*\(([^)]*)\))?", re.IGNORECASE)
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# Hostile HTML must cost linear time. ``<[^>]+>`` and ``<a[^>]+href...>(.*?)</a>`` rescanned to the end of the message
+# from every "<" / "<a" with no closing ">" / "</a>": 240 KB of repeated "<a href='x'>" took 16 s, and a 25 MB
+# message would have held a worker for hours (ReDoS). Tags stop at the next "<"; link text stops at the next "<a".
+TAG_RE = re.compile(r"<[^<>]*>")
+ANCHOR_RE = re.compile(r"""<a\s[^<>]{0,2000}?href\s*=\s*["']([^"'<>]{1,4096})["'][^<>]{0,2000}>((?:(?!<a[\s>]).){0,5000}?)</a>""",
+                       re.IGNORECASE | re.DOTALL)
 RISKY_EXT = {".exe", ".scr", ".js", ".jse", ".vbs", ".vbe", ".hta", ".wsf", ".ps1", ".bat", ".cmd", ".lnk", ".iso",
              ".img", ".vhd", ".one", ".html", ".htm", ".svg", ".docm", ".xlsm", ".pptm", ".jar", ".msi", ".zip", ".rar", ".7z"}
 
@@ -198,14 +204,14 @@ def decompose(raw: bytes) -> DecomposedEmail:
         (html_parts if ctype == "text/html" else text_parts).append(str(content))
 
     body_html = "\n".join(html_parts)
-    body_text = "\n".join(text_parts) or re.sub(r"<[^>]+>", " ", htmllib.unescape(body_html))
+    body_text = "\n".join(text_parts) or TAG_RE.sub(" ", htmllib.unescape(body_html))
     hrefs = [htmllib.unescape(h) for h in HREF_RE.findall(body_html)]
     urls = sorted({u.rstrip(".,;") for u in URL_RE.findall(body_text) + URL_RE.findall(body_html) + hrefs
                    if u.lower().startswith("http")})
     # Link text that shows one domain but points to another (classic phishing tell)
     mismatch = []
-    for m in re.finditer(r"""<a[^>]+href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""", body_html, re.IGNORECASE | re.DOTALL):
-        href, text = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
+    for m in ANCHOR_RE.finditer(body_html):
+        href, text = m.group(1), TAG_RE.sub("", m.group(2)).strip()
         shown = URL_RE.search(text) or re.search(r"\b[a-z0-9-]+(\.[a-z0-9-]+)+\b", text, re.IGNORECASE)
         if shown and href.startswith("http") and _url_domain(href) not in text.lower():
             mismatch.append({"shown": shown.group(0), "href": href})

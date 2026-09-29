@@ -144,7 +144,7 @@ async function CaseDetail(id) {
   const intel = v.intelligence || {};
   // phishing: which analysis ran, the trained models' verdict next to the rules', and every model's score
   const bd = a.backend_detail || {}, backend = (v.completeness || {}).analysis_backend;
-  const MODEL = {header_agent: 'Header', content_agent: 'Content (transformer)', url_agent: 'URLs', attachment_agent: 'Attachments',
+  const MODEL = {header_agent: 'Header', content_agent: 'Content (text model)', url_agent: 'URLs', attachment_agent: 'Attachments',
     sandbox_agent: 'Sandbox', threat_intel_agent: 'Threat intel', user_behavior_agent: 'User behaviour'};
   const analysisCard = c.domain !== 'phishing' || !backend ? '' : card('Analysis', bd.engine
     ? `<div class="inline small" style="gap:18px;margin-bottom:10px;flex-wrap:wrap"><span>ML models ${chip(bd.engine.verdict, 'plain')} ${pct(bd.engine.score)}</span><span>Rules ${chip(bd.heuristic.verdict, 'plain')} ${pct(bd.heuristic.score)}</span></div>` +
@@ -161,7 +161,7 @@ async function CaseDetail(id) {
         owner <b>${c.assignee ? esc(c.assignee) : 'unassigned'}</b>
         ${can('investigate') && c.assignee !== ME.id.toLowerCase() ? btn('Take case', 'assignCase', [id, 'me'], 'sm') : ''}
         ${can('investigate') && c.assignee && (c.assignee === ME.id.toLowerCase() || can('approve_high_impact')) ? btn('Unassign', 'assignCase', [id, ''], 'sm ghost') : ''}</p></div>
-      <div class="actions"><a class="btn primary" href="#/story/${encodeURIComponent(id)}">${icon('intel')}Attack story</a>${btn('Investigation record', 'dl', [`/api/v1/cases/${id}/report`], '', 'download')}</div></div>
+      <div class="actions"><a class="btn primary" href="#/story/${encodeURIComponent(id)}">${icon('intel')}Attack story</a>${btn('Investigation record', 'dl', [`/api/v1/cases/${encodeURIComponent(id)}/report`], '', 'download')}</div></div>
     ${un.length ? `<div class="callout"><b>Incomplete picture.</b>&nbsp;Unavailable sources: ${un.map(u => esc(u.source)).join(', ')}. Conclusions below exclude them.</div>` : ''}
     <div class="grid g-2">
       <div class="stack">

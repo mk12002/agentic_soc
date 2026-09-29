@@ -11,7 +11,9 @@ import re
 import secrets
 from dataclasses import dataclass, field
 
-EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+# Bounded to RFC 5321 lengths and anchored to the start of a run: with an unbounded local part, text such as
+# "1.1.1.1..." (no "@") was rescanned to its end from every position - 200 KB of it took ~95 s (ReDoS).
+EMAIL_RE = re.compile(r"(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-]{1,64})@([A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24})\b")
 PHONE_RE = re.compile(r"(?<![\w.])\+?\d[\d\s()-]{7,16}\d(?![\w.])")
 CARD_RE = re.compile(r"\b(?:\d[ -]?){13,16}\b")
 PAN_RE = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")          # Indian PAN

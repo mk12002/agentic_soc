@@ -66,7 +66,7 @@ Section 4.1 of the requirements doc describes the Multi-Agent Email Security Sys
 |---|---|---|
 | Seven analysis agents (header, content, URL, attachment + OCR, sandbox, threat intel, user behaviour) | **True** | `src/agents/*` — each has an agent, a feature extractor, inference code and a trained model in `models/` |
 | Header: SPF/DKIM/DMARC plus Levenshtein lookalike detection | **True, and more** | `header_agent/` also has ARC validation (`arc_validator.py`) |
-| Content: TinyBERT NLP classifier | **True** | `content_agent/`, `models/content_agent/model.safetensors`, plus `multilingual.py` |
+| Content: TinyBERT NLP classifier (replaced 2026-09-29 by a TF-IDF text classifier trained on public data - see docs/ENGINEERING.md §21) | **True** | `content_agent/`, `models/content_agent/model.safetensors`, plus `multilingual.py` |
 | URL: entropy, heuristics, reputation, homoglyph detection | **True** | `url_agent/`, `utils/unicode_normalizer.py` (a curated confusables map for Cyrillic, Greek and fullwidth characters, plus punycode) |
 | Attachment: EMBER features plus Azure AI Vision OCR | **True** | `attachment_agent/`, `services/ocr_service.py` |
 | Sandbox: Docker execution with strace | **True, but unsafe** | `sandbox/executor_service.py` uses `docker.from_env()`. See the sandbox gap below. |

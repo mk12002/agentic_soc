@@ -414,7 +414,8 @@ Use these when someone asks "how do you get that number?". Every one is determin
 - **Auto-close:** clear-safe and clear-spam reports with confidence ≥ 0.7 are closed and the reporter is answered.
   10 % are sampled for analyst QA, chosen deterministically by hashing.
 - **The trained ML engine runs alongside, by default:** seven models, one per e-mail component - header, content
-  (a fine-tuned transformer), URL, attachment, sandbox, threat intel, user behaviour. Each scores its part of the
+  (a text classifier trained on public phishing and spam data), URL, attachment, threat intel, user behaviour
+  (sandbox only with a detonation host). Each scores its part of the
   e-mail; the engine's decision graph combines them. The platform then fuses the models' verdict with the rules'
   verdict: the more severe wins, both are shown on the case with every model's score, and when *only* the models
   alarm on a properly authenticated sender without high confidence, the case goes to an analyst as suspicious.
@@ -579,6 +580,8 @@ and recommendation is identical."
   - 5 roles (analyst, lead, admin, automation admin, auditor).
   - Domain scoping (phishing / incident / vulnerability); cross-domain views need all-domain scope. Out-of-scope
     records answer 404.
+  - Each role acts only inside its own scope: a phishing lead who is also an all-domain auditor reads everything
+    but approves phishing actions only. Policy changes need an all-domain role.
   - Separation of duties: no self-approval of four-eyes actions, policies, exceptions or grants.
 - **Automation safety:** L0 observe · L1 enrich · L2 recommend (default) · L3 approve · L4 autonomous. Destructive
   actions are never autonomous. VIP, blast-radius and four-eyes gates apply. The kill switch is durable. Actions
@@ -603,7 +606,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 321 passed on SQLite (with PostgreSQL's rules enforced) and 321 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 329 passed on SQLite (with PostgreSQL's rules enforced) and 329 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -614,7 +617,7 @@ and recommendation is identical."
 | Output review | every model output of a full run audited for figures not in its evidence (see below) |
 | Consistency suite | the same figure compared across every surface (dashboards, lists, badges, brief, analyst tools, report facts, generated Word documents); every pipeline and job run twice with zero change; LLM on vs off with identical figures; every GET route × 7 roles (no errors, no leaks, explicit UTC); every write route fuzzed; every stored reference resolved |
 | Screen vs API | the browser tour reads every KPI, badge and tab count off the rendered screens and compares it with the API |
-| Penetration tests | 17 attack groups (authentication, privilege, cross-domain, injection, prompt injection, traversal, uploads, leakage, brute force, races, production surface, Entra token forgery): all refused (§16) |
+| Penetration tests | 24 attack tests (authentication, privilege, cross-domain, injection, prompt injection, traversal, uploads, leakage, brute force, races, production surface, Entra token forgery; round 2: mixed-scope roles, scoped self-approval, proxy-header spoofing, vulnerability-workflow abuse, cross-domain leaks, ReDoS in e-mail parsing): all refused (§16, SECURITY.md) |
 | Property-based fuzzing | 11 rules checked against thousands of generated inputs (redaction, guardrail, timestamps, e-mail parser) |
 | Time-travel tests | clock moved forward on 3 estates: SLAs, budget roll-over, retention, risk decay all correct |
 | Code quality | ruff: 0 findings across the repository; bandit: 0 medium/high; pip-audit and npm audit: no known vulnerabilities |
@@ -740,7 +743,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 321 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 329 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -750,7 +753,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 
 | Question | Answer |
 |---|---|
-| Has it been penetration-tested? | Internally, yes, and automatically on every test run: 17 attack groups against a local instance, plus a stored-XSS probe in a real browser (§16, SECURITY.md). It has not had an independent third-party test; that should be done in the client's environment before go-live. |
+| Has it been penetration-tested? | Internally, yes, and automatically on every test run: 24 attack tests against a local instance, plus a stored-XSS probe in a real browser (§16, SECURITY.md). A second, white-box round (2026-09-29) found and fixed 14 issues, the most serious a merged role scope and quadratic e-mail parsing (details in SECURITY.md). It has not had an independent third-party test; that should be done in the client's environment before go-live. |
+| Someone is a lead for phishing and an auditor for everything. Can they approve incident actions? | No. Each role acts only inside its own scope: they can read incident data as an auditor, but their lead permissions apply to phishing only. A pen test found this merged before the fix; a test pins it. |
+| Can a malicious e-mail slow the platform down? | Parsing is linear in the message size: every pattern over e-mail content is bounded and tested on 2.4 MB hostile bodies. Before round 2, one crafted message could hold a worker for hours. |
 | What if someone steals a token? | Tokens expire (a token without an expiry is refused). Logout revokes the token server-side, and an admin can revoke every session of a user at once. High-impact decisions need MFA on the token. |
 | Could someone forge an Entra token? | No. Production tokens are verified with RS256 against the tenant's published keys, with audience, issuer and expiry enforced. The tests try another signing key, the wrong audience or issuer, `alg: none` and the classic algorithm-confusion attack; all are refused. |
 | Can a phishing analyst see incident data? | No. Every list, record, report, audit entry and access-log entry is scoped. Asking for another domain's record by id answers "not found", which is tested for every id route. |
@@ -787,10 +792,11 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 
 | Question | Answer |
 |---|---|
-| Where are our trained models? | Six run on every reported e-mail: header, content (transformer), URL, attachment, threat intel, user behaviour. The sandbox model needs an isolated detonation host, so it runs only when one is configured. Each case's *Analysis* card shows the models' verdict, every model's score and how reliable it measured, next to the rules' verdict. |
+| Where are our trained models? | Six run on every reported e-mail: header, content (a text classifier), URL, attachment, threat intel, user behaviour. The sandbox model needs an isolated detonation host, so it runs only when one is configured. Each case's *Analysis* card shows the models' verdict, every model's score and how reliable it measured, next to the rules' verdict. |
+| Do the models send our mail anywhere? | No. Inside the platform the engine is strictly offline: every external lookup and cloud service is switched off, and a test blocks all network access and requires zero connection attempts. Threat intelligence comes from the platform's own configured sources. |
 | Are the models fed properly? | Yes - the platform gives them what they cannot see in the e-mail: its 8-source threat intelligence, whether this person has received mail from this sender before (from the mail flow), their department, and whether it arrived in business hours. With that data the models stopped calling a genuine Azure invoice malicious. |
 | Why also rules? | Two independent views. On our test data the rules catch two kinds the models miss (an HTML attachment carrying a login form, a bank-detail change with no link). And the content and user-behaviour models may not decide alone: a models-only alarm needs the header, URL, attachment or threat-intel model, or the rules, to agree - otherwise an analyst decides. |
-| How accurate are the models? | On our 46 labelled test messages: the models alone catch 79 % with no false alarms; combined with the rules 100 %, every verdict exactly right. The weakest model is the content transformer (small, reads only ~100 words); retraining it on real reported mail is the next step. The test data is synthetic and small - real accuracy is measured in shadow mode on your own reported mail. |
+| How accurate are the models? | On our 46 labelled test messages: the models alone catch 89 % with no false alarms; combined with the rules 100 %, every verdict exactly right. We replaced the delivered content model (a tiny transformer that caught 25 % of phishing on public test data) with a compact text classifier trained on public phishing and spam collections: 99 % on held-out data, half the size, and it shows the words that drove its score. Next: retrain it on your own reported mail. The test data is synthetic and small - real accuracy is measured in shadow mode on your own reported mail. |
 | Do we wait for them? | No. About 1 second per e-mail in the background; the models load once when the server starts (~10 s). |
 
 ### About the database and scale
@@ -815,9 +821,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 321 SQLite, 321 PostgreSQL / 205 |
-| Penetration test groups / fuzzing properties | 17 / 11, all passing |
-| Features verified | 102 of 102 |
+| Platform tests / engine tests | 329 SQLite, 329 PostgreSQL / 205 |
+| Penetration test groups / fuzzing properties | 24 / 11, all passing |
+| Features verified | 103 of 103 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
 | Risk half-life / bands | 7 days / critical ≥ 80, high ≥ 60, medium ≥ 30 |
@@ -1160,12 +1166,12 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 321 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 329 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |
 | **Time travel** | The test clock is moved forward: SLAs fall due and every screen agrees at each point; the token budget resets at month end; retention prunes old mail but keeps open cases; open exposures keep their risk while activity fades | Green on 3 estates |
-| **Penetration testing** | 17 attack groups against a local instance: forged, expired and unsigned tokens; algorithm confusion on production tokens; privilege escalation; cross-domain access by id; SQL and prompt injection; path traversal; upload abuse; information leakage; brute force; races (six simultaneous approvals execute once); production mode exposes no developer surface | All refused |
+| **Penetration testing** | 24 attack tests against a local instance: forged, expired and unsigned tokens; algorithm confusion on production tokens; privilege escalation; cross-domain access by id; SQL and prompt injection; path traversal; upload abuse; information leakage; brute force; races (six simultaneous approvals execute once); production mode exposes no developer surface. Round 2 (white-box): a lead with mixed-scope roles deciding another domain; scoped self-approval; spoofed proxy headers; read-only roles changing the vulnerability workflow; cross-domain data on shared screens; quadratic parsing of hostile e-mail (ReDoS) | All refused |
 | **Stored XSS** | Script in an e-mail's subject, sender, body, link and attachment name, viewed on 8 screens with the browser's CSP switched off | Nothing executed or injected |
 | **Property-based fuzzing** | Rules checked against thousands of generated inputs: redaction round-trips exactly and never leaks an internal address or card number; attacker indicators are kept; the numeric guardrail accepts supported figures and rejects invented ones; every vendor timestamp format parses to the same instant; the e-mail parser survives arbitrary bytes and hostile MIME | 11 properties hold |
 | **Accessibility** | axe-core (WCAG 2.1 A/AA) on every screen, both themes | 0 findings |

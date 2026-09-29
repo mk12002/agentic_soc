@@ -893,9 +893,15 @@ changes no number, verdict or action; the test suite proves it on three estates.
 - **Domain scope:** a principal may be limited to phishing / incident / vulnerability.
   - Every list is filtered.
   - Every id route checks the record's domain and answers **404** out of scope, which also hides existence.
-  - The audit log, access log and reports are scoped too. Cross-domain views (intelligence, brief) need all-domain
-    scope.
+  - The audit log, access log and reports are scoped too. Cross-domain views (intelligence, brief, `/metrics`) need
+    all-domain scope.
   - Tested for every id route with a phishing-only user.
+  - **Scope is per role.** What a principal may *see* is the union of its roles' scopes; what it may *do* in a
+    domain comes only from roles covering that domain (`Principal.role_domains`, `acting_in`). `need(perm, domain)`
+    hands the handler the principal as it acts in that domain; case writes act in the case's domain; `ActionService`
+    judges every approval, rejection, rollback and request-time self-approval in the action's domain. An action
+    requested on a case belongs to the case's domain; case-less actions are `platform` (all-domain roles only).
+    Platform grants add a role with its own scope; a scoped administrator grants only their own domains.
 - **Separation of duties:** nobody approves their own action, policy, exception or access grant; the proposer of a
   policy cannot approve it.
 
@@ -906,11 +912,15 @@ changes no number, verdict or action; the test suite proves it on three estates.
     'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
   - `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
     `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy`, `Cache-Control: no-store`
-  - HSTS on HTTPS
+  - HSTS on HTTPS (including `X-Forwarded-Proto: https` from a trusted proxy)
 - **No CORS grants.** The console is same-origin.
 - **Limits:**
   - body size 30 MB, enforced on the byte stream (chunked uploads without Content-Length too)
-  - per-client token bucket (20/s, burst 120; `X-Forwarded-For` honoured only from `SOC_TRUSTED_PROXIES`)
+  - per-client token bucket (20/s, burst 120). `X-Forwarded-For` is read only from `SOC_TRUSTED_PROXIES`, and the
+    client is its right-most hop that is not a proxy (the left-most is caller-controlled). Past 50,000 tracked
+    addresses, idle buckets are evicted.
+  - linear-time content parsing: every regex over e-mail content is bounded (§25 #36); unknown ids answer 404 and
+    programming errors a generic 400, never interpreter internals
 - **Input handling:**
   - NUL in path or query is refused (400)
   - database `DataError` → 400, never 500
@@ -1253,9 +1263,31 @@ platform by default** whenever its libraries (PyTorch, transformers) are install
 - RabbitMQ workers, Redis caching and a sandbox executor for detonation, when deployed as its own service
 - models verified by SHA-256 manifest before loading
 
-**The trained models** (`artifacts/phishing/models/`): header (random forest), content (a small fine-tuned BERT: 2
-layers, 128 wide, first 128 tokens), URL (random forest), attachment and sandbox (scikit-learn), threat intel and
-user behaviour (XGBoost).
+**The trained models** (`artifacts/phishing/models/`): header (random forest), content (a text classifier, below), URL
+(random forest), attachment and sandbox (scikit-learn), threat intel and user behaviour (XGBoost).
+
+**The content model was replaced** (2026-09-29). The delivered model was a 2-layer BERT reading the first 128 tokens;
+on 2,000 held-out public messages it reached 68 % accuracy and caught 25 % of phishing, and on the platform's corpus
+it called three phishing e-mails "Legitimate" with 90-95 % confidence and never predicted *Spam*. The new model
+(`scripts/train_content_model.py`, model card in `content_agent/model_card.json`):
+- TF-IDF word (1-2) and character (3-5) features + logistic regression, three classes (legitimate, spam, phishing);
+  9.5 MB, half the old model, ~6 ms per e-mail on a laptop CPU (measured; the list of 300k feature names
+  used to explain a score is built once per loaded model - rebuilding it per e-mail cost 149 ms)
+- the whole message, HTML reduced to visible text; links, addresses and numbers as neutral tokens
+  (`content_agent/text_prep.py`, the same function in training and at inference)
+- risk = expected risk over the classes (legitimate 0, spam 0.65, phishing 0.95); the words that pushed most towards
+  the predicted class become evidence (`content_terms:`)
+- trained on public data: the Nazario phishing corpus 2019-2025 (real phishing; CC BY 4.0 - attribution below),
+  the SpamAssassin public corpus (legitimate and spam; non-live testing terms: the messages are never sent) and the
+  "Safe Email" rows of zefang-liu/phishing-email-dataset (LGPL-3.0). That dataset's "Phishing Email" rows were left
+  out: most are ordinary spam, which would teach "spam = phishing". 11,499 messages after de-duplication, 20 %
+  held out
+- results: hold-out 99.1 % accuracy (phishing recall 98.9 %, spam 96.3 %) - likely flattered by the older
+  legitimate mail - and, on the platform's corpus it was never trained on, 10 of 12 base messages right (the old
+  model 7), every phishing message caught. It still reads invoice wording as phishing, so it never confirms an alarm
+  on its own.
+
+Attribution: phishing corpus by Jose Nazario, https://monkey.org/~jose/phishing/, licensed CC BY 4.0.
 
 **Integration:**
 - `SOC_PHISHING_ENGINE`: `auto` (default: on when installed), `1` (on), `0` (heuristic only). Used by the server,
@@ -1305,6 +1337,7 @@ suspicious, 18 legitimate or spam):
 | Heuristic analyser alone | 28 / 28 | 0 | 44 / 46 |
 | ML engine alone, without the platform's data | 22 / 28 | 3 (the genuine invoice, in each organisation) | 33 / 46 |
 | ML engine alone, **with** the platform's data | 22 / 28 | **0** | 36 / 46 |
+| ... and the new content model | **25 / 28** | **0** | **39 / 46** |
 | **Combined, as the platform runs it** | **28 / 28** | **0** | **46 / 46** |
 
 Each model on its own (separation: the chance a malicious message scores above a legitimate one; 0.5 = coin flip):
@@ -1314,17 +1347,17 @@ Each model on its own (separation: the chance a malicious message scores above a
 | Header | 0.85 | never scored a legitimate message 0.5+; misses attacks with clean authentication |
 | URL | 1.00 on the 13 messages with links | 0.49 over all 46: a message without links scores 0, correctly |
 | Attachment | 1.00 on the 13 with attachments | ranks correctly but scores many malicious attachments below 0.5 |
-| Content transformer | 0.88 | confidently wrong on 5 of the 12 base messages; never outputs *Spam*; the weakest model |
+| Content | 0.88 → **0.99** with the new text classifier | phishing scored below 0.5: 7 → 0; still flags the genuine invoice |
 | User behaviour | 0.86 → **0.93** with real contact history | legitimate messages scored 0.5+: 3 → 0 |
 | Threat intel | 0.50 on this corpus | the intel sources know none of the corpus domains; contributes on known campaigns |
 | Sandbox | 0.40 (static fallback only) | not run without a detonation host |
 
 Read with care: the corpus is small and synthetic, the generated organisations reuse its base messages, and the
-heuristic was written alongside it. The engine's blind spots on it are an HTML attachment carrying a credential form
-and a bank-detail-change request with no link or attachment; the heuristic covers both. The biggest remaining
-improvement is retraining the content model (a larger transformer, longer input, HTML stripped, trained on real
-reported mail including invoices, supplier fraud, service notifications and marketing). Real accuracy is measured
-on the client's reported mail in shadow mode.
+heuristic was written alongside it. With the new content model the engine's only blind spot on it is a
+bank-detail-change request from a real supplier's account (no link, no attachment, a familiar sender); the heuristic
+covers it. Next steps: retrain the content model on the client's reported mail once shadow mode has collected it
+(the public legitimate mail is old), and recalibrate the attachment model. Real accuracy is measured on the client's
+reported mail in shadow mode.
 
 **Tested in the platform** (`test_phishing_engine.py`, 13 tests): every in-platform agent answers inside the real
 pipeline; the genuine invoice is safe and phishing still caught with the platform's data; threat intel fed from the
@@ -1352,7 +1385,7 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 | Consistency | `test_consistency.py` | Same figure on every surface; re-runs change nothing; LLM on/off identical; every GET route × 7 roles; every write route fuzzed; every reference resolves |
 | Generalisation | `test_generalisation.py`, `test_variants.py` | Renamed and seeded variant organisations give correct results; no demo names leak |
 | Time travel | `test_time.py` | SLAs, budget roll-over, retention with legal hold, risk decay, all consistent as the clock moves |
-| Penetration | `test_pentest.py` | 17 attack groups refused (SECURITY.md) |
+| Penetration | `test_pentest.py` | 24 attack tests refused (SECURITY.md), incl. round 2: per-role scope, scoped self-approval, proxy-header spoofing, vulnerability-workflow abuse, cross-domain leaks on shared screens, ReDoS |
 | Property-based | `test_properties.py` | Redaction, guardrail, timestamps, bounded text, e-mail parser hold for generated inputs |
 | Concurrency | `test_scheduler.py`, `test_audit_concurrency.py`, pentest races | No double runs, no forked chain, exactly-once approvals, one case per e-mail |
 | Live (opt-in) | `test_live_llm.py`, live feed tests | The real LLM and public feeds |
@@ -1459,8 +1492,12 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 28 | Global search with escaped `LIKE` over names and every tool identifier, scope-filtered per group | A search engine (OpenSearch); full-text indexes | No extra infrastructure; any identifier from any tool finds the entity; scope rules reused | Substring scans; fine to hundreds of thousands of rows, a search index is the next step beyond |
 | 30 | The trained ML engine on by default (when installed), fed with the platform's threat intel and mail-flow history, fused with the heuristic; a models-only alarm needs a reliable model to agree | Heuristic only; engine only as delivered | Measured: with the platform's data the engine stopped calling legitimate mail malicious, and the combination got every labelled message right | +1 s per e-mail in the background, ~10 s model load at start; the sandbox agent does not run without a detonation host |
 | 31 | Weekly per-plan follow-up, weekly reports as a job, risk register refreshed after every scan | Daily escalations; reports and register on demand only | The client's stated recurring workload; no daily nagging of platform teams | Reports land in Reports every week whether or not anyone reads them |
+| 33 | Content model: a compact TF-IDF + logistic-regression classifier trained on public data, replacing a 2-layer BERT | A larger transformer; the LLM as content analyser | Measured far better (hold-out 99 % vs 68 %; corpus 10/12 vs 7/12) at half the size, explainable by its words, no GPU; the LLM would let model output change verdicts (hard rule 7) and fail with the LLM off | Public legitimate mail is old; retrain on the client's mail when available |
+| 34 | Offline engine enforced on its live settings (every lookup switch off, every external credential cleared) | Environment variables only | The engine reads the project's .env itself; with import order against it, image attachments went to an Azure OCR service and URLs / hashes to public lookup services | A test blocks all network access and requires zero connection attempts |
 | 32 | Azure role assignments read from Azure Resource Manager inside the Entra connector | A separate connector | One identity picture per person (directory roles and Azure roles); ARM has its own token audience through `RoutingTransport` | Needs the Reader role on the subscriptions |
 | 29 | Automatic *nullable* column addition at start-up on both engines | Alembic immediately | New optional fields reach existing databases with no manual step | Required columns, renames and drops still need a scripted migration |
+| 35 | Per-role data scope: a principal sees the union of its roles' domains, but each permission counts only where the role granting it applies (`Principal.acting_in`); route guards, case writes and `ActionService` decide with the acting principal | One merged scope per principal; separate accounts per scope | Penetration testing found the merged scope let a phishing lead who was also an all-domain auditor approve incident actions | Cross-domain decisions (policy, evidence export, correlated findings) need an all-domain role; `/me` shows `role_scopes` |
+| 36 | Every regex over message content is bounded (no unbounded run before a required character; scans stop at the next tag) and tested on 2.4 MB hostile bodies | An HTML parser for extraction; a timeout around analysis | Quadratic patterns let one reported e-mail hold a worker for hours; bounded patterns keep the verdict logic unchanged | Anchor text beyond 5,000 characters and addresses beyond RFC lengths are not matched |
 
 ---
 

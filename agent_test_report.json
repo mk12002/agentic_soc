@@ -1,0 +1,178 @@
+{
+  "header_agent": {
+    "Benign": {
+      "risk_score": 0.0364,
+      "confidence": 0.9394,
+      "indicators": [
+        "ml_header_model_used"
+      ]
+    },
+    "Malicious": {
+      "risk_score": 1.0,
+      "confidence": 0.9854,
+      "indicators": [
+        "spf_failed",
+        "dkim_failed",
+        "dmarc_failed",
+        "lookalike_domain:rnicrosoft.com->microsoft.com",
+        "missing_data:short_smtp_trace",
+        "reply_to_domain_mismatch",
+        "ml_header_model_used"
+      ]
+    }
+  },
+  "content_agent": {
+    "Benign": {
+      "risk_score": 0.0333,
+      "confidence": 0.94,
+      "indicators": [
+        "ml_content_label:Legitimate"
+      ]
+    },
+    "Malicious": {
+      "risk_score": 1.0,
+      "confidence": 0.9998,
+      "indicators": [
+        "urgency_signals:urgent,immediately,suspended",
+        "credential_signals:password,login",
+        "financial_signals:invoice,payment,wire",
+        "bec_pattern_both_urgency_and_financial",
+        "bec_fraud_signals:wire transfer",
+        "multilingual_urgency_signals:fr:urgent",
+        "multilingual_credential_signals:it:password",
+        "ml_content_label:Phishing",
+        "content_terms:your account, your, dear, password, account"
+      ]
+    }
+  },
+  "url_agent": {
+    "Benign": {
+      "risk_score": 0.2963,
+      "confidence": 0.82,
+      "indicators": [
+        "urls_analyzed=2",
+        "heuristic_risk=0.0",
+        "external_risk=0.0",
+        "external_lookups_enabled",
+        "many_urls:2",
+        "global_allowlist_prior_applied",
+        "confidence_capped_low_evidence",
+        "ml_url_model_used",
+        "urlhaus_unauthorized",
+        "benign_allowlist_prior:github.com",
+        "urlhaus_unauthorized",
+        "benign_allowlist_prior:google.com"
+      ]
+    },
+    "Malicious": {
+      "risk_score": 1.0,
+      "confidence": 0.92,
+      "indicators": [
+        "urls_analyzed=2",
+        "heuristic_risk=0.43",
+        "external_risk=0.0",
+        "external_lookups_enabled",
+        "confidence_penalty_conflict=1",
+        "many_urls:2",
+        "ml_url_model_used",
+        "many_subdomains",
+        "non_https_url",
+        "urlhaus_unauthorized",
+        "many_subdomains",
+        "credential_bait_terms",
+        "high_subdomain_entropy",
+        "non_https_url",
+        "urlhaus_unauthorized",
+        "heuristic_reputation_conflict"
+      ]
+    }
+  },
+  "attachment_agent": {
+    "Benign": {
+      "risk_score": 0.1363,
+      "confidence": 0.8637,
+      "indicators": [
+        "missing_attachment_path:notes.txt",
+        "ml_attachment_model_used_ensemble_10"
+      ]
+    },
+    "Malicious": {
+      "risk_score": 1.0,
+      "confidence": 0.8637,
+      "indicators": [
+        "suspicious_extension:invoice_urgent.exe",
+        "suspicious_extension:resume.pdf.js",
+        "missing_attachment_path:invoice_urgent.exe",
+        "double_extension_evasion:resume.pdf.js",
+        "ml_attachment_model_used_ensemble_10",
+        "missing_attachment_path:resume.pdf.js"
+      ]
+    }
+  },
+  "sandbox_agent": {
+    "Benign": {
+      "risk_score": 0.0,
+      "confidence": 0.45,
+      "indicators": [
+        "docker_sandbox_unavailable",
+        "soc_operational_alert:sandbox_backend_unavailable",
+        "missing_attachment_path:hello.txt"
+      ]
+    },
+    "Malicious": {
+      "risk_score": 0.0,
+      "confidence": 0.45,
+      "indicators": [
+        "docker_sandbox_unavailable",
+        "soc_operational_alert:sandbox_backend_unavailable",
+        "missing_attachment_path:malware.docm"
+      ]
+    }
+  },
+  "threat_intel_agent": {
+    "Benign": {
+      "risk_score": 0.0004,
+      "confidence": 0.65,
+      "indicators": [
+        "no_local_ioc_hits",
+        "local_match_score=0.0",
+        "external_enrichment_score=0.0",
+        "external_threat_enrichment_enabled",
+        "otx_not_configured"
+      ]
+    },
+    "Malicious": {
+      "risk_score": 0.88,
+      "confidence": 0.95,
+      "indicators": [
+        "ioc_match:185.100.87.202",
+        "ioc_match:44d88612fea8a8f36de82e1278abb02f",
+        "local_match_score=0.5",
+        "external_enrichment_score=0.88",
+        "external_threat_enrichment_enabled",
+        "otx_not_configured",
+        "malwarebazaar_unauthorized",
+        "virustotal_hash_hit:44d88612fea8a8f3:66:0",
+        "virustotal_domain_unavailable"
+      ]
+    }
+  },
+  "user_behavior_agent": {
+    "Benign": {
+      "risk_score": 0.03,
+      "confidence": 0.85,
+      "indicators": [
+        "low_click_likelihood"
+      ]
+    },
+    "Malicious": {
+      "risk_score": 0.9998,
+      "confidence": 0.85,
+      "indicators": [
+        "unfamiliar_sender_domain",
+        "ml_user_behavior_anomaly_detected",
+        "subject_urgency_hits:1"
+      ]
+    }
+  }
+}

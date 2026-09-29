@@ -46,10 +46,10 @@ PAYMENT = re.compile(r"\b(wire transfer|bank transfer|remittance|new (vendor|ban
                      r"gift cards?|payment (today|urgently)|INR [\d,]+|USD [\d,]+)\b", re.IGNORECASE)
 SECRECY = re.compile(r"\b(confidential|keep this (between us|quiet)|do not (call|discuss)|reply by email only|"
                      r"in a (board )?meeting)\b", re.IGNORECASE)
-BULK = re.compile(r"(unsubscribe|\d+% off|\bdeals?\b|\bsale\b|limited time|shop now|newsletter)", re.IGNORECASE)
+BULK = re.compile(r"(unsubscribe|(?<!\d)\d{1,3}% off|\bdeals?\b|\bsale\b|limited time|shop now|newsletter)", re.IGNORECASE)
 CONTAINER_EXT = {".iso", ".img", ".vhd", ".vhdx"}
 # Advance-fee ("419") fraud vocabulary - count distinct hits, require several to fire.
-ADVANCE_FEE = re.compile(r"\b(next of kin|beneficiary|transfer (of|the) (the )?(sum|fund|funds)|(\d+[.,]?\d*|\w+) million "
+ADVANCE_FEE = re.compile(r"\b(next of kin|beneficiary|transfer (of|the) (the )?(sum|fund|funds)|(?<![\d.,])(\d{1,9}(?:[.,]\d{1,3}){0,4}|\w{1,30}) million "
                          r"(united states |us |u\.s\. )?dollars|us\$ ?\d|foreign (partner|account)|"
                          r"strictly confidential|confidential (transaction|business)|(late|deceased) (client|husband|father)|"
                          r"inheritance|compensation fund|lottery|won (the )?(sum|prize)|claims? (agent|officer)|"
@@ -63,7 +63,7 @@ SEVERE = {"malicious", "phishing"}
 ENGINE_STATUS_NOTE = re.compile(
     r"_model_(used|loaded|missing|unavailable)|^\w+=\d+(\.\d+)?$|^ml_slm_confidence|^ml_slm_label:legitimate$|"
     r"\banaly[sz]ed\b|^heuristic_risk|_(not_configured|unauthori[sz]ed|enabled|disabled|unavailable|skipped)$|"
-    r"^no_|^missing_data:|^external_|^confidence_capped", re.IGNORECASE)
+    r"^no_|^missing_data:|^external_|^confidence_capped|^ml_content_label:legitimate$", re.IGNORECASE)
 
 
 @dataclass
@@ -269,8 +269,34 @@ class EngineAnalyzer:
         "ENGINE_DATABASE_ENABLED": "0", "DOMAIN_WHOIS_ENABLED": "0",
     }
 
+    # Offline means offline: every external lookup switched off and every external credential / endpoint cleared on
+    # the engine's live settings object. Setting environment variables alone was not enough - the engine reads the
+    # project's .env file itself when first imported, so code that imported it earlier kept the real keys and sent
+    # image attachments to an Azure OCR service and e-mail URLs / hashes to public lookup services.
+    OFFLINE_SETTINGS: ClassVar[dict[str, Any]] = {
+        **{f"enable_{s}": False for s in ("virustotal_url_lookup", "google_safe_browsing_lookup", "openphish_lookup",
+                                         "urlhaus_lookup", "otx_lookup", "abuseipdb_lookup", "malwarebazaar_lookup",
+                                         "virustotal_hash_lookup", "external_feed_harvesting")},
+        "storyline_enable_llm_mitre_enrichment": False, "threat_intel_auto_refresh_enabled": False,
+        "azure_search_enabled": False, "sandbox_local_docker_enabled": False,
+        **{k: None for k in ("azure_ocr_endpoint", "azure_ocr_key", "azure_openai_endpoint", "azure_openai_api_key",
+                             "virustotal_api_key", "google_safe_browsing_api_key", "otx_api_key", "abuseipdb_api_key",
+                             "urlscan_api_key", "shodan_api_key", "azure_search_api_key", "graph_client_secret",
+                             "quarantine_api_url", "soc_alert_api_url", "sandbox_executor_url",
+                             "sandbox_executor_shared_token", "sandbox_cape_url", "sandbox_cape_token")},
+    }
+
     def __init__(self, *, offline: bool = True) -> None:
         self.offline = offline
+
+    @classmethod
+    def enforce_offline(cls) -> None:
+        """Apply OFFLINE_SETTINGS to the engine's settings object, whenever it was created."""
+        from soc_platform.domains.phishing.engine.configs.settings import settings as engine_settings
+
+        for attr, value in cls.OFFLINE_SETTINGS.items():
+            if hasattr(engine_settings, attr):
+                object.__setattr__(engine_settings, attr, value)
 
     @staticmethod
     def active_agents(agents: dict[str, Any]) -> dict[str, Any]:
@@ -297,6 +323,7 @@ class EngineAnalyzer:
                 for k, v in self.OFFLINE_ENV.items():
                     os.environ[k] = v
                 os.environ.setdefault("IOC_DB_PATH", str(Path(tempfile.gettempdir()) / "soc_platform_ioc_store.db"))
+                self.enforce_offline()
             try:   # the engine logs every graph node at INFO through loguru; in-process that floods the server log
                 import sys
 
@@ -325,6 +352,8 @@ class EngineAnalyzer:
         recipient's real history with the sender, department, arrival time)."""
         if not hasattr(self, "graph"):
             self._load()
+        if self.offline:
+            self.enforce_offline()                           # cheap; nothing can have switched a lookup back on
         context = context or {}
         with tempfile.NamedTemporaryFile(suffix=".eml", delete=False) as tmp:
             tmp.write(raw or b"")
@@ -405,7 +434,7 @@ MODEL_RELIABILITY: dict[str, dict[str, Any]] = {
     "url_agent": {"level": "good", "corroborating": True, "note": "ranked every phishing link above every legitimate one"},
     "attachment_agent": {"level": "fair", "corroborating": True, "note": "ranks attachments correctly but scores many malicious ones low"},
     "threat_intel_agent": {"level": "good", "corroborating": True, "note": "the platform's multi-source threat intelligence"},
-    "content_agent": {"level": "low", "corroborating": False, "note": "small transformer; confidently wrong on several test messages"},
+    "content_agent": {"level": "good", "corroborating": False, "note": "text classifier (separation 0.99 on the labelled mail); still reads invoice wording as phishing, so it never confirms an alarm on its own"},
     "user_behavior_agent": {"level": "fair", "corroborating": False, "note": "depends on the recipient's real contact history"},
     "sandbox_agent": {"level": "off", "corroborating": False, "note": "needs an isolated detonation host"},
 }

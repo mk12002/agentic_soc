@@ -11,7 +11,7 @@ responsibility of the hosting environment.
 |---|---|---|
 | Stolen / forged API tokens | Entra ID RS256 tokens validated against tenant JWKS (issuer + audience); dev HS256 tokens refused in `prod` and served only to the local machine in dev; unknown role claims grant nothing; per-token (jti) and per-user (not-before) revocation | `core/auth.py`, `core/access.py` |
 | Stolen session used for high-impact decisions | Step-up MFA (`amr` = mfa or Conditional Access auth context) required for approvals, rollback, policy, kill switch and access management | `core/auth.py` |
-| Insider abuse / over-privilege | RBAC (analyst, lead, admin, automation_admin, auditor) + **domain scoping** (phishing / incident / vulnerability; cross-domain views require all-domain access; out-of-scope records answer 404); separation of duties: no self-approval of four-eyes actions, policies, exceptions or access grants; time-bound, justified platform grants | `core/auth.py`, `core/access.py`, `api/app.py` |
+| Insider abuse / over-privilege | RBAC (analyst, lead, admin, automation_admin, auditor) + **domain scoping** (phishing / incident / vulnerability; cross-domain views require all-domain access; out-of-scope records answer 404); **per-role scope**: a principal *sees* the union of its roles' domains but each role *acts* only inside its own (`Principal.acting_in`; a phishing lead who is also an all-domain auditor approves phishing actions only); every action decision is judged in the action's domain by `ActionService` itself; policy decisions need an all-domain role; an administrator can grant only scope they manage; separation of duties: no self-approval of four-eyes actions, policies, exceptions or access grants; time-bound, justified platform grants | `core/auth.py`, `core/access.py`, `core/actions.py`, `api/app.py` |
 | Compromised integration credential | Service-account API keys: SHA-256 stored, expiry ≤ 365 days, roles limited to analyst / auditor / automation admin, **never** approval, policy or access permissions | `core/access.py` |
 | Identity-provider outage | Break-glass: sealed secret, only its hash configured, every use and failure audited and raised as a critical insight | `core/access.py` |
 | Repudiation of who did what | Append-only access log (ORM refuses update/delete; pruned only by the audited retention job) in addition to the audit chain | `api/app.py`, `core/models.py` |
@@ -26,8 +26,8 @@ responsibility of the hosting environment.
 | Personal-data leakage to the LLM (R10) | Internal users, names, phone numbers, national ids pseudonymised before the prompt leaves the platform and restored after; prompts/responses logged; approved-endpoint allow-list; model pinning; token budget | `llm/redaction.py`, `llm/gateway.py` |
 | Malicious attachments (R12) | Hardened detonation (below); Windows payloads to CAPEv2 on an isolated analysis network | `engine/agents/sandbox_agent/agent.py` |
 | Tampered ML models (pickle = code execution) | SHA-256 manifest verified before any joblib/pickle artifact is deserialised; unlisted artifacts refused | `engine/integrity.py`, `artifacts/phishing/models/MANIFEST.sha256` |
-| Web attacks on the console | Strict CSP (`script-src 'self'`, no inline script or handlers, `frame-ancestors 'none'`), all dynamic values HTML-escaped, deep links restricted to http(s), no-store caching, nosniff, DENY framing | `api/app.py`, `api/static/` |
-| Abuse / DoS | Per-client-address rate limiting (X-Forwarded-For only from configured proxies), 30 MB request cap enforced on the byte stream (chunked uploads included), 25 MB email cap, cached /health, connector request budgets so enrichment cannot degrade source tools (R06) | `api/app.py`, `connectors/base.py` |
+| Web attacks on the console | Strict CSP (`script-src 'self'`, no inline script or handlers, `frame-ancestors 'none'`), all dynamic values HTML-escaped, ids URL-encoded in API paths, deep links restricted to http(s), no-store caching, nosniff, DENY framing, HSTS on HTTPS (also behind a TLS-terminating trusted proxy, via its `X-Forwarded-Proto`) | `api/app.py`, `api/static/` |
+| Abuse / DoS | Per-client-address rate limiting (X-Forwarded-For only from configured proxies, and then its right-most hop that is not a proxy; idle buckets evicted, never the whole table), 30 MB request cap enforced on the byte stream (chunked uploads included), 25 MB email cap, **linear-time parsing of hostile e-mail** (every regex over message content is bounded; tested on 2.4 MB pathological bodies), numeric inputs bounded, cached /health, connector request budgets so enrichment cannot degrade source tools (R06) | `api/app.py`, `connectors/base.py`, `domains/phishing/agents/`, `llm/redaction.py` |
 | Secret exposure | No secrets in the repository; `.env` git-ignored; `<NAME>_FILE` vault mounts supported; per-tool least-privilege service principals, read scopes by default | `config.py`, `config/connectors.yaml` |
 | Supply chain | `pip-audit` clean (setuptools pinned ≥ 83, unused packages removed incl. `nltk` with an unfixed advisory); detonation image built locally and pinned by digest in prod | `requirements/`, `deploy/sandbox/Dockerfile` |
 
@@ -119,6 +119,13 @@ adds a stored-XSS probe. Every attack below must fail, and does.
 | Six simultaneous approvals of one action | Executed exactly once |
 | Four simultaneous pulls of the reporting mailbox | One case per e-mail |
 | Server started in production mode | No `/docs`, no `/openapi.json`, no dev sign-in; dev tokens refused |
+| Lead scoped to one domain plus an all-domain role deciding another domain's action, case or the global policy | 403; the action is untouched |
+| Phishing-only analyst requesting and self-approving an action (with or without a case) | Filed in the case's domain; outside a case 403; never self-approved outside scope |
+| Scoped administrator granting all-domain roles or keys | 403 |
+| Spoofed `X-Forwarded-For` through a trusted proxy | Ignored: the right-most untrusted hop is the client |
+| Auditor requesting a risk exception or acknowledging a plan; 0 / negative / 100-year exceptions; reviving a rejected one | 403 / 422 / 400 |
+| Unknown ids and out-of-range numbers on vulnerability, handover, risk and job routes | 404 / 422, never 500, no interpreter internals |
+| 2.4 MB hostile e-mail bodies (unclosed anchors and tags, digit, dot and dash runs) through decomposer, analyser, model text preparation and pseudonymiser | Linear time (well under a second per step) |
 
 **Found and fixed by this testing:**
 - A token without an expiry was accepted forever. Every token must now carry `exp` and `iat`.
@@ -131,6 +138,11 @@ adds a stored-XSS probe. Every attack below must fail, and does.
 
 **Also checked:**
 - Dependencies: `pip-audit` finds no known vulnerabilities, and `npm audit` reports 0.
+- **The ML engine stays offline** inside the platform: every external lookup switch is off and every external
+  credential cleared on its live settings, whatever the import order. Found 2026-09-29: the engine read the project's
+  `.env` itself, so with an OCR key there image attachments were sent to an Azure OCR service, and its URL /
+  threat-intel agents queried public lookup services with e-mail URLs and hashes. A test now analyses messages
+  with links, a QR image and attachments with all network access blocked and requires zero connection attempts.
 - SSRF: no code path fetches URLs taken from e-mail content. Outbound calls go only to configured vendor endpoints
   and to the notification webhooks in `SOC_NOTIFY_WEBHOOKS` (HTTPS only; destinations are never taken from data).
 - Notification secrets: a webhook URL contains its own credential. It is never stored, logged or returned; the
@@ -144,6 +156,48 @@ adds a stored-XSS probe. Every attack below must fail, and does.
   length (not content); search escapes `LIKE` wildcards, applies the caller's domain scope to every result group and
   is audited by length.
 - Template injection: no template engine renders user text.
+
+### Penetration test round 2 (2026-09-29): white-box review and live probing
+
+**Method.** Every route in `api/app.py`, the services behind the write routes that only declare `READ`, the auth and
+access layers (`core/auth.py`, `core/access.py`, `core/actions.py`) and the console's HTML sinks were reviewed by
+hand. Each suspected weakness was then attacked against a live in-process instance with the demo data (a phishing-only
+analyst, a read-only auditor, a lead with mixed-scope roles, forged proxy headers, unknown ids, out-of-range numbers).
+For denial of service, every module-level regex in the platform and the engine was timed against 21 pathological
+inputs, and the e-mail decomposer, the heuristic analyser, the content model's text preparation and the LLM
+pseudonymiser were run on hostile bodies of up to 2.4 MB. Also checked: parsers for XML, archives, YAML and pickle
+(none take untrusted input; pickle loads stay behind the SHA-256 manifest), subprocess use, and the console's escaping
+and click handling.
+
+**Findings, all fixed.** Each has a regression test in `test_pentest.py` (section 11). Before the fix, the live
+probe showed the attack working.
+
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 1 | **Role scopes were merged.** A lead scoped to phishing who also held an all-domain role (for example auditor, or a platform grant) became a lead for every domain: the probe approved *and executed* an incident action. | High | Per-role scope (`Principal.role_domains`, `acting_in`): visibility stays the union, but a permission counts in a domain only when the role granting it covers that domain. Route guards hand on the principal *as it acts in the route's domain*; case writes, dispositions, notes, assignment and deep analysis act in the case's domain. Platform grants add a role with its own scope. |
+| 2 | **Scoped self-approval outside the scope.** `POST /api/v1/actions` filed every request as a `platform` action. A phishing-only analyst's request then fell outside every scoped approver's queue, yet the analyst could self-approve it: the probe executed `indicator.block`, `email.block_sender` and six other action types. | High | An action belongs to its case's domain; case-less actions stay `platform` (all-domain only). `ActionService` judges request-time self-approval, approval, rejection and rollback with the roles that cover the action's domain. This protects every caller, not just the API. |
+| 3 | **Hostile e-mail could stall the phishing pipeline (ReDoS).** The decomposer's tag and anchor patterns rescanned to the end of the message from every `<` / `<a`: 240 KB of repeated `<a href='x'>` took 16 s. The cost grows with the square of the size, so a message at the accepted 25 MB would hold a worker for more than a day. The analyser's advance-fee and bulk patterns had the same flaw (5 s on 40 KB of digits), and so did the content model's address and tag patterns. One reported or forwarded message was enough. | High | Every scan stops at the next tag, link text stops at the next `<a`, digit runs are bounded and anchored, and the model's text preparation works on a bounded prefix. On 2.4 MB of each hostile input, each step now takes well under a second. |
+| 4 | **ReDoS in the LLM pseudonymiser.** The e-mail pattern had an unbounded local part: 200 KB of `1.1.1…` or `4-4-4…` took 95 s before a model call. | Medium | Local part and domain bounded to RFC 5321 lengths and anchored to the start of a run (same fix in `core/identity.py`). |
+| 5 | **Client address spoofable behind a proxy.** The *left-most* `X-Forwarded-For` entry was trusted, but proxies append to that header, so the caller chooses the left-most entry. This gave a fresh rate-limit bucket per request, and `127.0.0.1` for the loopback-only dev sign-in. | Medium | The right-most hop that is not a trusted proxy is the client. It is also used for the access log and break-glass audit. |
+| 6 | **Read-only roles could change the vulnerability workflow.** An auditor could request a risk exception (routes declared only `READ`) and acknowledge remediation plans. Exception length was unbounded: 100 years and negative durations were accepted, and 10⁹ days crashed the route. | Medium | Exceptions need `request_action`, plan acknowledgement needs `investigate`; exceptions last 1 to 365 days (route and service); unknown findings and plans answer 404. |
+| 7 | **Decided exceptions could be revived.** A rejected (or expired) exception could be approved later without a new request; a decided risk-register entry could be decided again. | Medium | Only `requested` exceptions and `proposed` entries can be decided. |
+| 8 | **A scoped administrator could grant beyond their scope.** An admin for phishing could grant all-domain roles or create all-domain API keys. | Medium | Grants and keys may only carry domains where the granter's own admin role applies. |
+| 9 | **Global policy decided by a domain-scoped lead.** The autonomy policy governs every domain. | Medium | Proposing and approving policy use only all-domain roles; compliance evidence export likewise. |
+| 10 | **Other-domain data on shared screens.** Entity 360 showed a host's vulnerabilities to phishing- and incident-only users; `/metrics` gave domain-scoped auditors case counts for every domain; drift listed every domain. | Low | Vulnerabilities only with vulnerability scope; `/metrics` needs an all-domain reader; drift filtered to the caller's domains. |
+| 11 | **Crashes and internals in errors.** Unknown plan, exception or risk-entry ids answered 500, or 400 with `'NoneType' object has no attribute …`; `handover?hours=10¹²` answered 500; negative `limit`s were accepted. | Low | 404 for unknown ids; bounded numeric parameters (422); programming errors are logged and answered with a generic message. |
+| 12 | **No HSTS behind a TLS-terminating proxy** (the app saw `http`). | Low | `X-Forwarded-Proto: https` from a trusted proxy counts as HTTPS. |
+| 13 | **Rate-limiter reset.** When more than 50,000 addresses were tracked, the whole table was cleared, which also reset the budget of a client that was being limited. | Low | Only idle (already full) buckets are evicted. |
+| 14 | A case id taken from the URL was put unencoded into a download path in the console. | Info | URL-encoded (GET only, same origin; no state change was possible). |
+
+**Checked and accepted (no change):**
+- The console keeps its token in `localStorage`. This is mitigated by the strict CSP and by escaping everywhere, and
+  was re-verified by the stored-XSS probe.
+- Domain-scoped users still see an entity's identity data (name, keys, attributes) on Entity 360, which they need to
+  investigate their own cases. Everything cross-domain on that screen is removed.
+- Job history and connector status are operational metadata, visible to every reader.
+- The `reporter` of an uploaded message is free text, because analysts upload on someone's behalf. The uploader is
+  the authenticated principal in the audit and access logs.
+- Failed break-glass attempts are audited individually. That volume is bounded by the rate limit.
 
 ## Operator responsibilities (cannot be solved in code)
 

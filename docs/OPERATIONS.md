@@ -134,11 +134,19 @@ resolves every stored reference, looks for duplicates re-runs must never create,
 failure raises a high-severity *Platform self-check* finding (resolved automatically when consistent again). On
 demand: `GET /api/v1/admin/self-check` (auditor / admin, all-domain scope) or the card on the Integrations screen.
 
+## Network edge (reverse proxy, rate limit)
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `SOC_TRUSTED_PROXIES` | empty | Comma-separated addresses of your reverse proxies / gateways. Only a request whose direct peer is listed has its `X-Forwarded-For` read, and then the client is the **right-most** hop that is not itself a listed proxy (proxies append to the header, so its left-most entries are whatever the caller sent). The same peers' `X-Forwarded-Proto: https` turns on HSTS. List only real proxies. |
+| `SOC_RATE_LIMIT_RPS` / `SOC_RATE_LIMIT_BURST` | 20 / 120 | Per-client token bucket, in process. Put a gateway / WAF limit in front for several replicas. |
+
 ## Monitoring
 
 * `/health` - DB, audit-chain verification, kill switch.
 * `/metrics` - Prometheus: open cases, actions by status, insights, unresolved entities, per-stream sync age,
-  kill switch. Scrape with an **auditor service-account key** (`X-API-Key`).
+  kill switch. Scrape with an **all-domain auditor service-account key** (`X-API-Key`). It carries every domain's
+  counts, so a domain-scoped key gets 403.
 * Integrations screen - connector state (healthy / stale / error / misconfigured), freshness per stream against
   its expected cadence, reconciliation, job runs.
 * Overview - enrichment latency (median/p95 per domain and per tool) and verdict-quality drift.
@@ -150,7 +158,12 @@ Alert on: `soc_connector_last_success_age_seconds` above the stream's cadence, a
 
 * Roles come from Entra app roles `SOC.<Role>` or `SOC.<Role>.<Domain>` (Domain = Phishing | Incident |
   Vulnerability) plus platform grants (Access screen / `/api/v1/admin/roles`), which are time-bound and audited.
-  Nobody can grant or revoke their own access.
+  Nobody can grant or revoke their own access, and a domain-scoped administrator can grant only their own domains.
+* **Each role keeps its own scope.** A user *sees* every domain any of their roles covers, but a permission counts
+  only where the role that grants it applies. For example, `SOC.Lead.Phishing` plus `SOC.Auditor` reads all domains
+  but approves phishing actions only, and a platform grant of auditor on all domains never widens a scoped lead.
+  Decisions that span domains (the autonomy policy, compliance evidence export, correlated findings) need an
+  all-domain role. `GET /api/v1/me` shows `role_scopes`.
 * Step-up MFA: with `SOC_REQUIRE_MFA=1` (default in prod) approvals, policy, kill switch and access management
   need a token whose `amr` contains `mfa` (or the Conditional Access auth context `SOC_MFA_AUTH_CONTEXT`).
 * Service accounts: API keys (Access screen) - hashed, expiring (≤ 365 days), roles limited to analyst / auditor

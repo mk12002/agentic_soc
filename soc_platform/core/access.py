@@ -3,7 +3,8 @@ break-glass access and durable system flags.
 
 Everything here is audited. Rules that hold regardless of configuration:
 
-* nobody can grant, change or revoke *their own* access
+* nobody can grant, change or revoke *their own* access, or grant data scope they do not manage themselves
+* a platform grant adds a role *with its own scope*: it never widens what the principal's other roles may do
 * API-key (service) principals never receive approval / policy / access-management permissions
   (``auth.HUMAN_ONLY_PERMS``) and their keys always expire (max 365 days)
 * only a SHA-256 of an API key secret is stored; the secret is shown exactly once
@@ -66,16 +67,19 @@ class AccessService:
             or_(RoleAssignment.expires_at.is_(None), RoleAssignment.expires_at > now))).scalars().all()
         if not grants:
             return p
-        roles = set(p.roles)
-        domains = set(p.domains) if p.roles else set()
+        per_role: dict[Role, set[str]] = {}
+        for r, ds in (p.role_domains or tuple((r, p.domains) for r in p.roles)):
+            per_role.setdefault(r, set()).update(ds)
         for g in grants:
             try:
-                roles.add(Role(g.role))
+                per_role.setdefault(Role(g.role), set()).update(g.domains or ["*"])
             except ValueError:
                 continue
-            domains.update(g.domains or ["*"])
-        return replace(p, roles=frozenset(roles), domains=frozenset({"*"}) if "*" in domains or not domains
-                       else frozenset(domains))
+        pairs = tuple(sorted(((r, frozenset({"*"}) if "*" in ds else frozenset(ds)) for r, ds in per_role.items()),
+                             key=lambda x: x[0].value))
+        union = set().union(*(ds for _, ds in pairs))
+        return replace(p, roles=frozenset(per_role), domains=frozenset({"*"}) if "*" in union or not union
+                       else frozenset(union), role_domains=pairs if len({ds for _, ds in pairs}) > 1 else ())
 
     def is_revoked(self, p: Principal) -> bool:
         if p.token_id and self.s.execute(select(TokenRevocation.id).where(
@@ -95,6 +99,12 @@ class AccessService:
         if not by.can(perm):
             raise PermissionError(by.why_not(perm))
 
+    @staticmethod
+    def _require_scope(by: Principal, domains: list[str]) -> None:
+        """An administrator scoped to one domain cannot hand out access to another (or to all of them)."""
+        if any(not by.acting_in(d).can(Perm.MANAGE_ACCESS) for d in domains):
+            raise PermissionError("you can only grant access within your own data scope")
+
     def grant(self, by: Principal, principal_id: str, role: str, *, domains: list[str] | None = None,
               days: int | None = None, reason: str = "") -> RoleAssignment:
         self._require(by)
@@ -103,6 +113,7 @@ class AccessService:
         r = Role(role)
         if not reason.strip():
             raise ValueError("a justification is required")
+        self._require_scope(by, _domains(domains))
         ga = RoleAssignment(principal_id=principal_id.strip(), role=r.value, domains=_domains(domains),
                             granted_by=by.id, reason=reason.strip(),
                             expires_at=utcnow() + timedelta(days=days) if days else None)
@@ -149,6 +160,7 @@ class AccessService:
             raise PermissionError(f"service accounts may only hold {sorted(r.value for r in SERVICE_ROLES)}")
         if not 1 <= days <= MAX_KEY_DAYS:
             raise ValueError(f"key lifetime must be 1..{MAX_KEY_DAYS} days")
+        self._require_scope(by, _domains(domains))
         key = ApiKey(name=name.strip()[:128] or "service", secret_sha256="", roles=sorted(r.value for r in rs),
                      domains=_domains(domains), created_by=by.id, expires_at=utcnow() + timedelta(days=days))
         self.s.add(key)

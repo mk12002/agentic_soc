@@ -133,7 +133,8 @@ and a unified cross-tool timeline.
   **break-glass** access with a sealed secret (only its hash is configured; every use and failed attempt audited
   and raised as a critical insight).
 * **Authorisation:** RBAC (analyst, lead, admin, automation admin, auditor) + **domain scoping** (a user can be
-  limited to phishing, incident or vulnerability data; cross-domain views need all-domain access) + **step-up
+  limited to phishing, incident or vulnerability data; cross-domain views need all-domain access; each role acts
+  only inside its own scope, so a phishing lead who is also an all-domain auditor approves phishing actions only) + **step-up
   MFA** for approvals, policy, kill switch and access management + separation of duties everywhere (no
   self-approval of four-eyes actions, policies, exceptions or access grants). Service accounts can never approve.
 * **Session control:** per-token revocation (log out) and revoke-all-sessions per user.
@@ -160,7 +161,7 @@ and a unified cross-tool timeline.
 |---|---|
 | Ingestion (PH-F01) | Defender user-reported messages and the SOC reporting mailbox via Graph; manual `.eml` upload; replay-safe |
 | Decomposition (PH-F02) | Headers, SPF/DKIM/DMARC/compauth, routing path, bodies, URLs incl. hidden link-text mismatches, attachments, embedded images, **QR codes** |
-| Analysis (PH-F03) | Two engines fused, **both on by default** (the ML engine whenever its libraries are installed): the ML swarm with a trained model per component (content transformer, URL, header, attachment static + OCR, threat intel, user behaviour; sandbox when a detonation host exists), fed with the platform's own threat intelligence and mail-flow contact history - each case shows every model's score and measured reliability - and a deterministic heuristic analyser (look-alike domains incl. homoglyphs, brand impersonation, BEC / payment requests, **bank-detail change**, advance-fee fraud, fake replies, container / macro / ISO attachments, bulk marketing). A models-only alarm needs a reliable model or the rules to agree, otherwise an analyst decides |
+| Analysis (PH-F03) | Two engines fused, **both on by default** (the ML engine whenever its libraries are installed): the ML swarm with a trained model per component (content text classifier, URL, header, attachment static + OCR, threat intel, user behaviour; sandbox when a detonation host exists), fed with the platform's own threat intelligence and mail-flow contact history - each case shows every model's score and measured reliability - and a deterministic heuristic analyser (look-alike domains incl. homoglyphs, brand impersonation, BEC / payment requests, **bank-detail change**, advance-fee fraud, fake replies, container / macro / ISO attachments, bulk marketing). A models-only alarm needs a reliable model or the rules to agree, otherwise an analyst decides |
 | Control reconciliation (PH-F04) | Compares the platform verdict with Defender for Office 365 and Avanan verdicts and actions; flags missed-by-controls |
 | Campaign scope (PH-F05) | Every other recipient of the same or a similar message tenant-wide (message trace + similarity over sender, subject template, URL structure, attachment hash / fuzzy hash, body) |
 | User interaction (PH-F06) | Who clicked (Safe Links), whose device reached the site (Umbrella), who replied |
@@ -334,7 +335,7 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
   alert; database lease so replicas never double-run; replay from the console.
 * **Observability** - connector freshness and reconciliation, job health, enrichment latency, **measured model
   response times per workflow** (median and p95, `GET /api/v1/llm/status`), drift,
-  Prometheus `/metrics` (scraped with an auditor service-account key).
+  Prometheus `/metrics` (scraped with an all-domain auditor service-account key).
 * **Reports** - the [report builder](#71-ai-report-builder) plus fixed exports (daily exposure, weekly VM,
   management deck, investigation records); your own templates plug in.
 * **Compliance evidence pack (U17)** - control tests with pass/fail (audit-chain integrity, four-eyes approvals,

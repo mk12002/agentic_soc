@@ -25,7 +25,7 @@ BUILTIN_ACCOUNTS = {
     "umfd-1", "dwm-2", "-", "n/a", "unknown", "",
 }
 BUILTIN_DOMAINS = {"nt authority", "nt service", "font driver host", "window manager", "iis apppool", "nt virtual machine"}
-EMAIL_RE = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+EMAIL_RE = re.compile(r"(?<![A-Za-z0-9._%+'-])[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}")   # bounded: linear
 
 
 def split_account(raw: str) -> tuple[str | None, str]:

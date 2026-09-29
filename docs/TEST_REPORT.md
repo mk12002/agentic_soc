@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-09-29 (round 11; earlier rounds 2026-09-24 to 2026-09-29) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-09-29 (round 13; earlier rounds 2026-09-24 to 2026-09-29) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,88 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 11 (2026-09-29) - latest results: the phishing models, the client deck, recurring VM work
+## 0. Round 13 (2026-09-29) - latest results: new content model, the ML engine made strictly offline
+
+Results on the final code (this round's work together with the round 12 security fixes):
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **329 passed**, 0 failed, 15 skipped |
+| Platform suite on PostgreSQL 16 | **329 passed**, 0 failed, 15 skipped |
+| Phishing engine suite | **205 passed**, 0 failed |
+| Feature verification (`--browser --engine --live --llm`) | **103 of 103 features verified**; 260 test cases incl. live LLM and live feeds; browser tour with the LLM and models on: 0 problems |
+| Lint | clean |
+
+**The content model was replaced.** The delivered 2-layer BERT and its replacement were scored on the same 2,000
+held-out public messages. The new model is TF-IDF word and character features with logistic regression, trained with
+`scripts/train_content_model.py` on public data (Nazario phishing 2019-2025, CC BY 4.0; SpamAssassin; the "Safe
+Email" rows of zefang-liu/phishing-email-dataset) and re-trained after the round 12 text-preparation hardening:
+
+| | Old transformer | New classifier |
+|---|---|---|
+| Hold-out accuracy (2,000 public messages) | 68 % | **99 %** |
+| Phishing caught on the hold-out | 25 % | **99 %** |
+| Platform corpus, 12 base messages (never trained on) | 7 right | **10 right**, every phishing message caught |
+| Separation on the 46 labelled messages | 0.88 | **0.99** |
+| Size / time per e-mail | 18 MB | **9.5 MB / ~6 ms** |
+
+With it the engine alone catches 25 of 28 malicious messages (was 22) with no false alarms; combined with the rules
+all 46 labelled messages are still exactly right. It still reads invoice wording as phishing, so it never confirms
+an alarm on its own.
+
+**Found and fixed:**
+- **The ML engine could send e-mail content to external services.** It read the project's `.env` itself when first
+  imported; with an OCR key there, image attachments went to an Azure OCR service, and its URL / threat-intel agents
+  queried public lookup services with e-mail URLs and hashes. Offline mode now clears every lookup switch and
+  credential on the engine's live settings; a test blocks all network access and requires zero connection attempts
+  (3 before the fix, 0 after).
+- The public "phishing" dataset first considered was mostly ordinary spam; its phishing rows were left out.
+- Explaining a score rebuilt the list of 300,000 feature names for every e-mail (149 ms); it is now built once (~6 ms).
+- The round 12 hardening of the text preparation changed 2.5 % of the training text (a stray "<" no longer swallows
+  text up to the next ">"); the model was re-trained so training and inference match exactly.
+- The browser tour now reports why it crashed instead of a missing-file error.
+
+**Notes:** one PostgreSQL run made while the machine was saturated (a second full suite, a browser tour and LLM calls
+at once) had one failure in the retention time-travel test; it passed in two isolated re-runs and in every full run
+since. The cause was not identified; the test now reports each case's and submission's state if it fails again. A
+verification run during an internet outage failed its live tests; the re-run after the connection returned passed.
+
+## 0a. Round 12 (2026-09-29): penetration test round 2 (white-box)
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **329 passed**, 0 failed, 15 skipped |
+| Platform suite on PostgreSQL 16 | **329 passed**, 0 failed, 15 skipped |
+| Penetration tests (`test_pentest.py`) | **24 passed** (17 before + 7 new, one per attack class found in this round) |
+| Phishing ML engine suite | **205 passed**, 2 skipped (after the `text_prep.py` pattern changes) |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / no known vulnerabilities / clean |
+
+**Method.** Every API route and the services behind it, the auth and access layers, and the console's HTML sinks
+were reviewed by hand. Each suspected weakness was then attacked on a live instance with the demo data. For denial of
+service, every module-level regex (44 patterns) was timed against 21 pathological inputs, and the e-mail parsing
+chain was run on hostile bodies of up to 2.4 MB.
+
+**Found and fixed** (full table with severities in SECURITY.md, "Penetration test round 2"):
+
+| Severity | Finding | Measured before → after |
+|---|---|---|
+| High | Role scopes merged: a phishing lead who was also an all-domain auditor approved an incident action | executed → 403 |
+| High | A phishing-only analyst self-approved platform-wide actions through `POST /actions` | 8 action types executed → filed in the case's domain, never self-approved outside scope |
+| High | ReDoS in e-mail parsing (decomposer anchors/tags, analyser advance-fee/bulk patterns, content-model text preparation) | 240 KB of `<a href='x'>`: 16 s → 2.4 MB: 0.15 s |
+| Medium | ReDoS in the LLM pseudonymiser's e-mail pattern | 200 KB of `1.1.1…`: 95 s → 2 MB: 0.13 s |
+| Medium | Left-most `X-Forwarded-For` trusted behind a proxy (rate-limit bypass, fake loopback) | spoofed → right-most untrusted hop |
+| Medium | Auditor could request risk exceptions and acknowledge plans; 100-year / negative exceptions accepted | 200 → 403 / 422 |
+| Medium | Rejected exceptions could be re-approved; decided risk entries re-decided | 200 → 400 |
+| Medium | A scoped administrator could grant all-domain roles and keys | allowed → 403 |
+| Medium | Global policy decided by a domain-scoped lead | allowed → all-domain roles only |
+| Low | Entity 360 vulnerabilities, `/metrics` counts and drift of other domains shown to scoped users | shown → removed / 403 |
+| Low | Unknown ids and huge numbers answered 500 or `'NoneType' object has no attribute …` | 500 → 404 / 422 |
+| Low | No HSTS behind a TLS-terminating proxy; rate-limiter table wiped at 50,000 addresses | fixed |
+
+Two of the fixes touch uncommitted work in progress: the content model's `text_prep.py` (bounded address and tag
+patterns, bounded input) and `scripts/train_content_model.py` (SHA-1 marked as not used for security; same hashes).
+
+## 0b. Round 11 (2026-09-29): the phishing models, the client deck, recurring VM work
 
 | Check | Result |
 |---|---|
@@ -61,7 +142,7 @@ workload, the operating principle; the map is in REQUIREMENTS_TRACEABILITY.md). 
 - scikit-learn was unpinned while the models were saved with 1.8 (scores checked identical; now pinned).
 - Docker's compose file forced the models off even in an image built with them.
 
-## 0a. Round 10 (2026-09-28/29): scheduler, speed, teamwork, notifications
+## 0c. Round 10 (2026-09-28/29): scheduler, speed, teamwork, notifications
 
 **Final results (2026-09-29), after the additions and fixes listed below:**
 
@@ -145,7 +226,7 @@ The browser tour now also:
   Found by the full suite. Each case's note times are now strictly increasing.
 - **A vendor's `Retry-After` of hours could stall a job.** It is now capped at 120 s.
 
-## 0b. Round 9 (2026-09-26): penetration testing, fuzzing, types, coverage
+## 0d. Round 9 (2026-09-26): penetration testing, fuzzing, types, coverage
 
 | Check | Result |
 |---|---|
@@ -163,7 +244,7 @@ The browser tour now also:
 - Concurrent writes of the same message failed on Windows.
 - An unwired scaffold claimed "benign 95 %".
 
-## 0c. Round 8 (2026-09-26): PostgreSQL, time, accessibility, code quality
+## 0e. Round 8 (2026-09-26): PostgreSQL, time, accessibility, code quality
 
 | Check | Result |
 |---|---|
@@ -204,7 +285,7 @@ The browser tour now also:
 - A failed estate fixture could leak its environment into later tests; cleanup is now registered before setup.
 - Tests run on every sample estate, with day counts taken from settings rather than written into the tests.
 
-## 0d. Round 7 (2026-09-25): new data sets, failure modes, cost
+## 0f. Round 7 (2026-09-25): new data sets, failure modes, cost
 
 | Check | Result |
 |---|---|
@@ -225,7 +306,7 @@ correlation and case-action lookups degraded linearly with tenant size; the situ
 every page view (cached by fact fingerprint); auto-closed benign mail spent tokens (deterministic explanation);
 routine narratives now use the small tier.
 
-## 0e. Round 6 (2026-09-25): testing from every angle
+## 0g. Round 6 (2026-09-25): testing from every angle
 
 | Angle | Result |
 |---|---|
@@ -246,7 +327,7 @@ incident endpoint); case page vs actions API listing different actions; badge/ta
 list (true totals now, with "showing N of M"); timestamps without timezone; run-to-run changes in the QA sample;
 an intermittent guardrail hole (digits inside ids counted as support for invented figures).
 
-## 0f. Round 5 (2026-09-25)
+## 0h. Round 5 (2026-09-25)
 
 Added: Azure AI Foundry provider (live), full live-LLM test suite, numeric-fidelity guardrail, output review of a
 complete run with the real model, client name removed from the repository.
@@ -285,7 +366,7 @@ Found and fixed in this round (each with a regression test where it is code):
 * **Repository hygiene** - client name removed from every file and file name (identifiers → fictional "Acme"),
   including emails embedded as base64; a real mailbox email moved out of the repository.
 
-## 0g. Round 4 (2026-09-25)
+## 0i. Round 4 (2026-09-25)
 
 Added: attack story, evidence-bound deep analysis, AI report builder, reports encrypted at rest, generalisation test.
 Full per-feature evidence: [FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md) (generated by `scripts/verify_features.py`).
@@ -309,7 +390,7 @@ report files and compliance packs stored in plaintext (now sealed); duplicate re
 (merged, approved together); 9 bandit medium findings in offline phishing tools (HF revision pinning, http(s)-only
 URLs).
 
-## 0h. Round 3 (2026-09-25)
+## 0j. Round 3 (2026-09-25)
 
 | Area | Result |
 |---|---|

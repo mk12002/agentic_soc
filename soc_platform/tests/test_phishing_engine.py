@@ -63,13 +63,15 @@ def test_engine_status_notes_are_not_evidence():
                  "external_enrichment_score=0", "external_threat_enrichment_enabled", "local_match_score=0",
                  "malwarebazaar_unauthorized", "no_local_ioc_hits", "otx_not_configured", "external_lookups_enabled",
                  "google_safe_browsing_not_configured", "urlhaus_unauthorized", "virustotal_not_configured",
-                 "no_urls_detected", "missing_data:short_smtp_trace", "confidence_capped_low_evidence"):
+                 "no_urls_detected", "missing_data:short_smtp_trace", "confidence_capped_low_evidence",
+                 "ml_content_label:Legitimate"):
         assert az.ENGINE_STATUS_NOTE.search(note), note
     # real findings, in either direction, stay evidence
     for evidence in ("dmarc_failed", "spf_failed", "spf=fail", "reply_to_domain_mismatch", "urgency_signals:verify",
                      "credential_signals:login", "office_macro_presence:INV-4471.docm", "ml_slm_label:Phishing",
                      "domain_signal:suspicious_tld (.top)", "unfamiliar_sender_domain", "high_subdomain_entropy",
-                     "ml_user_behavior_anomaly_detected", "txn_trust:auth_all_pass", "benign_allowlist_prior:github.com"):
+                     "ml_user_behavior_anomaly_detected", "txn_trust:auth_all_pass", "benign_allowlist_prior:github.com",
+                     "ml_content_label:Phishing", "content_terms:verify, password, account"):
         assert not az.ENGINE_STATUS_NOTE.search(evidence), evidence
 
 
@@ -241,3 +243,35 @@ def test_with_the_platforms_data_the_genuine_invoice_is_safe_and_phishing_still_
     phish = ph.process(ph.submit_raw((CORPUS / "cred_phish_lookalike.eml").read_bytes(), source="test").id)
     assert phish["case"]["verdict"] == "malicious"
     assert "sandbox_agent" not in phish["assessment"]["backend_detail"]["engine"]["agent_scores"]
+
+
+@needs_models
+def test_the_engine_makes_no_outbound_connection_in_offline_mode(engine, monkeypatch):
+    """The engine read the project's .env itself on first import, so an OCR key there sent image attachments to an
+    Azure OCR service, and its URL / threat-intel agents queried public lookup services with e-mail URLs and hashes.
+    Offline mode now clears every lookup switch and credential on the live settings: with every network connection
+    blocked, analysing messages with links, an image (QR code) and attachments must not even try to connect."""
+    import socket
+
+    from soc_platform.domains.phishing.agents.decompose import decompose
+    from soc_platform.domains.phishing.engine.configs.settings import settings as engine_settings
+
+    object.__setattr__(engine_settings, "azure_ocr_endpoint", "https://ocr.example.invalid/")   # as if read from .env
+    object.__setattr__(engine_settings, "azure_ocr_key", "a-real-looking-key")
+    object.__setattr__(engine_settings, "enable_urlhaus_lookup", True)
+    attempts = []
+    real_connect = socket.socket.connect
+
+    def blocked(self, address):
+        attempts.append(address)
+        raise OSError("network blocked by test")
+
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+    try:
+        for name in ("quishing_qr", "cred_phish_lookalike", "malspam_macro", "html_attachment_phish"):
+            raw = (CORPUS / f"{name}.eml").read_bytes()
+            engine.analyze(decompose(raw), raw)
+    finally:
+        monkeypatch.setattr(socket.socket, "connect", real_connect)
+    assert attempts == [], attempts
+    assert engine_settings.azure_ocr_key is None and engine_settings.enable_urlhaus_lookup is False
