@@ -217,7 +217,9 @@ FEATURES: list[tuple[str, str, list[str]]] = [
       "test_notify.py::test_failures_are_recorded_and_retried_up_to_a_limit",
       "test_notify.py::test_only_https_channels_from_configuration_are_used",
       "test_notify.py::test_notify_is_a_scheduled_job",
-      "test_api.py::test_notification_settings_are_visible_to_auditors_without_the_secret"]),
+      "test_notify.py::test_a_test_message_reports_each_channel",
+      "test_api.py::test_notification_settings_are_visible_to_auditors_without_the_secret",
+      "test_api.py::test_send_test_message_is_for_integration_admins_and_audited"]),
     ("Speed", "Jobs commit cases before the model writes; explanations for a batch in parallel; decisions unchanged",
      ["test_incident.py::test_deferred_narration_keeps_the_case_usable_then_adds_the_written_explanation",
       "test_phishing.py::test_deferred_narration_for_reported_email"]),
@@ -228,7 +230,17 @@ FEATURES: list[tuple[str, str, list[str]]] = [
      ["test_scheduler.py::test_two_schedulers_at_once_never_run_a_job_twice",
       "test_scheduler.py::test_health_states_running_stale_stuck_never",
       "test_scheduler.py::test_a_dead_scheduler_thread_is_restarted",
-      "test_scheduler.py::test_the_server_runs_the_scheduler_itself"]),
+      "test_scheduler.py::test_the_server_runs_the_scheduler_itself",
+      "test_scheduler.py::test_first_leases_taken_at_the_same_moment_have_one_winner_and_never_raise",
+      "test_scheduler.py::test_the_heartbeat_never_puts_back_a_stale_running_job"]),
+    ("Resilience", "Every request commits before its response is sent (no acknowledged-but-uncommitted writes)",
+     ["test_commit_before_response.py::test_every_route_commits_its_session_before_responding",
+      "test_commit_before_response.py::test_an_uploaded_report_is_readable_as_soon_as_the_upload_returns"]),
+    ("Operations", "One-command demo reset: refuses in production, while the server runs, or without confirmation",
+     ["test_cli.py::test_reset_demo_starts_again_from_nothing",
+      "test_cli.py::test_reset_demo_asks_first_and_changes_nothing_when_cancelled",
+      "test_cli.py::test_reset_demo_refuses_in_production_and_while_the_server_runs",
+      "test_cli.py::test_reset_demo_never_deletes_folders_outside_the_project"]),
     ("Resilience", "Audit chain stays unbroken under concurrent appends; schema upgrades add optional columns without data loss",
      ["test_audit_concurrency.py::test_concurrent_appends_keep_one_unbroken_chain",
       "test_schema.py::test_start_up_adds_new_optional_columns_and_keeps_the_data"]),
@@ -318,6 +330,25 @@ def llm_env() -> dict[str, str]:
     return env
 
 
+def _webhook_receiver():
+    """A local stand-in for a Teams/Slack incoming webhook: accepts every POST (the tour only needs it to answer)."""
+    import http.server
+    import threading
+
+    class Hook(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hook)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
 def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple[bool, str]:
     """Tour into a temporary folder (docs/screenshots is only refreshed deliberately, via SOC_SHOTS)."""
     tour = ROOT / "scripts" / "ui_tour"
@@ -330,10 +361,13 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    env = {**os.environ, "SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": "verify-" + os.urandom(16).hex(), "SOC_ENVIRONMENT": "dev",
+    hook = _webhook_receiver()                   # the Notifications card then shows a real channel and deliveries
+    env = {**os.environ, "SOC_NOTIFY_WEBHOOKS": f"teams|http://127.0.0.1:{hook.server_port}/hook", "SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": "verify-" + os.urandom(16).hex(), "SOC_ENVIRONMENT": "dev",
            "SOC_DATABASE_URL": f"sqlite:///{tmp / 'soc.db'}", "SOC_ORG_DOMAINS": "acme-demo.com",
            "SOC_REPORT_OUTPUT_DIR": str(tmp / "reports"), "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"),
-           "SOC_EMBEDDED_SCHEDULER": "0",   # the tour drives every pipeline itself; background jobs would move its figures
+           # the real scheduler runs (heartbeat, so /health says "running") but its first job pass is a day away: the tour
+           # drives every pipeline itself, and background jobs would move its figures under the screen-vs-API check
+           "SOC_EMBEDDED_SCHEDULER": "1", "SOC_SCHEDULER_START_DELAY": "86400",
            **(llm_env() if with_llm else {"SOC_LLM_PROVIDER": "none"})}
     shots = shots or tmp / "shots"
     server = subprocess.Popen([sys.executable, "-m", "uvicorn", "soc_platform.api.app:app", "--host", "127.0.0.1", "--port", str(port)],
@@ -356,6 +390,7 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
     finally:
         server.terminate()
         server.wait(timeout=20)
+        hook.shutdown()
 
 
 def main() -> int:

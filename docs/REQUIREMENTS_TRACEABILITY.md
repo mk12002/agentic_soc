@@ -116,7 +116,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | PH-T04 | Sandbox hardening | ✅ | Hardened fail-closed detonation, no docker.sock, gVisor option, CAPEv2 for Windows payloads, authenticated executor | engine tests (sandbox), docs/SECURITY.md |
 | PH-T05 | Action layer | ✅ | Graph soft/hard delete & quarantine, Defender indicators, Umbrella destination lists, Entra revocation | test_connectors |
 | PH-T06 | Data handling | ✅ | Encrypted-at-rest .eml, retention job with legal hold, RBAC, PII pseudonymisation before any LLM call | test_access_security, test_resilience_security |
-| PH-T07 | Throughput | 🟡 | Heuristic path ~1 s/message end to end on fixtures; production sizing needs client volumes (A09/Q17) | timing in docs/TEST_REPORT.md |
+| PH-T07 | Throughput | 🟡 | Measured with every vendor call taking 400 ms: a full analysis (campaign scope, clicks, endpoint and identity impact) 2.9 s, a benign e-mail 1.2 s; vendor lookups run in parallel; with the LLM on, the case is saved first and the explanation follows. Production sizing needs client volumes (A09/Q17) | test_phishing::test_phishing_analysis_asks_the_tools_in_parallel; ENGINEERING.md §16.1 |
 | PH-T08 | Shadow-mode validation | ✅ | Shadow mode by default (all actions L2 = recommend); agreement metrics vs analyst dispositions | test_core_governance |
 | PH-T09 | Deployment model | ✅ | API-only alongside existing controls; no MX change | - |
 
@@ -130,7 +130,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | NFR-04 | Auditability | ✅ | Append-only hash-chained audit; verify endpoint; JSONL export with chain verification | test_core_governance, test_access_security |
 | NFR-05 | Resilience and partial-result tolerance | ✅ | Partial-result tolerance, circuit breakers, job retries/dead letter | test_resilience_security, test_jobs |
 | NFR-06 | Performance | 🟡 | Measured per workflow and tool (dashboard); targets pending client baselines | test_demo_walkthrough |
-| NFR-07 | Scalability | 🟡 | Stateless API + separate scheduler/workers + Postgres; job leases for multiple replicas. Not load-tested at client volume | - |
+| NFR-07 | Scalability | 🟡 | Stateless API (scale out behind TLS) + PostgreSQL; the scheduler runs inside the API server by default and can run as its own service; any number of schedulers is safe (database-decided due-ness, atomic per-job lease). Measured at 20,000 entities / actions; not load-tested at client volume | test_scheduler, test_intelligence::test_risk_ranking_only_profiles_entities_with_risk_sources |
 | NFR-08 | Platform security | ✅ | Vault secrets, least privilege, encryption at rest, CSP/headers, rate limits, bandit/pip-audit clean, hardened sandbox | test_access_security, test_resilience_security |
 | NFR-09 | Identity and access management | ✅ | Entra SSO, RBAC with domain scope, step-up MFA, SoD, break-glass (sealed, audited, alerted), service-account keys, revocation | test_access_security |
 | NFR-10 | Data protection and residency | 🟡 | Retention periods configurable and enforced; classification/residency are client decisions (Q21, Q24) | test_access_security |

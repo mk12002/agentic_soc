@@ -85,33 +85,44 @@ class Scheduler:
 
     # ------------------------------------------------------------------ liveness
     def _beat(self, *, loop: bool = False, job: str | None = None) -> None:
-        """Write this scheduler's heartbeat. The heartbeat thread and the job thread may create the row at the same
-        moment; the one that loses the insert simply writes again onto the row that now exists."""
+        """Write this scheduler's heartbeat. The heartbeat thread and the job thread share one row: each merges its own
+        fields into the latest version with a compare-and-swap on ``updated_at``, so neither overwrites the other's
+        newer value (the heartbeat once put back a stale "running job"). A lost insert race also just retries."""
         from sqlalchemy.exc import IntegrityError
 
-        try:
-            self._write_beat(loop=loop, job=job)
-        except IntegrityError:
-            self._write_beat(loop=loop, job=job)
+        for _ in range(20):
+            try:
+                if self._write_beat(loop=loop, job=job):
+                    return
+            except IntegrityError:
+                pass                                          # the other thread created the row first: merge into it
+        log.warning("scheduler heartbeat: gave up after repeated concurrent updates")
 
-    def _write_beat(self, *, loop: bool, job: str | None) -> None:
+    def _write_beat(self, *, loop: bool, job: str | None) -> bool:
+        from sqlalchemy import update
+
+        now = utcnow()
         with self.db.session() as s:
             f = s.get(SystemFlag, self.key)
-            if f is None:
-                f = SystemFlag(name=self.key, value={}, updated_by="scheduler")
-                s.add(f)
-            v = dict(f.value or {})
-            now = utcnow().isoformat()
-            v.update({"holder": jobs.HOLDER, "mode": self.mode, "at": now})
+            v = dict((f.value if f is not None else None) or {})
+            v.update({"holder": jobs.HOLDER, "mode": self.mode, "at": now.isoformat()})
             if loop:
-                v["loop_at"], v["job"] = now, job
-            f.value, f.updated_by, f.updated_at = v, "scheduler", utcnow()
-            if not loop:                                     # forget schedulers gone for a day (old processes)
-                cutoff = utcnow() - timedelta(days=1)
+                v["loop_at"], v["job"] = now.isoformat(), job
+            if f is None:
+                s.add(SystemFlag(name=self.key, value=v, updated_by="scheduler", updated_at=now))
+                written = True
+            else:
+                seen = f.updated_at
+                s.expunge(f)
+                written = s.execute(update(SystemFlag).where(SystemFlag.name == self.key, SystemFlag.updated_at == seen)
+                                    .values(value=v, updated_by="scheduler", updated_at=now)).rowcount == 1
+            if written and not loop:                          # forget schedulers gone for a day (old processes)
+                cutoff = now - timedelta(days=1)
                 for old in s.execute(select(SystemFlag).where(SystemFlag.name.like(KEY_PREFIX + "%"),
                                                               SystemFlag.name != self.key,
                                                               SystemFlag.updated_at < cutoff)).scalars():
                     s.delete(old)
+        return written
 
     def _heartbeat_loop(self) -> None:
         while not self.stop.is_set():

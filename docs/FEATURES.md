@@ -45,6 +45,10 @@ vulnerabilities in one place - only what your role and data scope allow. Every p
 |---|---|---|
 | ![](screenshots/00-sign-in.png) | ![](screenshots/01-overview.png) | ![](screenshots/20-dark-overview.png) |
 
+| Search (one box: cases, people, hosts, indicators, findings, CVEs) |
+|---|
+| ![](screenshots/29-search.png) |
+
 **Overview dashboard** - open cases by domain and severity, approvals waiting, automation rate, median time to
 close, open insights, open vulnerabilities and SLA breaches, a 14-day trend by domain, the highest-priority
 correlated findings, the riskiest users and hosts, data quality (asset / identity match rates, resolution queue),
@@ -323,7 +327,8 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
 * **Notifications** - important findings (default: high and critical) are posted to **Microsoft Teams, Slack or any
   webhook** (JSON for a SIEM or SOAR) within a minute: correlated attacks, dead-lettered jobs, break-glass use, a
   failing self-check, the LLM budget. Each finding is sent once per channel and again if it escalates; failed
-  deliveries are retried and shown on the Integrations screen. Destinations come only from configuration (HTTPS),
+  deliveries are retried and shown on the Integrations screen, where *Send test message* proves a channel on the
+  spot. Destinations come only from configuration (HTTPS),
   and the webhook secret is never stored or displayed.
 * **Durable jobs** - every scheduled run recorded; retries with backoff; dead letter after 3 failed runs with an
   alert; database lease so replicas never double-run; replay from the console.

@@ -184,7 +184,7 @@ exceptions: DataError -> 400; KeyError from services -> 404; PermissionError -> 
 
 ```text
 soc_platform/
-  __main__.py            CLI: init-db, demo, serve, scheduler, token, fixtures
+  __main__.py            CLI: init-db, demo, reset-demo, serve, scheduler, token, fixtures
   config.py              Settings (env-driven), secret() with *_FILE support
   jobs.py                job registry, run_job (lease, retries, record, dead letter)
   scheduler.py           embedded/standalone scheduler, heartbeat, status()
@@ -440,6 +440,13 @@ unresolved, by design.
 
 - `Database.session()` is a context manager: commit on success, rollback on any exception, always close.
 - The API uses one session per request (the `db_session` dependency). A job run uses one session per attempt.
+- **The request commits before the response is sent.** Every `Depends(db_session, scope="function")` ends the
+  session - commit or rollback - when the handler returns, before FastAPI sends the reply. FastAPI's default
+  (`request` scope) ends it *after* the reply. A real-server check found an uploaded report's case missing from the
+  very next case list in 28 of 40 tries (the upload is an `async` handler; sync handlers raced far less often but
+  the same way), and a failed commit would have been reported to the client as success. Guarded by
+  `test_commit_before_response.py`: every route's session scope is checked, and a real server must show each
+  upload in the next list.
 - **Exactly-once state transitions use conditional updates:** `UPDATE action_requests SET status=… WHERE id=… AND
   status IN (approvable)` and check `rowcount`. Six simultaneous approvals of one action execute it exactly once
   (tested).
@@ -992,6 +999,9 @@ Important findings are pushed to Teams, Slack or any webhook by the `notify` job
   `SOC_PUBLIC_URL` is set; `json` gets a structured record (id, rule, severity, title, status, domains, next steps,
   first seen) for a SIEM or SOAR.
 - **Visible:** Integrations → *Notifications* card and `GET /api/v1/admin/notifications` (audit-read, all-domain).
+- **Test message:** `POST /api/v1/admin/notifications/test` (*Send test message*, `manage_connectors`) posts a marked
+  test message to every channel and returns a result per channel (`kind:host`, ok, error). Audited, not recorded
+  as a delivery, and it never returns the URL.
 - Tested in `test_notify.py`: threshold, once per channel, escalation, retry cap, HTTPS-only parsing, secret file,
   and the job wiring.
 
@@ -1005,7 +1015,10 @@ Important findings are pushed to Teams, Slack or any webhook by the `notify` job
   exception per pass. Retry backoff waits on the stop event, so shutdown is prompt.
 - **Heartbeat:** `system_flags[scheduler:<sha256(holder)[:24]>]` records the holder, mode and `at` (every 30 s from
   a separate thread), plus `loop_at` and the current job from the loop. The key is hashed because the flag key column
-  is 64 characters. Rows gone for a day are pruned.
+  is 64 characters. Rows gone for a day are pruned. Both threads write the same row, so each write merges its own
+  fields into the latest version with a compare-and-swap on `updated_at` (retried on conflict). A plain
+  read-modify-write let the heartbeat put back an older copy, so the "running job" could briefly be wrong; a race
+  test reproduced it in 1 of 10 runs and now guards it.
 - **`status()`** for `/health`:
   - `running`
   - `stuck`: alive, but a job has run past its lease (30 min)
@@ -1145,7 +1158,7 @@ immediately.
     `/jobs`, `/connectors`, `/dashboard`, `/entities`, `/resolution`, `/policy`, `/kill-switch`, `/llm`,
     `/ingest/alerts`, `/search`
   - collaboration: `POST /cases/{id}/assign`, `POST /cases/{id}/notes`; notifications:
-    `GET /admin/notifications`
+    `GET /admin/notifications`, `POST /admin/notifications/test`
   - `/health` (unauthenticated: status, audit chain, kill switch, scheduler) and `/metrics` (Prometheus text,
     audit-read permission)
 - **Permissions are declared per route** with `Depends(need(Perm.X, "domain"))`. Record-level scope is checked in

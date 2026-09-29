@@ -304,3 +304,22 @@ def test_notification_settings_are_visible_to_auditors_without_the_secret(client
     assert r.json()["min_severity"] == "high" and "very-secret-token" not in r.text
     scoped = {"Authorization": "Bearer " + client.get("/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing").json()["token"]}
     assert client.get("/api/v1/admin/notifications", headers=scoped).status_code == 403   # a platform-wide setting
+
+
+def test_send_test_message_is_for_integration_admins_and_audited(client, monkeypatch):
+    from soc_platform.core import notify
+
+    monkeypatch.delenv("SOC_NOTIFY_WEBHOOKS", raising=False)
+    ada = tok(client, "ada@acme-demo.com", "admin")
+    assert client.post("/api/v1/admin/notifications/test", headers=ada).status_code == 400      # nothing configured
+    monkeypatch.setenv("SOC_NOTIFY_WEBHOOKS", "slack|https://hooks.slack.com/services/T/B/very-secret")
+    sent = []
+    monkeypatch.setattr(notify, "_post", lambda url, body: sent.append(body))
+    for role in ("analyst", "lead", "auditor"):
+        assert client.post("/api/v1/admin/notifications/test", headers=tok(client, "x@acme-demo.com", role)).status_code == 403
+    r = client.post("/api/v1/admin/notifications/test", headers=ada)
+    assert r.status_code == 200 and r.json()["results"] == [{"channel": "slack:hooks.slack.com", "ok": True, "error": None}]
+    assert len(sent) == 1 and "very-secret" not in r.text
+    audit = client.get("/api/v1/audit?limit=20", headers=ada).json()
+    rows = audit if isinstance(audit, list) else audit.get("records", audit.get("items", []))
+    assert any(a.get("event_type", a.get("event")) == "notify.test" for a in rows)

@@ -154,6 +154,24 @@ def deliver(s: Session, *, post: Any = None) -> dict[str, int]:
     return counts
 
 
+def send_test(*, by: str, post: Any = None) -> list[dict[str, Any]]:
+    """Send one clearly-marked test message to every configured channel, now, and say which worked. Not recorded as a
+    delivery (it is not a finding); the caller audits it."""
+    post = post or _post
+    link = _link()
+    text = f"Agentic SOC test message, sent by {by}. If you can read this, notifications reach this channel."
+    out = []
+    for ch in channels():
+        body = ({"source": "agentic-soc", "test": True, "text": text, "link": link} if ch.kind == "json"
+                else {"text": text + (f"\nOpen: {link}" if link else "")})
+        try:
+            post(ch.url, body)
+            out.append({"channel": ch.label, "ok": True, "error": None})
+        except Exception as exc:  # noqa: BLE001 - reported to the operator who pressed the button
+            out.append({"channel": ch.label, "ok": False, "error": f"{type(exc).__name__}: {exc}"[:300]})
+    return out
+
+
 def recent(s: Session, limit: int = 20) -> list[dict[str, Any]]:
     rows = s.execute(select(Notification).order_by(Notification.created_at.desc()).limit(limit)).scalars()
     return [{"channel": r.channel, "severity": r.severity, "status": r.status, "attempts": r.attempts,

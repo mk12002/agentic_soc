@@ -81,6 +81,10 @@ async function audit(page, label) {
 }
 async function shot(page, name, full = true) {
   await audit(page, name);
+  const junk = await page.evaluate(() => (document.body.innerText.match(/\[native code\]|undefined|NaN|\[object Object\]/) || [''])[0]);
+  if (junk) problems.push(`${name}: page shows "${junk}"`);                // a template bug leaking into the screen
+  if (await page.evaluate(() => { const b = document.getElementById('sched-status'); return !!b && !b.hidden; }))
+    problems.push(`${name}: scheduler banner shown although the scheduler is running`);
   await page.screenshot({path: `${OUT}/${name}.png`, fullPage: full});
   console.log('saved', name);
 }
@@ -107,22 +111,8 @@ async function visit(page, hash, name, full = true) {
   await call(lead, 'POST', '/api/v1/vm/misconfigurations/route');
   await call(lead, 'POST', '/api/v1/intelligence/refresh');
   const ops = await token(`otto@${EST.org}`, 'automation_admin');
-  for (const j of ['intelligence', 'follow_up', 'retention']) await call(ops, 'POST', `/api/v1/jobs/${j}/run`);
-  // stored-XSS probe: script in every field the console displays (subject, sender, body link, attachment name)
-  const XSS = `<img src=x onerror="window.__xss='img'"><script>window.__xss='script'</script>`;
-  const xssMail = [`From: "Mallory ${XSS}" <mallory@evil.example>`, `To: ${EST.focus_upn}`,
-    `Subject: Invoice ${XSS}`, 'Message-ID: <xss-probe@evil.example>', 'MIME-Version: 1.0',
-    'Content-Type: multipart/mixed; boundary="b1"', '', '--b1', 'Content-Type: text/html; charset=utf-8', '',
-    `<p>Pay now ${XSS} <a href="javascript:window.__xss='href'">here</a> https://evil.example/pay?q="><svg onload=window.__xss='svg'></p>`,
-    '--b1', `Content-Type: application/octet-stream; name="a${XSS}.pdf"`,
-    `Content-Disposition: attachment; filename="a${XSS}.pdf"`, 'Content-Transfer-Encoding: base64', '', 'JVBERi0xLjQK', '--b1--', ''].join('\r\n');
-  const fdx = new FormData();
-  fdx.append('file', new Blob([xssMail], {type: 'message/rfc822'}), 'xss.eml');
-  const xr = await fetch(BASE + '/api/v1/phishing/submit', {method: 'POST', headers: {Authorization: 'Bearer ' + lead}, body: fdx});
-  if (!xr.ok) problems.push(`xss probe upload -> ${xr.status}`);
+  for (const j of ['intelligence', 'follow_up', 'retention', 'notify']) await call(ops, 'POST', `/api/v1/jobs/${j}/run`);
   const cases = await call(lead, 'GET', '/api/v1/cases');
-  const xssCase = cases.find(c => (c.title || '').includes('onerror'));
-  if (!xssCase) problems.push('xss probe case not created');
   const phishCase = cases.find(c => c.domain === 'phishing' && c.title.includes(EST.phish_subject_token)) || cases.find(c => c.domain === 'phishing');
   const incCase = cases.find(c => c.domain === 'incident' && c.severity === 'critical') || cases.find(c => c.domain === 'incident');
   const jane = await call(lead, 'GET', `/api/v1/entities/find?kind=identity&key=upn&value=${encodeURIComponent(EST.focus_upn)}`);
@@ -152,9 +142,24 @@ async function visit(page, hash, name, full = true) {
   await page.waitForFunction(() => !document.querySelector('#ia .spin') && document.querySelector('#ia').textContent.length > 40, null, {timeout: 120000});
   await shot(page, '02-intelligence');
   await visit(page, 'cases', '03-cases', false);
+  const term = EST.focus_upn.split('@')[0].split(/[._]/)[0];          // e.g. "jane": finds cases, identity, findings
+  await page.fill('#global-q', term);
+  await page.press('#global-q', 'Enter');
+  await page.waitForFunction(() => location.hash.startsWith('#/search/'));
+  await settle(page);
+  if (!(await page.$$eval('#main .card', cs => cs.length))) problems.push('search showed no result groups');
+  await shot(page, '29-search');
   await visit(page, `cases/${phishCase.id}`, '04-case-phishing');
   await page.hover('abbr.cite').catch(() => {});
-  await visit(page, `cases/${incCase.id}`, '05-case-incident');
+  await page.goto(`${BASE}/#/cases/${incCase.id}`); await settle(page);   // own the case and leave a note, in the UI
+  await page.click('[data-fn="assignCase"]'); await settle(page);
+  await page.fill('#note-text', 'Spoke to the user: laptop handed to IT for re-imaging. Waiting on EDR isolation approval.');
+  await page.click('[data-fn="addNote"]'); await settle(page);
+  if (!(await page.textContent('#main')).includes('laptop handed to IT')) problems.push('case note not shown after adding it');
+  await page.goto(`${BASE}/#/overview`); await settle(page);             // leave and come back: fresh page, top of it
+  await page.goto(`${BASE}/#/cases/${incCase.id}`); await settle(page);
+  await page.evaluate(() => { window.scrollTo(0, 0); const t = document.getElementById('toast'); if (t) t.hidden = true; });
+  await shot(page, '05-case-incident');
   await visit(page, `entity/${jane.id}`, '06-entity-360');
   await visit(page, 'approvals', '07-approvals');
   await visit(page, `story/${phishCase.id}`, '24-attack-story');
@@ -262,6 +267,12 @@ async function visit(page, hash, name, full = true) {
   if (!(await page.$('#kout code'))) problems.push('service-account key was not shown');
   await page.evaluate(() => { const c = document.querySelector('#kout code'); if (c) c.textContent = c.textContent.slice(0, 7) + '•'.repeat(24) + '  (masked for the screenshot)'; });
   await shot(page, '18-access');
+  await page.goto(`${BASE}/#/integrations`); await settle(page);
+  if (await page.$('[data-fn="notifyTest"]')) {
+    await page.click('[data-fn="notifyTest"]'); await page.waitForTimeout(1500);
+    const t = await page.evaluate(() => { const x = document.getElementById('toast'); return x && !x.hidden ? [x.classList.contains('err'), x.textContent] : [false, '']; });
+    if (t[0] || !t[1].includes('Test message sent')) problems.push('send test message: ' + (t[1] || 'no confirmation'));
+  }
   // auditor: compliance pack
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
   await page.fill('#si-user', `audrey@${EST.org}`); await page.selectOption('#si-role', 'auditor');
@@ -274,6 +285,21 @@ async function visit(page, hash, name, full = true) {
   await shot(page, '19-compliance-pack', false);
 
   // ---------- stored XSS: open every screen that displays the hostile e-mail
+  // (uploaded only now, after the screenshots, so the documentation never shows the probe)
+  // stored-XSS probe: script in every field the console displays (subject, sender, body link, attachment name)
+  const XSS = `<img src=x onerror="window.__xss='img'"><script>window.__xss='script'</script>`;
+  const xssMail = [`From: "Mallory ${XSS}" <mallory@evil.example>`, `To: ${EST.focus_upn}`,
+    `Subject: Invoice ${XSS}`, 'Message-ID: <xss-probe@evil.example>', 'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="b1"', '', '--b1', 'Content-Type: text/html; charset=utf-8', '',
+    `<p>Pay now ${XSS} <a href="javascript:window.__xss='href'">here</a> https://evil.example/pay?q="><svg onload=window.__xss='svg'></p>`,
+    '--b1', `Content-Type: application/octet-stream; name="a${XSS}.pdf"`,
+    `Content-Disposition: attachment; filename="a${XSS}.pdf"`, 'Content-Transfer-Encoding: base64', '', 'JVBERi0xLjQK', '--b1--', ''].join('\r\n');
+  const fdx = new FormData();
+  fdx.append('file', new Blob([xssMail], {type: 'message/rfc822'}), 'xss.eml');
+  const xr = await fetch(BASE + '/api/v1/phishing/submit', {method: 'POST', headers: {Authorization: 'Bearer ' + lead}, body: fdx});
+  if (!xr.ok) problems.push(`xss probe upload -> ${xr.status}`);
+  const xssCase = (await call(lead, 'GET', '/api/v1/cases')).find(c => (c.title || '').includes('onerror'));
+  if (!xssCase) problems.push('xss probe case not created');
   if (xssCase) {
     for (const r of [`cases/${xssCase.id}`, `story/${xssCase.id}`, 'cases', 'phishing', 'approvals', 'overview', 'intelligence', 'audit']) {
       await page.goto(`${BASE}/#/${r}`); await settle(page);
@@ -284,12 +310,28 @@ async function visit(page, hash, name, full = true) {
     console.log('stored-XSS probe checked');
   }
 
+  // phishing-only analyst: the Data scope field on the sign-in form really limits what they see
+  await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
+  await page.fill('#si-user', `pia@${EST.org}`); await page.selectOption('#si-role', 'analyst');
+  await page.selectOption('#si-scope', 'phishing');
+  await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
+  const nav = await page.$$eval('[data-nav]', as => as.map(a => a.dataset.nav));
+  if (nav.includes('vulnerabilities') || nav.includes('shadow-it') || !nav.includes('phishing')) problems.push('scoped sign-in: menu not limited - ' + nav.join(','));
+  const scopedCases = await page.evaluate(async () => (await (await fetch('/api/v1/cases', {headers: {Authorization: 'Bearer ' + localStorage.getItem('soc_token')}})).json()).map(c => c.domain));
+  if (scopedCases.some(d => d !== 'phishing')) problems.push('scoped sign-in: non-phishing cases listed');
+  for (const r of ['intelligence', 'vulnerabilities', 'shadow-it']) {      // typed-in addresses outside the scope
+    await page.goto(`${BASE}/#/${r}`); await settle(page);
+    if (!(await page.textContent('#main')).includes('outside your data scope') && !(await page.textContent('#main')).includes('needs all-domain access'))
+      problems.push(`scoped sign-in: ${r} did not explain the scope`);
+  }
+
   // ---------- layout audit at narrower widths, every screen, both themes
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
   await page.fill('#si-user', EST.lead); await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
-    `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'reports', 'access', 'audit'];
+    `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'reports', 'access', 'audit',
+    `search/${encodeURIComponent(term)}`];
   for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light']]) {
     await page.setViewportSize({width: w, height: 900});
     await page.evaluate(t => { document.documentElement.setAttribute('data-theme', t); }, theme);

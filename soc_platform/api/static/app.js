@@ -212,6 +212,7 @@ async function render() {
   if (!window.ME) return;
   const {name, params} = route();
   document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === name));
+  const q = $('#global-q'); if (q && name !== 'search') q.value = '';        // the box shows a query only on its results
   const title = TITLES[name] || cap(name);
   const parent = {story: 'cases', entity: 'cases'}[name] || name;
   $('#crumbs').innerHTML = name === 'search' ? '<b>Search</b>' : params.length ? `<a href="#/${esc(parent)}">${esc(TITLES[parent] || title)}</a> <span class="muted">/</span> <b>${esc(name === 'story' ? 'Attack story' : name === 'entity' ? 'Entity 360' : 'Detail')}</b>` : `<b>${esc(title)}</b>`;
@@ -221,6 +222,12 @@ async function render() {
   GEN += 1;
   main.innerHTML = skeleton();
   if (!view) { main.innerHTML = empty('Page not found'); return; }
+  const scope = NAV.flatMap(([, items]) => items).find(([id]) => id === name);   // a screen outside the user's data scope
+  if (scope && scope[3] && !inDomain(scope[3])) {
+    main.innerHTML = page(title, '', '', empty(scope[3] === '*' ? 'This screen spans every domain, so it needs all-domain access. Your sign-in is limited to ' + window.ME.domains.join(', ') + '.'
+      : `This screen shows ${scope[3]} data, which is outside your data scope (${window.ME.domains.join(', ')}).`));
+    return;
+  }
   try { await view(...params); } catch (e) { if (!main.innerHTML || main.querySelector('.skeleton')) main.innerHTML = empty('This page could not be loaded. ' + (e.message || '').slice(0, 160)); }
   window.scrollTo(0, 0);
 }

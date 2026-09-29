@@ -414,6 +414,8 @@ To show findings arriving in a chat channel:
    follows.
 4. **Integrations → Notifications** shows the channels (host only) and each delivery: sent, or failed with the
    error and attempt number. *Run now* on the `notify` job sends immediately.
+5. **Send test message** on the same card (signed in as Admin or Automation admin) posts a clearly marked test
+   message to every channel at once and says which worked - use it before the demo to prove the channel.
 
 Only `https://` addresses are accepted (`http://` only to localhost, for testing with a local receiver).
 
@@ -488,15 +490,22 @@ To go back, open a new PowerShell window (these variables live only in the windo
 
 ## 10. Resetting between demos
 
-**Stop the server first** (Ctrl+C in its window). Then:
+**Stop the server first** (Ctrl+C in its window). Then one command:
 
 ```powershell
-Remove-Item .\soc_platform.db -ErrorAction SilentlyContinue       # the default database
-Remove-Item .\data\raw, .\data\reports -Recurse -ErrorAction SilentlyContinue
-python -m soc_platform init-db; python -m soc_platform demo
+python -m soc_platform reset-demo          # asks you to type RESET; add --yes to skip the question
+python -m soc_platform serve
 ```
 
-Only delete these if they hold nothing you want to keep. They're the demo database and its generated files.
+It empties the database in `SOC_DATABASE_URL`, deletes the raw payloads and generated reports, and reloads the
+sample organisation (`init-db` + `demo`): about 15 seconds without the LLM (measured 14 s), longer with it because the model writes the explanations. It protects you from mistakes:
+- it refuses to run while the server is running on `SOC_PORT` (on Windows the database file would be in use)
+- it refuses with `SOC_ENVIRONMENT=prod`
+- it deletes the raw-payload and report folders only when they are inside the current folder or the project
+- without `--yes` it changes nothing unless you type `RESET`
+
+It works on SQLite (the file is deleted) and PostgreSQL (every platform table is dropped and recreated). Only use
+it on a demo database: the audit log goes too.
 
 **Or keep a separate database per audience.** Your main database stays untouched:
 
@@ -593,6 +602,7 @@ The browser tour needs Node.js and Chrome or Edge. It installs its own two packa
 | "Scheduler stuck (job)" banner | That job has run for more than 30 minutes, typically a tool that stopped answering. Check **Integrations** (job history and connector status); the job's lease expires and it is retried. |
 | Notifications not arriving | Integrations → *Notifications*: "No channels configured" means `SOC_NOTIFY_WEBHOOKS` is not set in this window, or the entry was rejected (it must be `kind\|https://...`, kind `teams`, `slack` or `json`; the server log names the rejected entry). A *failed* row shows the channel's error; after 5 attempts it stops retrying. Only findings rated at or above `SOC_NOTIFY_MIN_SEVERITY` (default high) and still *new* are sent. |
 | A case says "the written explanation is being prepared" for long | The model is slow or unavailable; the next incident / phishing job run retries it. The verdict and recommendations are already final. Check `GET /api/v1/llm/status`. |
+| `reset-demo` says the server is running or the file is in use | Stop `serve` (Ctrl+C) - or the other program using the database - and run it again. Nothing was deleted. |
 | "database is locked" | Two processes are writing one SQLite file (for example two servers). Stop one. Use PostgreSQL (§11) for more. |
 | Upload refused (413) | The file is larger than 30 MB. |
 | "rate limit exceeded" (429) while scripting | Default 20 requests/s per client. Slow the script, or set `SOC_RATE_LIMIT_RPS=200` for a local demo. |
@@ -620,7 +630,7 @@ OWN A CASE   case > Take case ; Cases > Mine / Unassigned ; notes on the case pa
 NOTIFY       SOC_NOTIFY_WEBHOOKS=teams|https://... (then Integrations > Notifications)
 TOKEN        python -m soc_platform token lena@acme-demo.com lead
 LLM?         Reports page callout, or GET /api/v1/llm/status
-RESET        stop server; delete soc_platform.db, data\raw, data\reports; init-db; demo
+RESET        stop server; python -m soc_platform reset-demo --yes ; serve
 OTHER ORG    python scripts\build_estate_variant.py out\veridian --seed 7  (then §9)
 DOCKER       docker compose -f deploy\docker-compose.yml --env-file .env up -d --build
 TESTS        python -m pytest soc_platform\tests -q ; python scripts\verify_features.py

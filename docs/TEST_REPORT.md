@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-09-28 (round 10; earlier rounds 2026-09-24 to 2026-09-26) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-09-29 (round 10; earlier rounds 2026-09-24 to 2026-09-26) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,9 +8,47 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 10 (2026-09-28) - latest results: scheduler, speed, teamwork, notifications
+## 0. Round 10 (2026-09-28/29) - latest results: scheduler, speed, teamwork, notifications
 
-New in this round:
+**Final results (2026-09-29), after the additions and fixes listed below:**
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **301 passed**, 0 failed, 15 skipped |
+| Platform suite on PostgreSQL 16 | **301 passed**, 0 failed, 15 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **98 of 98 features verified**; 242 test cases; engine 162 passed; browser tour with the LLM on: 30 screenshots, 0 problems |
+| Lint / JS syntax | clean |
+
+**Added on 2026-09-29:**
+- *Send test message* on the Notifications card
+- `python -m soc_platform reset-demo` (measured 14 s without the LLM)
+- a Data scope choice on the dev sign-in
+- screenshots refreshed, including a new search screenshot
+
+The browser tour now also:
+- takes a case and adds a note in the UI
+- searches from the top bar
+- presses *Send test message* as Admin
+- signs in as a phishing-only analyst
+- fails on `undefined` / `NaN` / `[native code]` on any screen, or a scheduler banner while the scheduler runs
+
+**Found and fixed on 2026-09-29:**
+- **Writes were acknowledged before they were committed.** FastAPI ended each request's database session after
+  sending the response. Against a real server, an uploaded report's case was missing from the next case list in
+  **28 of 40** tries, and a commit failure would have been reported as success. Every request now commits before
+  replying (0 of 40). Found because the extended browser tour read a case back straight after uploading it; the
+  normal test client cannot show this race.
+- **The scheduler's status could show an older running job.** The heartbeat wrote back a stale copy of the shared
+  row; reproduced in 1 of 10 runs. Now a compare-and-swap.
+- **The Notifications card showed `function sub() { [native code] }`** as its subtitle, and the new test button
+  was missing (wrong argument to the card helper). The new screen guard catches this class of bug.
+- **A domain-scoped user who typed in the address of an out-of-scope screen** got a page of refused requests. The
+  console now says which scope the screen needs.
+- **The search box kept the last query** on every other page.
+- **The reset command, run under the PostgreSQL test mode**, emptied the configured SQLite file instead of the
+  database actually in use. It now decides from the live connection.
+
+**Earlier in this round (2026-09-28).** New in this round:
 - the built-in scheduler
 - parallel vendor I/O in all three modules
 - deferred case explanations
@@ -22,7 +60,7 @@ New in this round:
 
 | Check | Result |
 |---|---|
-| Platform test suite on **SQLite** (PostgreSQL's rules enforced) | **292 passed**, 0 failed, 15 skipped (opt-in live / PostgreSQL-only) |
+| Platform test suite on **SQLite** (PostgreSQL's rules enforced), 2026-09-28 | **292 passed**, 0 failed, 15 skipped (opt-in live / PostgreSQL-only) |
 | The same suite on **PostgreSQL 16** | **293 passed**, 0 failed, 14 skipped |
 | Feature verification (`--browser --engine --live --llm`) | **96 of 96 features verified**; 232 test cases incl. live LLM and live feed tests; engine 162 passed; browser tour with the LLM on: 0 problems |
 | Lint (ruff, whole repository) / bandit (platform) / `node --check` | 0 findings / no platform findings / clean |

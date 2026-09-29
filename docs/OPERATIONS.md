@@ -9,6 +9,7 @@
 | Run every job once | `python -m soc_platform scheduler --once` |
 | Create schema | `python -m soc_platform init-db` |
 | Demo on fixtures | `python -m soc_platform demo` |
+| Start a demo again from nothing | `python -m soc_platform reset-demo [--yes]` (server stopped; refuses in prod; demo databases only - the audit log goes too) |
 
 Environment: see `.env.example`. Secrets are read from `<NAME>_FILE` (vault mount) or `<NAME>`.
 
@@ -72,6 +73,9 @@ SOC_PUBLIC_URL=https://soc.example    # optional: messages link to the console
   table stores the channel as `kind:host` only - the webhook URL (which contains its secret) is never stored or
   shown.
 * Check: Integrations → *Notifications* card, or `GET /api/v1/admin/notifications` (auditor / admin, all-domain scope).
+* Prove a channel: **Send test message** on that card, or `POST /api/v1/admin/notifications/test` (`manage_connectors`:
+  admin or automation admin). One marked test message per channel, a result per channel; audited as `notify.test`
+  and not counted as a delivery.
   The webhook URLs carry their own credentials: keep them in the vault and mount them as `SOC_NOTIFY_WEBHOOKS_FILE`.
 
 ## Resilience settings

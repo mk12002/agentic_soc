@@ -224,3 +224,33 @@ def test_first_leases_taken_at_the_same_moment_have_one_winner_and_never_raise(t
             t.join()
         assert errors == [] and results.count(True) == 1, (errors, results)
         db.engine.dispose()
+
+
+def test_the_heartbeat_never_puts_back_a_stale_running_job(tmp_path):
+    """The heartbeat thread and the job thread share one row. The heartbeat used to write back a copy it had read
+    earlier, so the "running job" could revert to an older one for up to a heartbeat."""
+    db = Database(f"sqlite:///{tmp_path / 'beat.db'}")
+    db.create_all()
+    s = sched.Scheduler(db)
+    start = threading.Barrier(2)
+
+    def heartbeats(start=start, s=s):
+        start.wait()
+        for _ in range(150):
+            s._beat()
+
+    def job_thread(start=start, s=s):
+        start.wait()
+        for i in range(150):
+            s._beat(loop=True, job=f"job{i}")
+        s._beat(loop=True, job="last")
+
+    threads = [threading.Thread(target=heartbeats), threading.Thread(target=job_thread)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    with db.session() as x:
+        v = x.get(SystemFlag, s.key).value
+    assert v["job"] == "last" and v["loop_at"] and v["at"]
+    db.engine.dispose()

@@ -276,13 +276,17 @@ def registry() -> ConnectorRegistry:
 
 
 def db_session() -> Iterator[Session]:
+    """One session per request, committed when the handler returns. Always used with ``scope="function"`` so the
+    commit happens *before* the response is sent: with FastAPI's default ("request") the commit ran after the reply,
+    so a client could read back stale data - an upload's case was missing from the next list in 28 of 40 tries - or
+    be told a write succeeded that then failed to commit."""
     with get_database().session() as s:
         yield s
 
 
 def current_user(request: Request, authorization: str | None = Header(default=None),
                  x_api_key: str | None = Header(default=None), x_break_glass: str | None = Header(default=None),
-                 settings: Settings = Depends(get_settings), s: Session = Depends(db_session)) -> Principal:
+                 settings: Settings = Depends(get_settings), s: Session = Depends(db_session, scope="function")) -> Principal:
     """Bearer token (Entra / dev), service-account API key, or sealed break-glass credential."""
     acc = AccessService(s, settings)
     client = request.client.host if request.client else "unknown"
@@ -381,7 +385,7 @@ _CHAIN_CACHE: dict[str, Any] = {"at": 0.0, "ok": None}
 
 
 @app.get("/health")
-def health(s: Session = Depends(db_session)) -> dict[str, Any]:
+def health(s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     now = __import__("time").monotonic()
     if now - _CHAIN_CACHE["at"] > 300:  # full verification at most every 5 min; /api/v1/audit/verify is on demand
         _CHAIN_CACHE.update(at=now, ok=AuditLog(s).verify()["ok"])
@@ -432,7 +436,7 @@ def connectors(_: Principal = Depends(need(Perm.READ))) -> list[dict[str, Any]]:
 
 @app.post("/api/v1/connectors/{name}/sync")
 def connector_sync(name: str, stream: str, full: bool = False, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
-                   s: Session = Depends(db_session)) -> dict[str, Any]:
+                   s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     try:
         conn = registry().get(name)
     except KeyError:
@@ -447,7 +451,7 @@ def connector_sync(name: str, stream: str, full: bool = False, p: Principal = De
 
 @app.post("/api/v1/connectors/{name}/test")
 def connector_test(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
-                   s: Session = Depends(db_session)) -> dict[str, Any]:
+                   s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     """Authenticate against the tool and read one page (NFR-13): proves credentials, scopes and reachability."""
     try:
         conn = registry().get(name)
@@ -492,12 +496,12 @@ def admin_permissions(_: Principal = Depends(need(Perm.READ_AUDIT))) -> dict[str
 
 
 @app.get("/api/v1/admin/roles")
-def admin_roles(all: bool = False, _: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+def admin_roles(all: bool = False, _: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session, scope="function")):
     return _access(s).list_grants(include_inactive=all)
 
 
 @app.post("/api/v1/admin/roles")
-def admin_grant(body: GrantBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+def admin_grant(body: GrantBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session, scope="function")):
     try:
         g = _access(s).grant(p, body.principal_id, body.role, domains=body.domains, days=body.days, reason=body.reason)
     except Exception as exc:
@@ -507,7 +511,7 @@ def admin_grant(body: GrantBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)
 
 @app.delete("/api/v1/admin/roles/{gid}")
 def admin_revoke(gid: str, reason: str = "", p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
-                 s: Session = Depends(db_session)):
+                 s: Session = Depends(db_session, scope="function")):
     try:
         g = _access(s).revoke_grant(p, gid, reason)
     except Exception as exc:
@@ -516,12 +520,12 @@ def admin_revoke(gid: str, reason: str = "", p: Principal = Depends(need(Perm.MA
 
 
 @app.get("/api/v1/admin/api-keys")
-def admin_keys(_: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+def admin_keys(_: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session, scope="function")):
     return _access(s).list_api_keys()
 
 
 @app.post("/api/v1/admin/api-keys")
-def admin_key_create(body: ApiKeyBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+def admin_key_create(body: ApiKeyBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session, scope="function")):
     try:
         key, secret = _access(s).create_api_key(p, body.name, body.roles, domains=body.domains, days=body.days)
     except Exception as exc:
@@ -532,7 +536,7 @@ def admin_key_create(body: ApiKeyBody, p: Principal = Depends(need(Perm.MANAGE_A
 
 
 @app.delete("/api/v1/admin/api-keys/{kid}")
-def admin_key_revoke(kid: str, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session)):
+def admin_key_revoke(kid: str, p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session, scope="function")):
     try:
         _access(s).revoke_api_key(p, kid)
     except Exception as exc:
@@ -542,13 +546,13 @@ def admin_key_revoke(kid: str, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
 
 @app.post("/api/v1/admin/revoke-sessions")
 def admin_revoke_sessions(body: RevokeBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
-                          s: Session = Depends(db_session)):
+                          s: Session = Depends(db_session, scope="function")):
     _access(s).revoke_sessions(p, body.principal_id, body.reason)
     return {"principal_id": body.principal_id, "sessions_revoked": True}
 
 
 @app.post("/api/v1/auth/logout")
-def logout(p: Principal = Depends(current_user), s: Session = Depends(db_session)) -> dict[str, Any]:
+def logout(p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     """Revoke the presented token (its jti) server-side."""
     if p.is_service or p.break_glass or not p.token_id:
         raise HTTPException(400, "only bearer tokens with a jti can be revoked this way")
@@ -558,7 +562,7 @@ def logout(p: Principal = Depends(current_user), s: Session = Depends(db_session
 
 @app.get("/api/v1/admin/access-log")
 def admin_access_log(principal_id: str | None = None, status_min: int = 0, limit: int = Query(200, le=2000),
-                     _: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session)):
+                     _: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session, scope="function")):
     # request paths name cases and entities of every domain: all-domain readers only
     ACCESS_LOG.flush(2.0)
     q = select(AccessLogRecord).order_by(AccessLogRecord.seq.desc()).limit(limit)
@@ -573,14 +577,14 @@ def admin_access_log(principal_id: str | None = None, status_min: int = 0, limit
 
 @app.post("/api/v1/admin/retention/run")
 def admin_retention(dry_run: bool = True, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
-                    s: Session = Depends(db_session)) -> dict[str, Any]:
+                    s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     from soc_platform.core.retention import run_retention
 
     return run_retention(s, get_settings(), actor=p.id, dry_run=dry_run)
 
 
 @app.get("/api/v1/audit/export")
-def audit_export(since_seq: int = 0, p: Principal = Depends(need(Perm.EXPORT_EVIDENCE, "*")), s: Session = Depends(db_session)):
+def audit_export(since_seq: int = 0, p: Principal = Depends(need(Perm.EXPORT_EVIDENCE, "*")), s: Session = Depends(db_session, scope="function")):
     """JSON Lines export of the hash-chained audit log for external archiving / SIEM (NFR-04). The whole chain is
     needed to verify it, so this requires all-domain scope."""
     from fastapi.responses import PlainTextResponse
@@ -600,7 +604,7 @@ class PushedAlerts(BaseModel):
 
 @app.post("/api/v1/ingest/alerts")
 def ingest_alerts(body: PushedAlerts, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")),
-                  s: Session = Depends(db_session)) -> dict[str, int]:
+                  s: Session = Depends(db_session, scope="function")) -> dict[str, int]:
     """Push endpoint for any SIEM/SOAR (IM-T02 webhook ingestion; duplicates suppressed on replay)."""
     reg = registry()
     conn = reg.get("generic_siem")
@@ -617,7 +621,7 @@ def ingest_alerts(body: PushedAlerts, p: Principal = Depends(need(Perm.INVESTIGA
 
 
 @app.get("/api/v1/policy")
-def get_policy(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)) -> dict[str, Any]:
+def get_policy(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     ps = PolicyStore(s)
     return {"active_version": ps.active_version(), "document": ps.active(),
             "proposals": [{"id": v.id, "proposed_by": v.proposed_by, "status": v.status, "note": v.note}
@@ -630,7 +634,7 @@ class PolicyProposal(BaseModel):
 
 
 @app.post("/api/v1/policy/proposals")
-def propose_policy(body: PolicyProposal, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def propose_policy(body: PolicyProposal, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
     try:
         v = PolicyStore(s).propose(body.document, p, body.note)
     except Exception as exc:
@@ -639,7 +643,7 @@ def propose_policy(body: PolicyProposal, p: Principal = Depends(current_user), s
 
 
 @app.post("/api/v1/policy/proposals/{vid}/approve")
-def approve_policy(vid: int, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def approve_policy(vid: int, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
     try:
         v = PolicyStore(s).approve(vid, p)
     except Exception as exc:
@@ -648,7 +652,7 @@ def approve_policy(vid: int, p: Principal = Depends(current_user), s: Session = 
 
 
 @app.post("/api/v1/kill-switch")
-def kill_switch(on: bool, p: Principal = Depends(need(Perm.KILL_SWITCH)), s: Session = Depends(db_session)):
+def kill_switch(on: bool, p: Principal = Depends(need(Perm.KILL_SWITCH)), s: Session = Depends(db_session, scope="function")):
     """Durable (DB-backed) so every API replica and the scheduler stop together, and it survives restarts."""
     AccessService(s, get_settings()).set_flag(p, "kill_switch", bool(on), perm=Perm.KILL_SWITCH)
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="policy.kill_switch", subject_type="policy",
@@ -660,14 +664,14 @@ def kill_switch(on: bool, p: Principal = Depends(need(Perm.KILL_SWITCH)), s: Ses
 
 
 @app.get("/api/v1/actions/catalog")
-def action_catalog(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def action_catalog(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     pol = policy_engine(s)
     return [{**a, "level": int(pol.view(a["action_type"]).level)} for a in registry().action_registry().catalog()]
 
 
 @app.get("/api/v1/actions")
 def list_actions(status: str | None = None, case_id: str | None = None, domain: str | None = None,
-                 p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+                 p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     if case_id:
         from soc_platform.core.cases import actions_for_case
 
@@ -685,7 +689,7 @@ def list_actions(status: str | None = None, case_id: str | None = None, domain: 
 
 
 @app.get("/api/v1/actions/summary")
-def actions_summary(status: str | None = None, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def actions_summary(status: str | None = None, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     """True totals behind the action list (badge and tab counts), scoped like the list."""
     from sqlalchemy import func
 
@@ -723,7 +727,7 @@ def _action_service(s: Session) -> ActionService:
 
 
 @app.post("/api/v1/actions")
-def request_action(body: ActionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def request_action(body: ActionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
     _case_in_scope(s, p, body.case_id)
     if body.case_id is None and "*" not in p.domains:
         raise HTTPException(403, "actions outside a case require all-domain access")
@@ -736,7 +740,7 @@ def request_action(body: ActionBody, p: Principal = Depends(current_user), s: Se
 
 @app.post("/api/v1/actions/{aid}/{verb}")
 def decide_action(aid: str, verb: str, body: Decision, p: Principal = Depends(current_user),
-                  s: Session = Depends(db_session)):
+                  s: Session = Depends(db_session, scope="function")):
     svc = _action_service(s)
     ar = s.get(ActionRequest, aid)
     if ar is not None:
@@ -758,7 +762,7 @@ def decide_action(aid: str, verb: str, body: Decision, p: Principal = Depends(cu
 @app.get("/api/v1/audit")
 def audit(subject_id: str | None = None, actor_id: str | None = None, event_type: str | None = None,
           limit: int = Query(200, ge=1, le=100_000), p: Principal = Depends(need(Perm.READ_AUDIT)),
-          s: Session = Depends(db_session)):
+          s: Session = Depends(db_session, scope="function")):
     log = AuditLog(s)
     if "*" in p.domains:
         rows = log.query(subject_id=subject_id, actor_id=actor_id, event_type=event_type, limit=limit)
@@ -785,7 +789,7 @@ def _audit_domain(s: Session, subject_type: str, subject_id: str) -> str | None:
 
 
 @app.get("/api/v1/admin/self-check")
-def self_check(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session)):
+def self_check(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session, scope="function")):
     """The platform proves its own figures agree across every surface and its records are intact (see core.selfcheck)."""
     from soc_platform.core.selfcheck import run_self_check
 
@@ -793,7 +797,7 @@ def self_check(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = 
 
 
 @app.get("/api/v1/admin/notifications")
-def notifications(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session)):
+def notifications(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session, scope="function")):
     """Configured notification channels (kind and host only - never the webhook URL, which holds a secret) and the
     most recent deliveries."""
     from soc_platform.core import notify
@@ -803,8 +807,21 @@ def notifications(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session
             "max_attempts": notify.MAX_ATTEMPTS, "recent": notify.recent(s)}
 
 
+@app.post("/api/v1/admin/notifications/test")
+def notifications_test(p: Principal = Depends(need(Perm.MANAGE_CONNECTORS, "*")), s: Session = Depends(db_session, scope="function")):
+    """Send a test message to every configured channel now (Integrations -> Notifications -> Send test message)."""
+    from soc_platform.core import notify
+
+    if not notify.channels():
+        raise HTTPException(400, "no notification channels configured (SOC_NOTIFY_WEBHOOKS)")
+    results = notify.send_test(by=p.id)
+    AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="notify.test", subject_type="notifications",
+                       subject_id="channels", payload={"results": results})
+    return {"results": results}
+
+
 @app.get("/api/v1/audit/verify")
-def audit_verify(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session)):
+def audit_verify(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
     return AuditLog(s).verify()
 
 
@@ -812,7 +829,7 @@ def audit_verify(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Dep
 
 
 @app.get("/api/v1/entities/find")
-def find_entity(kind: str, key: str, value: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
+def find_entity(kind: str, key: str, value: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     st = ContextStore(s)
     e = st.find(kind, key, value)
     if e is None:
@@ -821,7 +838,7 @@ def find_entity(kind: str, key: str, value: str, _: Principal = Depends(need(Per
 
 
 @app.get("/api/v1/entities/{eid}")
-def get_entity(eid: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
+def get_entity(eid: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     e = s.get(Entity, eid)
     if e is None:
         raise HTTPException(404, "not found")
@@ -836,7 +853,7 @@ def _entity(st: ContextStore, e: Entity) -> dict[str, Any]:
 
 
 @app.get("/api/v1/resolution/unresolved")
-def unresolved(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
+def unresolved(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     return [{"id": u.id, "kind": u.kind, "reason": u.reason, "candidates": u.candidates, "source_record": u.source_record_id}
             for u in s.execute(select(UnresolvedItem).where(UnresolvedItem.status == "open")).scalars()]
 
@@ -847,7 +864,7 @@ class Override(BaseModel):
 
 
 @app.post("/api/v1/resolution/{uid}/override")
-def resolution_override(uid: str, body: Override, p: Principal = Depends(need(Perm.RESOLVE_ENTITIES, "*")), s: Session = Depends(db_session)):
+def resolution_override(uid: str, body: Override, p: Principal = Depends(need(Perm.RESOLVE_ENTITIES, "*")), s: Session = Depends(db_session, scope="function")):
     try:
         rec = EntityResolver(s).override(uid, body.entity_id, p, body.reason)
     except Exception as exc:
@@ -856,7 +873,7 @@ def resolution_override(uid: str, body: Override, p: Principal = Depends(need(Pe
 
 
 @app.get("/api/v1/resolution/match-rate")
-def match_rate(kind: str = "asset", _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
+def match_rate(kind: str = "asset", _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     return EntityResolver(s).match_rate(kind)
 
 
@@ -876,7 +893,7 @@ def _assignee_filter(q: Any, assignee: str | None, p: Principal) -> Any:
 
 @app.get("/api/v1/cases")
 def list_cases(domain: str | None = None, status: str | None = None, assignee: str | None = Query(None, max_length=256),
-               p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+               p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     q = select(Case).order_by(Case.created_at.desc()).limit(500)
     if domain:
         q = q.where(Case.domain == domain)
@@ -894,7 +911,7 @@ LIST_LIMIT = 500
 
 
 @app.get("/api/v1/cases/summary")
-def cases_summary(status: str | None = None, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def cases_summary(status: str | None = None, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     """True totals behind the case list (the list itself returns the 500 most recent)."""
     from sqlalchemy import func
 
@@ -919,7 +936,7 @@ def cases_summary(status: str | None = None, p: Principal = Depends(need(Perm.RE
 
 @app.get("/api/v1/search")
 def search(q: str = Query(..., min_length=2, max_length=200), limit: int = Query(10, ge=1, le=50),
-           p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)) -> dict[str, Any]:
+           p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     """One search box over cases, people / hosts / indicators (any identifier from any tool), correlated findings and
     vulnerabilities - each group limited to what the caller may see. Matching is case-insensitive substring; the
     user's text is escaped, so it is always a literal (``%`` and ``_`` match themselves)."""
@@ -968,7 +985,7 @@ class NoteBody(BaseModel):
 
 
 @app.post("/api/v1/cases/{cid}/assign")
-def case_assign(cid: str, body: AssignBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def case_assign(cid: str, body: AssignBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session, scope="function")):
     """Take a case, give it to someone (lead), or clear the owner (lead, or the current owner)."""
     _case_in_scope(s, p, cid)
     try:
@@ -981,7 +998,7 @@ def case_assign(cid: str, body: AssignBody, p: Principal = Depends(need(Perm.INV
 
 
 @app.post("/api/v1/cases/{cid}/notes")
-def case_note(cid: str, body: NoteBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session)):
+def case_note(cid: str, body: NoteBody, p: Principal = Depends(need(Perm.INVESTIGATE)), s: Session = Depends(db_session, scope="function")):
     """Append an analyst note (notes are never edited or deleted; a correction is a new note)."""
     _case_in_scope(s, p, cid)
     try:
@@ -994,7 +1011,7 @@ def case_note(cid: str, body: NoteBody, p: Principal = Depends(need(Perm.INVESTI
 
 
 @app.get("/api/v1/cases/{cid}")
-def get_case(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def get_case(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     _case_in_scope(s, p, cid)
     try:
         view = CaseService(s).view(cid)
@@ -1027,7 +1044,7 @@ class DispositionBody(BaseModel):
 
 
 @app.post("/api/v1/cases/{cid}/disposition")
-def case_disposition(cid: str, body: DispositionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session)):
+def case_disposition(cid: str, body: DispositionBody, p: Principal = Depends(current_user), s: Session = Depends(db_session, scope="function")):
     case = _case_in_scope(s, p, cid)
     try:
         if case.domain == "phishing":
@@ -1039,7 +1056,7 @@ def case_disposition(cid: str, body: DispositionBody, p: Principal = Depends(cur
 
 
 @app.get("/api/v1/cases/{cid}/report")
-def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     _case_in_scope(s, p, cid)
     from soc_platform.reporting.reports import ReportService
 
@@ -1053,7 +1070,7 @@ class BundleBody(BaseModel):
 
 
 @app.get("/api/v1/cases/{cid}/story")
-def case_story(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def case_story(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     """Attack Story: cross-tool attack chain, gaps, benign explanations, blast radius, response plan."""
     from soc_platform.intelligence.story import story_for_case
 
@@ -1066,7 +1083,7 @@ def case_story(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = D
 
 
 @app.post("/api/v1/cases/{cid}/story/approve")
-def story_approve(cid: str, body: BundleBody, p: Principal = Depends(need(Perm.APPROVE_ACTION)), s: Session = Depends(db_session)):
+def story_approve(cid: str, body: BundleBody, p: Principal = Depends(need(Perm.APPROVE_ACTION)), s: Session = Depends(db_session, scope="function")):
     """Approve several response-plan actions at once. Each goes through the normal policy / four-eyes checks."""
     from soc_platform.intelligence.story import story_for_case
 
@@ -1100,7 +1117,7 @@ class DeepBody(BaseModel):
 
 @app.post("/api/v1/cases/{cid}/deep-analysis")
 def deep_analysis(cid: str, body: DeepBody | None = None, p: Principal = Depends(need(Perm.INVESTIGATE)),
-                  s: Session = Depends(db_session)):
+                  s: Session = Depends(db_session, scope="function")):
     """Evidence-bound LLM review of the attack story (requires an approved LLM endpoint)."""
     from soc_platform.intelligence.deep_analysis import run_deep_analysis
     from soc_platform.intelligence.story import story_for_case
@@ -1112,7 +1129,7 @@ def deep_analysis(cid: str, body: DeepBody | None = None, p: Principal = Depends
 
 
 @app.get("/api/v1/llm/status")
-def llm_status(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def llm_status(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     st = get_settings()
     return {"configured": st.llm_provider != "none", "provider": st.llm_provider,
             "model_pinned": st.llm_model_version, "redaction": st.llm_redact_pii,
@@ -1121,7 +1138,7 @@ def llm_status(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_
 
 
 @app.get("/api/v1/metrics/shadow")
-def shadow(domain: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def shadow(domain: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     if not p.in_domain(domain):
         raise HTTPException(403, f"not authorised for {domain} data")
     return {"agreement": agreement_report(s, domain), "detection_quality": detection_quality(s, domain, min_count=2)}
@@ -1129,7 +1146,7 @@ def shadow(domain: str, p: Principal = Depends(need(Perm.READ)), s: Session = De
 
 @app.get("/api/v1/metrics/drift")
 def drift(recent_days: int = Query(7, ge=1, le=90), baseline_days: int = Query(28, ge=7, le=365),
-          _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+          _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     """Verdict-quality drift per domain (R14, NFR-13)."""
     from soc_platform.intelligence.drift import drift_report
 
@@ -1137,7 +1154,7 @@ def drift(recent_days: int = Query(7, ge=1, le=90), baseline_days: int = Query(2
 
 
 @app.get("/api/v1/llm/budget")
-def llm_budget(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def llm_budget(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     return LLMGateway(s, get_settings()).budget_status()
 
 
@@ -1145,7 +1162,7 @@ def llm_budget(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_
 
 
 @app.post("/api/v1/phishing/ingest")
-def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session)):
+def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session, scope="function")):
     svc = _services(s)["phishing"]
     subs = svc.ingest_reported()
     ids = [svc.process(sub.id, narrate=False)["case"]["id"] for sub in subs if process and sub.status == "new"]
@@ -1158,7 +1175,7 @@ def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVES
 
 @app.post("/api/v1/phishing/submit")
 async def phishing_submit(file: UploadFile = File(...), reporter: str | None = None, process: bool = True,
-                          p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session)):
+                          p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session, scope="function")):
     raw = await file.read(25 * 1024 * 1024 + 1)
     if len(raw) > 25 * 1024 * 1024:
         raise HTTPException(413, "message too large")
@@ -1171,7 +1188,7 @@ async def phishing_submit(file: UploadFile = File(...), reporter: str | None = N
 
 @app.get("/api/v1/phishing/suppliers")
 def phishing_suppliers(days: int = Query(90, ge=1, le=730), _: Principal = Depends(need(Perm.READ, "phishing")),
-                       s: Session = Depends(db_session)):
+                       s: Session = Depends(db_session, scope="function")):
     """Third-party / vendor email risk (U18)."""
     from soc_platform.domains.phishing.supplier import SupplierMonitor
 
@@ -1179,7 +1196,7 @@ def phishing_suppliers(days: int = Query(90, ge=1, le=730), _: Principal = Depen
 
 
 @app.get("/api/v1/phishing/metrics")
-def phishing_metrics(_: Principal = Depends(need(Perm.READ, "phishing")), s: Session = Depends(db_session)):
+def phishing_metrics(_: Principal = Depends(need(Perm.READ, "phishing")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["phishing"].metrics()
 
 
@@ -1187,7 +1204,7 @@ def phishing_metrics(_: Principal = Depends(need(Perm.READ, "phishing")), s: Ses
 
 
 @app.post("/api/v1/incidents/run")
-def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")), s: Session = Depends(db_session)):
+def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")), s: Session = Depends(db_session, scope="function")):
     svc = _services(s)["incident"]
     ing = svc.ingest()
     cases = svc.cluster()
@@ -1199,7 +1216,7 @@ def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INV
 
 
 @app.post("/api/v1/incidents/{cid}/investigate")
-def incident_investigate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")), s: Session = Depends(db_session)):
+def incident_investigate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")), s: Session = Depends(db_session, scope="function")):
     case = s.get(Case, cid)
     if case is None or case.domain != "incident":
         raise HTTPException(404, "unknown incident")
@@ -1207,7 +1224,7 @@ def incident_investigate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE,
 
 
 @app.get("/api/v1/incidents/handover")
-def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ, "incident")), s: Session = Depends(db_session)):
+def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ, "incident")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["incident"].handover(hours=hours)
 
 
@@ -1215,7 +1232,7 @@ def incident_handover(hours: int = 12, _: Principal = Depends(need(Perm.READ, "i
 
 
 @app.post("/api/v1/vm/refresh")
-def vm_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
+def vm_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     out = _services(s)["vulnerability"].refresh()
     out["misconfigurations"] = _misconfig(s).refresh()
     _intel(s).refresh()
@@ -1229,13 +1246,13 @@ def _misconfig(s: Session):
 
 
 @app.get("/api/v1/vm/metrics")
-def vm_metrics(_: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_metrics(_: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["vulnerability"].metrics()
 
 
 @app.get("/api/v1/vm/findings")
 def vm_findings(priority: str | None = None, status: str = "open,reopened", _: Principal = Depends(need(Perm.READ, "vulnerability")),
-                s: Session = Depends(db_session)):
+                s: Session = Depends(db_session, scope="function")):
     from soc_platform.domains.vulnerability.models import ConsolidatedFinding
 
     q = select(ConsolidatedFinding).where(ConsolidatedFinding.status.in_(status.split(","))) \
@@ -1249,7 +1266,7 @@ def vm_findings(priority: str | None = None, status: str = "open,reopened", _: P
 
 
 @app.get("/api/v1/vm/affected/{cve}")
-def vm_affected(cve: str, _: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_affected(cve: str, _: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["vulnerability"].affected_devices(cve.upper())
 
 
@@ -1260,7 +1277,7 @@ class CampaignBody(BaseModel):
 
 
 @app.post("/api/v1/vm/campaigns")
-def vm_campaign(body: CampaignBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_campaign(body: CampaignBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     try:
         c = _services(s)["vulnerability"].create_campaign(body.cve.upper(), p, notify_via=body.notify_via,
                                                           team_contacts=body.team_contacts)
@@ -1277,19 +1294,19 @@ class AckBody(BaseModel):
 
 
 @app.post("/api/v1/vm/plans/{pid}/acknowledge")
-def vm_ack(pid: str, body: AckBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_ack(pid: str, body: AckBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     plan = _services(s)["vulnerability"].acknowledge(pid, p, committed_date=body.committed_date, owner=body.owner,
                                                      dependencies=body.dependencies, response=body.response)
     return {"plan_id": plan.id, "status": plan.status}
 
 
 @app.post("/api/v1/vm/follow-up")
-def vm_follow(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
+def vm_follow(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["vulnerability"].follow_up()
 
 
 @app.post("/api/v1/vm/campaigns/{cid}/validate")
-def vm_validate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
+def vm_validate(cid: str, p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     from soc_platform.domains.vulnerability.models import RemediationCampaign
 
     if s.get(RemediationCampaign, cid) is None:
@@ -1305,14 +1322,14 @@ class ExceptionBody(BaseModel):
 
 
 @app.post("/api/v1/vm/exceptions")
-def vm_exception(body: ExceptionBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_exception(body: ExceptionBody, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     ex = _services(s)["vulnerability"].request_exception(body.finding_id, p, justification=body.justification,
                                                          compensating_control=body.compensating_control, days=body.days)
     return {"exception_id": ex.id, "status": ex.status}
 
 
 @app.post("/api/v1/vm/exceptions/{eid}/decision")
-def vm_exception_decision(eid: str, approve: bool, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_exception_decision(eid: str, approve: bool, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     try:
         ex = _services(s)["vulnerability"].decide_exception(eid, p, approve=approve)
     except Exception as exc:
@@ -1321,13 +1338,13 @@ def vm_exception_decision(eid: str, approve: bool, p: Principal = Depends(need(P
 
 
 @app.post("/api/v1/vm/risk-register/propose")
-def vm_rr(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
+def vm_rr(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     return [{"id": e.id, "cve": e.cve, "rating": e.rating, "risk_statement": e.risk_statement, "status": e.status}
             for e in _services(s)["vulnerability"].propose_risk_register()]
 
 
 @app.post("/api/v1/vm/risk-register/{eid}/decision")
-def vm_rr_decide(eid: str, approve: bool, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_rr_decide(eid: str, approve: bool, p: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     try:
         e = _services(s)["vulnerability"].decide_risk_entry(eid, p, approve=approve)
     except Exception as exc:
@@ -1340,24 +1357,24 @@ class QueryBody(BaseModel):
 
 
 @app.post("/api/v1/vm/query")
-def vm_query(body: QueryBody, _: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_query(body: QueryBody, _: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["vulnerability"].query(body.question)
 
 
 @app.get("/api/v1/vm/new-kev")
 def vm_new_kev(since: str = Query(..., description="YYYY-MM-DD"), _: Principal = Depends(need(Perm.READ, "vulnerability")),
-               s: Session = Depends(db_session)):
+               s: Session = Depends(db_session, scope="function")):
     return _services(s)["vulnerability"].new_cve_assessment(since=since)
 
 
 @app.get("/api/v1/vm/coverage")
-def vm_coverage(_: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session)):
+def vm_coverage(_: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     return _services(s)["vulnerability"].coverage()
 
 
 @app.get("/api/v1/jobs")
 def job_history(job: str | None = None, limit: int = Query(100, le=1000), _: Principal = Depends(need(Perm.READ)),
-                s: Session = Depends(db_session)):
+                s: Session = Depends(db_session, scope="function")):
     """Scheduled job runs, retries and dead letters (VM-T11)."""
     from soc_platform import jobs
 
@@ -1366,7 +1383,7 @@ def job_history(job: str | None = None, limit: int = Query(100, le=1000), _: Pri
 
 
 @app.post("/api/v1/jobs/{name}/run")
-def job_replay(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)), s: Session = Depends(db_session)):
+def job_replay(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)), s: Session = Depends(db_session, scope="function")):
     """Replay / run a job now. Jobs are idempotent, so a replay never duplicates work or actions."""
     from soc_platform import jobs
 
@@ -1384,20 +1401,20 @@ def job_replay(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)), 
 
 
 @app.post("/api/v1/vm/tickets/sync")
-def vm_ticket_sync(_: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session)):
+def vm_ticket_sync(_: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     """Pull ticket state from ITSM; resolved tickets trigger closure validation (VM-T10, VM-F10)."""
     return _services(s)["vulnerability"].sync_tickets()
 
 
 @app.get("/api/v1/vm/misconfigurations")
 def vm_misconfigs(status: str | None = None, _: Principal = Depends(need(Perm.READ, "vulnerability")),
-                  s: Session = Depends(db_session)):
+                  s: Session = Depends(db_session, scope="function")):
     svc = _misconfig(s)
     return {"metrics": svc.metrics(), "items": svc.list(status)}
 
 
 @app.post("/api/v1/vm/misconfigurations/route")
-def vm_misconfig_route(p: Principal = Depends(need(Perm.REQUEST_ACTION, "vulnerability")), s: Session = Depends(db_session)):
+def vm_misconfig_route(p: Principal = Depends(need(Perm.REQUEST_ACTION, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     try:
         return _misconfig(s).route(p)
     except Exception as exc:
@@ -1406,7 +1423,7 @@ def vm_misconfig_route(p: Principal = Depends(need(Perm.REQUEST_ACTION, "vulnera
 
 @app.post("/api/v1/vm/misconfigurations/{mid}/{verb}")
 def vm_misconfig_verb(mid: str, verb: str, note: str = "", p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")),
-                      s: Session = Depends(db_session)):
+                      s: Session = Depends(db_session, scope="function")):
     svc = _misconfig(s)
     try:
         if verb == "fixed":
@@ -1457,7 +1474,7 @@ def _custom_report_allowed(p: Principal, metrics: dict[str, Any]) -> bool:
 
 
 @app.get("/api/v1/reports/templates")
-def report_templates(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def report_templates(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     """Standard and saved report specifications, plus the data-source catalogue they may use."""
     from soc_platform.reporting.builder import catalogue, list_templates
 
@@ -1465,7 +1482,7 @@ def report_templates(_: Principal = Depends(need(Perm.READ)), s: Session = Depen
 
 
 @app.post("/api/v1/reports/plan")
-def report_plan(body: PlanBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def report_plan(body: PlanBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     """Turn a report described in words into a spec (catalogue sources only) for review before generating."""
     from soc_platform.reporting.builder import plan_report
 
@@ -1476,7 +1493,7 @@ def report_plan(body: PlanBody, p: Principal = Depends(need(Perm.READ)), s: Sess
 
 
 @app.post("/api/v1/reports/templates")
-def save_report_template(body: SaveTemplateBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def save_report_template(body: SaveTemplateBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     from soc_platform.reporting.builder import validate_spec
     from soc_platform.reporting.models import ReportTemplate
 
@@ -1493,7 +1510,7 @@ def save_report_template(body: SaveTemplateBody, p: Principal = Depends(need(Per
 
 
 @app.post("/api/v1/reports/build")
-def build_custom_report(body: BuildBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def build_custom_report(body: BuildBody, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     """Generate a standard, saved or ad-hoc report: figures computed in code, narrative grounded on them."""
     from soc_platform.reporting.builder import build_report, get_template, validate_spec
 
@@ -1521,7 +1538,7 @@ def build_custom_report(body: BuildBody, p: Principal = Depends(need(Perm.READ))
 
 @app.post("/api/v1/reports/{kind}")
 def make_report(kind: str, period_days: int = Query(90, ge=1, le=730), p: Principal = Depends(need(Perm.READ)),
-                s: Session = Depends(db_session)):
+                s: Session = Depends(db_session, scope="function")):
     from soc_platform.reporting.reports import ReportService
 
     if kind not in REPORT_DOMAIN:
@@ -1551,7 +1568,7 @@ def make_report(kind: str, period_days: int = Query(90, ge=1, le=730), p: Princi
 
 
 @app.get("/api/v1/reports/{rid}/download")
-def download_report(rid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def download_report(rid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     from soc_platform.domains.vulnerability.models import ReportRun
 
     run = s.get(ReportRun, rid)
@@ -1577,21 +1594,21 @@ def download_report(rid: str, p: Principal = Depends(need(Perm.READ)), s: Sessio
 
 @app.get("/api/v1/dashboard/overview")
 def dash_overview(days: int = Query(14, ge=1, le=90), p: Principal = Depends(need(Perm.READ)),
-                  s: Session = Depends(db_session)):
+                  s: Session = Depends(db_session, scope="function")):
     from soc_platform.api.dashboards import overview
 
     return overview(s, p.domains, days=days)
 
 
 @app.get("/api/v1/dashboard/connectors")
-def dash_connectors(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def dash_connectors(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     from soc_platform.api.dashboards import connector_freshness
 
     return connector_freshness(s, registry())
 
 
 @app.get("/api/v1/dashboard/attack-coverage")
-def dash_attack(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def dash_attack(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     from soc_platform.intelligence.attack_coverage import coverage
 
     return coverage(s, registry().enabled_names())
@@ -1606,7 +1623,7 @@ def dash_shadow_it(since: str = Query("-7days", pattern=r"^-\d{1,3}(days|hours)$
 
 
 @app.get("/api/v1/entities/{eid}/360")
-def entity360(eid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session)):
+def entity360(eid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     from soc_platform.api.dashboards import entity_360
 
     out = entity_360(s, eid)
@@ -1621,7 +1638,7 @@ def entity360(eid: str, p: Principal = Depends(need(Perm.READ)), s: Session = De
 
 
 @app.get("/metrics", include_in_schema=False)
-def metrics(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session)):
+def metrics(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
     """Prometheus scrape endpoint; authenticate with an auditor service-account key (X-API-Key)."""
     from fastapi.responses import PlainTextResponse
 
@@ -1648,7 +1665,7 @@ def _insight(i) -> dict[str, Any]:
 
 @app.get("/api/v1/intelligence/insights")
 def intel_insights(severity: str | None = None, status: str = "new,acknowledged", _: Principal = Depends(need(Perm.READ, "*")),
-                   s: Session = Depends(db_session)):
+                   s: Session = Depends(db_session, scope="function")):
     from soc_platform.intelligence.models import Insight
 
     q = select(Insight).where(Insight.status.in_(status.split(","))).order_by(Insight.score.desc())
@@ -1658,12 +1675,12 @@ def intel_insights(severity: str | None = None, status: str = "new,acknowledged"
 
 
 @app.post("/api/v1/intelligence/refresh")
-def intel_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "*")), s: Session = Depends(db_session)):
+def intel_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "*")), s: Session = Depends(db_session, scope="function")):
     return {"insights": len(_intel(s).refresh())}
 
 
 @app.post("/api/v1/intelligence/insights/{iid}/{verb}")
-def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGATE, "*")), s: Session = Depends(db_session)):
+def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGATE, "*")), s: Session = Depends(db_session, scope="function")):
     from soc_platform.intelligence.models import Insight
 
     status = {"acknowledge": "acknowledged", "dismiss": "dismissed", "resolve": "resolved"}.get(verb)
@@ -1678,14 +1695,14 @@ def intel_decide(iid: str, verb: str, p: Principal = Depends(need(Perm.INVESTIGA
 
 @app.get("/api/v1/intelligence/risk/top")
 def intel_top(kind: str | None = None, limit: int = 10, _: Principal = Depends(need(Perm.READ, "*")),
-              s: Session = Depends(db_session)):
+              s: Session = Depends(db_session, scope="function")):
     from soc_platform.intelligence.risk import RiskEngine
 
     return [p.as_dict() for p in RiskEngine(s).top(kind, limit)]
 
 
 @app.get("/api/v1/intelligence/entities/{eid}/risk")
-def intel_entity_risk(eid: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
+def intel_entity_risk(eid: str, _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     from soc_platform.intelligence.risk import RiskEngine
 
     p = RiskEngine(s).profile(eid)
@@ -1699,7 +1716,7 @@ class AskBody(BaseModel):
 
 
 @app.post("/api/v1/intelligence/ask")
-def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
+def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     out = _intel(s).analyst.ask(body.question)
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="intelligence.ask", subject_type="question",
                        subject_id="ask", payload={"question": body.question, "planner": out["planner"],
@@ -1708,5 +1725,5 @@ def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ, "*")), s: Se
 
 
 @app.get("/api/v1/intelligence/brief")
-def intel_brief(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session)):
+def intel_brief(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     return _intel(s).analyst.brief()

@@ -382,13 +382,19 @@ async function Integrations() {
         ? `<div class="small" style="margin-bottom:8px">Findings rated <b>${esc(nt.min_severity)}</b> or higher are sent to ${nt.channels.map(c => `<span class="tag">${esc(c)}</span>`).join(' ')} - once per channel, again if a finding escalates.</div>`
         : `<div class="small muted" style="margin-bottom:8px">No channels configured. Set <span class="mono">SOC_NOTIFY_WEBHOOKS</span> (Teams, Slack or JSON webhooks) to be told about important findings.</div>`) +
       (nt.recent.length ? table(['When', 'Channel', 'Severity', 'Outcome'], nt.recent.map(r => `<tr><td class="mono small muted">${dt(r.at)}</td><td class="small">${esc(r.channel)}</td><td>${chip(r.severity)}</td>
-        <td>${status(r.status === 'sent' ? 'ok' : 'high', cap(r.status))}${r.error ? `<div class="t-sub" style="color:var(--high)">${esc(r.error.slice(0, 140))} · attempt ${r.attempts} of ${nt.max_attempts}</div>` : ''}</td></tr>`), {flush: true}) : ''),
+        <td>${status(r.status === 'sent' ? 'ok' : 'high', cap(r.status))}${r.error ? `<div class="t-sub" style="color:var(--high)">${esc(r.error.slice(0, 140))} · attempt ${r.attempts} of ${nt.max_attempts}</div>` : ''}</td></tr>`), {flush: true}) : '') +
+      (nt.channels.length && can('manage_connectors') ? `<div class="mt">${btn('Send test message', 'notifyTest', [])}</div>` : ''),
       {sub: 'sent by the notify job every minute'})}</div>` : ''}
     <div class="mt">${card('Scheduled jobs', table(['Job', 'Last run', 'Outcome', {h: 'Duration', num: 1}, 'Detail', ''], Object.keys(jr.jobs).map(j => { const r = last[j]; return `<tr>
       <td class="t-title">${esc(cap(j))}</td><td class="mono small muted">${r ? dt(r.started_at) : 'never'}</td>
       <td>${r ? status(jst[r.status], cap(r.status)) + `${r.attempts > 1 ? `<div class="t-sub">${r.attempts} attempts</div>` : ''}` : ''}</td>
       <td class="num small">${r && r.duration_s != null ? r.duration_s + ' s' : ''}</td><td class="small muted wrap">${r ? esc((r.error || JSON.stringify(r.summary)).slice(0, 140)) : ''}</td>
       <td>${can('manage_connectors') ? btn('Run now', 'runJob', [j], 'sm') : ''}</td></tr>`; })), {flush: true, sub: 'retried with backoff; dead-lettered after 3 failed runs'})}</div>`));
+}
+async function notifyTest() {
+  const r = await post('/api/v1/admin/notifications/test');
+  const bad = r.results.filter(x => !x.ok);
+  toast(bad.length ? `Failed: ${bad.map(x => `${x.channel} (${x.error})`).join('; ')}` : `Test message sent to ${r.results.map(x => x.channel).join(', ')}`, bad.length > 0);
 }
 async function testConn(name) { const r = await post(`/api/v1/connectors/${name}/test`); toast(r.ok ? `${name}: connected (${r.latency_ms} ms, ${r.sample_records ?? 0} records)` : `${name}: ${r.error}`, !r.ok); }
 async function runJob(name) { toast(`Running ${name}…`); const r = await post(`/api/v1/jobs/${name}/run`); toast(`${name}: ${r.status}${r.error ? ' - ' + r.error : ''}`, r.status !== 'ok'); Integrations(); }
@@ -650,5 +656,5 @@ async function approveBundle(id) {
 window.VIEWS = {search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
-Object.assign(ALLOWED, {assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});

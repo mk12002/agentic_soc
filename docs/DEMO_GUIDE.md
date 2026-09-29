@@ -25,6 +25,7 @@ python -m soc_platform serve        # http://127.0.0.1:8080
 Sign in with role **Lead** and *Continue*. Then, in order:
 Cases → *Run incident pipeline*, *Pull reported emails*; Vulnerabilities → *Refresh*; Intelligence → *Re-correlate*.
 (Or run `python -m soc_platform demo` once beforehand.) Rehearse once - the first run takes ~10 s in total.
+Between audiences: stop the server and run `python -m soc_platform reset-demo --yes`.
 
 ## Script
 

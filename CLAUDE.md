@@ -77,6 +77,7 @@ session; `verify_features.py` reads the `SOC_LLM_*` lines itself).
 # run
 python -m soc_platform init-db                 # create tables (idempotent)
 python -m soc_platform demo                    # load the sample org: 7 phishing + 3 incident cases, 34 approvals, 6 findings
+python -m soc_platform reset-demo [--yes]      # server stopped: wipe the demo DB + raw/report files, then init-db + demo
 python -m soc_platform serve                   # API + console + built-in scheduler on 127.0.0.1:8080 (SOC_PORT/SOC_HOST)
 python -m soc_platform scheduler [--once]      # optional separate scheduler service
 python -m soc_platform token lena@acme-demo.com lead   # dev token (needs SOC_DEV_JWT_SECRET)
@@ -91,7 +92,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 96 features
+python scripts/verify_features.py                                 # tests mapped to 98 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -170,7 +171,8 @@ leaf any layer may call; everything must work without it.
 
 **Request path**: BodyLimitMiddleware (30 MB) → SecurityMiddleware (NUL in path/query → 400, Content-Length → 413,
 token bucket 20/s burst 120 → 429) → `current_user` (Bearer / X-API-Key / X-Break-Glass, revocation) →
-`need(Perm.X, "domain")` → handler with one DB session (commit/rollback) → security headers + queued access-log row.
+`need(Perm.X, "domain")` → handler with one DB session (commit/rollback **before** the response - always
+`Depends(db_session, scope="function")`) → security headers + queued access-log row.
 `DataError` → 400, service `KeyError` → 404, `PermissionError` → 403. Out-of-scope records answer **404**.
 
 ---
@@ -253,14 +255,15 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `test_story.py`, `test_phishing.py` (incl. a latency test that fails if lookups become sequential),
   `test_incident.py`, `test_vulnerability.py`, `test_intelligence.py`, `test_report_builder.py`, `test_api.py`,
   `test_access_security.py`, `test_resilience_security.py`, `test_connectors.py`, `test_core_*.py`, `test_jobs.py`,
-  `test_notify.py` (webhooks), `test_schema.py` (column addition on both engines),
+  `test_notify.py` (webhooks), `test_schema.py` (column addition on both engines), `test_cli.py` (`reset-demo`),
+  `test_commit_before_response.py` (commit before reply, real server),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): ~292 platform tests on SQLite / ~293 on PostgreSQL, 205
-  engine tests, 96/96 features verified.
+- Current counts (keep docs in sync when they change): ~301 platform tests on SQLite and on PostgreSQL, 205
+  engine tests, 98/98 features verified.
 
 ---
 
@@ -350,15 +353,23 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **Leases are released only after the run is recorded**, due-ness is re-checked after taking the lease, and taking a
   lease is a compare-and-swap whose insert race returns "not acquired" - each closed a real race.
 - **"First insert" of a `system_flags` row races** (two threads both see no row): catch `IntegrityError` and treat
-  it as lost / retry onto the existing row (`jobs._lease`, `Scheduler._beat`, `audit._lock_chain`).
+  it as lost / retry onto the existing row (`jobs._lease`, `Scheduler._beat`, `audit._lock_chain`). Two writers of
+  one row must not read-modify-write: use a compare-and-swap on `updated_at` (`_lease`, `_write_beat`).
+- **FastAPI runs a `yield` dependency's cleanup after the response by default.** For `db_session` that meant the
+  commit came after the reply (an upload's case was missing from the next list in 28 of 40 tries). Every new route
+  must use `Depends(db_session, scope="function")`; `test_commit_before_response.py` fails otherwise. TestClient
+  cannot show this race - only a real server can.
 - **Thread exceptions only warn in pytest** (`PytestUnhandledThreadExceptionWarning`) - a crashed background thread
   can hide behind a green test. `test_scheduler.py` turns them into errors; do the same in new concurrency tests.
 - **Equal timestamps on Windows**: the clock advances in ~15 ms steps, so "newest first" by time alone is random
   within a tick - make times strictly increasing (case notes, `JobRun.ordinal`).
 - **`demo` expectations** in the guides (7+3 cases, 34 approvals, 6 findings) are real; if you change fixtures or
   pipelines, re-count and update RUN_GUIDE / PRESENTER_GUIDE.
-- **Browser tour** runs with `SOC_EMBEDDED_SCHEDULER=0` so background jobs don't move figures under the
-  screen-vs-API check; `docs/screenshots` is refreshed only deliberately (`SOC_SHOTS`).
+- **Browser tour** runs the real scheduler with `SOC_SCHEDULER_START_DELAY=86400`: the heartbeat is live (no
+  "Scheduler stopped" banner in screenshots) but no job runs to move figures under the screen-vs-API check. It gives
+  the server a local webhook receiver so the Notifications card has a channel, and uploads the stored-XSS probe only
+  after the screenshots. It fails on `undefined` / `NaN` / `[native code]` in any screenshot. `docs/screenshots` is
+  refreshed only deliberately: `run_browser_tour(with_llm=True, shots=<tmp>)`, then copy the PNGs.
 - **Job bodies may commit mid-way.** The incident and phishing jobs commit the investigated cases, then call
   `narrate_pending` (parallel model calls). Anything that reads a case must cope with
   `assessment["narration_pending"]` (deterministic explanation in place, model text still to come). Pass

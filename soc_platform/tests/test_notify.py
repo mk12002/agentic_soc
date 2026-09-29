@@ -107,3 +107,18 @@ def test_webhooks_can_come_from_a_mounted_secret_file(monkeypatch, tmp_path):
     monkeypatch.delenv("SOC_NOTIFY_WEBHOOKS", raising=False)
     monkeypatch.setenv("SOC_NOTIFY_WEBHOOKS_FILE", str(f))
     assert [c.label for c in notify.channels()] == ["slack:hooks.slack.com"]
+
+
+def test_a_test_message_reports_each_channel(hooks):
+    sent = []
+
+    def post(url, body):
+        if "siem" in url:
+            raise RuntimeError("webhook answered 404")
+        sent.append(body)
+
+    out = notify.send_test(by="ada@acme-demo.com", post=post)
+    assert out[0] == {"channel": "teams:acme.webhook.office.com", "ok": True, "error": None}
+    assert out[1]["channel"] == "json:siem.acme-demo.com" and not out[1]["ok"] and "404" in out[1]["error"]
+    assert "test message" in sent[0]["text"] and "ada@acme-demo.com" in sent[0]["text"]
+    assert all("secret" not in str(r) for r in out)                        # the URL never comes back

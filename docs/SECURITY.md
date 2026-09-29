@@ -135,6 +135,11 @@ adds a stored-XSS probe. Every attack below must fail, and does.
   and to the notification webhooks in `SOC_NOTIFY_WEBHOOKS` (HTTPS only; destinations are never taken from data).
 - Notification secrets: a webhook URL contains its own credential. It is never stored, logged or returned; the
   database and the API show the channel as `kind:host` only. Keep the URLs in the vault (`SOC_NOTIFY_WEBHOOKS_FILE`).
+  Sending a test message needs `manage_connectors` (admin / automation admin) and is audited.
+- Every request commits or rolls back before its response is sent, so a client is never told a write succeeded
+  that was not committed (it used to happen after the reply).
+- `reset-demo` (CLI) refuses with `SOC_ENVIRONMENT=prod`, refuses while the server runs, asks for confirmation and
+  never deletes folders outside the project.
 - Collaboration and search: assigning a case to someone else needs a lead; notes are append-only and audited by
   length (not content); search escapes `LIKE` wildcards, applies the caller's domain scope to every result group and
   is audited by length.
