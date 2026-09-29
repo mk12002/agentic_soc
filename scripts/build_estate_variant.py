@@ -96,6 +96,7 @@ def mapping_for(seed: int) -> tuple[list[tuple[str, str]], dict]:
     org_look = dom.replace("o", "0", 1)
     m: list[tuple[str, str]] = [
         ("Acme Human Resources", f"{org_name} Human Resources"), ("acmebackups", slug.replace("-", "") + "backups"),
+        ("Acme Production", f"{org_name} Production"), ("Acme Development", f"{org_name} Development"),   # Azure subs
         ("acme-demo.com", dom), ("acme-dem0.com", org_look), ("acme-demo", slug), ("ACME", nb),
         ("micros0ft-helpdesk.com", LOOKALIKE[seed % len(LOOKALIKE)]), ("micros0ft", LOOKALIKE[seed % len(LOOKALIKE)].split("-")[0]),
         ("185.220.101.4", TOR[seed % len(TOR)]),

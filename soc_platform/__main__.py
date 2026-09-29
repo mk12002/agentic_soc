@@ -65,7 +65,11 @@ def cmd_demo() -> None:
             if c.status != "closed":
                 v = im.investigate(c.id)
                 print(f"[IM] {v['case']['severity']:>8} {v['case']['title'][:70]} - {len(v['actions'])} recommended action(s)")
-        ph = PhishingService(s, reg, org_domains=org, raw_dir=Path(st.raw_payload_dir) / "phishing")
+        from soc_platform.domains.phishing.agents.analyzer import engine_enabled
+
+        engine = engine_enabled()                            # the trained models, when installed (SOC_PHISHING_ENGINE)
+        print(f"[PH] analysis: {'ML engine + heuristic' if engine else 'heuristic only'}")
+        ph = PhishingService(s, reg, org_domains=org, raw_dir=Path(st.raw_payload_dir) / "phishing", use_engine=engine)
         for sub in ph.ingest_reported():
             v = ph.process(sub.id)
             a = v["assessment"]

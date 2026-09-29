@@ -79,6 +79,69 @@
    "body": {
     "results": [
      {
+      "RecipientEmailAddress": "jane.doe@acme-demo.com",
+      "Messages": 11,
+      "Last": "2026-08-21T07:55:00Z"
+     }
+    ]
+   },
+   "status": 200,
+   "body_contains": [
+    "sender-history",
+    "azure.microsoft.com"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/v1.0/security/runHuntingQuery$",
+   "body": {
+    "results": [
+     {
+      "RecipientEmailAddress": "jane.doe@acme-demo.com",
+      "Messages": 37,
+      "Last": "2026-09-17T16:20:00Z"
+     }
+    ]
+   },
+   "status": 200,
+   "body_contains": [
+    "sender-history",
+    "github.com"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/v1.0/security/runHuntingQuery$",
+   "body": {
+    "results": [
+     {
+      "RecipientEmailAddress": "arun.k@acme-demo.com",
+      "Messages": 14,
+      "Last": "2026-08-28T10:05:00Z"
+     }
+    ]
+   },
+   "status": 200,
+   "body_contains": [
+    "sender-history",
+    "krishna-logistics.com"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "^/v1.0/security/runHuntingQuery$",
+   "body": {
+    "results": []
+   },
+   "status": 200,
+   "body_contains": "sender-history"
+  },
+  {
+   "method": "POST",
+   "path": "^/v1.0/security/runHuntingQuery$",
+   "body": {
+    "results": [
+     {
       "Timestamp": "2026-09-20T09:05:10Z",
       "AccountUpn": "jane.doe@acme-demo.com",
       "Url": "https://login.micros0ft-helpdesk.com/verify?u=jane.doe",

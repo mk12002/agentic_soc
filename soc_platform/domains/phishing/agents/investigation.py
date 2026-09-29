@@ -285,12 +285,15 @@ def user_impact(reg: ConnectorRegistry, em: DecomposedEmail, recipients: list[st
                 row["identity"] = {"risky_signins": len(risky), "risky_ips": sorted({s.get("ipAddress") for s in risky}),
                                    "suspicious_inbox_rules": len(ctx["suspicious_inbox_rules"]),
                                    "new_devices": len(ctx["new_devices"]), "user_risk": (ctx["risky"] or {}).get("riskLevel"),
-                                   "privileged_roles": ctx["privileged_roles"], "entra_object_id": ctx["user"].get("id")}
+                                   "privileged_roles": ctx["privileged_roles"], "entra_object_id": ctx["user"].get("id"),
+                                   "azure_privileged_roles": ctx.get("azure_privileged") or []}
                 if risky or ctx["suspicious_inbox_rules"] or ctx["new_devices"]:
                     ev.append(EvidenceItem(
                         f"Identity: {u} - {len(risky)} risky sign-in(s) from {row['identity']['risky_ips']}, "
                         f"{len(ctx['suspicious_inbox_rules'])} forwarding/hiding inbox rule(s), "
-                        f"{len(ctx['new_devices'])} new device registration(s) after the click", "entra", "identity",
+                        f"{len(ctx['new_devices'])} new device registration(s) after the click"
+                        + (f"; holds privileged Azure role(s): {', '.join(ctx['azure_privileged'])}"
+                           if ctx.get("azure_privileged") else ""), "entra", "identity",
                         {"user": u, **row["identity"]}))
             except Exception as exc:
                 unavailable.append(f"entra ({u}): {exc}")

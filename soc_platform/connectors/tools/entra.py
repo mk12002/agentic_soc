@@ -1,7 +1,9 @@
 """Microsoft Entra ID / Identity Protection connector (IM-T01, PH-F08, IM-F09, U07).
 
 Read: users, sign-ins, risky users, risk detections, directory audits; per-user identity
-context (roles, groups, MFA methods, recent sign-ins, inbox rules, registered devices).
+context (roles, groups, MFA methods, recent sign-ins, inbox rules, registered devices) and Azure access: the
+user's Azure role assignments (direct or through a group) on every subscription the app can read, through Azure
+Resource Manager with its own token audience.
 Write (policy-gated): revoke sessions, disable/enable account, confirm compromised,
 force password change at next sign-in.
 """
@@ -12,9 +14,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
-from soc_platform.connectors.registry import ConnectorManifest
+from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ok_lookup, parse_ts, targets_of
-from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport
+from soc_platform.connectors.tools._microsoft import APP_FIELDS, ARM, MicrosoftConnector, graph_and_arm_transport
 from soc_platform.core.identity import email_aliases
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -23,6 +25,14 @@ PRIVILEGED_ROLES = {"Global Administrator", "Privileged Role Administrator", "Se
                     "Exchange Administrator", "SharePoint Administrator", "User Administrator",
                     "Application Administrator", "Cloud Application Administrator", "Privileged Authentication Administrator"}
 _RISK = {"none": "informational", "low": "low", "medium": "medium", "high": "high", "hidden": "medium"}
+# Azure built-in roles by definition id (resolved locally; custom roles are looked up). The privileged ones are the
+# roles Microsoft classes as "privileged administrator roles": they can change resources or grant access.
+AZURE_BUILTIN_ROLES = {"8e3af657-a8ff-443c-a75c-2fe8c4bcb635": "Owner", "b24988ac-6180-42a0-ab88-20f7382dd24c": "Contributor",
+                       "acdd72a7-3385-48ef-bd42-f606fba81ae7": "Reader",
+                       "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9": "User Access Administrator",
+                       "f58310d9-a9f6-439a-9e8d-f62e7b41a168": "Role Based Access Control Administrator"}
+AZURE_PRIVILEGED_ROLES = {"Owner", "Contributor", "User Access Administrator", "Role Based Access Control Administrator"}
+ARM_API = {"subscriptions": "2022-12-01", "authorization": "2022-04-01"}
 
 
 class EntraConnector(MicrosoftConnector):
@@ -158,10 +168,72 @@ class EntraConnector(MicrosoftConnector):
                             (r.get("actions") or {}).get("redirectTo") or (r.get("actions") or {}).get("delete")
                             or (r.get("actions") or {}).get("moveToFolder") in {"RSS Feeds", "Archive", "Conversation History"}]
         new_devices = [d for d in devices if since_iso and str(d.get("registrationDateTime", "")) >= since_iso]
+        azure, azure_error = self._azure_roles(u.get("id")), None
+        if isinstance(azure, str):
+            azure, azure_error = None, azure
         return {"user": u, "roles": roles, "privileged_roles": sorted(set(roles) & PRIVILEGED_ROLES), "groups": groups,
                 "mfa_methods": methods, "signins": signins, "risky": risky[0] if risky else None,
                 "inbox_rules": rules, "suspicious_inbox_rules": suspicious_rules, "devices": devices,
-                "new_devices": new_devices}
+                "new_devices": new_devices, "azure_roles": azure, "azure_error": azure_error,
+                "azure_privileged": sorted(f"{r['role']} on {r['scope_name']}" for r in azure or [] if r["privileged"])}
+
+    def _azure_roles(self, object_id: str | None) -> list[dict[str, Any]] | str:
+        """The user's Azure role assignments (direct, or inherited through a group - ``assignedTo`` covers both) on
+        the configured subscriptions (``azure_subscriptions``), or on every subscription the app can read. Returns
+        a reason string instead when Azure Resource Manager cannot be read, so the identity lookup still succeeds."""
+        if not object_id:
+            return "no Entra object id for the user"
+        try:
+            subs = self._azure_subscriptions()
+
+            def assignments(sid: str) -> list[dict[str, Any]]:
+                return self.get(f"{ARM}/subscriptions/{sid}/providers/Microsoft.Authorization/roleAssignments",
+                                params={"api-version": ARM_API["authorization"],
+                                        "$filter": f"assignedTo('{object_id}')"}).get("value", [])
+
+            order = sorted(subs)
+            with ThreadPoolExecutor(max_workers=max(1, min(8, len(order)))) as pool:   # one call per subscription
+                per_sub = dict(zip(order, pool.map(assignments, order), strict=True))
+            out = []
+            for sid in order:
+                name = subs[sid]
+                for a in per_sub[sid]:
+                    p = a.get("properties") or {}
+                    role = self._azure_role_name(p.get("roleDefinitionId", ""))
+                    scope = p.get("scope") or f"/subscriptions/{sid}"
+                    below = scope.split(f"/subscriptions/{sid}", 1)[-1].strip("/")
+                    out.append({"role": role, "privileged": role in AZURE_PRIVILEGED_ROLES, "subscription": name,
+                                "scope": scope, "scope_name": name + (f" ({below})" if below else ""),
+                                "via": "group" if p.get("principalType") == "Group" else "direct"})
+            return sorted(out, key=lambda r: (not r["privileged"], r["subscription"], r["role"]))
+        except Exception as exc:  # reported on the lookup as "Azure role assignments unavailable"
+            return f"Azure role assignments unavailable: {type(exc).__name__}: {exc}"[:200]
+
+    def _azure_subscriptions(self) -> dict[str, str]:
+        """Subscription id -> display name: the configured ones, or every subscription the app can read (listed once
+        an hour - the list rarely changes, and every identity lookup would otherwise pay for it)."""
+        import time
+
+        configured = [x.strip() for x in str(self.settings.get("azure_subscriptions") or "").split(",") if x.strip()]
+        if configured:
+            return {s: s for s in configured}
+        cached = getattr(self, "_subs_cache", None)
+        if cached and time.monotonic() - cached[0] < 3600:
+            return cached[1]
+        listed = self.get(f"{ARM}/subscriptions", params={"api-version": ARM_API["subscriptions"]}).get("value", [])
+        subs = {s["subscriptionId"]: s.get("displayName") or s["subscriptionId"] for s in listed}
+        self._subs_cache = (time.monotonic(), subs)
+        return subs
+
+    def _azure_role_name(self, definition_id: str) -> str:
+        guid = definition_id.rstrip("/").rsplit("/", 1)[-1]
+        if guid in AZURE_BUILTIN_ROLES:
+            return AZURE_BUILTIN_ROLES[guid]
+        names = self.__dict__.setdefault("_role_names", {})          # custom roles: looked up once
+        if guid not in names:
+            body = self.get(f"{ARM}{definition_id}", params={"api-version": ARM_API["authorization"]})
+            names[guid] = (body.get("properties") or {}).get("roleName") or guid
+        return names[guid]
 
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:
@@ -174,11 +246,14 @@ class EntraConnector(MicrosoftConnector):
                            f"user risk: {(ctx['risky'] or {}).get('riskLevel', 'none')}; "
                            f"{len(ctx['signins'])} sign-in(s), {len(risky_signins)} risky; "
                            f"{len(ctx['suspicious_inbox_rules'])} suspicious inbox rule(s); "
-                           f"{len(ctx['new_devices'])} newly registered device(s)")
+                           f"{len(ctx['new_devices'])} newly registered device(s); "
+                           + (f"Azure roles: {', '.join(r['role'] + ' on ' + r['scope_name'] for r in ctx['azure_roles']) or 'none'}"
+                              if ctx["azure_roles"] is not None else ctx["azure_error"]))
                 return ok_lookup(self, recs, summary, recs[0].deep_link, risky_signins=len(risky_signins),
                                  user_risk=(ctx["risky"] or {}).get("riskLevel", "none"),
                                  suspicious_inbox_rules=len(ctx["suspicious_inbox_rules"]),
                                  new_devices=len(ctx["new_devices"]), privileged_roles=ctx["privileged_roles"],
+                                 azure_privileged_roles=ctx["azure_privileged"],
                                  risky_ips=sorted({s.get("ipAddress") for s in risky_signins if s.get("ipAddress")}))
             if entity_type == "ip":
                 s = self.get("/v1.0/auditLogs/signIns", params={"$filter": f"ipAddress eq '{value}'", "$top": 50}).get("value", [])
@@ -238,9 +313,13 @@ def _actions(c: EntraConnector) -> list:
 
 MANIFEST = ConnectorManifest(
     name="entra", tool="Microsoft Entra ID", vendor="Microsoft", category="identity", dimension="identity",
-    description="Users, sign-ins, risky users and detections, roles, MFA, inbox rules; session revoke and account control.",
+    description="Users, sign-ins, risky users and detections, directory and Azure roles, MFA, inbox rules; session "
+                "revoke and account control.",
     factory=lambda s, t: EntraConnector(s, t, rate_per_sec=5, burst=10),
-    live_transport=graph_transport, config=list(APP_FIELDS), actions=_actions, confidence="High",
-    to_confirm="Entra ID P2 for Identity Protection risk data; write permissions for response actions",
+    live_transport=graph_and_arm_transport, actions=_actions, confidence="High",
+    config=[*APP_FIELDS, ConfigField("azure_subscriptions", "Azure subscription ids to read role assignments from "
+                                     "(comma-separated; empty = every subscription the app can read)", required=False)],
+    to_confirm="Entra ID P2 for Identity Protection risk data; write permissions for response actions; the Reader "
+               "role on the Azure subscriptions (or a management group) for Azure role assignments",
     focus_areas=("incident", "phishing"),
 )

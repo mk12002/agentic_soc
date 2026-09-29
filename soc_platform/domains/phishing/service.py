@@ -14,11 +14,13 @@ until an analyst approves or an action type is promoted in the autonomy policy.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import statistics
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from soc_platform.connectors.registry import ConnectorRegistry
+from soc_platform.connectors.tools._common import parse_ts
 from soc_platform.core.actions import ActionRegistry
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.auth import Principal
@@ -169,7 +172,8 @@ class PhishingService:
             raise ValueError("original message no longer retained (retention policy)")
         raw = read_protected(sub.raw_path)
         em = decompose(raw)
-        result = self.analyzer.analyze(em, raw)
+        result = (self.analyzer.analyze(em, raw, {"behavior": self._behavior_context(em, sub.reporter)})
+                  if self.analyzer.engine is not None else self.analyzer.analyze(em, raw))
         case = self.cases.create("phishing", f"Reported: {em.subject or '(no subject)'}", severity=SEVERITY[result.verdict],
                                  attributes={"submission_id": sub.id, "reporter": sub.reporter, "sender": em.sender,
                                              "internet_message_id": em.message_id,
@@ -265,6 +269,14 @@ class PhishingService:
         ids = list(dict.fromkeys((case_ids or []) + self.cases.pending_narration("phishing")))
         return self.cases.narrate_pending(ids, self.llm, redactor=Redactor(internal_domains=set(self.org_domains)),
                                           actor=f"agent:{AGENT}")
+
+    def _behavior_context(self, em: DecomposedEmail, reporter: str | None) -> dict[str, Any]:
+        def department_of(upn: str) -> str | None:
+            ent = self.store.find("identity", "upn", upn)
+            return (ent.attributes or {}).get("department") if ent is not None else None
+
+        return behavior_context(em, reporter, org_domains=self.org_domains, registry=self.registry,
+                                department_of=department_of)
 
     def _fact_summary(self, em: DecomposedEmail, r: AnalysisResult, camp: dict, impact: dict, rec: dict) -> str:
         parts = [f"Verdict {r.verdict} (score {r.score:.2f}, backend {r.backend}) for '{em.subject}' from {em.sender}."]
@@ -474,3 +486,44 @@ class PhishingService:
                 "clickers": dict(clicks), "repeat_clickers": sorted(u for u, n in clicks.items() if n >= 2),
                 "time_to_containment_minutes": {"median": round(statistics.median(ttc), 1) if ttc else None, "samples": len(ttc)},
                 "top_reporters": Counter(s.reporter for s in subs if s.reporter).most_common(5)}
+
+
+def behavior_context(em: DecomposedEmail, reporter: str | None, *, org_domains: list[str], registry: Any,
+                     department_of: Any) -> dict[str, Any]:
+    """What the user-behaviour model needs and cannot see in the e-mail: the recipient's real history with the
+    sender's domain (tenant mail flow, Defender for Office 365), the recipient's department (directory) and whether
+    the message arrived in business hours (its own Date header, in the sender's time zone). Anything that cannot be
+    looked up is left out, and the model falls back to its own defaults for it. Shared by the pipeline and
+    ``scripts/eval_phishing.py``, so the evaluation measures exactly what production runs."""
+    from email.utils import parsedate_to_datetime
+
+    internal = [r.lower() for r in em.to if not org_domains or r.split("@")[-1].lower() in org_domains]
+    recipient = (internal or [(reporter or "").lower()])[0]
+    ctx: dict[str, Any] = {"recipient": recipient}
+    sent = None
+    if em.date:                         # the decomposer stores ISO 8601; a raw header date is accepted too
+        try:
+            sent = datetime.fromisoformat(em.date)
+        except ValueError:
+            try:
+                sent = parsedate_to_datetime(em.date)
+            except (TypeError, ValueError):
+                sent = None
+    if sent is not None and sent.tzinfo is not None:
+        ctx["is_business_hours"] = sent.weekday() < 5 and 8 <= sent.hour < 19
+    dept = department_of(recipient) if recipient else None
+    if dept:
+        ctx["department"] = dept
+    if recipient and em.sender_domain and "defender_office365" in registry.enabled_names():
+        try:
+            hist = registry.get("defender_office365").sender_history(
+                em.sender_domain, [recipient], exclude_internet_message_id=em.message_id or "").get(recipient)
+        except Exception:  # a mail-flow lookup that fails leaves the model on its defaults; it never blocks analysis
+            logging.getLogger(__name__).warning("sender history unavailable for the behaviour model", exc_info=True)
+        else:
+            ctx["contact_count"] = hist["messages"] if hist else 0
+            last = parse_ts(hist.get("last")) if hist else None
+            if last is not None:
+                ref = sent if sent is not None and sent.tzinfo is not None else utcnow()
+                ctx["days_since_last_contact"] = max(0.0, (ref - last).total_seconds() / 86400)
+    return ctx

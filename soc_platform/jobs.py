@@ -30,6 +30,7 @@ JOBS: dict[str, tuple[str, int]] = {  # name -> (interval env var, default secon
     "vulnerability": ("SOC_JOB_VM_SECONDS", 6 * 3600),
     "follow_up": ("SOC_JOB_FOLLOWUP_SECONDS", 24 * 3600),
     "daily_report": ("SOC_JOB_DAILY_REPORT_SECONDS", 24 * 3600),
+    "weekly_reports": ("SOC_JOB_WEEKLY_REPORTS_SECONDS", 7 * 24 * 3600),
     "intelligence": ("SOC_JOB_INTELLIGENCE_SECONDS", 600),
     "retention": ("SOC_JOB_RETENTION_SECONDS", 24 * 3600),
     "self_check": ("SOC_JOB_SELF_CHECK_SECONDS", 3600),
@@ -68,13 +69,16 @@ def _body(name: str, s: Session) -> dict[str, Any]:
     if name == "vulnerability":
         out = sv["vulnerability"].refresh()
         mis = _misconfig(s).refresh()
+        register = sv["vulnerability"].refresh_risk_register()   # critical CVEs proposed; existing entries kept current
         return {"consolidated": out["consolidation"]["consolidated"],
-                "misconfigurations": mis["consolidation"]["consolidated"]}
+                "misconfigurations": mis["consolidation"]["consolidated"],
+                "risk_register": {k: len(v) for k, v in register.items()}}
     if name == "follow_up":
         sync = sv["vulnerability"].sync_tickets()
         fu = sv["vulnerability"].follow_up()
         exp = sv["vulnerability"].expire_exceptions()
-        return {"tickets": sync, "escalations": len(fu["escalations"]), "expired_exceptions": len(exp)}
+        return {"tickets": sync, "escalations": len(fu["escalations"]), "status_checks": len(fu["status_checks"]),
+                "expired_exceptions": len(exp)}
     if name == "intelligence":
         svc = _intel(s)
         n = len(svc.refresh())
@@ -92,6 +96,14 @@ def _body(name: str, s: Session) -> dict[str, Any]:
 
         run = ReportService(s, get_settings().report_output_dir).daily_exposure(sv["vulnerability"])
         return {"report": run.id}
+    if name == "weekly_reports":            # the weekly VM report and the weekly management deck
+        from soc_platform.api.app import llm
+        from soc_platform.reporting.reports import ReportService
+
+        rs = ReportService(s, get_settings().report_output_dir, llm=llm(s))
+        vm_run = rs.weekly_vm(sv["vulnerability"])
+        deck = rs.weekly_management_deck(sv["vulnerability"], sv["incident"], sv["phishing"])
+        return {"weekly_vm": vm_run.id, "weekly_mgmt": deck.id}
     if name == "retention":
         from soc_platform.core.retention import run_retention
 

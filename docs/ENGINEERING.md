@@ -37,7 +37,7 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (diagram-level overview)
 18. [Frontend](#18-frontend)
 19. [Reporting](#19-reporting)
 20. [Configuration and secrets](#20-configuration-and-secrets)
-21. [The optional phishing ML engine](#21-the-optional-phishing-ml-engine)
+21. [The phishing ML engine](#21-the-phishing-ml-engine-trained-models-per-e-mail-component)
 22. [Testing strategy](#22-testing-strategy)
 23. [Code quality tooling](#23-code-quality-tooling)
 24. [Deployment and operations](#24-deployment-and-operations)
@@ -312,6 +312,12 @@ same code:
 
 ### 5.6 The 20 connectors
 
+The Entra connector also reads each person's **Azure role assignments** (Owner, Contributor, User Access
+Administrator... on subscriptions or resource groups, directly or through a group) from Azure Resource Manager,
+through a `RoutingTransport` that gives `management.azure.com` its own token audience. The subscriptions come from
+`azure_subscriptions`, or every subscription the app can read (Reader role). If ARM cannot be read, the identity
+lookup still succeeds and says so.
+
 CrowdStrike Falcon, Defender for Endpoint, Defender for Office 365 (+ Exchange via Graph), Avanan (HEC Smart API;
 falls back to the shared mailbox), Entra ID (+ Identity Protection), Cisco Umbrella, Thinkst Canary, Delinea Secret
 Server, Delinea Privilege Manager, Rapid7 InsightVM (API v3 or CSV export), Wiz (GraphQL), NVD, FIRST EPSS,
@@ -512,7 +518,8 @@ runs. In-memory databases use `StaticPool` so every session sees the same data.
    - spam if bulk or urgency without phishing signals
    - otherwise safe
 
-   `EngineAnalyzer` runs the optional 7-agent ML swarm in-process instead (`SOC_PHISHING_ENGINE=1`).
+   **The trained ML engine runs alongside it by default** (§21): `CompositeAnalyzer` asks both and fuses the two
+   opinions. The heuristic is the fallback when the engine is not installed or fails.
 4. **Enrich.** Threat-intel fusion on up to 12 indicators (sorted, so the same e-mail always checks the same
    ones). The indicators, and the 8 sources for each, are queried in parallel. A failed lookup is logged and the
    source reported as unavailable, never as clean.
@@ -596,12 +603,20 @@ narration, calls overlap, evidence ids match, and nothing is left pending (`test
    - per-team action plans: awaiting_notification → notified → acknowledged → in_progress → done/blocked
    - notifications and tickets are action requests, so they go through approval
    - creating a campaign for a CVE that already has an active one returns it (idempotent)
-5. **Follow-up (daily):** chase plans unacknowledged after 3 days; two-way ticket sync. A ticket marked done while a
+5. **Weekly follow-up** (the job runs daily; the cadence is per plan, `SOC_VM_FOLLOWUP_DAYS`, default 7): each open
+   plan hears from the SOC at most once a week - an escalation draft when it is unacknowledged 3+ days after
+   notification, past its committed date or past SLA (a plan's first escalation goes out at once; level 2+ is
+   "stalled"), otherwise a routine weekly status check with the open-finding count, which does not count as an
+   escalation. The first version escalated the same plan every day. Two-way ticket sync. A ticket marked done while a
    scanner still sees the vulnerability is a **false closure**, reopened and counted.
 6. **Validation:** re-query each scanner. The result per source is `still_present` / `not_present` /
    `unverifiable: <error>`, and a fix is never accepted on an unverifiable answer.
 7. **Exceptions and risk register.** An exception needs a justification, a compensating control and an expiry, and
-   is approved by a different person; expiry reopens the finding. Past-SLA findings are proposed for the register.
+   is approved by a different person; expiry reopens the finding. The **risk register is kept current** after every
+   vulnerability refresh (`refresh_risk_register`): open P1 CVEs are proposed as entries (a lead approves them);
+   existing entries get their affected-asset count and owners updated; an entry is marked *remediated* once nothing
+   is open and sent back to *proposed* for a lead to review if the vulnerability returns. Each change is audited
+   (`vm.risk_register_updated`).
 8. **Cloud misconfigurations** (`misconfig.py`): Wiz issues consolidated per (resource × rule), owner by CMDB or
    subscription, SLA by severity (tightened for toxic combinations on internet-exposed resources), routed, then
    fixed and validated against Wiz.
@@ -946,7 +961,7 @@ changes no number, verdict or action; the test suite proves it on three estates.
 
 ### 14.1 Jobs (`jobs.py`)
 
-Nine jobs:
+Ten jobs:
 
 | Job | Default interval |
 |---|---|
@@ -958,6 +973,7 @@ Nine jobs:
 | vulnerability | 6 h |
 | follow_up | 1 day |
 | daily_report | 1 day |
+| weekly_reports | 7 days (weekly VM report + weekly management deck) |
 | retention | 1 day |
 
 Intervals are set by `SOC_JOB_*_SECONDS`.
@@ -1022,7 +1038,10 @@ Important findings are pushed to Teams, Slack or any webhook by the `notify` job
 - **`status()`** for `/health`:
   - `running`
   - `stuck`: alive, but a job has run past its lease (30 min)
-  - `stale`: no heartbeat for `SOC_SCHEDULER_STALE_SECONDS`, default 180 s
+  - `stale`: no heartbeat for `SOC_SCHEDULER_STALE_SECONDS`, default 180 s - unless the scheduler runs inside this
+    server and its heartbeat thread is alive and still trying (`alive_here`): then `running` with
+    `heartbeat_write_delayed`. On SQLite a long transaction (a slow LLM call in a demo) blocks the heartbeat write,
+    and the console used to show "Scheduler stopped" for a scheduler that was fine; the browser tour caught it.
   - `never`
 
   The console shows "Scheduler stopped" or "Scheduler stuck (job)".
@@ -1225,21 +1244,92 @@ immediately.
 
 ---
 
-## 21. The optional phishing ML engine
+## 21. The phishing ML engine (trained models per e-mail component)
 
-`soc_platform/domains/phishing/engine/` is an earlier, self-contained phishing analysis system, integrated as an
-optional backend:
+`soc_platform/domains/phishing/engine/` is an earlier, self-contained phishing analysis system. It runs **inside the
+platform by default** whenever its libraries (PyTorch, transformers) are installed:
 - a seven-agent swarm: header, content NLP, URL, attachment/OCR, sandbox, threat intel, user behaviour
-- a LangGraph decision graph, a counterfactual engine, MITRE mapping
-- RabbitMQ workers, Redis caching
-- a sandbox executor for detonation on an isolated host
+- a LangGraph decision graph (weighted scoring with a consensus boost), a counterfactual engine, MITRE mapping
+- RabbitMQ workers, Redis caching and a sandbox executor for detonation, when deployed as its own service
 - models verified by SHA-256 manifest before loading
 
+**The trained models** (`artifacts/phishing/models/`): header (random forest), content (a small fine-tuned BERT: 2
+layers, 128 wide, first 128 tokens), URL (random forest), attachment and sandbox (scikit-learn), threat intel and
+user behaviour (XGBoost).
+
 **Integration:**
-- `EngineAnalyzer` runs the swarm in-process when `SOC_PHISHING_ENGINE=1`. The engine's own persistence, actions and
-  the retired "Garuda" hop are disabled.
-- The platform's action layer, policy, audit and impact agents replace them.
-- The heuristic analyser remains the default and a second opinion.
+- `SOC_PHISHING_ENGINE`: `auto` (default: on when installed), `1` (on), `0` (heuristic only). Used by the server,
+  the jobs and `demo` (which prints which analysis it used). The test suite pins `0` except `test_phishing_engine.py`.
+- `EngineAnalyzer` runs the agents in parallel on the parsed e-mail, then the engine's decision graph. The engine's
+  own persistence, actions, LLM and the retired "Garuda" hop are disabled; the platform's action layer, policy,
+  audit, LLM gateway and impact agents replace them.
+- Models load in a background thread at server start (`warm_up_engine`): ~9-11 s on a laptop CPU, then ~1 s per
+  e-mail. The models are cached per process.
+- The engine logs through loguru at INFO per graph node; in-process it is set to `SOC_PHISHING_ENGINE_LOG_LEVEL`
+  (default `WARNING`). scikit-learn is pinned to 1.8.x, the version the models were saved with.
+
+**The platform feeds the models what they cannot see in the e-mail** (each measured before and after, below):
+- **Threat intel:** inside the platform the engine's own agent had no API keys and an empty local store, so it
+  scored every message 0. It now receives the platform's threat-intel fusion (8 sources, already queried by the
+  heuristic for the sender domain, link domains, attachment hashes and origin IP; `platform_threat_intel_result`):
+  malicious indicators score 0.8-1.0 by how many sources agree, suspicious 0.45, nothing found 0.
+- **User behaviour:** four of its seven inputs were defaults in this deployment (contact history "never", department
+  "medium risk", business hours "always"). The platform now supplies them (`behavior_context`, passed as
+  `payload["behavior_context"]` and read by the engine's feature contract): the recipient's delivered-mail history
+  with the sender's domain over 90 days (Defender for Office 365 advanced hunting, `sender_history`, the reported
+  message itself excluded), the recipient's department (the directory) and whether the message arrived in business
+  hours (its Date header, in the sender's time zone). Anything that cannot be looked up keeps the model's default.
+- **Sandbox:** without an isolated detonation host only the agent's static fallback runs, and on the labelled corpus
+  that ranked malicious attachments no better than chance (separation 0.40) while the attachment agent covers the
+  same ground correctly. It is therefore **not run** in-platform unless `SOC_PHISHING_SANDBOX=1` (a detonation host
+  is configured).
+
+**Fusion** (`CompositeAnalyzer.fuse`): the more severe verdict wins; both opinions, every model's score and each
+model's measured reliability are kept on the case and shown on the case page (*Analysis*). Two safeguards send a
+case to an analyst as *suspicious* instead of declaring it malicious:
+- **Corroboration:** when the engine alone says malicious (the heuristic says safe or spam) and none of the reliable
+  models (header, URL, attachment, threat intel - `MODEL_RELIABILITY`) scores 0.5 or more, i.e. only the content and
+  user-behaviour models drove it.
+- **Authenticated sender:** when the engine alone calls a DMARC/DKIM-authenticated sender malicious below 0.85.
+
+Engine indicators that describe the agent's own state or an absence (`ml_header_model_used`, `urls_analyzed=2`,
+`virustotal_not_configured`, `no_attachments`, the content model's own label...) are not turned into evidence
+(`ENGINE_STATUS_NOTE`, checked against every indicator the agents emitted on the corpus).
+
+**Measured** (`scripts/eval_phishing.py --engine [--no-context]`: the built-in corpus plus the corpora of two
+generated organisations, each analysed against its own tools and people; 46 labelled messages, 28 malicious or
+suspicious, 18 legitimate or spam):
+
+| | Detection | Legitimate called malicious | Exact verdict |
+|---|---|---|---|
+| Heuristic analyser alone | 28 / 28 | 0 | 44 / 46 |
+| ML engine alone, without the platform's data | 22 / 28 | 3 (the genuine invoice, in each organisation) | 33 / 46 |
+| ML engine alone, **with** the platform's data | 22 / 28 | **0** | 36 / 46 |
+| **Combined, as the platform runs it** | **28 / 28** | **0** | **46 / 46** |
+
+Each model on its own (separation: the chance a malicious message scores above a legitimate one; 0.5 = coin flip):
+
+| Model | Separation | Notes |
+|---|---|---|
+| Header | 0.85 | never scored a legitimate message 0.5+; misses attacks with clean authentication |
+| URL | 1.00 on the 13 messages with links | 0.49 over all 46: a message without links scores 0, correctly |
+| Attachment | 1.00 on the 13 with attachments | ranks correctly but scores many malicious attachments below 0.5 |
+| Content transformer | 0.88 | confidently wrong on 5 of the 12 base messages; never outputs *Spam*; the weakest model |
+| User behaviour | 0.86 → **0.93** with real contact history | legitimate messages scored 0.5+: 3 → 0 |
+| Threat intel | 0.50 on this corpus | the intel sources know none of the corpus domains; contributes on known campaigns |
+| Sandbox | 0.40 (static fallback only) | not run without a detonation host |
+
+Read with care: the corpus is small and synthetic, the generated organisations reuse its base messages, and the
+heuristic was written alongside it. The engine's blind spots on it are an HTML attachment carrying a credential form
+and a bank-detail-change request with no link or attachment; the heuristic covers both. The biggest remaining
+improvement is retraining the content model (a larger transformer, longer input, HTML stripped, trained on real
+reported mail including invoices, supplier fraud, service notifications and marketing). Real accuracy is measured
+on the client's reported mail in shadow mode.
+
+**Tested in the platform** (`test_phishing_engine.py`, 13 tests): every in-platform agent answers inside the real
+pipeline; the genuine invoice is safe and phishing still caught with the platform's data; threat intel fed from the
+platform; sandbox off without a detonation host; both safeguards; status notes not cited; the behaviour features
+use real history, department and arrival time; fallback when the engine fails; the setting.
 
 **Quality:** 205 engine tests. It is lint-clean under the repository's policy (resilience-boundary catch-alls
 documented in `pyproject.toml`; silent `pass` handlers replaced with logging). Real bugs fixed during review:
@@ -1315,8 +1405,9 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 ## 24. Deployment and operations
 
 - **Image** (`deploy/Dockerfile`): a multi-stage build on `python:3.11-slim`; build dependencies only in the builder
-  stage; a non-root `soc` user (uid 1001); `HEALTHCHECK` on `/health`; Uvicorn with 2 workers. The optional ML
-  engine comes from the `WITH_PHISHING_ENGINE=true` build argument (installs CPU PyTorch).
+  stage; a non-root `soc` user (uid 1001); `HEALTHCHECK` on `/health`; Uvicorn with 2 workers. The ML engine's
+  libraries come from the `WITH_PHISHING_ENGINE=true` build argument (CPU PyTorch); compose sets
+  `SOC_PHISHING_ENGINE=auto`, so an image built with them runs the models and one without uses the heuristic.
 - **Compose** (`deploy/docker-compose.yml`):
   - `postgres`
   - `platform-api` (built-in scheduler off)
@@ -1366,6 +1457,9 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 26 | Notifications from findings, through configured HTTPS webhooks only, deduplicated per channel and severity | A separate alerting subsystem; e-mail; destinations per rule | One path for detection and operational alerts; no SSRF path; no spam from unchanged findings | Channel set is platform-wide (no per-team routing yet) |
 | 27 | Case ownership and append-only notes in the platform | Rely on the ITSM ticket for ownership | Analysts triage in the console; ownership must filter the queue; notes must be audit-grade | Two places a case can be discussed when a ticket exists (the ticket link is on the case) |
 | 28 | Global search with escaped `LIKE` over names and every tool identifier, scope-filtered per group | A search engine (OpenSearch); full-text indexes | No extra infrastructure; any identifier from any tool finds the entity; scope rules reused | Substring scans; fine to hundreds of thousands of rows, a search index is the next step beyond |
+| 30 | The trained ML engine on by default (when installed), fed with the platform's threat intel and mail-flow history, fused with the heuristic; a models-only alarm needs a reliable model to agree | Heuristic only; engine only as delivered | Measured: with the platform's data the engine stopped calling legitimate mail malicious, and the combination got every labelled message right | +1 s per e-mail in the background, ~10 s model load at start; the sandbox agent does not run without a detonation host |
+| 31 | Weekly per-plan follow-up, weekly reports as a job, risk register refreshed after every scan | Daily escalations; reports and register on demand only | The client's stated recurring workload; no daily nagging of platform teams | Reports land in Reports every week whether or not anyone reads them |
+| 32 | Azure role assignments read from Azure Resource Manager inside the Entra connector | A separate connector | One identity picture per person (directory roles and Azure roles); ARM has its own token audience through `RoutingTransport` | Needs the Reader role on the subscriptions |
 | 29 | Automatic *nullable* column addition at start-up on both engines | Alembic immediately | New optional fields reach existing databases with no manual step | Required columns, renames and drops still need a scripted migration |
 
 ---

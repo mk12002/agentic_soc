@@ -175,16 +175,17 @@ Secret access audit, privileged sessions, standing privilege; credential rotatio
 
 ### Microsoft Entra ID (`entra`)
 
-Users, sign-ins, risky users and detections, roles, MFA, inbox rules; session revoke and account control.
+Users, sign-ins, risky users and detections, directory and Azure roles, MFA, inbox rules; session revoke and account control.
 
 - Vendor: Microsoft · focus areas: incident, phishing
 - Read scopes: User.Read.All, AuditLog.Read.All, IdentityRiskyUser.Read.All, IdentityRiskEvent.Read.All, RoleManagement.Read.Directory, UserAuthenticationMethod.Read.All, MailboxSettings.Read
 - Write scopes (only for approved actions): User.RevokeSessions.All, User.EnableDisableAccount.All, IdentityRiskyUser.ReadWrite.All, User-PasswordProfile.ReadWrite.All
-- To confirm with the client: Entra ID P2 for Identity Protection risk data; write permissions for response actions
+- To confirm with the client: Entra ID P2 for Identity Protection risk data; write permissions for response actions; the Reader role on the Azure subscriptions (or a management group) for Azure role assignments
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
   - `client_secret` (secret): App registration secret (prefer certificate-based auth in prod)
+  - `azure_subscriptions` (optional): Azure subscription ids to read role assignments from (comma-separated; empty = every subscription the app can read)
 
 ### FIRST EPSS (`epss`)
 
@@ -242,7 +243,7 @@ Asset inventory and vulnerability findings from the Security Console API (or CSV
 - Write scopes (only for approved actions): -
 - To confirm with the client: Authoritative product/version; live API availability
 - Configuration:
-  - `console_url`: Security Console URL, e.g. https://ivm.acme.local:3780
+  - `console_url`: Security Console URL, e.g. https://ivm.example.local:3780
   - `username` (secret): Read-only API user
   - `password` (secret): API user password
   - `verify_tls` (optional): Verify console TLS certificate

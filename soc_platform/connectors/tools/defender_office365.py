@@ -141,6 +141,22 @@ class DefenderOffice365Connector(MicrosoftConnector):
              "ThreatTypes, Url, UrlDomain, SHA256, FileName")
         return self.graph_hunt(q)
 
+    def sender_history(self, sender_domain: str, recipients: list[str], *, exclude_internet_message_id: str = "",
+                       lookback_days: int = 90) -> dict[str, dict[str, Any]]:
+        """How often each recipient has received delivered mail from ``sender_domain`` before (and when last), from
+        the tenant's mail flow - the "have we heard from this sender before?" signal. The reported message itself is
+        excluded. Returns {recipient: {"messages": n, "last": iso time}} for recipients with any history."""
+        if not sender_domain or not recipients:
+            return {}
+        rows = self.graph_hunt(
+            "// sender-history\n"
+            f"EmailEvents | where Timestamp > ago({lookback_days}d)\n"
+            f"| where SenderFromDomain =~ {kql_str(sender_domain)} and RecipientEmailAddress in~ ({kql_list(recipients)})\n"
+            f"| where DeliveryAction == 'Delivered' and InternetMessageId != {kql_str(exclude_internet_message_id)}\n"
+            "| summarize Messages = count(), Last = max(Timestamp) by RecipientEmailAddress")
+        return {str(r.get("RecipientEmailAddress", "")).lower(): {"messages": int(r.get("Messages") or 0), "last": r.get("Last")}
+                for r in rows if r.get("RecipientEmailAddress")}
+
     def url_clicks(self, urls: list[str], url_domains: list[str], lookback_days: int = 14) -> list[dict[str, Any]]:
         """Safe Links click telemetry: who clicked, when, allowed or blocked (PH-F06)."""
         return self.graph_hunt(

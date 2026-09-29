@@ -59,8 +59,10 @@ An **agentic SOC platform**: one investigation and automation layer over an orga
   tool identifier, findings and CVEs, and Teams / Slack / webhook notifications for findings above a threshold.
 - Every connector has **fake mode** (vendor-shaped fixtures through the same parsing code) so the whole platform runs
   and demos with no tenant access.
-- Optional **phishing ML engine** (`soc_platform/domains/phishing/engine/`, ~24k lines, earlier code base): 7-agent
-  ML swarm + LangGraph; off by default (`SOC_PHISHING_ENGINE=1` to use it in-process).
+- **Phishing ML engine** (`soc_platform/domains/phishing/engine/`, ~24k lines, earlier code base): 7-agent ML swarm
+  (a trained model per e-mail component, `artifacts/phishing/models/`) + LangGraph. **On by default when installed**
+  (`SOC_PHISHING_ENGINE=auto`), fused with the heuristic analyser (`CompositeAnalyzer.fuse`). The test suite pins it
+  off (conftest) except `test_phishing_engine.py`. scikit-learn is pinned to 1.8 (the models' version).
 
 Scale: ~16.8k lines platform Python, ~5.6k lines platform tests, ~0.9k lines of vanilla JS UI.
 
@@ -76,7 +78,7 @@ session; `verify_features.py` reads the `SOC_LLM_*` lines itself).
 ```bash
 # run
 python -m soc_platform init-db                 # create tables (idempotent)
-python -m soc_platform demo                    # load the sample org: 7 phishing + 3 incident cases, 34 approvals, 6 findings
+python -m soc_platform demo                    # sample org: 7 phishing + 3 incident cases, 34 approvals, 6 open vulns (same with or without the ML engine)
 python -m soc_platform reset-demo [--yes]      # server stopped: wipe the demo DB + raw/report files, then init-db + demo
 python -m soc_platform serve                   # API + console + built-in scheduler on 127.0.0.1:8080 (SOC_PORT/SOC_HOST)
 python -m soc_platform scheduler [--once]      # optional separate scheduler service
@@ -92,7 +94,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 98 features
+python scripts/verify_features.py                                 # tests mapped to 102 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -262,8 +264,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): ~301 platform tests on SQLite and on PostgreSQL, 205
-  engine tests, 98/98 features verified.
+- Current counts (keep docs in sync when they change): ~321 platform tests on SQLite and on PostgreSQL, 205
+  engine tests, 102/102 features verified.
 
 ---
 
@@ -359,11 +361,14 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   commit came after the reply (an upload's case was missing from the next list in 28 of 40 tries). Every new route
   must use `Depends(db_session, scope="function")`; `test_commit_before_response.py` fails otherwise. TestClient
   cannot show this race - only a real server can.
+- **SQLite blocks all writers during a long transaction** (an LLM call inside a request): background writes such as the
+  heartbeat wait or fail. Commit before slow model calls (jobs and bulk endpoints do), and never infer "dead" from
+  one missed write - `/health` asks the in-process scheduler (`Scheduler.alive_here`).
 - **Thread exceptions only warn in pytest** (`PytestUnhandledThreadExceptionWarning`) - a crashed background thread
   can hide behind a green test. `test_scheduler.py` turns them into errors; do the same in new concurrency tests.
 - **Equal timestamps on Windows**: the clock advances in ~15 ms steps, so "newest first" by time alone is random
   within a tick - make times strictly increasing (case notes, `JobRun.ordinal`).
-- **`demo` expectations** in the guides (7+3 cases, 34 approvals, 6 findings) are real; if you change fixtures or
+- **`demo` expectations** in the guides (7+3 cases, 34 approvals, 6 open vulnerabilities; the same with or without the ML engine) are real; if you change fixtures or
   pipelines, re-count and update RUN_GUIDE / PRESENTER_GUIDE.
 - **Browser tour** runs the real scheduler with `SOC_SCHEDULER_START_DELAY=86400`: the heartbeat is live (no
   "Scheduler stopped" banner in screenshots) but no job runs to move figures under the screen-vs-API check. It gives

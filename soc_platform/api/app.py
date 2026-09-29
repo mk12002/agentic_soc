@@ -47,7 +47,10 @@ async def _lifespan(_app: FastAPI):
     """The server runs the job scheduler itself (SOC_EMBEDDED_SCHEDULER=1, the default), so one process is the whole
     platform. Deployments with a dedicated scheduler service set SOC_EMBEDDED_SCHEDULER=0; running both is also safe."""
     from soc_platform import scheduler as sched
+    from soc_platform.domains.phishing.agents.analyzer import engine_enabled, warm_up_engine
 
+    if engine_enabled():   # load the trained models in the background; the server answers meanwhile
+        __import__("threading").Thread(target=warm_up_engine, name="soc-engine-warmup", daemon=True).start()
     sch = None
     if sched.enabled_embedded():
         sch = sched.Scheduler(mode="embedded")
@@ -343,6 +346,7 @@ def llm(s: Session) -> LLMGateway | None:
 
 def _services(s: Session):
     from soc_platform.domains.incident.service import IncidentService
+    from soc_platform.domains.phishing.agents.analyzer import engine_enabled
     from soc_platform.domains.phishing.service import PhishingService
     from soc_platform.domains.vulnerability.service import VulnerabilityService
 
@@ -353,7 +357,7 @@ def _services(s: Session):
     return {"incident": IncidentService(s, reg, policy=pol, llm=gw, actions=acts),
             "vulnerability": VulnerabilityService(s, reg, policy=pol, llm=gw, actions=acts),
             "phishing": PhishingService(s, reg, policy=pol, llm=gw, actions=acts, org_domains=org,
-                                        use_engine=__import__("os").environ.get("SOC_PHISHING_ENGINE", "0") == "1",
+                                        use_engine=engine_enabled(),
                                         raw_dir=Path(st.raw_payload_dir) / "phishing")}
 
 
@@ -1166,6 +1170,7 @@ def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVES
     svc = _services(s)["phishing"]
     subs = svc.ingest_reported()
     ids = [svc.process(sub.id, narrate=False)["case"]["id"] for sub in subs if process and sub.status == "new"]
+    s.commit()                                   # cases saved first: no write lock is held while the model writes
     svc.narrate_pending(ids)                     # the model explanations for the whole batch, in parallel
     out = [svc.cases.view(cid)["case"] for cid in ids]
     if out:
@@ -1209,6 +1214,7 @@ def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INV
     ing = svc.ingest()
     cases = svc.cluster()
     ids = [svc.investigate(c.id, narrate=False)["case"]["id"] for c in cases if investigate and c.status != "closed"]
+    s.commit()                                   # cases saved first: no write lock is held while the model writes
     svc.narrate_pending(ids)                     # the model explanations for the whole batch, in parallel
     done = [svc.cases.view(cid)["case"] for cid in ids]
     _intel(s).refresh()

@@ -898,6 +898,253 @@
     "value": []
    },
    "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions$",
+   "body": {
+    "value": [
+     {
+      "subscriptionId": "11111111-2222-3333-4444-000000000001",
+      "displayName": "Acme Production",
+      "state": "Enabled"
+     },
+     {
+      "subscriptionId": "11111111-2222-3333-4444-000000000002",
+      "displayName": "Acme Development",
+      "state": "Enabled"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": [
+     {
+      "id": "/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments/grp-finance-team-b24988ac",
+      "properties": {
+       "roleDefinitionId": "/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c",
+       "principalId": "grp-finance-team",
+       "principalType": "Group",
+       "scope": "/subscriptions/11111111-2222-3333-4444-000000000001/resourceGroups/finance-apps"
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-jane-0001')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-jane-0001')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": [
+     {
+      "id": "/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments/u-bob-0002-8e3af657",
+      "properties": {
+       "roleDefinitionId": "/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleDefinitions/8e3af657-a8ff-443c-a75c-2fe8c4bcb635",
+       "principalId": "u-bob-0002",
+       "principalType": "User",
+       "scope": "/subscriptions/11111111-2222-3333-4444-000000000001"
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-bob-0002')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-bob-0002')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-raj-0003')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": [
+     {
+      "id": "/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments/u-raj-0003-acdd72a7",
+      "properties": {
+       "roleDefinitionId": "/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7",
+       "principalId": "u-raj-0003",
+       "principalType": "User",
+       "scope": "/subscriptions/11111111-2222-3333-4444-000000000002"
+      }
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-raj-0003')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-priya-0004')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-priya-0004')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-arun-0005')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-arun-0005')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-meera-0006')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-meera-0006')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-tom-0007')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-tom-0007')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-li-0008')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "assignedTo('u-li-0008')"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000001/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "*"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/subscriptions/11111111-2222-3333-4444-000000000002/providers/Microsoft.Authorization/roleAssignments$",
+   "body": {
+    "value": []
+   },
+   "status": 200,
+   "params": {
+    "$filter": "*"
+   }
   }
  ]
 }

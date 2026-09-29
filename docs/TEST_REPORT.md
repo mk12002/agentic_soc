@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-09-29 (round 10; earlier rounds 2026-09-24 to 2026-09-26) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-09-29 (round 11; earlier rounds 2026-09-24 to 2026-09-29) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,60 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 10 (2026-09-28/29) - latest results: scheduler, speed, teamwork, notifications
+## 0. Round 11 (2026-09-29) - latest results: the phishing models, the client deck, recurring VM work
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **321 passed**, 0 failed, 15 skipped |
+| Platform suite on PostgreSQL 16 | **321 passed**, 0 failed, 15 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **102 of 102 features verified**; 259 test cases incl. live LLM and live feeds; engine 162 passed; browser tour with the LLM and the ML models on: 30 screenshots, 0 problems |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / no known vulnerabilities / clean |
+
+**The phishing ML models, checked one by one.** The engine (a trained model per e-mail component) now runs inside
+the platform by default. Each model was measured on its own on 46 labelled messages (the built-in corpus plus two
+generated organisations, each analysed against its own tools and people):
+
+| Model | Finding | Action |
+|---|---|---|
+| Header | Good: never flagged legitimate mail (separation 0.85) | kept; may confirm an alarm |
+| URL | Good: every phishing link above every legitimate one (1.00 on messages with links) | kept; may confirm |
+| Attachment | Ranks correctly (1.00 on messages with attachments), scores many malicious ones low | kept; may confirm; recalibration recommended |
+| Content transformer | Weakest: confidently wrong on 5 of 12 base messages, never outputs *Spam*; the integration was checked (labels, preprocessing) and is correct - it is the model (2-layer BERT, first 128 tokens) | kept, but may not decide alone; retraining recommended |
+| User behaviour | 4 of 7 inputs were defaults in-platform, so every first-time external sender looked risky | now fed real mail-flow contact history, department, arrival time: separation 0.86 → 0.93, legitimate flagged 3 → 0 |
+| Threat intel | Always 0 in-platform (no keys, empty local store) | now fed the platform's 8-source threat intel: 100 on the demo campaign |
+| Sandbox | Static fallback only without detonation: no better than chance (0.40) | not run unless a detonation host is configured |
+
+| | Detection | Legitimate called malicious | Exact verdict (of 46) |
+|---|---|---|---|
+| Engine as delivered | 22 / 28 | 3 | 33 |
+| Engine with the platform's data | 22 / 28 | **0** | 36 |
+| **Combined with the rules, as the platform runs it** | **28 / 28** | **0** | **46** |
+
+The one decision the models had flipped - a genuine Azure invoice called malicious - is gone: with the platform's
+data the models see a sender the recipient hears from monthly. A models-only alarm now needs a reliable model
+(header, URL, attachment, threat intel) or the rules to agree, otherwise an analyst decides. Each case's *Analysis*
+card shows both verdicts, every model's score and its measured reliability. Caveat: the data is small and synthetic;
+real accuracy is measured on the client's reported mail in shadow mode.
+
+**The client's management deck, checked item by item** (tools, the three workflows step by step, the recurring
+workload, the operating principle; the map is in REQUIREMENTS_TRACEABILITY.md). Gaps found and closed:
+- the weekly VM report and weekly management deck were not scheduled - now the `weekly_reports` job
+- the risk register was updated only on request - now after every vulnerability refresh (proposals, updates,
+  remediated, returned)
+- follow-up nagged overdue teams daily and never checked on plans that were on track - now weekly per plan
+- "Azure Identity & Access" was not covered beyond Entra - Azure role assignments per subscription and resource
+  group are now read from Azure Resource Manager (Owner, Contributor... directly or through a group)
+
+**Found and fixed in this round:**
+- The models were cited as evidence for their own status (`virustotal_not_configured`, `no_attachments`, ...).
+- The Notifications card, the scheduler banner and the out-of-scope screens (see round 10) - plus a false "Scheduler
+  stopped" banner in an LLM-heavy SQLite demo: a heartbeat write waiting for the database lock was read as a dead
+  scheduler. The server now asks its own in-process scheduler; the bulk endpoints commit before the model writes.
+- Generated organisations would have shown the sample's "Acme" Azure subscription names; they are renamed.
+- scikit-learn was unpinned while the models were saved with 1.8 (scores checked identical; now pinned).
+- Docker's compose file forced the models off even in an image built with them.
+
+## 0a. Round 10 (2026-09-28/29): scheduler, speed, teamwork, notifications
 
 **Final results (2026-09-29), after the additions and fixes listed below:**
 
@@ -92,7 +145,7 @@ The browser tour now also:
   Found by the full suite. Each case's note times are now strictly increasing.
 - **A vendor's `Retry-After` of hours could stall a job.** It is now capped at 120 s.
 
-## 0a. Round 9 (2026-09-26): penetration testing, fuzzing, types, coverage
+## 0b. Round 9 (2026-09-26): penetration testing, fuzzing, types, coverage
 
 | Check | Result |
 |---|---|
@@ -110,7 +163,7 @@ The browser tour now also:
 - Concurrent writes of the same message failed on Windows.
 - An unwired scaffold claimed "benign 95 %".
 
-## 0b. Round 8 (2026-09-26): PostgreSQL, time, accessibility, code quality
+## 0c. Round 8 (2026-09-26): PostgreSQL, time, accessibility, code quality
 
 | Check | Result |
 |---|---|
@@ -151,7 +204,7 @@ The browser tour now also:
 - A failed estate fixture could leak its environment into later tests; cleanup is now registered before setup.
 - Tests run on every sample estate, with day counts taken from settings rather than written into the tests.
 
-## 0c. Round 7 (2026-09-25): new data sets, failure modes, cost
+## 0d. Round 7 (2026-09-25): new data sets, failure modes, cost
 
 | Check | Result |
 |---|---|
@@ -172,7 +225,7 @@ correlation and case-action lookups degraded linearly with tenant size; the situ
 every page view (cached by fact fingerprint); auto-closed benign mail spent tokens (deterministic explanation);
 routine narratives now use the small tier.
 
-## 0d. Round 6 (2026-09-25): testing from every angle
+## 0e. Round 6 (2026-09-25): testing from every angle
 
 | Angle | Result |
 |---|---|
@@ -193,7 +246,7 @@ incident endpoint); case page vs actions API listing different actions; badge/ta
 list (true totals now, with "showing N of M"); timestamps without timezone; run-to-run changes in the QA sample;
 an intermittent guardrail hole (digits inside ids counted as support for invented figures).
 
-## 0e. Round 5 (2026-09-25)
+## 0f. Round 5 (2026-09-25)
 
 Added: Azure AI Foundry provider (live), full live-LLM test suite, numeric-fidelity guardrail, output review of a
 complete run with the real model, client name removed from the repository.
@@ -232,7 +285,7 @@ Found and fixed in this round (each with a regression test where it is code):
 * **Repository hygiene** - client name removed from every file and file name (identifiers → fictional "Acme"),
   including emails embedded as base64; a real mailbox email moved out of the repository.
 
-## 0f. Round 4 (2026-09-25)
+## 0g. Round 4 (2026-09-25)
 
 Added: attack story, evidence-bound deep analysis, AI report builder, reports encrypted at rest, generalisation test.
 Full per-feature evidence: [FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md) (generated by `scripts/verify_features.py`).
@@ -256,7 +309,7 @@ report files and compliance packs stored in plaintext (now sealed); duplicate re
 (merged, approved together); 9 bandit medium findings in offline phishing tools (HF revision pinning, http(s)-only
 URLs).
 
-## 0g. Round 3 (2026-09-25)
+## 0h. Round 3 (2026-09-25)
 
 | Area | Result |
 |---|---|

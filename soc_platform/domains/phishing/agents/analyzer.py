@@ -58,6 +58,12 @@ ADVANCE_FEE = re.compile(r"\b(next of kin|beneficiary|transfer (of|the) (the )?(
 SUSPICIOUS_TLD = {"xyz", "top", "click", "zip", "mov", "icu", "buzz", "cam", "rest", "shop", "live", "support",
                   "work", "gq", "tk", "ml", "cf", "ga"}
 SEVERE = {"malicious", "phishing"}
+# Engine indicators that report the agent's own state (which models / lookups ran or are configured) or the absence
+# of something ("no_attachments") rather than something found in the e-mail.
+ENGINE_STATUS_NOTE = re.compile(
+    r"_model_(used|loaded|missing|unavailable)|^\w+=\d+(\.\d+)?$|^ml_slm_confidence|^ml_slm_label:legitimate$|"
+    r"\banaly[sz]ed\b|^heuristic_risk|_(not_configured|unauthori[sz]ed|enabled|disabled|unavailable|skipped)$|"
+    r"^no_|^missing_data:|^external_|^confidence_capped", re.IGNORECASE)
 
 
 @dataclass
@@ -197,6 +203,8 @@ class HeuristicAnalyzer:
 
             with ThreadPoolExecutor(max_workers=8) as pool:  # lookups in parallel, results in a fixed order
                 found = list(pool.map(enrich, iocs[:12]))
+            ti_results = [{"type": itype, "value": v, "verdict": e.get("verdict"), "sources_hit": e.get("sources_hit", 0)}
+                          for (itype, v), e in zip(iocs[:12], found, strict=True) if e is not None]
             for (itype, v), e in zip(iocs[:12], found, strict=True):
                 if e is None:
                     continue
@@ -242,7 +250,7 @@ class HeuristicAnalyzer:
         return AnalysisResult(verdict, round(score, 3), confidence, s, "heuristic",
                               counterfactual={"signals_that_drive_verdict": cf_needed,
                                               "note": "verdict drops below 'suspicious' only if all of these were absent"},
-                              mitre=mitre)
+                              mitre=mitre, raw={"threat_intel": ti_results} if self.ti is not None else {})
 
 
 class EngineAnalyzer:
@@ -264,6 +272,15 @@ class EngineAnalyzer:
     def __init__(self, *, offline: bool = True) -> None:
         self.offline = offline
 
+    @staticmethod
+    def active_agents(agents: dict[str, Any]) -> dict[str, Any]:
+        """The agents run inside the platform. The sandbox agent is left out unless an isolated detonation host is
+        configured (``SOC_PHISHING_SANDBOX=1``): without detonation only its static fallback runs, and on the labelled
+        corpus that ranked malicious attachments no better than chance (the attachment agent covers the same
+        ground and ranks them correctly)."""
+        run_sandbox = os.environ.get("SOC_PHISHING_SANDBOX", "0").strip().lower() in {"1", "true", "on", "yes"}
+        return {n: fn for n, fn in agents.items() if n != "sandbox_agent" or run_sandbox}
+
     @classmethod
     def available(cls) -> bool:
         try:
@@ -280,6 +297,15 @@ class EngineAnalyzer:
                 for k, v in self.OFFLINE_ENV.items():
                     os.environ[k] = v
                 os.environ.setdefault("IOC_DB_PATH", str(Path(tempfile.gettempdir()) / "soc_platform_ioc_store.db"))
+            try:   # the engine logs every graph node at INFO through loguru; in-process that floods the server log
+                import sys
+
+                from loguru import logger as engine_log
+
+                engine_log.remove()
+                engine_log.add(sys.stderr, level=os.environ.get("SOC_PHISHING_ENGINE_LOG_LEVEL", "WARNING"))
+            except ImportError:
+                pass
             from soc_platform.domains.phishing.engine.agents.service_runner import AGENT_FUNCTIONS
             from soc_platform.domains.phishing.engine.orchestrator.langgraph_workflow import LangGraphOrchestrator
             from soc_platform.domains.phishing.engine.services.email_parser import EmailParserService
@@ -293,9 +319,13 @@ class EngineAnalyzer:
             self.graph = _NoGaruda(save_report=lambda *_: None, execute_actions=lambda *_: None)
             EngineAnalyzer._loaded = True
 
-    def analyze(self, em: DecomposedEmail, raw: bytes | None = None) -> AnalysisResult:
+    def analyze(self, em: DecomposedEmail, raw: bytes | None = None, context: dict[str, Any] | None = None) -> AnalysisResult:
+        """``context`` carries what the platform knows and the engine cannot see from the e-mail alone:
+        ``threat_intel`` (the platform's multi-source verdicts for the e-mail's indicators) and ``behavior`` (the
+        recipient's real history with the sender, department, arrival time)."""
         if not hasattr(self, "graph"):
             self._load()
+        context = context or {}
         with tempfile.NamedTemporaryFile(suffix=".eml", delete=False) as tmp:
             tmp.write(raw or b"")
             path = tmp.name
@@ -303,10 +333,15 @@ class EngineAnalyzer:
             payload = self.parser.parse_file(path)
         finally:
             os.unlink(path)
+        if context.get("behavior"):
+            payload["behavior_context"] = context["behavior"]
+        agents = self.active_agents(self.agents)
+        if context.get("threat_intel") is not None:          # the platform's intel instead of an empty local store
+            agents["threat_intel_agent"] = lambda _payload, ti=context["threat_intel"]: platform_threat_intel_result(ti)
         results: list[dict[str, Any]] = []
         missing: list[str] = []
-        with ThreadPoolExecutor(max_workers=7) as pool:
-            futs = {n: pool.submit(fn, dict(payload)) for n, fn in self.agents.items()}
+        with ThreadPoolExecutor(max_workers=max(1, len(agents))) as pool:
+            futs = {n: pool.submit(fn, dict(payload)) for n, fn in agents.items()}
             for n, f in futs.items():
                 try:
                     r = f.result(timeout=120)
@@ -328,8 +363,11 @@ class EngineAnalyzer:
         verdict = verdict_map.get(str(d.get("verdict", "")).lower(), "suspicious")
         signals = []
         for r in results:
-            for ind in (r.get("indicators") or [])[:6]:
-                signals.append(Signal(str(ind)[:80], float(r.get("risk_score", 0) or 0) / max(1, len(r.get("indicators") or [])),
+            # agents also list status notes ("ml_header_model_used", "urls_analyzed=2", the content model's own
+            # "Legitimate" label): those are not evidence and must not be cited as if they were
+            evidence = [str(i) for i in (r.get("indicators") or []) if not ENGINE_STATUS_NOTE.search(str(i))][:6]
+            for ind in evidence:
+                signals.append(Signal(ind[:80], float(r.get("risk_score", 0) or 0) / len(evidence),
                                       f"{r['agent_name']}: {ind}", r["agent_name"].replace("_agent", "")))
         mitre = [{"technique": t.get("technique_id") or t.get("id"), "name": t.get("name") or t.get("technique_name", "")}
                  for t in ((d.get("attack_assessment") or {}).get("techniques") or []) if isinstance(t, dict)]
@@ -341,6 +379,71 @@ class EngineAnalyzer:
                                   r["agent_name"]: r.get("risk_score") for r in results}}, missing_agents=missing)
 
 
+def platform_threat_intel_result(ti: list[dict[str, Any]]) -> dict[str, Any]:
+    """The engine's threat-intel agent result, built from the platform's threat-intel fusion (8 sources, already
+    queried for the e-mail's sender domain, link domains, attachment hashes and origin IP). Malicious indicators
+    score by how many sources agree; suspicious ones score lower; nothing found scores zero."""
+    malicious = [t for t in ti if t.get("verdict") == "malicious"]
+    suspicious = [t for t in ti if t.get("verdict") == "suspicious"]
+    if malicious:
+        risk = min(1.0, 0.7 + 0.1 * max(int(t.get("sources_hit") or 1) for t in malicious))
+    elif suspicious:
+        risk = 0.45
+    else:
+        risk = 0.0
+    indicators = ([f"ti_malicious:{t['type']}:{t['value']} ({t.get('sources_hit', 0)} sources)" for t in malicious][:6] +
+                  [f"ti_suspicious:{t['type']}:{t['value']}" for t in suspicious][:3])
+    return {"agent_name": "threat_intel_agent", "risk_score": round(risk, 4), "confidence": 0.9 if ti else 0.3,
+            "indicators": indicators, "source": "platform_threat_intel"}
+
+
+# How far each model can be trusted, measured on the labelled corpus (scripts/eval_phishing.py --per-model,
+# docs/TEST_REPORT.md): separation of malicious from legitimate mail where the model has something to judge.
+# "corroborating" models may confirm an engine-only verdict on their own; the others may not.
+MODEL_RELIABILITY: dict[str, dict[str, Any]] = {
+    "header_agent": {"level": "good", "corroborating": True, "note": "never flagged legitimate mail; misses attacks with clean authentication"},
+    "url_agent": {"level": "good", "corroborating": True, "note": "ranked every phishing link above every legitimate one"},
+    "attachment_agent": {"level": "fair", "corroborating": True, "note": "ranks attachments correctly but scores many malicious ones low"},
+    "threat_intel_agent": {"level": "good", "corroborating": True, "note": "the platform's multi-source threat intelligence"},
+    "content_agent": {"level": "low", "corroborating": False, "note": "small transformer; confidently wrong on several test messages"},
+    "user_behavior_agent": {"level": "fair", "corroborating": False, "note": "depends on the recipient's real contact history"},
+    "sandbox_agent": {"level": "off", "corroborating": False, "note": "needs an isolated detonation host"},
+}
+CORROBORATION_THRESHOLD = 0.5
+
+_ENGINE_AVAILABLE: bool | None = None
+
+
+def engine_enabled() -> bool:
+    """Whether reported e-mail is analysed by the trained ML engine as well as the heuristic analyser.
+
+    ``SOC_PHISHING_ENGINE``: ``auto`` (default) - on whenever the engine's libraries (PyTorch, transformers) are
+    installed; ``1`` - on (analysis records an engine error and falls back to the heuristic if they are missing);
+    ``0`` - heuristic only."""
+    global _ENGINE_AVAILABLE
+    mode = (os.environ.get("SOC_PHISHING_ENGINE") or "auto").strip().lower()
+    if mode in {"1", "true", "on", "yes"}:
+        return True
+    if mode in {"0", "false", "off", "no"}:
+        return False
+    if _ENGINE_AVAILABLE is None:
+        _ENGINE_AVAILABLE = EngineAnalyzer.available()
+    return _ENGINE_AVAILABLE
+
+
+def warm_up_engine() -> None:
+    """Load the models now (in a background thread at server start) so the first reported e-mail does not wait ~10 s."""
+    from soc_platform.domains.phishing.agents.decompose import decompose
+
+    sample = (b"From: warmup@example.com\r\nTo: warmup@example.com\r\nSubject: warm-up\r\nMessage-ID: <warmup@local>\r\n"
+              b"\r\nmodel warm-up https://example.com\r\n")
+    try:
+        EngineAnalyzer().analyze(decompose(sample), sample)
+        logging.getLogger(__name__).info("phishing ML engine loaded")
+    except Exception:  # reported; analysis falls back to the heuristic and records why
+        logging.getLogger(__name__).warning("phishing ML engine could not be loaded", exc_info=True)
+
+
 class CompositeAnalyzer:
     """Engine when available (primary), heuristic always (second opinion + fallback)."""
 
@@ -348,25 +451,45 @@ class CompositeAnalyzer:
         self.heuristic = heuristic
         self.engine = engine
 
-    def analyze(self, em: DecomposedEmail, raw: bytes | None = None) -> AnalysisResult:
+    def analyze(self, em: DecomposedEmail, raw: bytes | None = None, context: dict[str, Any] | None = None) -> AnalysisResult:
         h = self.heuristic.analyze(em, raw)
         if self.engine is None:
             return h
+        ctx = dict(context or {})
+        if "threat_intel" in h.raw:                          # the heuristic already asked the platform's intel sources
+            ctx.setdefault("threat_intel", h.raw["threat_intel"])
         try:
-            e = self.engine.analyze(em, raw)
+            e = self.engine.analyze(em, raw, ctx) if ctx else self.engine.analyze(em, raw)
         except Exception as exc:
             h.raw["engine_error"] = f"{type(exc).__name__}: {exc}"[:300]
             return h
+        return self.fuse(h, e)
+
+    @staticmethod
+    def fuse(h: AnalysisResult, e: AnalysisResult) -> AnalysisResult:
+        """Combine the heuristic and engine opinions (also used by the evaluation, without re-running either)."""
         # Most severe verdict wins; both opinions are kept for the analyst.
         order = ["safe", "spam", "suspicious", "malicious"]
         primary = e if order.index(e.verdict) >= order.index(h.verdict) else h
         verdict = primary.verdict
         h_names = {x.name for x in h.signals}
         note = None
-        if (e.verdict == "malicious" and h.verdict == "safe" and "strong_authentication" in h_names
-                and e.score < 0.85 and not any(x.weight > 0 for x in h.signals)):
-            # Engine-only signal against a strongly authenticated sender: route to an analyst rather than
-            # declaring it malicious (observed false positive on legitimate vendor invoices).
+        scores = e.raw.get("agent_scores") or {}
+        corroborated = [a for a, sc in scores.items()
+                        if MODEL_RELIABILITY.get(a, {}).get("corroborating") and (sc or 0) >= CORROBORATION_THRESHOLD]
+        if e.verdict == "malicious" and h.verdict in {"safe", "spam"} and scores and not corroborated:
+            # Only the less reliable models (content, user behaviour) call it malicious and neither the heuristic nor
+            # any reliable model (header, URL, attachment, threat intel) agrees: an analyst decides.
+            verdict = "suspicious"
+            note = ("only the content / user-behaviour models called this malicious, with no support from the header, "
+                    "URL, attachment or threat-intel models or the rules; sent to an analyst")
+        elif (e.verdict == "malicious" and h.verdict == "safe" and "strong_authentication" in h_names
+                and e.score < 0.85):
+            # The engine alone calls a strongly authenticated sender malicious without high confidence, while the
+            # heuristic - having weighed its own signals - calls it safe: route to an analyst rather than declaring
+            # it malicious (observed false positive on legitimate vendor invoices). An earlier version also
+            # required the heuristic to have found no signal at all, so a single weak one (a look-alike link
+            # domain it had already outweighed) let the false positive through.
             verdict = "suspicious"
             note = "engine-only moderate signal on a DMARC/DKIM-authenticated sender; downgraded to suspicious for review"
         merged = AnalysisResult(verdict, max(e.score, h.score), max(e.confidence, h.confidence),
@@ -374,5 +497,7 @@ class CompositeAnalyzer:
                                 counterfactual=e.counterfactual or h.counterfactual,
                                 mitre=e.mitre or h.mitre, missing_agents=e.missing_agents,
                                 raw={"engine": {"verdict": e.verdict, "score": e.score, **e.raw},
-                                     "heuristic": {"verdict": h.verdict, "score": h.score}, "fusion_note": note})
+                                     "heuristic": {"verdict": h.verdict, "score": h.score}, "fusion_note": note,
+                                     "corroborated_by": corroborated, "threat_intel": h.raw.get("threat_intel", []),
+                                     "model_reliability": {a: MODEL_RELIABILITY[a] for a in scores if a in MODEL_RELIABILITY}})
         return merged

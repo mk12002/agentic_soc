@@ -35,6 +35,7 @@ log = logging.getLogger(__name__)
 HEARTBEAT_SECONDS = 30
 TICK_SECONDS = 15
 KEY_PREFIX = "scheduler:"
+_LOCAL: Scheduler | None = None   # the scheduler running inside this process (embedded in the API server), if any
 
 
 def _key(holder: str) -> str:
@@ -78,6 +79,8 @@ class Scheduler:
         self.stop = threading.Event()
         self.key = _key(jobs.HOLDER)
         self._threads: list[threading.Thread] = []
+        self._workers: dict[str, threading.Thread] = {}
+        self.last_attempt: float | None = None             # monotonic time the heartbeat thread last tried to write
 
     @property
     def db(self) -> Any:
@@ -126,6 +129,7 @@ class Scheduler:
 
     def _heartbeat_loop(self) -> None:
         while not self.stop.is_set():
+            self.last_attempt = time.monotonic()
             try:
                 self._beat()
             except Exception:
@@ -162,8 +166,10 @@ class Scheduler:
     # ------------------------------------------------------------------ lifecycle
     def start(self, *, start_delay: float = 5.0) -> None:
         """Start the heartbeat and job threads under a supervisor that restarts either if it ever stops."""
+        global _LOCAL
+
         def supervise() -> None:
-            workers: dict[str, threading.Thread] = {}
+            workers = self._workers
             first = True
             while not self.stop.is_set():
                 for name, target, args in (("heartbeat", self._heartbeat_loop, ()),
@@ -181,9 +187,21 @@ class Scheduler:
         sup = threading.Thread(target=supervise, name="soc-scheduler", daemon=True)
         sup.start()
         self._threads = [sup]
+        _LOCAL = self
         log.info("scheduler started (%s)", self.mode)
 
+    def alive_here(self, within: float) -> bool:
+        """True when this in-process scheduler's threads are running and its heartbeat thread tried to write within
+        ``within`` seconds - even if the database write itself is waiting (SQLite blocks writers while another
+        transaction holds the lock, e.g. during a slow LLM call in a demo)."""
+        hb = self._workers.get("heartbeat")
+        return (not self.stop.is_set() and bool(self._threads) and self._threads[0].is_alive() and hb is not None
+                and hb.is_alive() and self.last_attempt is not None and time.monotonic() - self.last_attempt <= within)
+
     def shutdown(self, timeout: float = 5.0) -> None:
+        global _LOCAL
+        if _LOCAL is self:
+            _LOCAL = None
         self.stop.set()
         for t in self._threads:
             t.join(timeout)
@@ -219,7 +237,9 @@ def status(s: Any) -> dict[str, Any]:
     out.update({"mode": b.get("mode"), "heartbeat_age_seconds": round(age), "schedulers": sum(
         1 for x in live if (now - ts(x["at"])).total_seconds() <= stale_after)})
     loop_at = ts(b.get("loop_at"))
-    if age > stale_after:
+    if age > stale_after and _LOCAL is not None and _LOCAL.alive_here(stale_after):
+        out["state"], out["heartbeat_write_delayed"] = "running", True   # alive here; its database write is waiting
+    elif age > stale_after:
         out["state"] = "stale"
     elif loop_at is not None and (now - loop_at).total_seconds() > jobs.LEASE_SECONDS and b.get("job"):
         out["state"], out["stuck_job"] = "stuck", b.get("job")

@@ -254,3 +254,32 @@ def test_the_heartbeat_never_puts_back_a_stale_running_job(tmp_path):
         v = x.get(SystemFlag, s.key).value
     assert v["job"] == "last" and v["loop_at"] and v["at"]
     db.engine.dispose()
+
+
+def test_an_embedded_scheduler_whose_heartbeat_write_is_waiting_is_not_reported_stopped(db, monkeypatch):
+    """On SQLite a long transaction (e.g. a slow LLM call in a demo) blocks every other writer, including the
+    heartbeat, and the console showed "Scheduler stopped" although the scheduler was alive. The server now asks its
+    own in-process scheduler; one that is really gone is still reported."""
+    monkeypatch.setattr(sched.jobs, "run_job", lambda *a, **k: None)
+    sc = sched.Scheduler(db, tick=0.05, heartbeat=0.05)
+    sc.start(start_delay=3600)                               # heartbeat only; no job runs
+    try:
+        deadline = time.time() + 10
+        while (sc.last_attempt is None or "heartbeat" not in sc._workers) and time.time() < deadline:
+            time.sleep(0.05)
+
+        def locked(**_kw):                                   # what SQLite answers while another writer holds the lock
+            import sqlite3
+
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(sc, "_beat", locked)
+        monkeypatch.setenv("SOC_CLOCK_OFFSET_SECONDS", "3600")   # the stored heartbeat looks an hour old
+        time.sleep(0.2)                                          # the thread keeps trying (and failing)
+        with db.session() as s:
+            st = sched.status(s)
+        assert st["state"] == "running" and st["heartbeat_write_delayed"] is True
+    finally:
+        sc.shutdown()
+    with db.session() as s:                                      # stopped: no local scheduler any more
+        assert sched.status(s)["state"] == "stale"

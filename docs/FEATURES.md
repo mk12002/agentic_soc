@@ -160,7 +160,7 @@ and a unified cross-tool timeline.
 |---|---|
 | Ingestion (PH-F01) | Defender user-reported messages and the SOC reporting mailbox via Graph; manual `.eml` upload; replay-safe |
 | Decomposition (PH-F02) | Headers, SPF/DKIM/DMARC/compauth, routing path, bodies, URLs incl. hidden link-text mismatches, attachments, embedded images, **QR codes** |
-| Analysis (PH-F03) | Two engines fused: the 7-agent ML swarm (content model, URL, header, attachment static + OCR, sandbox detonation, threat intel, user behaviour) and a deterministic heuristic analyser (look-alike domains incl. homoglyphs, brand impersonation, BEC / payment requests, **bank-detail change**, advance-fee fraud, fake replies, container / macro / ISO attachments, bulk marketing) |
+| Analysis (PH-F03) | Two engines fused, **both on by default** (the ML engine whenever its libraries are installed): the ML swarm with a trained model per component (content transformer, URL, header, attachment static + OCR, threat intel, user behaviour; sandbox when a detonation host exists), fed with the platform's own threat intelligence and mail-flow contact history - each case shows every model's score and measured reliability - and a deterministic heuristic analyser (look-alike domains incl. homoglyphs, brand impersonation, BEC / payment requests, **bank-detail change**, advance-fee fraud, fake replies, container / macro / ISO attachments, bulk marketing). A models-only alarm needs a reliable model or the rules to agree, otherwise an analyst decides |
 | Control reconciliation (PH-F04) | Compares the platform verdict with Defender for Office 365 and Avanan verdicts and actions; flags missed-by-controls |
 | Campaign scope (PH-F05) | Every other recipient of the same or a similar message tenant-wide (message trace + similarity over sender, subject template, URL structure, attachment hash / fuzzy hash, body) |
 | User interaction (PH-F06) | Who clicked (Safe Links), whose device reached the site (Umbrella), who replied |
@@ -191,7 +191,7 @@ legitimate vendor, internal and marketing mail).
 | Alert ingestion (IM-F01, IM-T02) | CrowdStrike, Defender for Endpoint, Defender for Office 365, Entra Identity Protection, Canary, Wiz, Delinea, Sentinel, plus a webhook for any SIEM/SOAR; cursor-based polling; duplicates suppressed on replay |
 | Clustering (IM-F02) | Groups related alerts by entity, time window and technique into one incident; suppresses repeat noise |
 | Entity extraction (IM-F03) | Users, hosts, IPs, domains, URLs, hashes, processes, cloud resources |
-| Parallel enrichment (IM-F04, IM-T04) | Fan-out across endpoint, identity, privileged access, DNS, deception, exposure, email and threat-intel dimensions with per-source timeouts, caching and per-tool rate budgets (the SOC never overloads a tool's API) |
+| Parallel enrichment (IM-F04, IM-T04) | Fan-out across endpoint, identity (incl. directory roles and **Azure role assignments** per subscription / resource group), privileged access, DNS, deception, exposure, email and threat-intel dimensions with per-source timeouts, caching and per-tool rate budgets (the SOC never overloads a tool's API) |
 | Consolidated view (IM-F05) | Entity cards, unified timeline, evidence by dimension, deep links back to each tool |
 | Risk assessment (IM-F06) | Deterministic, exposure-informed severity and confidence (an attacked host with a KEV-listed vulnerability ranks higher - U06), MITRE ATT&CK with evidence, grounded summary |
 | Recommendations (IM-F07) | Ranked actions with expected impact, blast radius, reversibility and executing tool |
@@ -219,11 +219,11 @@ legitimate vendor, internal and marketing mail).
 | Prioritisation (VM-F04) | CVSS + EPSS + CISA KEV + exploit availability + internet exposure + asset criticality → explainable P1-P4 with SLA from first seen |
 | Affected devices (VM-F05) | Complete deduplicated asset list per CVE with owner, team, environment, location, priority, status |
 | Notifications & routing (VM-F06/F07) | Per-team drafts (assets, rationale, fix, target date) routed via ITSM ticket or SOC mailbox behind approval; unknown owners raised as exceptions |
-| Plans & follow-up (VM-F08/F09) | Committed dates, dependencies, acknowledgements; scheduled escalation of unacknowledged / overdue / SLA-breached items |
+| Plans & follow-up (VM-F08/F09) | Committed dates, dependencies, acknowledgements; **weekly follow-up per plan**: an escalation when unacknowledged / overdue / past SLA (level 2+ = stalled), otherwise a routine weekly status check - never daily nagging |
 | **Two-way ITSM sync (VM-T10)** | ServiceNow / Jira ticket state flows back; a resolved ticket triggers re-verification against the scanners; a **false closure** reopens the ticket with the evidence |
 | Validation (VM-F10) | Verified remediated / still present / decommissioned / unverifiable; false closures counted |
-| Exceptions & risk register (VM-F11/F12) | Justification, compensating control, approver ≠ requester, expiry → auto-reopen; proposed risk-register entries for approval |
-| Reports (VM-F13) | Daily exposure report, weekly VM report, management deck - from one dataset |
+| Exceptions & risk register (VM-F11/F12) | Justification, compensating control, approver ≠ requester, expiry → auto-reopen; **risk register kept current after every scan**: critical CVEs proposed for lead approval, affected assets and owners updated, entries marked remediated, returned vulnerabilities sent back for review |
+| Reports (VM-F13) | Daily exposure report (every day) and the weekly VM report + weekly management deck (every week), generated automatically from one dataset |
 | Analytics (VM-F14) | Open/closed, MTTR, ageing, SLA breach, regression, per-team performance |
 | Natural-language query (VM-F15, U12) | "Which internet-facing hosts have KEV vulnerabilities?" → answer + the exact filter used + records |
 | New-CVE / KEV exposure (VM-F16, U02) | Automatic "are we exposed, where, how badly" when a CVE is published or KEV-listed |

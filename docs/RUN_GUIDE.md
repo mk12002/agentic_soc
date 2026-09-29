@@ -63,8 +63,17 @@ pip install -r requirements\dev.txt       # only for running the tests (§13)
 If PowerShell refuses to run `Activate.ps1`, allow local scripts once for your user:
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-The optional phishing ML engine (`requirements\phishing.txt`, PyTorch and the ML agents) is **not** needed for the
-demo. The platform's own deterministic analyser gives the verdicts shown in the demo.
+**The phishing ML engine** (your trained models: header, content, URL, attachment, threat intel, user behaviour;
+the sandbox model only with a detonation host) runs automatically when its libraries are installed:
+
+```powershell
+pip install -r requirements\phishing.txt     # PyTorch, transformers, scikit-learn 1.8, XGBoost (once; a large download)
+```
+
+Then every reported e-mail is analysed by the models **and** the platform's rule-based analyser, and each case shows
+both opinions and every model's score. `demo` prints which analysis it used. The server loads the models in the
+background at start-up (about 10 seconds). Without these libraries, or with `SOC_PHISHING_ENGINE=0`, the rule-based
+analyser works alone.
 
 ---
 
@@ -243,11 +252,11 @@ After `demo`:
 | Where | What you should see |
 |---|---|
 | **Cases** | 10 cases: 7 phishing, 3 incidents |
-| **Approvals** | 34 actions awaiting a decision (incident 15, phishing 16, vulnerability 3) |
+| **Approvals** | 34 actions awaiting a decision (incident 15, phishing 16, vulnerability 3), with or without the ML engine |
 | **Vulnerabilities** | 6 open findings; the CVE-2021-44228 (Log4Shell) campaign |
 | **Cloud posture** | Misconfigurations routed to their owning teams |
 | **Intelligence** | A situation brief, correlated findings, the riskiest users and hosts |
-| **Phishing** | The reported credential-phishing campaign (8 recipients, Jane clicked), supplier fraud, CEO fraud, QR phishing, a genuine invoice, marketing spam |
+| **Phishing** | The reported credential-phishing campaign (8 recipients, Jane clicked), supplier fraud, CEO fraud, QR phishing, a genuine invoice (safe, auto-closed), marketing spam. With the ML engine each case's *Analysis* card shows the models' and the rules' verdicts and every model's score |
 | **Suppliers** | Krishna Logistics: account compromise, look-alike domain, payment diversion |
 | **Audit log** | "Chain verified" |
 
@@ -535,6 +544,10 @@ docker compose -f deploy\docker-compose.yml logs -f platform-api                
 ```
 
 Open http://127.0.0.1:8080 as before.
+
+**With the phishing ML models in the container:** add `WITH_PHISHING_ENGINE=true` to `.env` before `up --build`. The
+image then includes PyTorch and the model libraries and the models run automatically (`SOC_PHISHING_ENGINE=auto`).
+Without it the image is smaller and the rule-based analyser works alone.
 
 **Stop, or wipe everything:**
 

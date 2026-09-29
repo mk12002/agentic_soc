@@ -152,7 +152,8 @@ adds a stored-XSS probe. Every attack below must fail, and does.
   keep `SOC_DEV_TOKENS_REMOTE` unset. Configure `SOC_TRUSTED_PROXIES` for the reverse proxy.
 * Create Entra app roles `SOC.<Role>` / `SOC.<Role>.<Domain>` and require MFA via Conditional Access.
 * Run behind TLS (reverse proxy / App Gateway) and restrict network access to the API and executor.
-* Provision per-tool service principals with read scopes first; add write scopes per approved action.
+* Provision per-tool service principals with read scopes first; add write scopes per approved action. For Azure role
+  assignments the Entra app needs only the built-in **Reader** role on the subscriptions (or a management group).
 * Grant the audit-log database role INSERT/SELECT only; back up and retain per the organisation's policy.
 * Store secrets in a vault (Azure Key Vault) and mount them as `*_FILE` (including the notification webhooks).
 * Operate CAPEv2 / the detonation host on an isolated network segment with no route to production.

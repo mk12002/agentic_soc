@@ -19,11 +19,11 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | VM-F06 | Remediation notification drafting | ✅ | `create_campaign` drafts per-team notifications (assets, rationale, fix, target date) | test_vulnerability |
 | VM-F07 | Ownership routing | ✅ | `enrich_ownership` from ServiceNow CMDB / CSV mapping; unknown owner → blocked plan (exception raised) | test_vulnerability |
 | VM-F08 | Action plan tracking | ✅ | `ActionPlan` per campaign/team: owner, committed date, dependencies, status, responses | test_vulnerability |
-| VM-F09 | Automated follow-up | ✅ | `follow_up` escalations for unacknowledged / overdue / SLA-breached, stalled summary; scheduled job | test_vulnerability, test_jobs |
+| VM-F09 | Automated follow-up | ✅ | Weekly follow-up per plan (`SOC_VM_FOLLOWUP_DAYS`): escalation for unacknowledged / overdue / SLA-breached (level 2+ stalled), otherwise a routine weekly status check; scheduled job | test_vulnerability::test_follow_up_is_weekly_per_plan_escalations_count_up_routine_checks_do_not, test_jobs |
 | VM-F10 | Remediation validation | ✅ | `validate` re-queries each source → verified / still present / decommissioned / unverifiable; false closures counted; ITSM-resolved tickets trigger validation | test_vulnerability (false closure, ITSM sync) |
 | VM-F11 | Exception and risk acceptance | ✅ | Exceptions with justification, compensating control, approver ≠ requester, expiry → auto-reopen | test_vulnerability::test_exception_separation... |
-| VM-F12 | Risk register updates | 🟡 | `propose_risk_register` + approval; format is generic until the client's register schema is supplied (A08) | test_vulnerability |
-| VM-F13 | Recurring reporting | 🟡 | Daily exposure, weekly VM (docx), management deck (pptx) from one dataset; your own templates plug in (A08) | test_demo_walkthrough (all reports download) |
+| VM-F12 | Risk register updates | 🟡 | Kept current after every vulnerability refresh (`refresh_risk_register`): critical CVEs proposed for lead approval, affected assets and owners updated, entries marked remediated or sent back for review; audited. Format is generic until the client's register schema is supplied (A08) | test_vulnerability::test_risk_register_is_kept_current_after_every_refresh, test_risk_register_proposals_need_lead |
+| VM-F13 | Recurring reporting | 🟡 | Scheduled: daily exposure report (every day), weekly VM report (docx) and weekly management deck (pptx) every week (`weekly_reports` job), from one dataset; your own templates plug in (A08) | test_vulnerability::test_weekly_reports_are_a_scheduled_job, test_demo_walkthrough (all reports download) |
 | VM-F14 | Trend and SLA analytics | ✅ | `metrics`: open/closed, MTTR, ageing, SLA breach, reopen/regression, per team | test_vulnerability |
 | VM-F15 | Natural-language exposure query | ✅ | `query` NL → shown filter → records (no model needed; LLM optional) | test_vulnerability, test_demo_walkthrough |
 | VM-F16 | New-CVE exposure assessment | ✅ | `new_cve_assessment` + `new_kev_exposure` insight; live NVD/EPSS/KEV verified | test_vulnerability, test_live_public_feeds |
@@ -55,7 +55,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | IM-F01 | Alert ingestion and normalisation | ✅ | Alert streams from CrowdStrike, MDE, MDO, Entra, Canary, Umbrella (lookup), Wiz, Delinea, Sentinel + webhook for any SIEM | test_incident, test_connectors |
 | IM-F02 | Deduplication and clustering | ✅ | `cluster` by entity + time window + technique; repeat suppression | test_incident |
 | IM-F03 | Entity extraction | ✅ | Users (UPN/SAM/aliases), hosts, IPs, domains, URLs, hashes, processes, cloud resources via `EntityRef`s; built-in accounts excluded | test_identity_scale, test_incident |
-| IM-F04 | Multi-tool context enrichment | ✅ | `core/enrichment.py` parallel fan-out across 8 dimensions with per-source timeouts, cache, budget | test_incident |
+| IM-F04 | Multi-tool context enrichment | ✅ | `core/enrichment.py` parallel fan-out across 8 dimensions with per-source timeouts, cache, budget; identity context includes directory roles and Azure role assignments (Azure Resource Manager) | test_incident, test_connectors::test_entra_reports_azure_role_assignments_from_resource_manager |
 | IM-F05 | Consolidated security context view | ✅ | Case view: entity cards, unified timeline, evidence by dimension, deep links; entity 360 view | test_demo_walkthrough |
 | IM-F06 | AI risk assessment and summary | ✅ | Deterministic severity/confidence, MITRE with evidence, grounded summary; every claim cites evidence (E-refs resolvable in UI) | test_incident, test_demo_walkthrough |
 | IM-F07 | Recommended remediation actions | ✅ | Ranked recommendations with expected impact, blast radius, reversibility, executing tool | test_incident |
@@ -91,7 +91,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 |---|---|---|---|---|
 | PH-F01 | Reported-email ingestion | ✅ | Defender user-reported messages + SOC mailbox via Graph; upload/API submission | test_phishing |
 | PH-F02 | Automated email decomposition | ✅ | `decompose`: headers, auth results, routing path, bodies, URLs, attachments, images, QR codes | test_phishing |
-| PH-F03 | Multi-signal analysis | ✅ | 7-agent ML engine (+OCR, sandbox, TI) and deterministic heuristic analyser, composite fusion | test_phishing, engine unit tests (162) |
+| PH-F03 | Multi-signal analysis | ✅ | ML engine with a trained model per component, on by default when installed, fed with the platform's threat intelligence and mail-flow contact history, and the deterministic heuristic analyser, fused (a models-only alarm needs a reliable model or the rules to agree; a disputed authenticated sender goes to an analyst); every model's score and reliability shown on the case. Measured: 46 / 46 labelled messages exactly right combined | test_phishing_engine (engine inside the pipeline), test_phishing, engine unit tests (162) |
 | PH-F04 | Existing-control verdict reconciliation | ✅ | `reconcile` with Avanan + MDO verdicts/actions; disagreements flagged | test_phishing |
 | PH-F05 | Campaign scope determination | ✅ | `campaign_scope` via message trace / hunting + similarity | test_phishing |
 | PH-F06 | User-interaction analysis | ✅ | `user_impact`: Safe Links clicks, Umbrella DNS, replies | test_phishing |
@@ -164,6 +164,35 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | U17 | Compliance and audit evidence automation | ✅ | `reporting/compliance.py`: control tests + evidence.json + chained audit export + summary.docx | test_demo_walkthrough, test_access_security |
 | U18 | Third-party and vendor email risk monitoring | ✅ | `domains/phishing/supplier.py`: supplier compromise, payment diversion, impersonation, spoofing; supplier look-alikes protected in analysis | test_phishing::test_supplier_email_risk_u18 |
 
+## Coverage of the SOC management deck (operational challenges and automation opportunities)
+
+The management deck describes the security tools, three high-effort workflows, the recurring workload and the
+target operating model. Each item, and where the platform delivers it:
+
+| Deck item | Delivered by | Proven by |
+|---|---|---|
+| **Tools:** CrowdStrike Falcon, Defender for Endpoint | `crowdstrike`, `defender_endpoint` connectors (hosts, alerts, vulnerabilities, containment) | test_connectors |
+| **Tools:** Rapid7 InsightVM/Nexpose, CrowdStrike, Wiz, Defender (exposure) | `rapid7`, `wiz`, CrowdStrike Spotlight and Defender TVM streams, consolidated per asset × CVE | test_vulnerability |
+| **Tools:** Avanan, Defender for Office 365 / Security Portal | `avanan`, `defender_office365` (reported mail, campaign search, verdicts, purge) | test_phishing, test_connectors |
+| **Tools:** Microsoft Entra, Azure Identity & Access | `entra`: users, sign-ins, risk, MFA, groups, directory roles, and Azure role assignments per subscription / resource group | test_connectors (incl. Azure roles) |
+| **Tools:** Cisco Umbrella, Thinkst Canary, Delinea Secret Server / Privilege Manager | `umbrella`, `canary`, `delinea_secret_server`, `delinea_privilege_manager` | test_connectors, test_incident |
+| **VM:** vulnerability identified → gather affected devices → consolidate & deduplicate | ingest from 4 scanners in parallel, entity resolution, one record per asset × CVE, affected-device list with owner | test_vulnerability |
+| **VM:** prepare remediation notification → platform team coordination | campaign per CVE, per-team drafts via ITSM or mailbox, behind approval | test_vulnerability |
+| **VM:** action plan & weekly follow-up | committed dates and acknowledgements; weekly follow-up per plan (escalation or status check) | test_vulnerability |
+| **VM:** remediation validation → closure | re-query every scanner; false closures reopened; two-way ITSM sync | test_vulnerability |
+| **VM recurring:** daily exposure report | `daily_report` job | test_jobs, test_demo_walkthrough |
+| **VM recurring:** critical vulnerability updates in the risk register | `refresh_risk_register` after every vulnerability refresh; lead approval | test_vulnerability |
+| **VM recurring:** weekly VM reports, weekly management PPT | `weekly_reports` job (Word + PowerPoint) | test_vulnerability |
+| **Incident:** high alert volumes | alerts from every tool clustered into incidents (shared user / host, 24 h); noisy detections flagged | test_incident |
+| **Incident:** alert lacks context; evidence from user, host, IP, endpoint, identity, DNS, vulnerability and privileged-access tools | parallel enrichment across 8 dimensions into one consolidated case view | test_incident |
+| **Incident:** analyst makes the risk decision | deterministic severity and confidence, recommended actions only (L2), analyst disposition captured | test_core_governance |
+| **Phishing:** user reports → sender / domain → URLs / attachments → security verdicts | decomposition, the 7 trained models + rules, threat-intel fusion, Defender / Avanan reconciliation | test_phishing, test_phishing_engine |
+| **Phishing:** recipients / campaign scope → user interaction → endpoint / identity impact | tenant-wide campaign search, click and DNS checks, per-user EDR and identity checks | test_phishing |
+| **Phishing:** risk & remediation in a single investigation view | one case with verdict, evidence, impact and gated remediation | test_phishing, test_demo_walkthrough |
+| **Common pattern:** search, gather, consolidate, correlate, document, follow up | shared context store, entity resolution, cross-domain correlation and attack story, reports, follow-up jobs | test_consistency, test_story |
+| **Operating principle:** AI gathers and correlates; the analyst validates and decides | recommend-by-default autonomy, four-eyes, LLM never decides a figure or verdict | test_core_governance, test_consistency (LLM on/off identical) |
+| **Automation layer:** gather, correlate, summarise, enrich, draft, report, follow-up support | connectors, enrichment, grounded narratives, drafted notifications, report builder, follow-up and notify jobs | the whole suite |
+
 ## Added beyond the stated requirements
 
 Operational features added during the build. They are not requirement IDs, but they are implemented and tested
@@ -177,6 +206,8 @@ in the same way.
 | Deferred case explanations (cases usable before the model writes) | `CaseService.narrate_pending`, `narrate=False` in jobs and bulk endpoints | test_incident, test_phishing |
 | Built-in, self-healing scheduler with heartbeat | `scheduler.py`, `/health` scheduler state | test_scheduler |
 | Automatic addition of new optional columns; recorded model response times | `Database._add_missing_columns`, `llm_calls.latency_ms`, `/api/v1/llm/status` | test_schema |
+| Send test message; one-command demo reset | `POST /api/v1/admin/notifications/test`; `python -m soc_platform reset-demo` | test_notify, test_api, test_cli |
+| Every request commits before its response | `Depends(db_session, scope="function")` everywhere | test_commit_before_response |
 
 ## Risks (R01–R16): mitigations in place
 

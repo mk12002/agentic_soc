@@ -217,3 +217,50 @@ def test_exchange_admin_calls_use_their_own_token_audience():
     assert seen == [("exo", "https://outlook.office365.com/adminapi/beta/t/InvokeCommand"), ("graph", "/v1.0/users")]
     from soc_platform.connectors.tools import defender_office365 as mdo
     assert mdo.MANIFEST.live_transport is mdo._live
+
+
+def test_entra_reports_azure_role_assignments_from_resource_manager(reg):
+    """'Azure Identity & Access': who holds which Azure role, directly or through a group, on each subscription -
+    read from Azure Resource Manager with its own token audience alongside Graph."""
+    entra = reg.get("entra")
+    bob = entra.identity_context("bob.lee@acme-demo.com")
+    assert bob["azure_roles"][0]["role"] == "Owner" and bob["azure_roles"][0]["privileged"]
+    assert bob["azure_privileged"] == ["Owner on Acme Production"] and bob["azure_error"] is None
+    jane = entra.identity_context("jane.doe@acme-demo.com")
+    assert jane["azure_roles"] == [{"role": "Contributor", "privileged": True, "subscription": "Acme Production",
+                                    "scope": jane["azure_roles"][0]["scope"], "via": "group",
+                                    "scope_name": "Acme Production (resourceGroups/finance-apps)"}]
+    raj = entra.identity_context("raj.mehta@acme-demo.com")
+    assert [r["role"] for r in raj["azure_roles"]] == ["Reader"] and raj["azure_privileged"] == []
+    assert entra.identity_context("priya.nair@acme-demo.com")["azure_roles"] == []
+    # the lookup an investigation uses carries it, and the ARM calls went to the Azure API paths
+    look = entra.lookup("user", "bob.lee@acme-demo.com")
+    assert look.ok and look.signals["azure_privileged_roles"] == ["Owner on Acme Production"]
+    assert "Azure roles: Owner on Acme Production" in look.summary
+    arm_calls = [c for c in entra.http.calls if c["path"].startswith("/subscriptions")]
+    assert arm_calls and all(c["params"]["api-version"] for c in arm_calls)
+
+
+def test_entra_identity_context_survives_azure_being_unreadable(reg, monkeypatch):
+    entra = reg.get("entra")
+    real_get = entra.get
+
+    def get(path, **kw):
+        if "management.azure.com" in path:
+            raise PermissionError("403: the app has no Reader role on the subscriptions")
+        return real_get(path, **kw)
+
+    monkeypatch.setattr(entra, "get", get)
+    ctx = entra.identity_context("jane.doe@acme-demo.com")
+    assert ctx["azure_roles"] is None and "Reader role" in ctx["azure_error"]
+    assert ctx["privileged_roles"] == [] and len(ctx["suspicious_inbox_rules"]) == 1          # the rest still works
+    look = entra.lookup("user", "jane.doe@acme-demo.com")
+    assert look.ok and "Azure role assignments unavailable" in look.summary
+
+
+def test_entra_reads_only_the_configured_subscriptions_when_given(reg, monkeypatch):
+    entra = reg.get("entra")
+    monkeypatch.setitem(entra.settings, "azure_subscriptions", "11111111-2222-3333-4444-000000000002")
+    raj = entra.identity_context("raj.mehta@acme-demo.com")
+    assert [(r["role"], r["subscription"]) for r in raj["azure_roles"]] == [("Reader", "11111111-2222-3333-4444-000000000002")]
+    assert entra.identity_context("bob.lee@acme-demo.com")["azure_roles"] == []    # production not configured

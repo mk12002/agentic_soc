@@ -150,6 +150,8 @@ async function visit(page, hash, name, full = true) {
   if (!(await page.$$eval('#main .card', cs => cs.length))) problems.push('search showed no result groups');
   await shot(page, '29-search');
   await visit(page, `cases/${phishCase.id}`, '04-case-phishing');
+  const analysis = await page.evaluate(() => [...document.querySelectorAll('#main .card-h h2')].map(h => h.textContent).includes('Analysis'));
+  if (!analysis) problems.push('phishing case: the Analysis card (models vs rules) is missing');
   await page.hover('abbr.cite').catch(() => {});
   await page.goto(`${BASE}/#/cases/${incCase.id}`); await settle(page);   // own the case and leave a note, in the UI
   await page.click('[data-fn="assignCase"]'); await settle(page);

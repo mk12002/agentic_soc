@@ -133,7 +133,7 @@ python -m soc_platform reset-demo --yes      # the same data, fresh (refuses whi
 - the correlation, the three standard reports, and an audit-chain check
 
 Result: 7 phishing + 3 incident cases, 6 open vulnerabilities, 34 actions awaiting approval (incident 15, phishing 16,
-vulnerability 3). It uses `SOC_ORG_DOMAINS`, `SOC_RAW_PAYLOAD_DIR` and `SOC_REPORT_OUTPUT_DIR` from settings. Running
+vulnerability 3) - the same with or without the ML engine. It uses `SOC_ORG_DOMAINS`, `SOC_RAW_PAYLOAD_DIR` and `SOC_REPORT_OUTPUT_DIR` from settings. Running
 it twice changes nothing.
 
 To show the LLM features, the `.env` must contain an approved endpoint (already configured for Azure AI Foundry):
@@ -413,10 +413,16 @@ Use these when someone asks "how do you get that number?". Every one is determin
   score ≥ 0.35. **Spam** if bulk or urgency without phishing signals. Otherwise **safe**.
 - **Auto-close:** clear-safe and clear-spam reports with confidence ≥ 0.7 are closed and the reporter is answered.
   10 % are sampled for analyst QA, chosen deterministically by hashing.
-- **Optional ML engine:** a 7-agent ML swarm (content, URL, header, attachment/sandbox, threat intel, user
-  behaviour, and so on). Its models are verified by SHA-256 manifest before loading.
-- **Labelled corpus result:** 100 % detection, 0 % false positives on 20 messages. **Say:** "That's a regression
-  check, not an accuracy claim - accuracy is measured in shadow mode on your own reported mail."
+- **The trained ML engine runs alongside, by default:** seven models, one per e-mail component - header, content
+  (a fine-tuned transformer), URL, attachment, sandbox, threat intel, user behaviour. Each scores its part of the
+  e-mail; the engine's decision graph combines them. The platform then fuses the models' verdict with the rules'
+  verdict: the more severe wins, both are shown on the case with every model's score, and when *only* the models
+  alarm on a properly authenticated sender without high confidence, the case goes to an analyst as suspicious.
+- **Measured on 46 labelled messages:** combined 100 % detection; the models alone 79 %, the rules alone 100 %
+  (the corpus was written with the rules, so it favours them). Given the platform's data (threat intel,
+  who has mailed whom before), the models stopped calling a genuine invoice malicious, and the combination got
+  all 46 test messages exactly right. **Say:** "That's a regression check, not an accuracy claim -
+  accuracy is measured in shadow mode on your own reported mail."
 
 ### 6.4 Incident severity and confidence
 
@@ -597,7 +603,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 301 passed on SQLite (with PostgreSQL's rules enforced) and 301 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 321 passed on SQLite (with PostgreSQL's rules enforced) and 321 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -734,7 +740,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 301 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 321 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -777,6 +783,16 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Will it alert us, or must someone watch the screen? | It posts findings rated high or above (configurable) to Teams, Slack or any webhook (JSON for a SIEM or SOAR) within a minute: correlated attacks and the platform's own alarms (a dead job, break-glass use, a failed self-check, the LLM budget). Each finding is sent once per channel, again only if it escalates. |
 | Could an attacker make it call out somewhere? | No. Destinations come only from configuration and must be HTTPS; nothing in an e-mail or alert can set one. Webhook URLs are secrets, kept in the vault, and never stored or shown - the screen shows only the host. |
 
+### About the phishing models
+
+| Question | Answer |
+|---|---|
+| Where are our trained models? | Six run on every reported e-mail: header, content (transformer), URL, attachment, threat intel, user behaviour. The sandbox model needs an isolated detonation host, so it runs only when one is configured. Each case's *Analysis* card shows the models' verdict, every model's score and how reliable it measured, next to the rules' verdict. |
+| Are the models fed properly? | Yes - the platform gives them what they cannot see in the e-mail: its 8-source threat intelligence, whether this person has received mail from this sender before (from the mail flow), their department, and whether it arrived in business hours. With that data the models stopped calling a genuine Azure invoice malicious. |
+| Why also rules? | Two independent views. On our test data the rules catch two kinds the models miss (an HTML attachment carrying a login form, a bank-detail change with no link). And the content and user-behaviour models may not decide alone: a models-only alarm needs the header, URL, attachment or threat-intel model, or the rules, to agree - otherwise an analyst decides. |
+| How accurate are the models? | On our 46 labelled test messages: the models alone catch 79 % with no false alarms; combined with the rules 100 %, every verdict exactly right. The weakest model is the content transformer (small, reads only ~100 words); retraining it on real reported mail is the next step. The test data is synthetic and small - real accuracy is measured in shadow mode on your own reported mail. |
+| Do we wait for them? | No. About 1 second per e-mail in the background; the models load once when the server starts (~10 s). |
+
 ### About the database and scale
 
 | Question | Answer |
@@ -799,9 +815,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 301 SQLite, 301 PostgreSQL / 205 |
+| Platform tests / engine tests | 321 SQLite, 321 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 17 / 11, all passing |
-| Features verified | 98 of 98 |
+| Features verified | 102 of 102 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
 | Risk half-life / bands | 7 days / critical ≥ 80, high ≥ 60, medium ≥ 30 |
@@ -957,11 +973,12 @@ and the result is recorded.
 | `phishing` | 2 minutes | Pull newly reported e-mails and analyse them; the cases are saved first, the model's explanations follow in parallel |
 | `incident` | 5 minutes | Ingest alerts, cluster them into incidents, investigate; the cases are saved first, the model's explanations follow in parallel |
 | `intelligence` | 10 minutes | Re-correlate: risk, 12 rules, brief |
-| `vulnerability` | 6 hours | Refresh the four scanners, prioritise, update SLAs |
+| `vulnerability` | 6 hours | Refresh the four scanners, prioritise, update SLAs, keep the risk register current |
 | `self_check` | 1 hour | Prove every shared figure agrees everywhere; check the LLM budget |
 | `notify` | 1 minute | Post new findings at or above the threshold to Teams / Slack / webhooks; retry failed deliveries (up to 5 attempts) |
-| `follow_up` | daily | Chase unacknowledged remediation plans; sync tickets; catch false closures |
+| `follow_up` | daily | Weekly follow-up per remediation plan (escalation if overdue, otherwise a status check); sync tickets; catch false closures |
 | `daily_report` | daily | The SOC daily report |
+| `weekly_reports` | weekly | The weekly VM report (Word) and the weekly management deck (PowerPoint) |
 | `retention` | daily | Prune old raw payloads, closed-case e-mails and LLM prompt text; keep legal holds |
 
 Every run is recorded. A run that fails is retried with backoff; after 3 failed runs it is **dead-lettered** and a
@@ -1035,8 +1052,9 @@ Every screen works in light and dark themes and at 768 px and above. All times a
    - QR codes in images.
 
    Malformed or hostile MIME is tolerated, never fatal.
-3. **Analyse.** The deterministic signal model (§6.3) produces the verdict, score and named signals. The optional
-   ML engine can take this step instead.
+3. **Analyse.** The seven trained models (one per component) and the deterministic signal model (§6.3) each give a
+   verdict; the platform fuses them, keeps both opinions and every model's score, and sends a disputed
+   authenticated sender to an analyst.
 4. **Enrich.** Threat-intel fusion on the URLs, domains, hashes and origin IP. A source that fails is reported as
    unavailable.
 5. **Campaign scope.** Defender advanced hunting finds similar messages: recipients and variants.
@@ -1142,7 +1160,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 301 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 321 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |

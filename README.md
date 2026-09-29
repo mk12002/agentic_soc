@@ -49,13 +49,13 @@ Open the console, choose a role and **Continue** (development sign-in; productio
 pipelines from *Cases* and *Vulnerabilities*, or follow the scripted walkthrough in
 [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md). The console opens in light mode; the moon icon switches to dark.
 
-Optional – the full phishing ML swarm (TinyBERT content model, URL/header/attachment/sandbox/TI/behaviour models):
+The phishing ML swarm (TinyBERT content model, URL/header/attachment/sandbox/TI/behaviour models) runs automatically
+once installed (`SOC_PHISHING_ENGINE=auto`; `0` = rule-based analyser only):
 
 ```bash
 git lfs pull
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements/phishing.txt
-export SOC_PHISHING_ENGINE=1
 ```
 
 ### Docker

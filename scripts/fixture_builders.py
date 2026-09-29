@@ -125,12 +125,22 @@ def defender_office365() -> None:
                           {"@odata.type": "#microsoft.graph.security.analyzedMessageEvidence",
                            "senderIp": PHISH["sender_ip"]}]}
     hunt = r"^/v1.0/security/runHuntingQuery$"
+    # recipient history with a sender domain (the user-behaviour model's contact features): months of delivered mail
+    # from the organisation's regular senders - including the real supplier, whose account an attacker may use - and
+    # none from look-alike or first-time domains
+    regular = {"azure.microsoft.com": (u("jane")["upn"], 11, "2026-08-21T07:55:00Z"),
+               "github.com": (u("jane")["upn"], 37, "2026-09-17T16:20:00Z"),
+               "krishna-logistics.com": (u("arun")["upn"], 14, "2026-08-28T10:05:00Z")}
+    history_routes = [route("POST", hunt, {"results": [{"RecipientEmailAddress": who, "Messages": n, "Last": last}]},
+                            body_contains=["sender-history", domain]) for domain, (who, n, last) in regular.items()]
+    history_routes.append(route("POST", hunt, {"results": []}, body_contains="sender-history"))
     write("defender_office365", [
         route("GET", rf"^/v1.0/users/{mbox}/mailFolders/inbox/messages$", {"value": [reported]}),
         route("GET", rf"^/v1.0/users/{mbox}/messages/rep-msg-0001/attachments$", {"value": [
             {"@odata.type": "#microsoft.graph.fileAttachment", "id": "att-1", "name": "original.eml",
              "contentType": "message/rfc822", "contentBytes": base64.b64encode(mime.encode()).decode()}]}),
         route("GET", r"^/v1.0/security/alerts_v2$", {"value": [alert]}),
+        *history_routes,                                   # first: other hunting routes match on recipient names too
         route("POST", hunt, {"results": clicks}, body_contains="UrlClickEvents | where Timestamp > ago(14d)"),
         route("POST", hunt, {"results": clicks[:1]}, body_contains=["UrlClickEvents", "jane.doe"]),
         route("POST", hunt, {"results": []}, body_contains="UrlClickEvents"),
@@ -214,6 +224,32 @@ def entra() -> None:
             route("GET", rf"^/v1.0/users/{x['upn']}/mailFolders/inbox/messageRules$", {"value": rules if k == "jane" else []}),
             route("GET", rf"^/v1.0/users/{x['upn']}/registeredDevices$", {"value": devices}),
         ]
+    # Azure Resource Manager (management.azure.com): subscriptions and who holds which Azure role on them
+    prod, dev = "11111111-2222-3333-4444-000000000001", "11111111-2222-3333-4444-000000000002"
+    owner, contributor, reader = ("8e3af657-a8ff-443c-a75c-2fe8c4bcb635", "b24988ac-6180-42a0-ab88-20f7382dd24c",
+                                  "acdd72a7-3385-48ef-bd42-f606fba81ae7")
+    routes.append(route("GET", r"^/subscriptions$", {"value": [
+        {"subscriptionId": prod, "displayName": "Acme Production", "state": "Enabled"},
+        {"subscriptionId": dev, "displayName": "Acme Development", "state": "Enabled"}]}))
+
+    def assignment(sub, role, principal_id, principal_type="User", scope=None):
+        return {"id": f"/subscriptions/{sub}/providers/Microsoft.Authorization/roleAssignments/{principal_id}-{role[:8]}",
+                "properties": {"roleDefinitionId": f"/subscriptions/{sub}/providers/Microsoft.Authorization/roleDefinitions/{role}",
+                               "principalId": principal_id, "principalType": principal_type,
+                               "scope": scope or f"/subscriptions/{sub}"}}
+
+    held = {"bob": [(prod, owner, "User", None)],                                   # already an Exchange admin
+            "jane": [(prod, contributor, "Group", f"/subscriptions/{prod}/resourceGroups/finance-apps")],
+            "raj": [(dev, reader, "User", None)]}
+    for k, x in USERS.items():
+        for sub in (prod, dev):
+            mine = [assignment(s, r, x["id"] if t == "User" else "grp-finance-team", t, sc)
+                    for s, r, t, sc in held.get(k, []) if s == sub]
+            routes.append(route("GET", rf"^/subscriptions/{sub}/providers/Microsoft.Authorization/roleAssignments$",
+                                {"value": mine}, params={"$filter": f"assignedTo('{x['id']}')"}))
+    for sub in (prod, dev):          # anyone else (e.g. a generated organisation's extra staff): no Azure roles
+        routes.append(route("GET", rf"^/subscriptions/{sub}/providers/Microsoft.Authorization/roleAssignments$",
+                            {"value": []}, params={"$filter": "*"}))
     write("entra", routes)
 
 

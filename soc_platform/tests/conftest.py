@@ -15,6 +15,7 @@ from soc_platform.core.db import Database
 # Tests never write into the project folder: raw payloads and reports go to a per-run temporary directory unless a
 # test chooses its own.
 __import__("os").environ.setdefault("SOC_EMBEDDED_SCHEDULER", "0")     # tests drive jobs explicitly
+__import__("os").environ.setdefault("SOC_PHISHING_ENGINE", "0")        # heuristic by default; test_phishing_engine.py turns the ML engine on
 __import__("os").environ.setdefault("SOC_RAW_PAYLOAD_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-raw-"))
 __import__("os").environ.setdefault("SOC_REPORT_OUTPUT_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-reports-"))
 

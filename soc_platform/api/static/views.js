@@ -142,6 +142,19 @@ async function CaseDetail(id) {
     <td><div class="inline" style="flex-wrap:wrap;gap:6px">${['recommended', 'pending_approval'].includes(x.status) && can('approve_action') ? btn('Approve', 'act', [x.id, 'approve', id], 'sm primary') + btn('Reject', 'act', [x.id, 'reject', id], 'sm') :
       x.status === 'executed' && can('rollback_action') ? btn('Roll back', 'act', [x.id, 'rollback', id], 'sm') : ''}</div></td></tr>`;
   const intel = v.intelligence || {};
+  // phishing: which analysis ran, the trained models' verdict next to the rules', and every model's score
+  const bd = a.backend_detail || {}, backend = (v.completeness || {}).analysis_backend;
+  const MODEL = {header_agent: 'Header', content_agent: 'Content (transformer)', url_agent: 'URLs', attachment_agent: 'Attachments',
+    sandbox_agent: 'Sandbox', threat_intel_agent: 'Threat intel', user_behavior_agent: 'User behaviour'};
+  const analysisCard = c.domain !== 'phishing' || !backend ? '' : card('Analysis', bd.engine
+    ? `<div class="inline small" style="gap:18px;margin-bottom:10px;flex-wrap:wrap"><span>ML models ${chip(bd.engine.verdict, 'plain')} ${pct(bd.engine.score)}</span><span>Rules ${chip(bd.heuristic.verdict, 'plain')} ${pct(bd.heuristic.score)}</span></div>` +
+      Object.entries(bd.engine.agent_scores || {}).map(([k, s]) => { const rel = (bd.model_reliability || {})[k];
+        return `<div class="list-row small"><span class="grow">${esc(MODEL[k] || cap(k))}${rel ? ` <span class="tag" title="${esc(rel.note)}">${esc(rel.level)} reliability</span>` : ''}</span><div style="width:90px">${meter((s || 0) * 100)}</div><span class="score">${Math.round((s || 0) * 100)}</span></div>`; }).join('') +
+      ((bd.corroborated_by || []).length ? `<div class="t-sub" style="margin-top:6px">Confirmed by: ${esc(bd.corroborated_by.map(k => MODEL[k] || k).join(', '))}</div>` : '') +
+      ((v.completeness.missing_agents || []).length ? `<div class="t-sub" style="margin-top:6px">Did not answer: ${esc(v.completeness.missing_agents.join(', '))}</div>` : '') +
+      (bd.fusion_note ? `<div class="t-sub" style="margin-top:8px">${esc(bd.fusion_note)}</div>` : '')
+    : `<div class="small">Rule-based analyser${bd.engine_error ? ` only - the ML models could not run (${esc(String(bd.engine_error).slice(0, 140))})` : ' only (the ML models are not installed or switched off)'}.</div>`,
+    {sub: bd.engine ? 'trained models and rules each give a verdict; the more severe one counts' : ''});
   setMainG(__g, `<div class="page-head"><div>
       <div class="inline" style="margin-bottom:8px"><a href="#/cases" class="small" aria-label="Back to cases" title="Back to cases">${icon('back', '')}</a>${chip(c.severity)}${chip(c.verdict || 'pending', 'plain')}<span class="muted small">${esc(cap(c.domain))} · ${esc(cap(c.status))} · opened ${dt(c.created_at)}</span></div>
       <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} · automation mode ${esc(cap(c.autonomy_mode || 'recommend'))} ·
@@ -157,6 +170,7 @@ async function CaseDetail(id) {
           ${(a.inferences || []).length ? `<h3 class="small strong" style="margin:16px 0 4px">Inferences</h3>${a.inferences.map(x => `<div class="inf small">${esc(x.text)} ${cite(x)}</div>`).join('')}` : ''}
           ${(a.mitre || []).length ? `<h3 class="small strong" style="margin:16px 0 6px">MITRE ATT&amp;CK</h3>${a.mitre.map(m => `<span class="tag">${esc(m.technique)} ${esc(m.name || '')}</span>`).join('')}` : ''}`,
           {sub: 'hover a reference to see the evidence it cites'})}
+        ${analysisCard}
         ${card(`Recommended actions <span class="muted">(${acts.length})</span>`, table(['#', 'Action and rationale', 'Targets', 'Status', ''], acts.map(actRow), {empty: 'No actions recommended'}), {flush: true})}
         ${card('Evidence', Object.entries(v.evidence).map(([d, items]) => `<div class="small strong" style="margin:10px 0 2px;text-transform:capitalize">${esc(cap(d))}</div>` +
           items.map(i => `<div class="ev"><span class="ref">${esc(i.ref || '')}</span><div class="grow small"><span class="muted">${esc(i.source)}</span> · ${esc(i.summary)}

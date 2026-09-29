@@ -84,7 +84,20 @@ def extract_behavior_features(payload: dict[str, Any], cursor: sqlite3.Cursor) -
 
     # Basic business hour approximation (ideally passed in timestamp, but we'll mock based on existence of timestamp in headers)
     # The payload generally doesn't have an explicit arrival timestamp in the standard dict format yet, so we assume 1.0 (Day) unless specified.
-    is_business_hours = 1.0 
+    is_business_hours = 1.0
+
+    # When the SOC platform hosts the engine it supplies what the local graph cannot know: the recipient's real
+    # history with the sender's domain (from the tenant's mail flow), the recipient's department (from the
+    # directory) and whether the message arrived in business hours. Same features, real values instead of defaults.
+    ctx = payload.get("behavior_context") or {}
+    if ctx.get("contact_count") is not None:
+        contact_count = float(ctx["contact_count"])
+    if ctx.get("days_since_last_contact") is not None:
+        days_since_last_contact = float(ctx["days_since_last_contact"])
+    if ctx.get("department"):
+        dept_risk_tier = DEPT_RISK_MAP.get(str(ctx["department"]).lower(), dept_risk_tier)
+    if ctx.get("is_business_hours") is not None:
+        is_business_hours = 1.0 if ctx["is_business_hours"] else 0.0
     
     vector = np.array(
         [
