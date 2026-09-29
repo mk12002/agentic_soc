@@ -204,7 +204,7 @@ buttons), and the grant is in the audit log with Ada's justification.
 #### The approvals and four-eyes demo
 
 The platform recommends actions; nothing runs until a person with the right role approves.
-- **Normal actions** (e.g. purge a phishing message): an Analyst or a Lead may approve.
+- **Normal actions** (e.g. create a ticket, block an indicator): an Analyst or a Lead may approve.
 - **High-impact actions** need a **Lead**: host isolation and account disable (both marked *four-eyes* in the
   policy), actions on VIP targets, and anything over its blast-radius limit.
 - **Four-eyes** means the approver must be a different person from whoever requested the action. When a person
@@ -214,7 +214,8 @@ The platform recommends actions; nothing runs until a person with the right role
    and press *Approve*. It is refused: an analyst cannot approve a high-impact action.
 2. Window 2 (private): `lena@acme-demo.com`, Lead. **Approvals** → approve the same action. It executes (in fake
    mode, against the fixture EDR).
-3. Approve a normal action as Ann to show that routine work does not wait for a Lead.
+3. Approve a normal action as Ann (e.g. **Create ticket**) to show that routine work does not wait for a Lead.
+   Signed in as Ada (Admin), Max (Automation admin) or Audrey (Auditor), the same Approve is refused.
 4. **Audit log**: the recommendation, Lena's approval and the execution, in the hash chain.
 
 #### Showing data scope
