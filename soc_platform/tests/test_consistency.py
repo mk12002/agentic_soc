@@ -248,7 +248,7 @@ def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
     iso = re.compile(r'"(ts_utc|[a-z_]*(?:_at|_due|_seen|since|until|when|start|end|date))":\s*"(\d{4}-\d{2}-\d{2}T[\d:.]+)(Z|[+-]\d{2}:\d{2})?"')
     problems = []
     gets = sorted({r.path for r in app.routes if hasattr(r, "methods") and "GET" in r.methods and r.path.startswith("/api")}
-                  - {"/api/v1/dev/token", "/api/v1/audit/export"})
+                  - {"/api/v1/dev/token", "/api/v1/auth/config", "/api/v1/audit/export"})   # auth/config: public sign-in values
     for path in gets:
         url = path
         for k, v in ids.items():

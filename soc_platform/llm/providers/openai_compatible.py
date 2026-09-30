@@ -5,6 +5,14 @@ SOC_LLM_DEPLOYMENT / SOC_LLM_DEPLOYMENT_SMALL are model names, SOC_LLM_API_KEY i
 ``azure_foundry`` is the same protocol on Azure AI Foundry / Azure OpenAI's v1 API: SOC_LLM_ENDPOINT is
 ``https://<resource>.services.ai.azure.com/openai/v1`` (or ``https://<resource>.openai.azure.com/openai/v1``),
 SOC_LLM_DEPLOYMENT is the deployment name (e.g. ``gpt-4.1-mini``), and SOC_LLM_API_KEY is sent as ``api-key``.
+
+An organisation's own LLM gateway (one endpoint in front of several vendors' models) usually speaks this protocol
+too; what differs is set without code changes:
+  * SOC_LLM_AUTH_HEADER / SOC_LLM_AUTH_PREFIX - the header carrying SOC_LLM_API_KEY (default ``Authorization`` /
+    ``Bearer ``; e.g. ``x-api-key`` with an empty prefix)
+  * SOC_LLM_EXTRA_HEADERS - JSON object of fixed non-secret headers; SOC_LLM_CA_BUNDLE - corporate CA file
+  * SOC_LLM_JSON_MODE=0 - for gateways or models that reject ``response_format``: JSON is then asked for in the
+    instructions only (replies are parsed tolerantly either way)
 """
 
 from __future__ import annotations
@@ -14,7 +22,10 @@ import os
 import httpx  # noqa: F401 - kept importable here: tests patch httpx.post through this module
 
 from soc_platform.config import Settings, secret
-from soc_platform.llm.gateway import Completion, Provider, post_with_retry
+from soc_platform.llm.gateway import Completion, Provider, llm_extra_headers, post_with_retry
+
+JSON_RULE = ("\n\nOutput format: reply with a single JSON object only - no prose before or after it, "
+             "no markdown fences.")
 
 
 class OpenAICompatibleProvider(Provider):
@@ -31,7 +42,9 @@ class OpenAICompatibleProvider(Provider):
             raise ValueError(f"LLM endpoint {self.base} is not on the approved list")
 
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.key}"} if self.key else {}
+        name = os.environ.get("SOC_LLM_AUTH_HEADER", "").strip() or "Authorization"
+        prefix = os.environ.get("SOC_LLM_AUTH_PREFIX", "Bearer ")
+        return {**llm_extra_headers(), **({name: f"{prefix}{self.key}"} if self.key else {})}
 
     def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
         model = self.models.get(tier) or self.models["large"]
@@ -39,9 +52,13 @@ class OpenAICompatibleProvider(Provider):
             return None
         url = self.base + ("/chat/completions" if self.base.endswith("/v1") else "/v1/chat/completions")
         headers = self._headers()
-        resp = post_with_retry(url, headers=headers, json={
-            "model": model, "temperature": 0.1, "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}, tier=tier)
+        body: dict = {"model": model, "temperature": 0.1,
+                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if os.environ.get("SOC_LLM_JSON_MODE", "1").strip().lower() in {"0", "false", "no", "off"}:
+            body["messages"][0]["content"] = system + JSON_RULE
+        else:
+            body["response_format"] = {"type": "json_object"}
+        resp = post_with_retry(url, headers=headers, json=body, tier=tier)
         body = resp.json()
         usage = body.get("usage") or {}
         return Completion(body["choices"][0]["message"]["content"], int(usage.get("prompt_tokens", 0) or 0),
@@ -55,4 +72,4 @@ class AzureFoundryProvider(OpenAICompatibleProvider):
     requires_key = True
 
     def _headers(self) -> dict[str, str]:
-        return {"api-key": self.key or ""}
+        return {**llm_extra_headers(), "api-key": self.key or ""}

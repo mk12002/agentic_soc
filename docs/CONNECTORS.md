@@ -10,10 +10,13 @@ Every connector runs in one of two modes, set per connector in `config/connector
   never literals).
 
 **Verification status.** Every connector is implemented against the vendor's documented API and verified end to end
-on fixtures shaped like the documented responses (`soc_platform/tests/test_connectors.py`). The public feeds (NVD,
-EPSS, CISA KEV) are also verified live. The vendor connectors have **not yet been run against the client's tenants**: do
-that per connector with the *Test* button (Connectors screen) or `POST /api/v1/connectors/{name}/test`, which
-authenticates and reads one page. Items under *To confirm* are licence or permission questions for the client (A01, A03).
+on fixtures shaped like the documented responses (`soc_platform/tests/test_connectors.py`). Request and response
+formats were audited field by field against the vendors' public API references and public reference integrations
+(round 14 in `docs/TEST_REPORT.md` lists what that audit corrected). The public feeds (NVD, EPSS, CISA KEV) are also
+verified live. The vendor connectors have **not yet been run against the client's tenants**: do that per connector with
+the *Test* button (Integrations screen) or `POST /api/v1/connectors/{name}/test`, which authenticates and reads one
+page. Items under *To confirm* are licence or permission questions for the client (A01, A03). Step-by-step onboarding
+of every tool in the client's environment: `docs/CLIENT_DEPLOYMENT_GUIDE.md`.
 
 **Onboarding a tool (live):**
 
@@ -55,8 +58,8 @@ authenticates and reads one page. Items under *To confirm* are licence or permis
 Security events, per-message verdicts and actions for reconciliation; quarantine/restore.
 
 - Vendor: Check Point · focus areas: phishing
-- Read scopes: see vendor docs / to confirm
-- Write scopes (only for approved actions): quarantine / restore
+- Read scopes: Infinity Portal API key for the Email & Collaboration service (read events and entities)
+- Write scopes (only for approved actions): same API key with a read-write role: quarantine / restore
 - To confirm with the client: API availability and scope under current licence (fallbacks: journaling, shared mailbox, export)
 - Configuration:
   - `api_url` (optional): Smart API gateway URL (region specific)
@@ -214,8 +217,8 @@ Normalises alerts pushed to /api/v1/ingest/alerts from any SIEM/SOAR.
 Remediation tickets as Jira issues with comments/status sync.
 
 - Vendor: Atlassian · focus areas: vulnerability, incident
-- Read scopes: see vendor docs / to confirm
-- Write scopes (only for approved actions): -
+- Read scopes: Browse projects
+- Write scopes (only for approved actions): Create issues, Add comments, Transition issues
 - To confirm with the client: Only if the client uses Jira (Q03)
 - Configuration:
   - `base_url`: https://<site>.atlassian.net
@@ -254,24 +257,24 @@ Asset inventory and vulnerability findings from the Security Console API (or CSV
 Sentinel incidents (if Sentinel is the client's SIEM).
 
 - Vendor: Microsoft · focus areas: incident
-- Read scopes: see vendor docs / to confirm
+- Read scopes: Microsoft Sentinel Reader on the workspace (Azure RBAC)
 - Write scopes (only for approved actions): -
 - To confirm with the client: Whether a SIEM exists and which (Q01)
 - Configuration:
-  - `tenant_id`: 
-  - `client_id` (secret): 
-  - `client_secret` (secret): 
-  - `subscription_id`: 
-  - `resource_group`: 
-  - `workspace`: 
+  - `tenant_id`: Entra tenant id
+  - `client_id` (secret): App registration (client) id
+  - `client_secret` (secret): App registration secret
+  - `subscription_id`: Azure subscription holding the Sentinel workspace
+  - `resource_group`: Resource group of the Log Analytics workspace
+  - `workspace`: Log Analytics workspace name
 
 ### ServiceNow (ITSM + CMDB) (`servicenow`)
 
 Remediation/incident tickets with bidirectional status; CMDB ownership and criticality.
 
 - Vendor: ServiceNow · focus areas: vulnerability, incident
-- Read scopes: see vendor docs / to confirm
-- Write scopes (only for approved actions): -
+- Read scopes: itil (read the ticket table), cmdb_read (CMDB CI table)
+- Write scopes (only for approved actions): itil (create and update tickets, work notes)
 - To confirm with the client: Which ITSM system; API access; workflow ownership (Q03)
 - Configuration:
   - `instance_url`: https://<instance>.service-now.com

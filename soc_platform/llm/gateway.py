@@ -55,11 +55,29 @@ def llm_timeout(tier: str = "large") -> httpx.Timeout:
     return httpx.Timeout(read, connect=float(os.environ.get("SOC_LLM_CONNECT_TIMEOUT_SECONDS", "10")))
 
 
+def llm_extra_headers() -> dict[str, str]:
+    """SOC_LLM_EXTRA_HEADERS: a JSON object of fixed, non-secret headers an organisation's own LLM gateway may require
+    (application id, cost centre...)."""
+    raw = os.environ.get("SOC_LLM_EXTRA_HEADERS", "").strip()
+    if not raw:
+        return {}
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise TypeError("SOC_LLM_EXTRA_HEADERS must be a JSON object")
+    return {str(k): str(v) for k, v in value.items()}
+
+
+def llm_verify() -> dict[str, Any]:
+    """SOC_LLM_CA_BUNDLE: CA file for an internal gateway whose certificate a corporate CA issued."""
+    ca = os.environ.get("SOC_LLM_CA_BUNDLE", "").strip()
+    return {"verify": __import__("ssl").create_default_context(cafile=ca)} if ca else {}
+
+
 def post_with_retry(url: str, *, headers: dict[str, str], json: dict[str, Any], tier: str = "large") -> Any:
     """POST to a model endpoint: bounded timeouts, one retry on throttling / transient server errors."""
     import time as _time
 
-    resp = httpx.post(url, headers=headers, json=json, timeout=llm_timeout(tier))
+    resp = httpx.post(url, headers=headers, json=json, timeout=llm_timeout(tier), **llm_verify())
     code = getattr(resp, "status_code", 200)
     if code in (429, 500, 502, 503, 504):
         wait = getattr(resp, "headers", {}).get("retry-after", "2") if hasattr(resp, "headers") else "2"
@@ -68,7 +86,7 @@ def post_with_retry(url: str, *, headers: dict[str, str], json: dict[str, Any], 
         except ValueError:
             wait_s = 2.0
         _time.sleep(wait_s)
-        resp = httpx.post(url, headers=headers, json=json, timeout=llm_timeout(tier))
+        resp = httpx.post(url, headers=headers, json=json, timeout=llm_timeout(tier), **llm_verify())
     resp.raise_for_status()
     return resp
 
@@ -142,7 +160,7 @@ class AzureOpenAIProvider(Provider):
         url = f"{self.endpoint}/openai/deployments/{deployment}/chat/completions?api-version={self.api_version}"
         resp = post_with_retry(
             url,
-            headers={"api-key": self.key},
+            headers={**llm_extra_headers(), "api-key": self.key},
             json={"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                   "temperature": 0.1, "response_format": {"type": "json_object"}},
             tier=tier,

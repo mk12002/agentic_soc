@@ -20,6 +20,10 @@ __import__("os").environ.setdefault("SOC_RAW_PAYLOAD_DIR", __import__("tempfile"
 __import__("os").environ.setdefault("SOC_REPORT_OUTPUT_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-reports-"))
 
 _PG = __import__("os").environ.get("SOC_TEST_POSTGRES")
+if _PG is not None and not _PG.strip().startswith(("postgresql://", "postgresql+psycopg://", "postgres://")):
+    # set but empty or wrong (e.g. an unreadable URI file): never fall back to SQLite silently - a "PostgreSQL" run
+    # that really ran on SQLite looks exactly like a pass
+    raise RuntimeError(f"SOC_TEST_POSTGRES is set but is not a PostgreSQL URL ({_PG[:30]!r}); unset it for SQLite")
 if _PG:
     import hashlib as _hashlib
     import uuid as _uuid

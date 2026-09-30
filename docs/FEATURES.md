@@ -41,6 +41,10 @@ serial, MAC, cloud id, CVE or case title and get matching cases, people, hosts, 
 vulnerabilities in one place - only what your role and data scope allow. Every page has a stable URL (`#/cases/<id>`,
 `#/entity/<id>`), so links can be shared and the browser back button works.
 
+Sign-in: the demo uses a development form (pick a person, role and data scope). In production
+(`SOC_AUTH_MODE=entra`) the same screen shows *Sign in with Microsoft*: Entra ID single sign-on with MFA, roles from
+the platform's app roles ([CLIENT_DEPLOYMENT_GUIDE.md](CLIENT_DEPLOYMENT_GUIDE.md) section 3).
+
 | Sign-in | Overview (light) | Overview (dark) |
 |---|---|---|
 | ![](screenshots/00-sign-in.png) | ![](screenshots/01-overview.png) | ![](screenshots/20-dark-overview.png) |

@@ -9,6 +9,7 @@ Whether the client runs a SIEM is the top open question. Two implementations:
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from soc_platform.connectors.base import Page
@@ -24,6 +25,7 @@ class SentinelConnector(ToolConnector):
     tool = "sentinel"
     dimension = "other"
     streams = ("incidents",)
+    read_scopes = ("Microsoft Sentinel Reader on the workspace (Azure RBAC)",)
 
     def _ws(self) -> str:
         s = self.settings
@@ -49,6 +51,16 @@ class SentinelConnector(ToolConnector):
             deep_link=p.get("incidentUrl"))]
 
 
+def _field_map(v: Any) -> dict[str, str]:
+    """From connectors.yaml the map is a mapping; from an environment variable it is a JSON string."""
+    if not v:
+        return {}
+    value = json.loads(v) if isinstance(v, str) else v
+    if not isinstance(value, dict):
+        raise TypeError("generic_siem field_map must be a JSON object")
+    return {str(k): str(x) for k, x in value.items()}
+
+
 class GenericSiemConnector(ToolConnector):
     """Normalises pushed alerts. Field map config: {"id": "alert_id", "title": "rule_name", ...}."""
 
@@ -62,7 +74,7 @@ class GenericSiemConnector(ToolConnector):
     def normalize(self, stream: str, a: dict[str, Any]) -> list[NormalizedRecord]:
         fm = {"id": "id", "title": "title", "severity": "severity", "time": "timestamp", "host": "host", "user": "user",
               "src_ip": "src_ip", "dst_ip": "dst_ip", "domain": "domain", "url": "url", "hash": "sha256",
-              "source": "source", **(self.settings.get("field_map") or {})}
+              "source": "source", **_field_map(self.settings.get("field_map"))}
         g = lambda k: a.get(fm[k])
         refs = []
         if g("host"):
@@ -86,8 +98,12 @@ MANIFESTS = [
         factory=lambda s, t: SentinelConnector(s, t, rate_per_sec=2, burst=4),
         live_transport=lambda s: HttpTransport("https://management.azure.com", entra_app_auth(
             s["tenant_id"], s["client_id"], s["client_secret"], "https://management.azure.com/.default")),
-        config=[ConfigField("tenant_id"), ConfigField("client_id", secret=True), ConfigField("client_secret", secret=True),
-                ConfigField("subscription_id"), ConfigField("resource_group"), ConfigField("workspace")],
+        config=[ConfigField("tenant_id", "Entra tenant id"),
+                ConfigField("client_id", "App registration (client) id", secret=True),
+                ConfigField("client_secret", "App registration secret", secret=True),
+                ConfigField("subscription_id", "Azure subscription holding the Sentinel workspace"),
+                ConfigField("resource_group", "Resource group of the Log Analytics workspace"),
+                ConfigField("workspace", "Log Analytics workspace name")],
         confidence="Unknown", to_confirm="Whether a SIEM exists and which (Q01)", focus_areas=("incident",)),
     ConnectorManifest(
         name="generic_siem", tool="Generic SIEM/SOAR webhook", vendor="any", category="siem", dimension="other",

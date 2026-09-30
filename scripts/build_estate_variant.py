@@ -256,13 +256,19 @@ def main(out: str, seed: int = 7, scale: float = 1.0) -> Path:
                                                   "fixingKbId": "KB5034765"})
     sn = fx["servicenow"]["routes"]
     sn_all = _route(sn, "GET", r"^/api/now/table/cmdb_ci_computer$")
-    sn_star = _route(sn, "GET", r"^/api/now/table/cmdb_ci_computer$", {"sysparm_query": "*"})
+    sn_star = _route(sn, "GET", r"^/api/now/table/cmdb_ci_computer$", {"sysparm_query": "~^name="})
+
+    def snf(value, display=None):          # sysparm_display_value=all: {"value", "display_value"} per field
+        return {"value": value, "display_value": value if display is None else display}
+
     for h in laptops:
         if h["in_cmdb"]:
-            ci = {"sys_id": f"ci-{h['hostname'].lower()}", "name": h["hostname"], "fqdn": h["fqdn"], "ip_address": h["ip"],
-                  "os": "Windows 11 Enterprise", "serial_number": h["serial"], "owned_by": {"display_value": h["user"]["name"]},
-                  "support_group": {"display_value": "End User Computing"}, "environment": "Corporate",
-                  "business_criticality": "3 - less critical", "location": {"display_value": "HQ"}, "sys_updated_on": "2026-09-20T02:00:00"}
+            ci = {"sys_id": snf(f"ci-{h['hostname'].lower()}"), "name": snf(h["hostname"]), "fqdn": snf(h["fqdn"]),
+                  "ip_address": snf(h["ip"]), "os": snf("Windows 11 Enterprise"), "serial_number": snf(h["serial"]),
+                  "owned_by": snf(f"usr-{h['user']['sam']}", h["user"]["name"]),
+                  "support_group": snf("grp-end-user-computing", "End User Computing"),
+                  "environment": snf("corporate", "Corporate"), "business_criticality": snf("3", "3 - less critical"),
+                  "location": snf("loc-hq", "HQ"), "sys_updated_on": snf("2026-09-20 02:00:00", "2026-09-20 07:30:00")}
             sn_all["body"]["result"].append(ci)
             _insert_before(sn, sn_star, [{"method": "GET", "path": r"^/api/now/table/cmdb_ci_computer$", "status": 200,
                                           "params": {"sysparm_query": f"name={h['hostname']}"}, "body": {"result": [ci]}}])
@@ -330,7 +336,7 @@ def main(out: str, seed: int = 7, scale: float = 1.0) -> Path:
         m = ec._base(label, frm, disp, extra[i % len(extra)]["upn"], subj, auth=auth, relay=relay, ip=ip, minutes=30 + i)
         m.set_content(body)
         stem = f"extra_{label}_{i}"
-        (dst / "corpus" / f"{stem}.eml").write_bytes(bytes(m))
+        (dst / "corpus" / f"{stem}.eml").write_bytes(ec.stable_bytes(m, f"{seed}|{stem}"))
         labels[stem] = label
     (dst / "corpus" / "labels.json").write_text(json.dumps(labels, indent=1), encoding="utf-8")
 

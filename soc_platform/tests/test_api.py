@@ -323,3 +323,24 @@ def test_send_test_message_is_for_integration_admins_and_audited(client, monkeyp
     audit = client.get("/api/v1/audit?limit=20", headers=ada).json()
     rows = audit if isinstance(audit, list) else audit.get("records", audit.get("items", []))
     assert any(a.get("event_type", a.get("event")) == "notify.test" for a in rows)
+
+
+def test_console_single_sign_on_config_is_public_and_only_in_entra_mode(client, monkeypatch):
+    from soc_platform.config import get_settings
+
+    assert client.get("/api/v1/auth/config").json() == {"mode": "dev"}
+    monkeypatch.setenv("SOC_AUTH_MODE", "entra")
+    monkeypatch.setenv("SOC_ENTRA_TENANT_ID", "11111111-2222-3333-4444-555555555555")
+    monkeypatch.setenv("SOC_ENTRA_AUDIENCE", "api://aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    get_settings.cache_clear()
+    try:
+        cfg = client.get("/api/v1/auth/config").json()             # no token needed: the sign-in page reads it
+        assert cfg == {"mode": "entra", "tenant_id": "11111111-2222-3333-4444-555555555555",
+                       "client_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                       "scope": "api://aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/.default"}
+        assert client.get("/api/v1/dev/token").status_code == 404       # dev sign-in is off in entra mode
+        csp = client.get("/").headers["content-security-policy"]
+        assert "connect-src 'self' https://login.microsoftonline.com" in csp
+    finally:
+        monkeypatch.undo()
+        get_settings.cache_clear()

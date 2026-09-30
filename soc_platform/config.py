@@ -77,7 +77,7 @@ def get_settings() -> Settings:
     approved = [e.strip() for e in env.get("SOC_LLM_APPROVED_ENDPOINTS", "").split(",") if e.strip()]
     return Settings(
         environment=env.get("SOC_ENVIRONMENT", "dev"),
-        database_url=env.get("SOC_DATABASE_URL", "sqlite:///./soc_platform.db"),
+        database_url=secret("SOC_DATABASE_URL") or "sqlite:///./soc_platform.db",   # carries a password: _FILE too
         raw_payload_dir=env.get("SOC_RAW_PAYLOAD_DIR", "./data/raw"),
         report_output_dir=env.get("SOC_REPORT_OUTPUT_DIR", "./data/reports"),
         auth_mode=env.get("SOC_AUTH_MODE", "dev"),

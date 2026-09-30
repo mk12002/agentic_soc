@@ -110,7 +110,9 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 | `SOC_RAW_PAYLOAD_DIR`, `SOC_REPORT_OUTPUT_DIR` | `.\data\raw`, `.\data\reports` | Where reported e-mails and generated reports are written |
 
 **Don't set** `SOC_ENVIRONMENT=prod` for a laptop demo. Production mode requires single sign-on, an encryption key
-and MFA, and it turns off the dev sign-in you use in the demo.
+and MFA, and it turns off the dev sign-in you use in the demo. Deploying for real (the client's tools, Entra sign-in,
+the client's own LLM instead of the demo Azure model) is covered step by step in
+[CLIENT_DEPLOYMENT_GUIDE.md](CLIENT_DEPLOYMENT_GUIDE.md).
 
 The other entries in your `.env` (for example `AZURE_OPENAI_*`, `RABBITMQ_*`, `GRAPH_*`) belong to the optional
 phishing ML engine. The platform ignores them.

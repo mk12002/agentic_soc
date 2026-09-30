@@ -9,8 +9,11 @@ SOC mailbox through the Defender for Office 365 connector instead.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -19,7 +22,23 @@ from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.http import Auth, HttpTransport
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts, sev_name
+from soc_platform.core.models import utcnow
 from soc_platform.core.schema import EntityRef, NormalizedRecord
+
+log = logging.getLogger(__name__)
+
+API = "/app/hec-api/v1.0"
+SAAS = "office365_emails"
+# HEC severities are strings "1".."5"
+HEC_SEVERITY = {"1": "informational", "2": "low", "3": "medium", "4": "high", "5": "critical"}
+# worst first: the overall verdict of a message is the worst verdict any engine gave it
+VERDICT_ORDER = ("malicious", "phishing", "suspicious", "spam", "clean")
+
+
+def overall_verdict(combined: dict[str, Any]) -> str | None:
+    """``entitySecurityResult.combinedVerdict`` is one verdict per engine (ap, av, dlp, clicktimeProtection...)."""
+    seen = {str(v).lower() for v in (combined or {}).values() if v}
+    return next((v for v in VERDICT_ORDER if v in seen), min(seen, default=None))
 
 
 class HecAuth(Auth):
@@ -46,46 +65,77 @@ class AvananConnector(ToolConnector):
     dimension = "email"
     streams = ("security_events",)
     lookups = ("email_message", "domain")
-    write_scopes = ("quarantine / restore",)
+    read_scopes = ("Infinity Portal API key for the Email & Collaboration service (read events and entities)",)
+    write_scopes = ("same API key with a read-write role: quarantine / restore",)
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
-        body = self.post("/app/hec-api/v1.0/event/query", json={"requestData": {
-            "startDate": cursor or self.settings.get("sync_from", "2026-01-01T00:00:00Z"),
-            "eventTypes": ["phishing", "malware", "suspicious_phishing", "suspicious_malware", "spam", "dlp"]}})
-        events = (body.get("responseData") or [])
+        req: dict[str, Any] = {"startDate": cursor or self.settings.get("sync_from", "2026-01-01T00:00:00Z"),
+                               "saas": [SAAS]}
+        events: list[dict[str, Any]] = []
+        for _ in range(50):                     # HEC pages with a scroll id until recordsNumber is reached
+            body = self.post(f"{API}/event/query", json={"requestData": req})
+            page = body.get("responseData") or []
+            events.extend(page)
+            env = body.get("responseEnvelope") or {}
+            if not page or not env.get("scrollId") or len(events) >= int(env.get("recordsNumber") or 0):
+                break
+            req = {"scrollId": env["scrollId"]}
+        # an event names its e-mail only by entityId; sender, recipients, subject and Message-ID live on the entity
+        ids = sorted({e["entityId"] for e in events if e.get("entityId")})
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            entities = dict(zip(ids, pool.map(self._entity, ids), strict=True))
+        for e in events:
+            e["_entity"] = entities.get(e.get("entityId")) or {}
         last = max((e.get("eventCreated") or "" for e in events), default=cursor)
         return Page(events, last, has_more=False)
 
+    def _entity(self, entity_id: str) -> dict[str, Any]:
+        try:
+            items = self.get(f"{API}/search/entity/{entity_id}").get("responseData") or []
+        except ConnectorError as exc:           # the event is still worth ingesting without its message details
+            log.warning("avanan: entity %s not readable: %s", entity_id, exc)
+            return {}
+        return items[0] if items else {}
+
     def normalize(self, stream: str, e: dict[str, Any]) -> list[NormalizedRecord]:
+        ent = e.get("_entity") or {}
+        p = ent.get("entityPayload") or {}
         refs = []
-        if e.get("senderAddress"):
-            refs.append(EntityRef(kind="indicator", role="sender", keys={"value": e["senderAddress"]}, attributes={"type": "email"}))
-        for r in e.get("recipients") or []:
-            refs.append(EntityRef(kind="identity", role="recipient", keys={"upn": r}))
+        if p.get("fromEmail"):
+            refs.append(EntityRef(kind="indicator", role="sender", keys={"value": p["fromEmail"].lower()},
+                                  attributes={"type": "email"}))
+        for r in p.get("recipients") or []:
+            refs.append(EntityRef(kind="identity", role="recipient", keys={"upn": r.lower()}))
         return [NormalizedRecord(
             kind="mail_event", tool=self.tool, source_type="security_event", source_id=e["eventId"],
             observed_at=parse_ts(e.get("eventCreated")), title=e.get("description") or f"Avanan {e.get('type')}",
-            severity=sev_name(e.get("severity")), dimension="email", refs=refs,
-            attributes={"verdict": e.get("type"), "state": e.get("state"), "action_taken": e.get("actions"),
-                        "entity_id": e.get("entityId"), "subject": e.get("subject"),
-                        "internet_message_id": e.get("internetMessageId")},
-            deep_link=e.get("entityLink"))]
+            severity=HEC_SEVERITY.get(str(e.get("severity")), sev_name(e.get("severity"))), dimension="email",
+            refs=refs,
+            attributes={"verdict": e.get("type"), "state": e.get("state"),
+                        "action_taken": [a.get("actionType") for a in e.get("actions") or []],
+                        "entity_id": e.get("entityId"), "subject": p.get("subject"),
+                        "internet_message_id": p.get("internetMessageId"),
+                        "engine_verdicts": (ent.get("entitySecurityResult") or {}).get("combinedVerdict") or {}})]
+
+    def _search(self, attr: str, op: str, value: str, days: int = 30) -> list[dict[str, Any]]:
+        body = self.post(f"{API}/search/query", json={"requestData": {
+            "entityFilter": {"saas": SAAS, "startDate": (utcnow() - timedelta(days=days)).isoformat()},
+            "entityExtendedFilter": [{"saasAttrName": f"entityPayload.{attr}", "saasAttrOp": op,
+                                      "saasAttrValue": value}]}})
+        return body.get("responseData") or []
 
     def verdict_for(self, internet_message_id: str) -> dict[str, Any] | None:
         """Avanan verdict + applied actions for one message (PH-F04 reconciliation)."""
-        body = self.post("/app/hec-api/v1.0/search/query", json={"requestData": {"entityFilter": {
-            "saas": "office365_emails", "extendedFilter": [{"saasAttrName": "entityPayload.internetMessageId",
-                                                            "saasAttrOp": "is", "saasAttrValue": internet_message_id}]}}})
-        items = body.get("responseData") or []
+        items = self._search("internetMessageId", "is", internet_message_id)
         if not items:
             return None
         it = items[0]
-        info = it.get("entityInfo") or {}
-        sec = it.get("entitySecurityResult") or {}
-        return {"entity_id": info.get("entityId"), "verdict": (sec.get("combinedVerdict") or "").lower() or None,
-                "engines": {k: (v or {}).get("verdict") for k, v in sec.items() if isinstance(v, dict)},
-                "actions": [a.get("actionType") for a in it.get("entityActions") or []],
-                "quarantined": any(a.get("actionType") == "quarantine" for a in it.get("entityActions") or [])}
+        combined = (it.get("entitySecurityResult") or {}).get("combinedVerdict") or {}
+        actions = [a.get("actionType") or a.get("entityActionName") for a in it.get("entityActions") or []]
+        return {"entity_id": (it.get("entityInfo") or {}).get("entityId"), "verdict": overall_verdict(combined),
+                "engines": {k: v for k, v in sorted(combined.items()) if v},
+                "actions": [a for a in actions if a],
+                "quarantined": bool((it.get("entityPayload") or {}).get("isQuarantined"))}
 
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:
@@ -93,16 +143,15 @@ class AvananConnector(ToolConnector):
                 v = self.verdict_for(value)
                 return ok_lookup(self, [], f"Avanan verdict={v['verdict']}, actions={v['actions']}" if v
                                  else "message not found in Avanan")
-            body = self.post("/app/hec-api/v1.0/event/query", json={"requestData": {"senderDomain": value}})
-            ev = body.get("responseData") or []
-            return ok_lookup(self, [], f"{len(ev)} Avanan event(s) for sender domain {value}")
+            found = self._search("fromDomain", "is", value)
+            return ok_lookup(self, [], f"{len(found)} Avanan-scanned message(s) from sender domain {value} (30 days)")
 
         return self.timed_lookup(run)
 
     def _action(self, action: str, targets: list) -> dict:
         ids = [t["avanan_entity_id"] for t in targets if t.get("avanan_entity_id")]
-        body = self.post("/app/hec-api/v1.0/action/entity", json={"requestData": {
-            "entityIds": ids, "entityActionName": action, "entityActionParam": ""}})
+        body = self.post(f"{API}/action/entity", json={"requestData": {
+            "entityIds": ids, "entityType": f"{SAAS}_email", "entityActionName": action}})
         return {"action": action, "entities": ids, "response": body}
 
     def quarantine(self, params: dict, targets: list) -> dict:

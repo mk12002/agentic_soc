@@ -83,7 +83,8 @@ API - no Node build step, no external CDNs - and works in current Chrome, Edge, 
 Connectors live in `soc_platform/connectors/tools/`; each declares its streams, lookups, actions and settings in a
 manifest. To go live with a tool, set `mode: live` in `config/connectors.yaml` and provide its credentials as
 environment variables or `<NAME>_FILE` vault mounts, then press **Test** on the Integrations screen.
-Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md).
+Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md); deploying into a client environment
+(real tools, Entra sign-in, the client's own LLM): [docs/CLIENT_DEPLOYMENT_GUIDE.md](docs/CLIENT_DEPLOYMENT_GUIDE.md).
 
 | Category | Connectors |
 |---|---|
@@ -156,6 +157,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | 25-minute client walkthrough, what a demo proves |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
 | [docs/CONNECTORS.md](docs/CONNECTORS.md) | Per-tool setup, scopes, configuration (generated from the code) |
+| [docs/CLIENT_DEPLOYMENT_GUIDE.md](docs/CLIENT_DEPLOYMENT_GUIDE.md) | Moving from the demo into the client's environment: hosting, Entra sign-in, connecting every tool, the client's in-house LLM, action rollout, go-live checklist |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Running, jobs, monitoring, access, break-glass, keys, retention, backups |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, controls, fixes, operator responsibilities |
 | [docs/REQUIREMENTS_TRACEABILITY.md](docs/REQUIREMENTS_TRACEABILITY.md) | Every requirement ID → code, test, status |

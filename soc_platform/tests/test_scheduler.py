@@ -14,6 +14,9 @@ from soc_platform import scheduler as sched
 from soc_platform.core.db import Database
 from soc_platform.core.models import JobRun, SystemFlag, utcnow
 
+# waits end as soon as their condition holds; the deadline only has to outlast a saturated machine (a 30 s
+# deadline once expired under full CPU load with nothing wrong)
+WAIT = 120
 # a race that only kills a background thread must still fail the test (two such races hid behind a warning)
 pytestmark = pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
 
@@ -104,7 +107,7 @@ def test_an_error_in_a_pass_never_stops_the_schedule(db, calls, monkeypatch):
     sc = sched.Scheduler(db, tick=0.05, heartbeat=0.05)
     sc.start(start_delay=0)
     try:
-        deadline = time.time() + 20
+        deadline = time.time() + WAIT
         while len(calls) < len(jobs.JOBS) and time.time() < deadline:
             time.sleep(0.05)
     finally:
@@ -125,7 +128,7 @@ def test_a_dead_scheduler_thread_is_restarted(db, calls, monkeypatch):
     monkeypatch.setattr(sc, "_job_loop", dies_first_time)
     sc.start(start_delay=0)
     try:
-        deadline = time.time() + 20
+        deadline = time.time() + WAIT
         while len(calls) < len(jobs.JOBS) and time.time() < deadline:
             time.sleep(0.1)
     finally:
@@ -168,17 +171,17 @@ def test_the_server_runs_the_scheduler_itself(tmp_path, monkeypatch, calls):
     dbm._default = None
     try:
         with TestClient(appmod.app) as c:                                           # runs the server's lifespan
-            deadline = time.time() + 30
+            deadline = time.time() + WAIT
             while len(calls) < len(jobs.JOBS) and time.time() < deadline:
                 time.sleep(0.1)
-            deadline = time.time() + 10
+            deadline = time.time() + WAIT
             while c.get("/health").json()["scheduler"]["state"] != "running" and time.time() < deadline:
                 time.sleep(0.1)
             h = c.get("/health").json()["scheduler"]
             assert h["state"] == "running" and h["mode"] == "embedded"
             assert sorted(calls) == sorted(jobs.JOBS)
         live = [t for t in threading.enumerate() if t.name.startswith("soc-scheduler") and t.is_alive()]
-        deadline = time.time() + 10
+        deadline = time.time() + WAIT
         while live and time.time() < deadline:
             time.sleep(0.1)
             live = [t for t in threading.enumerate() if t.name.startswith("soc-scheduler") and t.is_alive()]
@@ -264,7 +267,7 @@ def test_an_embedded_scheduler_whose_heartbeat_write_is_waiting_is_not_reported_
     sc = sched.Scheduler(db, tick=0.05, heartbeat=0.05)
     sc.start(start_delay=3600)                               # heartbeat only; no job runs
     try:
-        deadline = time.time() + 10
+        deadline = time.time() + WAIT
         while (sc.last_attempt is None or "heartbeat" not in sc._workers) and time.time() < deadline:
             time.sleep(0.05)
 

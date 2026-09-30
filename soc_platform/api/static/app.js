@@ -237,7 +237,49 @@ const setMainG = (g, html) => { if (g === GEN && $('#main')) $('#main').innerHTM
 const setMain = html => setMainG(GEN, html);
 
 // ---------------------------------------------------------------- auth
+// Production sign-in: Entra ID authorization code flow with PKCE (SPA platform). The access token is for the
+// platform API (roles claim = SOC.<Role>[.<Domain>]); when it expires the user signs in again (Entra keeps the session).
+let AUTH = null;
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const entraBase = () => `https://login.microsoftonline.com/${encodeURIComponent(AUTH.tenant_id)}/oauth2/v2.0`;
+const redirectUri = () => location.origin + '/';
+async function authConfig() {
+  if (!AUTH) { try { AUTH = await (await fetch('/api/v1/auth/config')).json(); } catch (e) { AUTH = {mode: 'dev'}; } }
+  return AUTH;
+}
+async function signInEntra() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  sessionStorage.setItem('soc_pkce', JSON.stringify({verifier, state, hash: location.hash || '#/overview'}));
+  const q = new URLSearchParams({client_id: AUTH.client_id, response_type: 'code', redirect_uri: redirectUri(),
+    response_mode: 'query', scope: AUTH.scope + ' openid profile', state, code_challenge: challenge,
+    code_challenge_method: 'S256'});
+  location.assign(`${entraBase()}/authorize?${q}`);
+}
+async function finishEntra() {
+  const p = new URLSearchParams(location.search);
+  if (!p.has('code') && !p.has('error')) return false;
+  let saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem('soc_pkce') || '{}'); } catch (e) { /* ignore */ }
+  sessionStorage.removeItem('soc_pkce');
+  history.replaceState(null, '', '/' + (saved.hash || '#/overview'));
+  if (p.has('error') || p.get('state') !== saved.state) {
+    toast('Sign-in failed: ' + (p.get('error_description') || p.get('error') || 'state mismatch'), true);
+    return false;
+  }
+  const r = await fetch(`${entraBase()}/token`, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({client_id: AUTH.client_id, grant_type: 'authorization_code', code: p.get('code'),
+      redirect_uri: redirectUri(), code_verifier: saved.verifier, scope: AUTH.scope})});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.access_token) { toast('Sign-in failed: ' + (body.error_description || r.status), true); return false; }
+  TOKEN = body.access_token;
+  try { localStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
+  return true;
+}
 async function boot() {
+  await authConfig();
+  if (AUTH.mode === 'entra') await finishEntra();
   if (!TOKEN) return signInScreen();
   try { window.ME = await api('/api/v1/me'); } catch (e) { return signInScreen(); }
   shell();
@@ -245,6 +287,17 @@ async function boot() {
 }
 function signInScreen() {
   window.ME = null;
+  if (AUTH && AUTH.mode === 'entra') {
+    $('#app').innerHTML = `<div class="auth"><section class="card auth-card"><div class="card-b">
+      <div class="brand" style="padding:0"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations platform</div></div></div>
+      <h1>Sign in</h1>
+      <button class="btn primary" data-fn="signInEntra" data-args="[]" style="justify-content:center;height:36px">Sign in with Microsoft</button>
+      <div class="foot">Single sign-on with your organisation account (Microsoft Entra ID). Your roles come from the platform's app roles.</div>
+      <button class="btn ghost sm" data-fn="toggleTheme" data-args="[]" id="theme-btn" style="align-self:flex-start"></button>
+    </div></section></div>`;
+    paintThemeButton();
+    return;
+  }
   $('#app').innerHTML = `<div class="auth"><section class="card auth-card"><div class="card-b">
     <div class="brand" style="padding:0"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations platform</div></div></div>
     <h1>Sign in</h1>
@@ -270,6 +323,10 @@ async function signOut(expired = false) {
   if (!expired && TOKEN) { try { await fetch('/api/v1/auth/logout', {method: 'POST', headers: {Authorization: 'Bearer ' + TOKEN}}); } catch (e) { /* ignore */ } }
   TOKEN = '';
   try { localStorage.removeItem('soc_token'); } catch (e) { /* ignore */ }
+  if (!expired && AUTH && AUTH.mode === 'entra') {       // end the Entra session too, then come back here
+    location.assign(`${entraBase()}/logout?post_logout_redirect_uri=${encodeURIComponent(redirectUri())}`);
+    return;
+  }
   signInScreen();
   if (expired) toast('Your session has expired. Please sign in again.');
 }
@@ -291,7 +348,7 @@ function goTo(h) { location.hash = h; }
 
 // ---------------------------------------------------------------- delegation
 function runSearch() { const q = ($('#global-q').value || '').trim(); if (q.length >= 2) location.hash = '#/search/' + encodeURIComponent(q); }
-const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signOut, dl, runSearch, refreshPage: () => render()};
+const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signInEntra, signOut, dl, runSearch, refreshPage: () => render()};
 document.addEventListener('click', ev => {
   const menu = $('#user-menu');
   if (menu && !menu.hidden && !ev.target.closest('.user')) menu.hidden = true;

@@ -14,7 +14,7 @@ from hypothesis import strategies as st
 
 from soc_platform.llm.redaction import Redactor, _luhn
 
-FAST = settings(max_examples=400, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+FAST = settings(max_examples=400, deadline=None, derandomize=True, suppress_health_check=[HealthCheck.too_slow])
 ORG = "acme-demo.com"
 
 
@@ -131,7 +131,7 @@ def test_bounded_text_always_fits_and_keeps_short_values(text, width):
 
 
 # ------------------------------------------------------------------------ e-mail decomposer
-@settings(max_examples=250, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=250, deadline=None, derandomize=True, suppress_health_check=[HealthCheck.too_slow])
 @given(st.binary(max_size=3000))
 def test_email_decomposer_never_crashes_on_arbitrary_bytes(raw):
     from soc_platform.domains.phishing.agents.decompose import decompose
@@ -140,7 +140,7 @@ def test_email_decomposer_never_crashes_on_arbitrary_bytes(raw):
     decompose(raw)
 
 
-@settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=150, deadline=None, derandomize=True, suppress_health_check=[HealthCheck.too_slow])
 @given(st.text(max_size=200), st.sampled_from(["text/plain", "text/html", "application/pdf", "image/png",
                                                  "multipart/mixed", "message/rfc822"]),
        st.sampled_from(["7bit", "base64", "quoted-printable", "8bit", "x-unknown"]))

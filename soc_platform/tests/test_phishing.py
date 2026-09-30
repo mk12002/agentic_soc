@@ -200,29 +200,33 @@ def test_auto_closed_reports_do_not_spend_llm_tokens(session, ph, monkeypatch):
 
 
 def test_phishing_analysis_asks_the_tools_in_parallel(session, monkeypatch, tmp_path):
-    """Latency: with every vendor call taking 150 ms, one analysis must take a fraction of the time its calls would
-    take one after another (threat-intel sources, reconciliation, clicks, DNS and per-user checks overlap)."""
+    """Latency: the vendor lookups of one analysis (threat-intel sources, reconciliation, clicks, DNS, per-user checks)
+    run at the same time. Measured as how many calls are in flight at once - not as wall-clock time, which a busy
+    machine can stretch: sequential code never exceeds one call in flight, parallel code overlaps several."""
     import threading
     import time
 
     from soc_platform.connectors import http as H
 
-    calls, lock, orig = [0], threading.Lock(), H.FixtureTransport.request
+    state, lock, orig = {"calls": 0, "live": 0, "peak": 0}, threading.Lock(), H.FixtureTransport.request
 
     def slow(self, method, path, **kw):
         with lock:
-            calls[0] += 1
-        time.sleep(0.15)
-        return orig(self, method, path, **kw)
+            state["calls"] += 1
+            state["live"] += 1
+            state["peak"] = max(state["peak"], state["live"])
+        try:
+            time.sleep(0.3)                                  # long enough for sibling lookups to start alongside
+            return orig(self, method, path, **kw)
+        finally:
+            with lock:
+                state["live"] -= 1
 
     monkeypatch.setattr(H.FixtureTransport, "request", slow)
     svc = PhishingService(session, ConnectorRegistry.all_fake(), org_domains=["acme-demo.com"], raw_dir=tmp_path)
     sub = svc.submit_raw((ROOT / "artifacts/phishing/corpus/cred_phish_lookalike.eml").read_bytes(), source="upload")
-    t0 = time.perf_counter()
     svc.process(sub.id)
-    elapsed = time.perf_counter() - t0
-    sequential = calls[0] * 0.15
-    assert calls[0] >= 20 and elapsed < 0.5 * sequential, (calls[0], round(elapsed, 2), round(sequential, 2))
+    assert state["calls"] >= 20 and state["peak"] >= 4, state
 
 
 def test_deferred_narration_for_reported_email(session, ph):

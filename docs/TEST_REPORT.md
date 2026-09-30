@@ -49,10 +49,23 @@ an alarm on its own.
   text up to the next ">"); the model was re-trained so training and inference match exactly.
 - The browser tour now reports why it crashed instead of a missing-file error.
 
-**Notes:** one PostgreSQL run made while the machine was saturated (a second full suite, a browser tour and LLM calls
-at once) had one failure in the retention time-travel test; it passed in two isolated re-runs and in every full run
-since. The cause was not identified; the test now reports each case's and submission's state if it fails again. A
-verification run during an internet outage failed its live tests; the re-run after the connection returned passed.
+**A rare random test failure, traced to its cause and removed.** One PostgreSQL run had one failure in the
+retention time-travel test (no reported e-mail of the seed-23 organisation had been auto-closed). Cause: the generated
+organisations' extra e-mails got a random `Message-ID` (Python's `make_msgid`: time + process id + random number), so
+every build produced different bytes; the auto-close QA sample is keyed on the message's content hash, so which reports
+were held for QA changed from run to run, and once in a while every auto-close candidate of that organisation was
+sampled. Fixed at the source: Message-IDs and MIME boundaries are now derived from the message itself, and a new test
+builds the same organisation twice and requires byte-identical data. The same review removed every other way a test
+could fail at random:
+- tests that proved parallelism by wall-clock time (a busy machine stretches it) now prove it by counting calls in
+  flight - sequential code can never pass them, parallel code always does;
+- real-server tests wait up to 120 s for the server to start (was 20-30 s); the ReDoS guard allows 30 s (the fixed
+  code takes ~0.15 s; the vulnerable patterns grow quadratically and would take far longer);
+- a test run whose PostgreSQL setting is empty now stops with an error instead of quietly running on SQLite.
+The timing-sensitive test files were then run on PostgreSQL with every CPU core saturated (24 busy processes on 12
+cores) - see the result below.
+
+A verification run during an internet outage failed its live tests; the re-run after the connection returned passed.
 
 ## 0a. Round 12 (2026-09-29): penetration test round 2 (white-box)
 

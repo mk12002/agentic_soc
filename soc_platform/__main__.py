@@ -27,7 +27,11 @@ def _db():
 
 def cmd_init_db() -> None:
     _db().create_all()
-    print("database ready:", os.environ.get("SOC_DATABASE_URL", "sqlite:///./soc_platform.db"))
+    from sqlalchemy.engine import make_url
+
+    from soc_platform.config import get_settings
+
+    print("database ready:", make_url(get_settings().database_url).render_as_string(hide_password=True))
 
 
 SAMPLE_ORG = "acme-demo.com"

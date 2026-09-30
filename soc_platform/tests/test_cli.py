@@ -112,3 +112,23 @@ def test_reset_demo_never_deletes_folders_outside_the_project(demo_env, monkeypa
     monkeypatch.setattr(cli, "cmd_demo", lambda: None)       # the demo itself is covered above
     cli.cmd_reset_demo("--yes")
     assert (outside / "keep.docx").exists()
+
+
+def test_database_url_comes_from_a_vault_file_and_init_db_never_prints_its_password(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from soc_platform.config import get_settings
+
+    f = tmp_path / "db_url"
+    f.write_text("postgresql+psycopg2://soc:s3cret-Pa55@db.internal:5432/soc_platform\n", encoding="utf-8")
+    monkeypatch.delenv("SOC_DATABASE_URL", raising=False)
+    monkeypatch.setenv("SOC_DATABASE_URL_FILE", str(f))
+    monkeypatch.setattr(cli, "_db", lambda: SimpleNamespace(create_all=lambda: None))
+    get_settings.cache_clear()
+    try:
+        assert get_settings().database_url.endswith("@db.internal:5432/soc_platform")
+        cli.cmd_init_db()
+        out = capsys.readouterr().out
+        assert "db.internal" in out and "s3cret-Pa55" not in out
+    finally:
+        get_settings.cache_clear()

@@ -679,7 +679,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
    load-tested at the client's volumes.
 4. **Detonation** needs an isolated analysis host (or CAPEv2 for Windows payloads). The hardening and fail-closed
    behaviour are tested; actual detonation is not run in the demo.
-5. **SSO** needs an Entra app registration; token validation is tested with signed tokens.
+5. **SSO** needs an Entra app registration. Token validation is tested with signed tokens; the console's own Entra
+   sign-in (authorization code + PKCE) is implemented to the documented flow and needs its first run in the client's
+   tenant (CLIENT_DEPLOYMENT_GUIDE.md section 3).
 6. **Other LLM providers:** Azure AI Foundry is verified live. Azure OpenAI deployments, Anthropic and self-hosted
    providers are tested against their request shapes with stubbed responses.
 7. **Templates:** reports use generic layouts until the client's Word and PowerPoint templates are supplied (they
@@ -707,6 +709,8 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | What data goes to the model? | Only the evidence needed for that task, with internal identities pseudonymised and restored afterwards. Only to an approved endpoint (fail closed), on a pinned model, every prompt logged. Nothing leaves without an LLM configured. |
 | Why gpt-4.1-mini, not a bigger model? | It's cheap and fast, and the guardrails do the heavy lifting on trust. A bigger model can be used per tier (small/large) by changing a deployment name. The platform is provider-agnostic. |
 | Could we run the model inside our tenant? | Yes: Azure AI Foundry in the client's subscription, or an OpenAI-compatible self-hosted model (vLLM, Ollama). |
+| We have our own LLM platform (Claude, Gemini and OpenAI models behind one endpoint). Can you use it instead of your Azure? | Yes - it is configuration, not code: point `SOC_LLM_PROVIDER=openai_compatible` (or `anthropic`) at the gateway, name a model per tier, and set its auth header, extra headers and CA if it needs them. Redaction, citations, the numeric guardrail, the budget and the fallback all still apply, and every verdict, score and action stays identical because the model never produces them. Walkthrough: CLIENT_DEPLOYMENT_GUIDE.md section 5. |
+| Our model is trained on company data - does that matter? | It writes better prose about your environment, but it only ever sees the evidence the platform sends for that task, and it still cannot change a figure or a decision. |
 | What does it cost? | Measured: about $5 / month for a small SOC, $26 mid-size, $150 large at gpt-4.1-mini (LLM_TOKENS_AND_COST.md). A cheaper small-tier model cuts another ~25 %. A monthly token budget with findings at 80 % and 100 % caps spend; beyond it the platform falls back to deterministic output. |
 
 ### About automation and control
@@ -736,7 +740,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | What if we change a tool? | A tool change is a connector change; the SDK makes a new connector a single module plus a manifest. |
 | We don't have tool X. | Coverage and the attack story adapt: stages that no enabled tool can see show as blind spots rather than "clear". |
 | Will it overload our tools' APIs? | Per-tool request budgets sized under vendor limits, caching, backoff and reconciliation. |
-| How long to go live? | Per tool: provision a read-scoped service principal, configure, press Test. Governance, audit and the workflows are already built; the work is integration and validation on real data. |
+| How long to go live? | Per tool: provision a read-scoped service principal, configure, press Test (every tool's permissions, settings and egress hosts: CLIENT_DEPLOYMENT_GUIDE.md). Governance, audit and the workflows are already built; the work is integration and validation on real data. |
 
 ### About quality and generality
 

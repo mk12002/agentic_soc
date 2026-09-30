@@ -87,6 +87,7 @@ class DefenderOffice365Connector(MicrosoftConnector):
 
     def _alert(self, a: dict[str, Any]) -> NormalizedRecord:
         refs = []
+        msg: dict[str, Any] = {}
         for ev in a.get("evidence") or []:
             t = ev.get("@odata.type", "")
             if t.endswith("userEvidence"):
@@ -96,18 +97,30 @@ class DefenderOffice365Connector(MicrosoftConnector):
             elif t.endswith("urlEvidence") and ev.get("url"):
                 refs.append(EntityRef(kind="indicator", role="observable", keys={"value": ev["url"]},
                                       attributes={"type": "url"}))
+            elif t.endswith("mailboxEvidence") and ev.get("primaryAddress"):
+                refs.append(EntityRef(kind="identity", role="recipient", keys={"upn": ev["primaryAddress"].lower()}))
             elif t.endswith("analyzedMessageEvidence"):
-                sender = ev.get("senderIp")
-                if sender:
-                    refs.append(EntityRef(kind="indicator", role="sender_ip", keys={"value": sender},
+                msg = msg or ev
+                if ev.get("senderIp"):
+                    refs.append(EntityRef(kind="indicator", role="sender_ip", keys={"value": ev["senderIp"]},
                                           attributes={"type": "ip"}))
+                sender = (ev.get("p1Sender") or {}).get("emailAddress")
+                if sender:
+                    refs.append(EntityRef(kind="indicator", role="sender", keys={"value": sender.lower()},
+                                          attributes={"type": "email"}))
+                if ev.get("recipientEmailAddress"):
+                    refs.append(EntityRef(kind="identity", role="recipient",
+                                          keys={"upn": ev["recipientEmailAddress"].lower()}))
         return NormalizedRecord(
             kind="alert", tool=self.tool, source_type="alert_v2", source_id=a["id"],
             observed_at=parse_ts(a.get("createdDateTime")), title=a.get("title", "Defender for Office 365 alert"),
             severity=sev_name(a.get("severity")), refs=refs, dimension="email",
             attributes={"category": a.get("category"), "status": a.get("status"),
                         "mitre_techniques": a.get("mitreTechniques") or [], "incident_id": a.get("incidentId"),
-                        "description": a.get("description")},
+                        "description": a.get("description"),
+                        "internet_message_id": msg.get("internetMessageId"),
+                        "network_message_id": msg.get("networkMessageId"), "subject": msg.get("subject"),
+                        "delivery_action": msg.get("deliveryAction")},
             deep_link=a.get("alertWebUrl"))
 
     # ------------------------------------------------------------------ investigation helpers (used by phishing agents)

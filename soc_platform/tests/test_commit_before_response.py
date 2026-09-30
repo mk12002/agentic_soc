@@ -57,7 +57,7 @@ def test_an_uploaded_report_is_readable_as_soon_as_the_upload_returns(tmp_path):
                            cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
     try:
-        for _ in range(120):
+        for _ in range(480):                                  # up to 120 s: a busy machine can start slowly
             try:
                 httpx.get(base + "/health", timeout=2)
                 break

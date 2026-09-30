@@ -16,8 +16,8 @@ from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 Q_RESOURCES = """query CloudResources($first: Int, $after: String) {
   cloudResources(first: $first, after: $after, filterBy: {type: [VIRTUAL_MACHINE, CONTAINER_IMAGE]}) {
-    nodes { id name type externalId providerUniqueId region subscriptionExternalId updatedAt
-            graphEntity { properties } }
+    nodes { id name type subscriptionId subscriptionExternalId
+            graphEntity { id providerUniqueId name type properties firstSeen lastSeen } }
     pageInfo { hasNextPage endCursor } totalCount } }"""
 Q_VULNS = """query VulnerabilityFindings($first: Int, $after: String) {
   vulnerabilityFindings(first: $first, after: $after, filterBy: {status: [OPEN]}) {
@@ -31,7 +31,8 @@ Q_VULNS_BY_CVE = Q_VULNS.replace("VulnerabilityFindings($first: Int, $after: Str
     .replace("filterBy: {status: [OPEN]}", "filterBy: {status: [OPEN], vulnerabilityExternalId: $cve}")
 Q_ISSUES = """query Issues($first: Int, $after: String) {
   issuesV2(first: $first, after: $after, filterBy: {status: [OPEN, IN_PROGRESS]}) {
-    nodes { id severity status createdAt type sourceRule { name } entitySnapshot { id name type providerId region
+    nodes { id severity status createdAt type sourceRule { __typename ... on Control { id name } ... on CloudEventRule { id name }
+                                         ... on CloudConfigurationRule { id name } } entitySnapshot { id name type providerId region
             cloudPlatform subscriptionExternalId } }
     pageInfo { hasNextPage endCursor } } }"""
 
@@ -63,11 +64,11 @@ class WizConnector(ToolConnector):
             props = (raw.get("graphEntity") or {}).get("properties") or {}
             return [NormalizedRecord(
                 kind="asset", tool=self.tool, source_type="cloud_resource", source_id=raw["id"], dimension="cloud",
-                observed_at=parse_ts(raw.get("updatedAt") or props.get("updatedAt")),
-                keys={"wiz_id": raw["id"], "cloud_resource_id": raw.get("providerUniqueId") or raw.get("externalId")},
+                observed_at=parse_ts((raw.get("graphEntity") or {}).get("lastSeen") or props.get("updatedAt")),
+                keys={"wiz_id": raw["id"], "cloud_resource_id": (raw.get("graphEntity") or {}).get("providerUniqueId") or props.get("externalId")},
                 attributes={"hostname": props.get("hostname") or raw.get("name"), "ip": (props.get("privateIpAddresses") or [None])[0],
                             "ips": props.get("privateIpAddresses") or [], "os": props.get("operatingSystem"),
-                            "cloud_type": raw.get("type"), "region": raw.get("region"),
+                            "cloud_type": raw.get("type"), "region": props.get("region"),
                             "subscription": raw.get("subscriptionExternalId"),
                             "internet_exposed": bool(props.get("hasWideInternetExposure"))},
                 deep_link=f"https://app.wiz.io/graph#~(entity~'{raw['id']})")]

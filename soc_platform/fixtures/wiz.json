@@ -11,14 +11,19 @@
         "id": "wiz-vm-web01",
         "name": "web01",
         "type": "VIRTUAL_MACHINE",
-        "externalId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web01",
-        "providerUniqueId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web01",
-        "region": "centralindia",
+        "subscriptionId": "wiz-sub-001",
         "subscriptionExternalId": "sub-001",
-        "updatedAt": "2026-09-20T04:00:00Z",
         "graphEntity": {
+         "id": "wiz-vm-web01",
+         "providerUniqueId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web01",
+         "name": "web01",
+         "type": "VIRTUAL_MACHINE",
+         "firstSeen": "2026-03-02T00:00:00Z",
+         "lastSeen": "2026-09-20T04:00:00Z",
          "properties": {
           "hostname": "web01",
+          "externalId": "/subscriptions/sub-001/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web01",
+          "region": "centralindia",
           "privateIpAddresses": [
            "10.10.0.5"
           ],
@@ -359,6 +364,8 @@
         "createdAt": "2026-09-18T00:00:00Z",
         "type": "TOXIC_COMBINATION",
         "sourceRule": {
+         "__typename": "Control",
+         "id": "wc-id-1001",
          "name": "Publicly exposed VM with critical vulnerability and high-privileged identity"
         },
         "entitySnapshot": {
@@ -378,6 +385,8 @@
         "createdAt": "2026-09-10T00:00:00Z",
         "type": "CLOUD_CONFIGURATION",
         "sourceRule": {
+         "__typename": "CloudConfigurationRule",
+         "id": "wcr-id-2002",
          "name": "Storage account allows public blob access"
         },
         "entitySnapshot": {

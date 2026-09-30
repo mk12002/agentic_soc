@@ -1249,6 +1249,14 @@ immediately.
   - test clocks ignored
 - **Connectors:** `config/connectors.yaml`. **Suppliers:** `config/suppliers.yaml` (or `SOC_SUPPLIER_DOMAINS`).
   **Sanctioned services:** `config/sanctioned_services.yaml`. **Organisation domains:** `SOC_ORG_DOMAINS`.
+- **Settings from the environment are strings.** Boolean and JSON connector settings are parsed explicitly
+  (`RAPID7_VERIFY_TLS=false` turns verification off; `GENERIC_SIEM_FIELD_MAP` is a JSON object), and the database URL,
+  which carries a password, can come from a vault file (`SOC_DATABASE_URL_FILE`); `init-db` prints it with the password
+  masked.
+- **Corporate CAs:** `SSL_CERT_FILE` (honoured by httpx) covers every outbound TLS connection; `SOC_LLM_CA_BUNDLE`
+  covers only the LLM gateway.
+- Moving into a client environment (hosting, sign-in, each tool, the client's own LLM):
+  [CLIENT_DEPLOYMENT_GUIDE.md](CLIENT_DEPLOYMENT_GUIDE.md).
 - The full list of settings is in [OPERATIONS.md](OPERATIONS.md). Every setting in production documentation is also
   in `deploy/docker-compose.yml`.
 
@@ -1415,6 +1423,14 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 - The embedded scheduler is off in tests (`SOC_EMBEDDED_SCHEDULER=0`).
 - Fixtures register cleanup before setup, so a failed setup cannot leak its environment into later tests.
 - Runs compared figure-for-figure freeze the clock.
+- **No test may depend on chance or on machine speed.** Generated sample data is byte-identical for the same seed
+  (Message-IDs and MIME boundaries derived from the message; a test builds an organisation twice and compares every
+  file) - random IDs once made the auto-close QA sample, keyed on content hashes, change between runs. Parallelism is
+  proved by counting calls in flight, never by wall-clock time. Waits for a server or thread have generous deadlines
+  (up to 120 s) and end as soon as the condition holds. The timing-sensitive files are checked with every CPU core
+  saturated.
+- A PostgreSQL run whose `SOC_TEST_POSTGRES` is empty or not a PostgreSQL URL stops with an error; it never falls back
+  to SQLite silently.
 
 ---
 
@@ -1498,6 +1514,9 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 29 | Automatic *nullable* column addition at start-up on both engines | Alembic immediately | New optional fields reach existing databases with no manual step | Required columns, renames and drops still need a scripted migration |
 | 35 | Per-role data scope: a principal sees the union of its roles' domains, but each permission counts only where the role granting it applies (`Principal.acting_in`); route guards, case writes and `ActionService` decide with the acting principal | One merged scope per principal; separate accounts per scope | Penetration testing found the merged scope let a phishing lead who was also an all-domain auditor approve incident actions | Cross-domain decisions (policy, evidence export, correlated findings) need an all-domain role; `/me` shows `role_scopes` |
 | 36 | Every regex over message content is bounded (no unbounded run before a required character; scans stop at the next tag) and tested on 2.4 MB hostile bodies | An HTML parser for extraction; a timeout around analysis | Quadratic patterns let one reported e-mail hold a worker for hours; bounded patterns keep the verdict logic unchanged | Anchor text beyond 5,000 characters and addresses beyond RFC lengths are not matched |
+| 37 | Console single sign-on implemented in the console itself (authorization code + PKCE against Entra ID, no library), configured from a public `GET /api/v1/auth/config` | MSAL.js; sign-in at a reverse proxy (Easy Auth / oauth2-proxy) | Keeps the strict CSP (`script-src 'self'`, only `login.microsoftonline.com` added to `connect-src`) and no third-party script; one app registration serves API and console | No silent token refresh: an expired token means one more click on *Sign in with Microsoft* (Entra keeps the session). Exercised end to end only in a real tenant |
+| 38 | An organisation's own LLM gateway is reached through settings, not code: auth header and prefix, fixed extra headers, CA bundle, JSON mode off, beta fallback off | A provider per client | Multi-vendor gateways (Claude, Gemini, OpenAI behind one endpoint) mostly speak the OpenAI chat-completions protocol but differ in these details; everything else (redaction, guardrails, budget, breaker) stays in the gateway | Token-per-call (OAuth) gateways or non-OpenAI protocols still need a small provider class (`docs/CLIENT_DEPLOYMENT_GUIDE.md` 5.7) |
+| 39 | Connector formats audited against vendors' public references and reference integrations; fixtures regenerated in the real shapes | Trusting the first implementation | The audit found mismatches that would only have shown in a live tenant: HEC events without message fields and per-engine verdicts, Wiz union fields and resource fields, ServiceNow local-time display timestamps, InsightVM fix text and severity words, MDE alert evidence, Graph beta-only sign-in fields | Each connector still needs its first run against the client's tenant |
 
 ---
 

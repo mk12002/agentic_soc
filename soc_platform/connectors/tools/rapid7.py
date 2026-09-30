@@ -8,6 +8,7 @@ Legacy Nexpose without API: point ``export_csv`` at a data-warehouse / report ex
 from __future__ import annotations
 
 import csv
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,11 @@ from soc_platform.connectors.http import BasicAuth, HttpTransport
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ToolConnector, ok_lookup, parse_ts, sev_from_score
 from soc_platform.core.schema import EntityRef, NormalizedRecord
+
+log = logging.getLogger(__name__)
+
+# InsightVM's own three tiers (used only when a definition has no CVSS score)
+R7_SEVERITY = {"critical": "critical", "severe": "high", "moderate": "medium"}
 
 
 class Rapid7Connector(ToolConnector):
@@ -55,10 +61,23 @@ class Rapid7Connector(ToolConnector):
     def _definition(self, vuln_id: str) -> dict[str, Any]:
         if vuln_id not in self._vuln_cache:
             try:
-                self._vuln_cache[vuln_id] = self.get(f"/api/3/vulnerabilities/{vuln_id}")
+                d = self.get(f"/api/3/vulnerabilities/{vuln_id}")
             except Exception:
-                self._vuln_cache[vuln_id] = {"id": vuln_id}
+                d = {"id": vuln_id}
+            d["_solution"] = self._solution(vuln_id)
+            self._vuln_cache[vuln_id] = d
         return self._vuln_cache[vuln_id]
+
+    def _solution(self, vuln_id: str) -> str | None:
+        """The fix text: a definition lists solution ids; each solution carries a plain-text summary."""
+        try:
+            ids = self.get(f"/api/3/vulnerabilities/{vuln_id}/solutions").get("resources") or []
+            if not ids:
+                return None
+            return ((self.get(f"/api/3/solutions/{ids[0]}").get("summary") or {}).get("text") or "").strip() or None
+        except Exception as exc:  # a missing fix text must not drop the finding
+            log.warning("rapid7: no solution text for %s: %s", vuln_id, exc)
+            return None
 
     def _csv_page(self, stream: str, cursor: str | None) -> Page:
         with Path(self.settings["export_csv"]).open(encoding="utf-8", newline="") as fh:
@@ -88,7 +107,7 @@ class Rapid7Connector(ToolConnector):
                 kind="finding", tool=self.tool, source_type="asset_vulnerability",
                 source_id=f"{a['id']}:{f['id']}:{cve or ''}", observed_at=parse_ts(f.get("since")),
                 title=f"{cve or d.get('title') or f['id']} on {a.get('hostName') or a.get('ip')}",
-                severity=sev_from_score(cvss) if cvss else (d.get("severity") or "").lower() or None,
+                severity=sev_from_score(cvss) if cvss else R7_SEVERITY.get(str(d.get("severity") or "").lower()),
                 dimension="exposure",
                 refs=[EntityRef(kind="asset", role="host", keys={"rapid7_asset_id": str(a["id"])},
                                 attributes={"hostname": a.get("hostName"), "fqdn": a.get("hostName") if "." in str(a.get("hostName") or "") else None,
@@ -96,7 +115,7 @@ class Rapid7Connector(ToolConnector):
                 attributes={"cve": cve, "vuln_id": f["id"], "title": d.get("title"), "cvss": cvss,
                             "status": "open" if f.get("status", "vulnerable").startswith("vulnerable") else f.get("status"),
                             "first_seen": f.get("since"), "exploits": d.get("exploits", 0),
-                            "malware_kits": d.get("malwareKits", 0), "solution": (d.get("solution") or {}).get("summary")},
+                            "malware_kits": d.get("malwareKits", 0), "solution": d.get("_solution")},
                 deep_link=f"{self.console}/asset.jsp?devid={a['id']}"))
         return out
 
@@ -152,7 +171,12 @@ class Rapid7Connector(ToolConnector):
 
 
 def _live(s: dict[str, Any]) -> HttpTransport:
-    return HttpTransport(s["console_url"], BasicAuth(s["username"], s["password"]), verify=bool(s.get("verify_tls", True)))
+    return HttpTransport(s["console_url"], BasicAuth(s["username"], s["password"]), verify=_truthy(s.get("verify_tls", True)))
+
+
+def _truthy(v: Any) -> bool:
+    """Settings arrive as strings from the environment: "false" must mean False."""
+    return str(v).strip().lower() not in {"0", "false", "no", "off"}
 
 
 MANIFEST = ConnectorManifest(

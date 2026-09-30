@@ -24,6 +24,9 @@ from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
 from soc_platform.core.schema import NormalizedRecord
 
+# Every Table API read asks for sysparm_display_value=all: each field is {"value", "display_value"}. Values give
+# codes and UTC timestamps (display values are in the API user's own timezone); display values give readable names.
+SN_DISPLAY = "all"
 _SN_STATE = {"1": "new", "2": "in_progress", "3": "on_hold", "6": "resolved", "7": "closed", "8": "cancelled"}
 
 
@@ -33,6 +36,8 @@ class ServiceNowConnector(ToolConnector):
     dimension = "ticketing"
     streams = ("tickets", "cmdb")
     lookups = ("host",)
+    read_scopes = ("itil (read the ticket table)", "cmdb_read (CMDB CI table)")
+    write_scopes = ("itil (create and update tickets, work notes)",)
 
     @property
     def table(self) -> str:
@@ -41,28 +46,31 @@ class ServiceNowConnector(ToolConnector):
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
         offset = int(cursor or 0)
         table = self.table if stream == "tickets" else (self.settings.get("cmdb_table") or "cmdb_ci_computer")
-        q = "sys_updated_on>javascript:gs.daysAgoStart(30)" if stream == "tickets" else ""
+        # a fixed order keeps offset paging stable while records change
+        q = ("sys_updated_on>javascript:gs.daysAgoStart(30)^" if stream == "tickets" else "") + "ORDERBYsys_id"
         body = self.get(f"/api/now/table/{table}", params={"sysparm_offset": offset, "sysparm_limit": 500,
-                                                           "sysparm_query": q, "sysparm_display_value": "true"})
+                                                           "sysparm_query": q, "sysparm_display_value": SN_DISPLAY})
         rows = body.get("result") or []
         return Page(rows, str(offset + len(rows)), has_more=len(rows) == 500)
 
-    def normalize(self, stream: str, r: dict[str, Any]) -> list[NormalizedRecord]:
+    def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
+        r = {k: _v(x) for k, x in raw.items()}
+        d = {k: _dv(x) for k, x in raw.items()}
         if stream == "cmdb":
             return [NormalizedRecord(
                 kind="asset", tool=self.tool, source_type="cmdb_ci", source_id=r["sys_id"], dimension="ticketing",
                 observed_at=parse_ts(r.get("sys_updated_on")),
                 keys={"serial_number": r.get("serial_number"), "mac": r.get("mac_address")},
                 attributes={"hostname": r.get("name"), "fqdn": r.get("fqdn") or None, "ip": r.get("ip_address"),
-                            "os": r.get("os"), "owner": _dv(r.get("owned_by")), "support_group": _dv(r.get("support_group")),
-                            "environment": r.get("environment") or r.get("used_for"),
-                            "criticality": (r.get("business_criticality") or "").lower() or None,
-                            "location": _dv(r.get("location"))})]
+                            "os": r.get("os"), "owner": d.get("owned_by"), "support_group": d.get("support_group"),
+                            "environment": d.get("environment") or d.get("used_for"),
+                            "criticality": (d.get("business_criticality") or "").lower() or None,
+                            "location": d.get("location")})]
         return [NormalizedRecord(
             kind="ticket", tool=self.tool, source_type=self.table, source_id=r["sys_id"], dimension="ticketing",
             observed_at=parse_ts(r.get("sys_updated_on")), title=f"{r.get('number')}: {r.get('short_description')}",
             attributes={"number": r.get("number"), "state": _SN_STATE.get(str(r.get("state")), r.get("state")),
-                        "assignment_group": _dv(r.get("assignment_group")), "correlation_id": r.get("correlation_id")})]
+                        "assignment_group": d.get("assignment_group"), "correlation_id": r.get("correlation_id")})]
 
     # ticketing interface ------------------------------------------------------------------
     def create_ticket(self, *, title: str, description: str, group: str | None, priority: int = 3,
@@ -83,23 +91,27 @@ class ServiceNowConnector(ToolConnector):
         return self.req("PATCH", f"/api/now/table/{self.table}/{ticket_id}", json=payload).body.get("result") or {}
 
     def get_ticket(self, ticket_id: str) -> dict[str, Any]:
-        r = self.get(f"/api/now/table/{self.table}/{ticket_id}").get("result") or {}
+        raw = self.get(f"/api/now/table/{self.table}/{ticket_id}",
+                       params={"sysparm_display_value": SN_DISPLAY}).get("result") or {}
+        r = {k: _v(x) for k, x in raw.items()}
         return {"ticket_id": ticket_id, "number": r.get("number"), "state": _SN_STATE.get(str(r.get("state")), r.get("state")),
-                "assignment_group": _dv(r.get("assignment_group")), "updated": r.get("sys_updated_on")}
+                "assignment_group": _dv(raw.get("assignment_group")), "updated": r.get("sys_updated_on")}
 
     # CMDB interface -----------------------------------------------------------------------
     def owner_for(self, attrs: dict[str, Any]) -> dict[str, Any] | None:
         name = str(attrs.get("hostname") or "").split(".")[0]
         if not name:
             return None
+        name = name.replace("^", "")           # '^' separates encoded-query terms
         rows = self.get(f"/api/now/table/{self.settings.get('cmdb_table') or 'cmdb_ci_computer'}",
-                        params={"sysparm_query": f"name={name}", "sysparm_display_value": "true", "sysparm_limit": 1}).get("result") or []
+                        params={"sysparm_query": f"name={name}", "sysparm_display_value": SN_DISPLAY,
+                                "sysparm_limit": 1}).get("result") or []
         if not rows:
             return None
-        r = rows[0]
-        return {"owner": _dv(r.get("owned_by")), "platform_team": _dv(r.get("support_group")),
-                "environment": r.get("environment") or r.get("used_for"),
-                "criticality": (r.get("business_criticality") or "").lower() or None, "location": _dv(r.get("location")),
+        d = {k: _dv(x) for k, x in rows[0].items()}
+        return {"owner": d.get("owned_by"), "platform_team": d.get("support_group"),
+                "environment": d.get("environment") or d.get("used_for"),
+                "criticality": (d.get("business_criticality") or "").lower() or None, "location": d.get("location"),
                 "source": "servicenow_cmdb"}
 
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
@@ -111,6 +123,8 @@ class JiraConnector(ToolConnector):
     tool = "jira"
     dimension = "ticketing"
     streams = ("tickets",)
+    read_scopes = ("Browse projects",)
+    write_scopes = ("Create issues", "Add comments", "Transition issues")
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
         project = self.settings.get("project_key", "SEC")
@@ -201,6 +215,10 @@ class CsvCmdbConnector(ToolConnector):
 
 def _dv(v: Any) -> Any:
     return v.get("display_value") if isinstance(v, dict) else v
+
+
+def _v(v: Any) -> Any:
+    return v.get("value") if isinstance(v, dict) else v
 
 
 def _ticket_actions(c: Any) -> list:

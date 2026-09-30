@@ -379,3 +379,50 @@ def test_risk_ranking_only_profiles_entities_with_risk_sources(session, world, m
     monkeypatch.setattr(RiskEngine, "profile", lambda self, eid: calls.append(eid) or orig(self, eid))
     assert [(p.name, p.score) for p in RiskEngine(session).top(None, 50)] == before     # same answer
     assert len(calls) < 200                                                              # idle entities never profiled
+
+
+def test_an_organisations_own_llm_gateway_is_configured_without_code_changes(monkeypatch):
+    # an in-house gateway in front of several vendors' models: its own key header, fixed headers, corporate CA,
+    # and no response_format
+    from soc_platform.llm.providers import openai_compatible as oc
+
+    seen = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None, **kw):
+        seen.update(url=url, headers=headers, body=json, kw=kw)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {
+            "model": json["model"], "choices": [{"message": {"content": 'Sure: {"ok": true}'}}], "usage": {}})
+
+    monkeypatch.setattr(oc.httpx, "post", fake_post)
+    monkeypatch.setenv("SOC_LLM_API_KEY", "g" * 32)
+    monkeypatch.setenv("SOC_LLM_AUTH_HEADER", "x-api-key")
+    monkeypatch.setenv("SOC_LLM_AUTH_PREFIX", "")
+    monkeypatch.setenv("SOC_LLM_EXTRA_HEADERS", '{"x-app-id": "soc-platform"}')
+    import ssl
+
+    import certifi
+
+    monkeypatch.setenv("SOC_LLM_CA_BUNDLE", certifi.where())          # stands in for the corporate CA file
+    monkeypatch.setenv("SOC_LLM_JSON_MODE", "0")
+    p = oc.OpenAICompatibleProvider(Settings(llm_endpoint="https://llm.corp.example/v1", llm_deployment="gemini-x"))
+    out = p.complete("sys", "u", tier="large")
+    assert seen["url"] == "https://llm.corp.example/v1/chat/completions"
+    assert seen["headers"] == {"x-app-id": "soc-platform", "x-api-key": "g" * 32}
+    assert isinstance(seen["kw"]["verify"], ssl.SSLContext)
+    assert "response_format" not in seen["body"] and "single JSON object" in seen["body"]["messages"][0]["content"]
+    assert out.text.endswith('{"ok": true}')
+    monkeypatch.setenv("SOC_LLM_JSON_MODE", "1")
+    p.complete("sys", "u", tier="large")
+    assert seen["body"]["response_format"] == {"type": "json_object"}
+
+
+def test_claude_through_a_gateway_can_skip_the_beta_fallback(monkeypatch):
+    monkeypatch.setenv("SOC_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("SOC_LLM_SERVER_FALLBACK", "0")
+    from soc_platform.llm.providers.anthropic_provider import AnthropicProvider
+
+    p = AnthropicProvider(Settings(llm_provider="anthropic", llm_endpoint="https://llm.corp.example/anthropic"))
+    calls = {}
+    p.client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: calls.setdefault("plain", kw) and _msg("{}")))
+    assert p.complete("sys", "user", tier="large").text == "{}"
+    assert "fallbacks" not in calls["plain"] and "betas" not in calls["plain"]

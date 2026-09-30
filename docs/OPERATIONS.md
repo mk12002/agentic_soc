@@ -28,6 +28,19 @@ SOC_LLM_MODEL_VERSION=gpt-4.1-mini         # responses from another model are lo
 SOC_LLM_MONTHLY_TOKEN_BUDGET=50000000      # finding at 80 % and 100 %; deterministic fallback when exhausted
 ```
 
+**An organisation's own LLM gateway** (one internal endpoint in front of Claude, Gemini and OpenAI models) is a
+configuration change, not a code change - full walkthrough in `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 5:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `SOC_LLM_PROVIDER` | `none` | `openai_compatible` for a gateway exposing `/v1/chat/completions`; `anthropic` for one exposing the Claude Messages API |
+| `SOC_LLM_AUTH_HEADER` / `SOC_LLM_AUTH_PREFIX` | `Authorization` / `Bearer ` | header and prefix carrying `SOC_LLM_API_KEY` (openai_compatible) |
+| `SOC_LLM_EXTRA_HEADERS` | empty | JSON object of fixed, non-secret headers the gateway requires |
+| `SOC_LLM_CA_BUNDLE` | empty | CA file for an internally issued gateway certificate |
+| `SOC_LLM_JSON_MODE` | `1` | `0` when the gateway or model rejects `response_format`; JSON is then requested in the instructions |
+| `SOC_LLM_SERVER_FALLBACK` | `1` | `anthropic` only: `0` if the gateway does not pass the Claude API's beta refusal fallback through |
+| `SSL_CERT_FILE` | empty | CA bundle for every outbound TLS connection (connectors to internal consoles too) |
+
 Check: `GET /api/v1/llm/status`; live test: `SOC_LIVE_LLM=1 pytest soc_platform/tests/test_live_llm.py` (costs
 tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept for `SOC_LLM_LOG_RETENTION_DAYS`.
 
@@ -156,6 +169,11 @@ Alert on: `soc_connector_last_success_age_seconds` above the stream's cadence, a
 
 ## Access management
 
+* **Console sign-in (production):** `SOC_AUTH_MODE=entra` with `SOC_ENTRA_TENANT_ID` and `SOC_ENTRA_AUDIENCE`
+  (`api://<app-id>`). The console runs the Entra ID authorization-code flow with PKCE itself (SPA redirect URI =
+  the console's origin + `/`); `SOC_ENTRA_SPA_CLIENT_ID` / `SOC_ENTRA_SCOPE` override the client id and scope when
+  the console has its own app registration. The API must issue v2.0 access tokens
+  (`requestedAccessTokenVersion: 2` in its manifest). Step-by-step: `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 3.
 * Roles come from Entra app roles `SOC.<Role>` or `SOC.<Role>.<Domain>` (Domain = Phishing | Incident |
   Vulnerability) plus platform grants (Access screen / `/api/v1/admin/roles`), which are time-bound and audited.
   Nobody can grant or revoke their own access, and a domain-scoped administrator can grant only their own domains.

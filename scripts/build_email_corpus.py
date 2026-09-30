@@ -10,13 +10,14 @@ label lives in the ``X-Test-Label`` header, which the platform never reads.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import sys
 import zipfile
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
-from email.utils import format_datetime, make_msgid
+from email.utils import format_datetime
 from pathlib import Path
 
 ORG = "acme-demo.com"
@@ -36,11 +37,21 @@ def _base(label: str, frm: str, display: str, to: str, subject: str, *, auth: st
     m["To"] = to
     m["Subject"] = subject
     m["Date"] = format_datetime(when)
-    m["Message-ID"] = make_msgid(domain=dom)
+    # derived from the message itself, not make_msgid() (time + pid + random): the same inputs must give byte-identical
+    # mail, or anything keyed on the content hash - such as the auto-close QA sample - changes between builds
+    m["Message-ID"] = f"<{hashlib.sha256(f'{label}|{frm}|{to}|{subject}|{minutes}'.encode()).hexdigest()[:24]}@{dom}>"
     if reply_to:
         m["Reply-To"] = reply_to
     m["X-Test-Label"] = label
     return m
+
+
+def stable_bytes(m: EmailMessage, seed: str) -> bytes:
+    """The message as bytes, with every multipart boundary derived from ``seed`` instead of chosen at random."""
+    for i, part in enumerate(m.walk()):
+        if part.is_multipart():
+            part.set_boundary(f"=_{hashlib.sha256(f'{seed}|{i}'.encode()).hexdigest()[:24]}")
+    return bytes(m)
 
 
 def _qr_png(url: str) -> bytes:
@@ -171,7 +182,7 @@ def main(out_dir: str) -> None:
     out.mkdir(parents=True, exist_ok=True)
     labels = {}
     for name, m in corpus():
-        (out / f"{name}.eml").write_bytes(bytes(m))
+        (out / f"{name}.eml").write_bytes(stable_bytes(m, name))
         labels[name] = m["X-Test-Label"]
     (out / "labels.json").write_text(json.dumps(labels, indent=1), encoding="utf-8")
     print(f"{len(labels)} messages -> {out}")

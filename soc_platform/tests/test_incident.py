@@ -122,7 +122,6 @@ def test_deferred_narration_keeps_the_case_usable_then_adds_the_written_explanat
     import json as _json
     import re as _re
     import threading
-    import time
 
     from soc_platform.config import Settings
     from soc_platform.llm.gateway import Completion, LLMGateway, Provider
@@ -133,12 +132,17 @@ def test_deferred_narration_keeps_the_case_usable_then_adds_the_written_explanat
         def __init__(self):
             self.live, self.peak = 0, 0
             self.lock = threading.Lock()
+            self.overlapped = threading.Event()
 
         def complete(self, system, user, *, tier):
             with self.lock:
                 self.live += 1
                 self.peak = max(self.peak, self.live)
-            time.sleep(0.05)
+                if self.live >= 2:
+                    self.overlapped.set()
+            # wait (up to 60 s) for a second call to be in flight: parallel code passes at once however busy the
+            # machine is; sequential code can never overlap, so the peak stays 1 and the test fails as it should
+            self.overlapped.wait(60)
             with self.lock:
                 self.live -= 1
             ids = _re.findall(r"^\[(E\d+)\]", user, _re.MULTILINE)

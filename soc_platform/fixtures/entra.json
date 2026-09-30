@@ -125,7 +125,8 @@
        "displayName": "JANE-LT01",
        "isCompliant": true
       },
-      "authenticationRequirement": "multiFactorAuthentication"
+      "isInteractive": true,
+      "riskEventTypes_v2": []
      },
      {
       "id": "si-002",
@@ -145,16 +146,15 @@
       "riskLevelDuringSignIn": "high",
       "riskState": "atRisk",
       "conditionalAccessStatus": "success",
-      "mfaDetail": {
-       "authMethod": "Microsoft Authenticator app",
-       "authDetail": "MFA completed (push approved)"
-      },
       "deviceDetail": {
        "deviceId": "",
        "displayName": "",
        "isCompliant": false
       },
-      "authenticationRequirement": "multiFactorAuthentication"
+      "isInteractive": true,
+      "riskEventTypes_v2": [
+       "anonymizedIPAddress"
+      ]
      }
     ]
    },
@@ -186,16 +186,15 @@
       "riskLevelDuringSignIn": "high",
       "riskState": "atRisk",
       "conditionalAccessStatus": "success",
-      "mfaDetail": {
-       "authMethod": "Microsoft Authenticator app",
-       "authDetail": "MFA completed (push approved)"
-      },
       "deviceDetail": {
        "deviceId": "",
        "displayName": "",
        "isCompliant": false
       },
-      "authenticationRequirement": "multiFactorAuthentication"
+      "isInteractive": true,
+      "riskEventTypes_v2": [
+       "anonymizedIPAddress"
+      ]
      }
     ]
    },
@@ -243,7 +242,8 @@
        "displayName": "JANE-LT01",
        "isCompliant": true
       },
-      "authenticationRequirement": "multiFactorAuthentication"
+      "isInteractive": true,
+      "riskEventTypes_v2": []
      },
      {
       "id": "si-002",
@@ -263,16 +263,15 @@
       "riskLevelDuringSignIn": "high",
       "riskState": "atRisk",
       "conditionalAccessStatus": "success",
-      "mfaDetail": {
-       "authMethod": "Microsoft Authenticator app",
-       "authDetail": "MFA completed (push approved)"
-      },
       "deviceDetail": {
        "deviceId": "",
        "displayName": "",
        "isCompliant": false
       },
-      "authenticationRequirement": "multiFactorAuthentication"
+      "isInteractive": true,
+      "riskEventTypes_v2": [
+       "anonymizedIPAddress"
+      ]
      }
     ]
    },

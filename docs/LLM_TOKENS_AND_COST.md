@@ -8,6 +8,11 @@ platform's own LLM call log, on three estates of different size and composition.
 > **Everything works without an LLM.** Every figure, verdict, score and action is computed in code; the model only
 > writes narrative. Turning it off costs nothing and changes no number.
 
+> **On the client's own LLM platform** the token counts per component stay roughly the same (the prompts are the
+> platform's), but other models tokenise differently and are priced differently: re-run `scripts/measure_llm_usage.py`
+> against the client's gateway and reprice with its per-model rates. Connecting it:
+> [CLIENT_DEPLOYMENT_GUIDE.md](CLIENT_DEPLOYMENT_GUIDE.md) section 5.
+
 ---
 
 ## 1. Tokens per component (one call)

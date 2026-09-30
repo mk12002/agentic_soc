@@ -6,24 +6,54 @@
    "body": {
     "result": [
      {
-      "sys_id": "ci-web01",
-      "name": "web01",
-      "fqdn": "web01.acme-demo.com",
-      "ip_address": "10.10.0.5",
-      "os": "Ubuntu 22.04 LTS",
-      "serial_number": "VMware-42 1a 7c 3e",
+      "sys_id": {
+       "value": "ci-web01",
+       "display_value": "ci-web01"
+      },
+      "name": {
+       "value": "web01",
+       "display_value": "web01"
+      },
+      "fqdn": {
+       "value": "web01.acme-demo.com",
+       "display_value": "web01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.10.0.5",
+       "display_value": "10.10.0.5"
+      },
+      "os": {
+       "value": "Ubuntu 22.04 LTS",
+       "display_value": "Ubuntu 22.04 LTS"
+      },
+      "serial_number": {
+       "value": "VMware-42 1a 7c 3e",
+       "display_value": "VMware-42 1a 7c 3e"
+      },
       "owned_by": {
+       "value": "usr-web01",
        "display_value": "Anil Rao"
       },
       "support_group": {
+       "value": "grp-web-platform",
        "display_value": "Web Platform"
       },
-      "environment": "Production",
-      "business_criticality": "1 - most critical",
+      "environment": {
+       "value": "production",
+       "display_value": "Production"
+      },
+      "business_criticality": {
+       "value": "1",
+       "display_value": "1 - most critical"
+      },
       "location": {
+       "value": "loc-kolkata-dc1",
        "display_value": "Kolkata DC1"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      }
     ]
    },
@@ -38,24 +68,54 @@
    "body": {
     "result": [
      {
-      "sys_id": "ci-db01",
-      "name": "DB01",
-      "fqdn": "db01.acme-demo.com",
-      "ip_address": "10.10.0.6",
-      "os": "Windows Server 2019",
-      "serial_number": "VMware-42 9f 11 02",
+      "sys_id": {
+       "value": "ci-db01",
+       "display_value": "ci-db01"
+      },
+      "name": {
+       "value": "DB01",
+       "display_value": "DB01"
+      },
+      "fqdn": {
+       "value": "db01.acme-demo.com",
+       "display_value": "db01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.10.0.6",
+       "display_value": "10.10.0.6"
+      },
+      "os": {
+       "value": "Windows Server 2019",
+       "display_value": "Windows Server 2019"
+      },
+      "serial_number": {
+       "value": "VMware-42 9f 11 02",
+       "display_value": "VMware-42 9f 11 02"
+      },
       "owned_by": {
+       "value": "usr-db01",
        "display_value": "Sunita Iyer"
       },
       "support_group": {
+       "value": "grp-windows-server-team",
        "display_value": "Windows Server Team"
       },
-      "environment": "Production",
-      "business_criticality": "1 - most critical",
+      "environment": {
+       "value": "production",
+       "display_value": "Production"
+      },
+      "business_criticality": {
+       "value": "1",
+       "display_value": "1 - most critical"
+      },
       "location": {
+       "value": "loc-kolkata-dc1",
        "display_value": "Kolkata DC1"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      }
     ]
    },
@@ -70,24 +130,54 @@
    "body": {
     "result": [
      {
-      "sys_id": "ci-fs01",
-      "name": "FS01",
-      "fqdn": "fs01.acme-demo.com",
-      "ip_address": "10.10.0.20",
-      "os": "Windows Server 2022",
-      "serial_number": "CZ20240001",
+      "sys_id": {
+       "value": "ci-fs01",
+       "display_value": "ci-fs01"
+      },
+      "name": {
+       "value": "FS01",
+       "display_value": "FS01"
+      },
+      "fqdn": {
+       "value": "fs01.acme-demo.com",
+       "display_value": "fs01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.10.0.20",
+       "display_value": "10.10.0.20"
+      },
+      "os": {
+       "value": "Windows Server 2022",
+       "display_value": "Windows Server 2022"
+      },
+      "serial_number": {
+       "value": "CZ20240001",
+       "display_value": "CZ20240001"
+      },
       "owned_by": {
+       "value": "usr-fs01",
        "display_value": "Sunita Iyer"
       },
       "support_group": {
+       "value": "grp-windows-server-team",
        "display_value": "Windows Server Team"
       },
-      "environment": "Production",
-      "business_criticality": "2 - somewhat critical",
+      "environment": {
+       "value": "production",
+       "display_value": "Production"
+      },
+      "business_criticality": {
+       "value": "2",
+       "display_value": "2 - somewhat critical"
+      },
       "location": {
+       "value": "loc-kolkata-dc1",
        "display_value": "Kolkata DC1"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      }
     ]
    },
@@ -102,24 +192,54 @@
    "body": {
     "result": [
      {
-      "sys_id": "ci-jane",
-      "name": "JANE-LT01",
-      "fqdn": "jane-lt01.acme-demo.com",
-      "ip_address": "10.20.1.15",
-      "os": "Windows 11 Enterprise",
-      "serial_number": "5CG1234XYZ",
+      "sys_id": {
+       "value": "ci-jane",
+       "display_value": "ci-jane"
+      },
+      "name": {
+       "value": "JANE-LT01",
+       "display_value": "JANE-LT01"
+      },
+      "fqdn": {
+       "value": "jane-lt01.acme-demo.com",
+       "display_value": "jane-lt01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.20.1.15",
+       "display_value": "10.20.1.15"
+      },
+      "os": {
+       "value": "Windows 11 Enterprise",
+       "display_value": "Windows 11 Enterprise"
+      },
+      "serial_number": {
+       "value": "5CG1234XYZ",
+       "display_value": "5CG1234XYZ"
+      },
       "owned_by": {
+       "value": "usr-jane",
        "display_value": "Jane Doe"
       },
       "support_group": {
+       "value": "grp-end-user-computing",
        "display_value": "End User Computing"
       },
-      "environment": "Corporate",
-      "business_criticality": "3 - less critical",
+      "environment": {
+       "value": "corporate",
+       "display_value": "Corporate"
+      },
+      "business_criticality": {
+       "value": "3",
+       "display_value": "3 - less critical"
+      },
       "location": {
+       "value": "loc-kolkata-hq",
        "display_value": "Kolkata HQ"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      }
     ]
    },
@@ -134,24 +254,54 @@
    "body": {
     "result": [
      {
-      "sys_id": "ci-bob",
-      "name": "BOB-LT02",
-      "fqdn": "bob-lt02.acme-demo.com",
-      "ip_address": "10.20.1.22",
-      "os": "Windows 11 Enterprise",
-      "serial_number": "5CG5678ABC",
+      "sys_id": {
+       "value": "ci-bob",
+       "display_value": "ci-bob"
+      },
+      "name": {
+       "value": "BOB-LT02",
+       "display_value": "BOB-LT02"
+      },
+      "fqdn": {
+       "value": "bob-lt02.acme-demo.com",
+       "display_value": "bob-lt02.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.20.1.22",
+       "display_value": "10.20.1.22"
+      },
+      "os": {
+       "value": "Windows 11 Enterprise",
+       "display_value": "Windows 11 Enterprise"
+      },
+      "serial_number": {
+       "value": "5CG5678ABC",
+       "display_value": "5CG5678ABC"
+      },
       "owned_by": {
+       "value": "usr-bob",
        "display_value": "Bob Lee"
       },
       "support_group": {
+       "value": "grp-end-user-computing",
        "display_value": "End User Computing"
       },
-      "environment": "Corporate",
-      "business_criticality": "3 - less critical",
+      "environment": {
+       "value": "corporate",
+       "display_value": "Corporate"
+      },
+      "business_criticality": {
+       "value": "3",
+       "display_value": "3 - less critical"
+      },
       "location": {
+       "value": "loc-kolkata-hq",
        "display_value": "Kolkata HQ"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      }
     ]
    },
@@ -168,7 +318,7 @@
    },
    "status": 200,
    "params": {
-    "sysparm_query": "*"
+    "sysparm_query": "~^name="
    }
   },
   {
@@ -177,104 +327,254 @@
    "body": {
     "result": [
      {
-      "sys_id": "ci-web01",
-      "name": "web01",
-      "fqdn": "web01.acme-demo.com",
-      "ip_address": "10.10.0.5",
-      "os": "Ubuntu 22.04 LTS",
-      "serial_number": "VMware-42 1a 7c 3e",
+      "sys_id": {
+       "value": "ci-web01",
+       "display_value": "ci-web01"
+      },
+      "name": {
+       "value": "web01",
+       "display_value": "web01"
+      },
+      "fqdn": {
+       "value": "web01.acme-demo.com",
+       "display_value": "web01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.10.0.5",
+       "display_value": "10.10.0.5"
+      },
+      "os": {
+       "value": "Ubuntu 22.04 LTS",
+       "display_value": "Ubuntu 22.04 LTS"
+      },
+      "serial_number": {
+       "value": "VMware-42 1a 7c 3e",
+       "display_value": "VMware-42 1a 7c 3e"
+      },
       "owned_by": {
+       "value": "usr-web01",
        "display_value": "Anil Rao"
       },
       "support_group": {
+       "value": "grp-web-platform",
        "display_value": "Web Platform"
       },
-      "environment": "Production",
-      "business_criticality": "1 - most critical",
+      "environment": {
+       "value": "production",
+       "display_value": "Production"
+      },
+      "business_criticality": {
+       "value": "1",
+       "display_value": "1 - most critical"
+      },
       "location": {
+       "value": "loc-kolkata-dc1",
        "display_value": "Kolkata DC1"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      },
      {
-      "sys_id": "ci-db01",
-      "name": "DB01",
-      "fqdn": "db01.acme-demo.com",
-      "ip_address": "10.10.0.6",
-      "os": "Windows Server 2019",
-      "serial_number": "VMware-42 9f 11 02",
+      "sys_id": {
+       "value": "ci-db01",
+       "display_value": "ci-db01"
+      },
+      "name": {
+       "value": "DB01",
+       "display_value": "DB01"
+      },
+      "fqdn": {
+       "value": "db01.acme-demo.com",
+       "display_value": "db01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.10.0.6",
+       "display_value": "10.10.0.6"
+      },
+      "os": {
+       "value": "Windows Server 2019",
+       "display_value": "Windows Server 2019"
+      },
+      "serial_number": {
+       "value": "VMware-42 9f 11 02",
+       "display_value": "VMware-42 9f 11 02"
+      },
       "owned_by": {
+       "value": "usr-db01",
        "display_value": "Sunita Iyer"
       },
       "support_group": {
+       "value": "grp-windows-server-team",
        "display_value": "Windows Server Team"
       },
-      "environment": "Production",
-      "business_criticality": "1 - most critical",
+      "environment": {
+       "value": "production",
+       "display_value": "Production"
+      },
+      "business_criticality": {
+       "value": "1",
+       "display_value": "1 - most critical"
+      },
       "location": {
+       "value": "loc-kolkata-dc1",
        "display_value": "Kolkata DC1"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      },
      {
-      "sys_id": "ci-fs01",
-      "name": "FS01",
-      "fqdn": "fs01.acme-demo.com",
-      "ip_address": "10.10.0.20",
-      "os": "Windows Server 2022",
-      "serial_number": "CZ20240001",
+      "sys_id": {
+       "value": "ci-fs01",
+       "display_value": "ci-fs01"
+      },
+      "name": {
+       "value": "FS01",
+       "display_value": "FS01"
+      },
+      "fqdn": {
+       "value": "fs01.acme-demo.com",
+       "display_value": "fs01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.10.0.20",
+       "display_value": "10.10.0.20"
+      },
+      "os": {
+       "value": "Windows Server 2022",
+       "display_value": "Windows Server 2022"
+      },
+      "serial_number": {
+       "value": "CZ20240001",
+       "display_value": "CZ20240001"
+      },
       "owned_by": {
+       "value": "usr-fs01",
        "display_value": "Sunita Iyer"
       },
       "support_group": {
+       "value": "grp-windows-server-team",
        "display_value": "Windows Server Team"
       },
-      "environment": "Production",
-      "business_criticality": "2 - somewhat critical",
+      "environment": {
+       "value": "production",
+       "display_value": "Production"
+      },
+      "business_criticality": {
+       "value": "2",
+       "display_value": "2 - somewhat critical"
+      },
       "location": {
+       "value": "loc-kolkata-dc1",
        "display_value": "Kolkata DC1"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      },
      {
-      "sys_id": "ci-jane",
-      "name": "JANE-LT01",
-      "fqdn": "jane-lt01.acme-demo.com",
-      "ip_address": "10.20.1.15",
-      "os": "Windows 11 Enterprise",
-      "serial_number": "5CG1234XYZ",
+      "sys_id": {
+       "value": "ci-jane",
+       "display_value": "ci-jane"
+      },
+      "name": {
+       "value": "JANE-LT01",
+       "display_value": "JANE-LT01"
+      },
+      "fqdn": {
+       "value": "jane-lt01.acme-demo.com",
+       "display_value": "jane-lt01.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.20.1.15",
+       "display_value": "10.20.1.15"
+      },
+      "os": {
+       "value": "Windows 11 Enterprise",
+       "display_value": "Windows 11 Enterprise"
+      },
+      "serial_number": {
+       "value": "5CG1234XYZ",
+       "display_value": "5CG1234XYZ"
+      },
       "owned_by": {
+       "value": "usr-jane",
        "display_value": "Jane Doe"
       },
       "support_group": {
+       "value": "grp-end-user-computing",
        "display_value": "End User Computing"
       },
-      "environment": "Corporate",
-      "business_criticality": "3 - less critical",
+      "environment": {
+       "value": "corporate",
+       "display_value": "Corporate"
+      },
+      "business_criticality": {
+       "value": "3",
+       "display_value": "3 - less critical"
+      },
       "location": {
+       "value": "loc-kolkata-hq",
        "display_value": "Kolkata HQ"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      },
      {
-      "sys_id": "ci-bob",
-      "name": "BOB-LT02",
-      "fqdn": "bob-lt02.acme-demo.com",
-      "ip_address": "10.20.1.22",
-      "os": "Windows 11 Enterprise",
-      "serial_number": "5CG5678ABC",
+      "sys_id": {
+       "value": "ci-bob",
+       "display_value": "ci-bob"
+      },
+      "name": {
+       "value": "BOB-LT02",
+       "display_value": "BOB-LT02"
+      },
+      "fqdn": {
+       "value": "bob-lt02.acme-demo.com",
+       "display_value": "bob-lt02.acme-demo.com"
+      },
+      "ip_address": {
+       "value": "10.20.1.22",
+       "display_value": "10.20.1.22"
+      },
+      "os": {
+       "value": "Windows 11 Enterprise",
+       "display_value": "Windows 11 Enterprise"
+      },
+      "serial_number": {
+       "value": "5CG5678ABC",
+       "display_value": "5CG5678ABC"
+      },
       "owned_by": {
+       "value": "usr-bob",
        "display_value": "Bob Lee"
       },
       "support_group": {
+       "value": "grp-end-user-computing",
        "display_value": "End User Computing"
       },
-      "environment": "Corporate",
-      "business_criticality": "3 - less critical",
+      "environment": {
+       "value": "corporate",
+       "display_value": "Corporate"
+      },
+      "business_criticality": {
+       "value": "3",
+       "display_value": "3 - less critical"
+      },
       "location": {
+       "value": "loc-kolkata-hq",
        "display_value": "Kolkata HQ"
       },
-      "sys_updated_on": "2026-09-20T02:00:00"
+      "sys_updated_on": {
+       "value": "2026-09-20 02:00:00",
+       "display_value": "2026-09-20 07:30:00"
+      }
      }
     ]
    },
@@ -296,12 +596,22 @@
    "path": "^/api/now/table/incident/sn-sys-0001$",
    "body": {
     "result": {
-     "number": "INC0012001",
-     "state": "2",
+     "number": {
+      "value": "INC0012001",
+      "display_value": "INC0012001"
+     },
+     "state": {
+      "value": "2",
+      "display_value": "In Progress"
+     },
      "assignment_group": {
+      "value": "grp-web-platform",
       "display_value": "Web Platform"
      },
-     "sys_updated_on": "2026-09-20T12:00:00"
+     "sys_updated_on": {
+      "value": "2026-09-20 12:00:00",
+      "display_value": "2026-09-20 17:30:00"
+     }
     }
    },
    "status": 200

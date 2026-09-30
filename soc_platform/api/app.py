@@ -69,7 +69,8 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 MAX_BODY_BYTES = 30 * 1024 * 1024
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-                               "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+                               "img-src 'self' data:; connect-src 'self' https://login.microsoftonline.com; "
+                               "frame-ancestors 'none'; base-uri 'none'; "
                                "form-action 'self'",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -438,6 +439,21 @@ def _scheduler_heartbeat(s: Session) -> dict[str, Any]:
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def ui() -> HTMLResponse:
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
+
+
+@app.get("/api/v1/auth/config")
+def auth_config() -> dict[str, str]:
+    """What the console needs to start single sign-on (public values only: tenant, client id, scope)."""
+    import os
+
+    st = get_settings()
+    if st.auth_mode != "entra":
+        return {"mode": st.auth_mode}
+    audience = st.entra_audience or ""
+    # one app registration can be both the API (audience api://<app-id>) and the console's SPA client
+    client = os.environ.get("SOC_ENTRA_SPA_CLIENT_ID") or audience.removeprefix("api://")
+    return {"mode": "entra", "tenant_id": st.entra_tenant_id or "", "client_id": client,
+            "scope": os.environ.get("SOC_ENTRA_SCOPE") or f"{audience}/.default"}
 
 
 @app.get("/api/v1/dev/token")

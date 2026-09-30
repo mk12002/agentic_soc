@@ -102,9 +102,9 @@ class EntraConnector(MicrosoftConnector):
             attributes={"app": s.get("appDisplayName"), "ip": s.get("ipAddress"), "country": loc.get("countryOrRegion"),
                         "city": loc.get("city"), "error_code": st.get("errorCode"), "failure": st.get("failureReason"),
                         "risk_level": s.get("riskLevelDuringSignIn"), "risk_state": s.get("riskState"),
-                        "mfa_detail": s.get("mfaDetail"), "conditional_access": s.get("conditionalAccessStatus"),
-                        "client_app": s.get("clientAppUsed"), "device_compliant": dev.get("isCompliant"),
-                        "authentication_requirement": s.get("authenticationRequirement")},
+                        "conditional_access": s.get("conditionalAccessStatus"), "client_app": s.get("clientAppUsed"),
+                        "device_compliant": dev.get("isCompliant"), "interactive": s.get("isInteractive"),
+                        "risk_events": s.get("riskEventTypes_v2") or []},   # v1.0 fields only (no beta mfaDetail)
             deep_link=f"{PORTAL}/#view/Microsoft_AAD_IAM/SignInLogsList.ReactView")
 
     def _risky_user(self, r: dict[str, Any]) -> NormalizedRecord:

@@ -264,3 +264,34 @@ def test_entra_reads_only_the_configured_subscriptions_when_given(reg, monkeypat
     raj = entra.identity_context("raj.mehta@acme-demo.com")
     assert [(r["role"], r["subscription"]) for r in raj["azure_roles"]] == [("Reader", "11111111-2222-3333-4444-000000000002")]
     assert entra.identity_context("bob.lee@acme-demo.com")["azure_roles"] == []    # production not configured
+
+
+def test_avanan_reads_message_details_from_the_entity_not_the_event(reg):
+    # HEC security events name their e-mail only by entityId; sender, recipients and subject live on the entity
+    c = reg.get("avanan")
+    page = c.fetch_page("security_events", None)
+    [rec] = c.normalize("security_events", page.records[0])
+    assert rec.severity == "low"                                  # HEC severity "2"
+    assert rec.attributes["subject"] and rec.attributes["internet_message_id"]
+    roles = {r.role for r in rec.refs}
+    assert roles == {"sender", "recipient"}
+
+
+def test_avanan_overall_verdict_is_the_worst_engine_verdict():
+    from soc_platform.connectors.tools.avanan import overall_verdict
+    assert overall_verdict({"ap": "clean", "av": "malicious", "dlp": None}) == "malicious"
+    assert overall_verdict({"ap": "spam", "av": "clean"}) == "spam"
+    assert overall_verdict({"ap": "clean", "dlp": None}) == "clean"
+    assert overall_verdict({}) is None
+
+
+def test_rapid7_verify_tls_false_from_the_environment_really_turns_verification_off():
+    from soc_platform.connectors.tools.rapid7 import _truthy
+    assert _truthy(True) and _truthy("true") and _truthy("1")
+    assert not _truthy("false") and not _truthy("0") and not _truthy(False) and not _truthy(" No ")
+
+
+def test_generic_siem_field_map_works_from_an_environment_variable():
+    from soc_platform.connectors.tools.siem import _field_map
+    assert _field_map('{"id": "alert_id", "title": "rule_name"}') == {"id": "alert_id", "title": "rule_name"}
+    assert _field_map({"id": "alert_id"}) == {"id": "alert_id"} and _field_map("") == {} and _field_map(None) == {}

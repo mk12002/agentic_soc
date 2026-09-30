@@ -137,3 +137,24 @@ def test_vulnerability_coverage_tracks_the_generated_gaps(loaded):
     if cfg["name"] != "demo":
         assert len(cov["missing_edr"]) >= cfg["laptops_without_edr"]
     assert not [a for a in cov["missing_edr"] if a.endswith("backups")]              # cloud storage never an EDR gap
+
+
+def test_the_same_seed_always_builds_byte_identical_data(tmp_path):
+    """Generated mail used random Message-IDs (time + pid + random), so every build had different bytes. Anything keyed
+    on a message's content hash - the auto-close QA sample - then changed between runs, and a retention test failed
+    once in a while when every auto-close candidate happened to be sampled. The same seed must give the same data."""
+    import hashlib
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("bev_det", root / "scripts" / "build_estate_variant.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def digest(d: Path) -> dict[str, str]:
+        return {str(f.relative_to(d)): hashlib.sha256(f.read_bytes()).hexdigest()
+                for f in sorted(d.rglob("*")) if f.is_file() and f.name != "estate.json"}   # estate.json holds its own path
+
+    first, second = digest(mod.main(str(tmp_path / "a"), seed=23)), digest(mod.main(str(tmp_path / "b"), seed=23))
+    assert first.keys() == second.keys() and any(k.startswith("corpus") for k in first)
+    assert [k for k in first if first[k] != second[k]] == []

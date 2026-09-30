@@ -26,7 +26,7 @@ responsibility of the hosting environment.
 | Personal-data leakage to the LLM (R10) | Internal users, names, phone numbers, national ids pseudonymised before the prompt leaves the platform and restored after; prompts/responses logged; approved-endpoint allow-list; model pinning; token budget | `llm/redaction.py`, `llm/gateway.py` |
 | Malicious attachments (R12) | Hardened detonation (below); Windows payloads to CAPEv2 on an isolated analysis network | `engine/agents/sandbox_agent/agent.py` |
 | Tampered ML models (pickle = code execution) | SHA-256 manifest verified before any joblib/pickle artifact is deserialised; unlisted artifacts refused | `engine/integrity.py`, `artifacts/phishing/models/MANIFEST.sha256` |
-| Web attacks on the console | Strict CSP (`script-src 'self'`, no inline script or handlers, `frame-ancestors 'none'`), all dynamic values HTML-escaped, ids URL-encoded in API paths, deep links restricted to http(s), no-store caching, nosniff, DENY framing, HSTS on HTTPS (also behind a TLS-terminating trusted proxy, via its `X-Forwarded-Proto`) | `api/app.py`, `api/static/` |
+| Web attacks on the console | Strict CSP (`script-src 'self'`, no inline script or handlers, `frame-ancestors 'none'`; `connect-src` allows only the origin and `login.microsoftonline.com` for sign-in), all dynamic values HTML-escaped, ids URL-encoded in API paths, deep links restricted to http(s), no-store caching, nosniff, DENY framing, HSTS on HTTPS (also behind a TLS-terminating trusted proxy, via its `X-Forwarded-Proto`) | `api/app.py`, `api/static/` |
 | Abuse / DoS | Per-client-address rate limiting (X-Forwarded-For only from configured proxies, and then its right-most hop that is not a proxy; idle buckets evicted, never the whole table), 30 MB request cap enforced on the byte stream (chunked uploads included), 25 MB email cap, **linear-time parsing of hostile e-mail** (every regex over message content is bounded; tested on 2.4 MB pathological bodies), numeric inputs bounded, cached /health, connector request budgets so enrichment cannot degrade source tools (R06) | `api/app.py`, `connectors/base.py`, `domains/phishing/agents/`, `llm/redaction.py` |
 | Secret exposure | No secrets in the repository; `.env` git-ignored; `<NAME>_FILE` vault mounts supported; per-tool least-privilege service principals, read scopes by default | `config.py`, `config/connectors.yaml` |
 | Supply chain | `pip-audit` clean (setuptools pinned ≥ 83, unused packages removed incl. `nltk` with an unfixed advisory); detonation image built locally and pinned by digest in prod | `requirements/`, `deploy/sandbox/Dockerfile` |
@@ -198,6 +198,16 @@ probe showed the attack working.
 - The `reporter` of an uploaded message is free text, because analysts upload on someone's behalf. The uploader is
   the authenticated principal in the audit and access logs.
 - Failed break-glass attempts are audited individually. That volume is bounded by the rate limit.
+
+## Console sign-in (production)
+
+With `SOC_AUTH_MODE=entra` the console signs users in with the Entra ID authorization-code flow and PKCE (S256
+challenge, random `state` checked on return, verifier kept in `sessionStorage` only for the round trip). The access
+token is for the platform API only; the API validates it (RS256, tenant JWKS, audience, v2.0 issuer, expiry) and maps
+app roles to platform roles. `GET /api/v1/auth/config` is unauthenticated by design and returns public values only
+(tenant id, client id, scope). Dev sign-in answers 404 in entra mode and in prod. Sign-out also ends the Entra
+session. Tests: `test_console_single_sign_on_config_is_public_and_only_in_entra_mode`, the pentest's unauthenticated
+route sweep.
 
 ## Operator responsibilities (cannot be solved in code)
 

@@ -65,7 +65,17 @@
        },
        {
         "@odata.type": "#microsoft.graph.security.analyzedMessageEvidence",
-        "senderIp": "185.220.101.4"
+        "senderIp": "185.220.101.4",
+        "networkMessageId": "nm-7f3a-0001",
+        "internetMessageId": "<20260920090200.1111@micros0ft-helpdesk.com>",
+        "subject": "Action required: your password expires today",
+        "recipientEmailAddress": "bob.lee@acme-demo.com",
+        "deliveryAction": "delivered",
+        "antiSpamDirection": "inbound",
+        "p1Sender": {
+         "emailAddress": "it-support@micros0ft-helpdesk.com",
+         "domainName": "micros0ft-helpdesk.com"
+        }
        }
       ]
      }

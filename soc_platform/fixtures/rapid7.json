@@ -308,9 +308,29 @@
     },
     "severity": "Critical",
     "exploits": 2,
-    "malwareKits": 1,
-    "solution": {
-     "summary": "Upgrade Apache Log4j 2.14.1"
+    "malwareKits": 1
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/vulnerabilities/r7-cve-2021-44228/solutions$",
+   "body": {
+    "resources": [
+     "r7-sol-cve-2021-44228"
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/solutions/r7-sol-cve-2021-44228$",
+   "body": {
+    "id": "r7-sol-cve-2021-44228",
+    "type": "rollup",
+    "summary": {
+     "text": "Upgrade Apache Log4j 2.14.1",
+     "html": "<p>Upgrade Apache Log4j 2.14.1</p>"
     }
    },
    "status": 200
@@ -329,11 +349,31 @@
       "score": 8.1
      }
     },
-    "severity": "High",
+    "severity": "Severe",
     "exploits": 2,
-    "malwareKits": 0,
-    "solution": {
-     "summary": "Upgrade Microsoft Windows 11"
+    "malwareKits": 0
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/vulnerabilities/r7-cve-2024-21412/solutions$",
+   "body": {
+    "resources": [
+     "r7-sol-cve-2024-21412"
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/solutions/r7-sol-cve-2024-21412$",
+   "body": {
+    "id": "r7-sol-cve-2024-21412",
+    "type": "rollup",
+    "summary": {
+     "text": "Upgrade Microsoft Windows 11",
+     "html": "<p>Upgrade Microsoft Windows 11</p>"
     }
    },
    "status": 200
@@ -352,11 +392,31 @@
       "score": 7.5
      }
     },
-    "severity": "High",
+    "severity": "Severe",
     "exploits": 2,
-    "malwareKits": 0,
-    "solution": {
-     "summary": "Upgrade nginx 1.18.0"
+    "malwareKits": 0
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/vulnerabilities/r7-cve-2023-44487/solutions$",
+   "body": {
+    "resources": [
+     "r7-sol-cve-2023-44487"
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/solutions/r7-sol-cve-2023-44487$",
+   "body": {
+    "id": "r7-sol-cve-2023-44487",
+    "type": "rollup",
+    "summary": {
+     "text": "Upgrade nginx 1.18.0",
+     "html": "<p>Upgrade nginx 1.18.0</p>"
     }
    },
    "status": 200
@@ -377,9 +437,29 @@
     },
     "severity": "Critical",
     "exploits": 0,
-    "malwareKits": 0,
-    "solution": {
-     "summary": "Upgrade OpenSSH 8.9p1"
+    "malwareKits": 0
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/vulnerabilities/r7-cve-2023-38408/solutions$",
+   "body": {
+    "resources": [
+     "r7-sol-cve-2023-38408"
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/solutions/r7-sol-cve-2023-38408$",
+   "body": {
+    "id": "r7-sol-cve-2023-38408",
+    "type": "rollup",
+    "summary": {
+     "text": "Upgrade OpenSSH 8.9p1",
+     "html": "<p>Upgrade OpenSSH 8.9p1</p>"
     }
    },
    "status": 200
@@ -398,11 +478,31 @@
       "score": 8.0
      }
     },
-    "severity": "High",
+    "severity": "Severe",
     "exploits": 2,
-    "malwareKits": 0,
-    "solution": {
-     "summary": "Upgrade Microsoft Windows Server 2019"
+    "malwareKits": 0
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/vulnerabilities/r7-cve-2022-41082/solutions$",
+   "body": {
+    "resources": [
+     "r7-sol-cve-2022-41082"
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/3/solutions/r7-sol-cve-2022-41082$",
+   "body": {
+    "id": "r7-sol-cve-2022-41082",
+    "type": "rollup",
+    "summary": {
+     "text": "Upgrade Microsoft Windows Server 2019",
+     "html": "<p>Upgrade Microsoft Windows Server 2019</p>"
     }
    },
    "status": 200

@@ -23,10 +23,13 @@ Every connector runs in one of two modes, set per connector in `config/connector
   never literals).
 
 **Verification status.** Every connector is implemented against the vendor's documented API and verified end to end
-on fixtures shaped like the documented responses (`soc_platform/tests/test_connectors.py`). The public feeds (NVD,
-EPSS, CISA KEV) are also verified live. The vendor connectors have **not yet been run against the client's tenants**: do
-that per connector with the *Test* button (Connectors screen) or `POST /api/v1/connectors/{name}/test`, which
-authenticates and reads one page. Items under *To confirm* are licence or permission questions for the client (A01, A03).
+on fixtures shaped like the documented responses (`soc_platform/tests/test_connectors.py`). Request and response
+formats were audited field by field against the vendors' public API references and public reference integrations
+(round 14 in `docs/TEST_REPORT.md` lists what that audit corrected). The public feeds (NVD, EPSS, CISA KEV) are also
+verified live. The vendor connectors have **not yet been run against the client's tenants**: do that per connector with
+the *Test* button (Integrations screen) or `POST /api/v1/connectors/{name}/test`, which authenticates and reads one
+page. Items under *To confirm* are licence or permission questions for the client (A01, A03). Step-by-step onboarding
+of every tool in the client's environment: `docs/CLIENT_DEPLOYMENT_GUIDE.md`.
 
 **Onboarding a tool (live):**
 

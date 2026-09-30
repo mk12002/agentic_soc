@@ -41,7 +41,10 @@ class DefenderEndpointConnector(MicrosoftConnector):
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
         path = {"alerts": "/api/alerts", "machines": "/api/machines",
                 "vulnerabilities": "/api/vulnerabilities/machinesVulnerabilities"}[stream]
-        return self.odata_page(path, cursor, {"$top": 1000})
+        params = {"$top": 1000}
+        if stream == "alerts":                  # the Alerts API returns evidence (files, URLs, IPs) only on request
+            params["$expand"] = "evidence"
+        return self.odata_page(path, cursor, params)
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         return [{"alerts": self._alert, "machines": self._machine, "vulnerabilities": self._vuln}[stream](raw)]

@@ -4,24 +4,71 @@
    "method": "POST",
    "path": "^/app/hec-api/v1.0/search/query$",
    "body": {
+    "responseEnvelope": {
+     "requestId": "7f3c0d1e-0000-4000-8000-000000000001",
+     "responseCode": 200,
+     "responseText": "",
+     "additionalText": "",
+     "scrollId": "",
+     "recordsNumber": 1
+    },
     "responseData": [
      {
       "entityInfo": {
-       "entityId": "av-ent-0001"
+       "entityId": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+       "customerId": "acme",
+       "saas": "office365_emails",
+       "saasEntityType": "office365_emails_email",
+       "entityCreated": "2026-09-20T09:02:00Z",
+       "entityUpdated": "2026-09-20T09:02:00Z",
+       "entityActionState": null
+      },
+      "entityPayload": {
+       "internetMessageId": "<20260920090200.1111@micros0ft-helpdesk.com>",
+       "subject": "Action required: your password expires today",
+       "received": "2026-09-20T09:02:00Z",
+       "recipients": [
+        "jane.doe@acme-demo.com",
+        "bob.lee@acme-demo.com",
+        "raj.mehta@acme-demo.com",
+        "priya.nair@acme-demo.com",
+        "arun.k@acme-demo.com",
+        "meera.s@acme-demo.com",
+        "tom.w@acme-demo.com",
+        "li.chen@acme-demo.com"
+       ],
+       "to": [
+        "jane.doe@acme-demo.com",
+        "bob.lee@acme-demo.com",
+        "raj.mehta@acme-demo.com",
+        "priya.nair@acme-demo.com",
+        "arun.k@acme-demo.com",
+        "meera.s@acme-demo.com",
+        "tom.w@acme-demo.com",
+        "li.chen@acme-demo.com"
+       ],
+       "fromEmail": "it-support@micros0ft-helpdesk.com",
+       "fromDomain": "micros0ft-helpdesk.com",
+       "isQuarantined": false,
+       "isIncoming": true,
+       "isInternal": false
       },
       "entitySecurityResult": {
-       "combinedVerdict": "clean",
-       "antiphishing": {
-        "verdict": "clean"
+       "combinedVerdict": {
+        "ap": "clean",
+        "av": "clean",
+        "dlp": null,
+        "clicktimeProtection": "clean",
+        "shadowIt": "clean"
        },
-       "anti_malware": {
-        "verdict": "clean"
-       },
-       "clicktimeProtection": {
-        "verdict": "clean"
-       }
+       "ap": [],
+       "av": [],
+       "dlp": [],
+       "clicktimeProtection": [],
+       "shadowIt": []
       },
-      "entityActions": []
+      "entityActions": [],
+      "entityAvailableActions": []
      }
     ]
    },
@@ -32,7 +79,75 @@
    "method": "POST",
    "path": "^/app/hec-api/v1.0/search/query$",
    "body": {
+    "responseEnvelope": {
+     "requestId": "7f3c0d1e-0000-4000-8000-000000000001",
+     "responseCode": 200,
+     "responseText": "",
+     "additionalText": "",
+     "scrollId": "",
+     "recordsNumber": 0
+    },
     "responseData": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/app/hec-api/v1.0/search/entity/9f8e7d6c5b4a39281706f5e4d3c2b1a0$",
+   "body": {
+    "responseEnvelope": {
+     "requestId": "7f3c0d1e-0000-4000-8000-000000000001",
+     "responseCode": 200,
+     "responseText": "",
+     "additionalText": "",
+     "scrollId": "",
+     "recordsNumber": 1
+    },
+    "responseData": [
+     {
+      "entityInfo": {
+       "entityId": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+       "customerId": "acme",
+       "saas": "office365_emails",
+       "saasEntityType": "office365_emails_email",
+       "entityCreated": "2026-09-20T05:59:40Z",
+       "entityUpdated": "2026-09-20T05:59:40Z",
+       "entityActionState": null
+      },
+      "entityPayload": {
+       "internetMessageId": "<20260920060000.5555@vendor.example>",
+       "subject": "Spring offers from vendor.example",
+       "received": "2026-09-20T05:59:40Z",
+       "recipients": [
+        "arun.k@acme-demo.com"
+       ],
+       "to": [
+        "arun.k@acme-demo.com"
+       ],
+       "fromEmail": "news@vendor.example",
+       "fromDomain": "vendor.example",
+       "isQuarantined": false,
+       "isIncoming": true,
+       "isInternal": false
+      },
+      "entitySecurityResult": {
+       "combinedVerdict": {
+        "ap": "spam",
+        "av": "clean",
+        "dlp": null,
+        "clicktimeProtection": "clean",
+        "shadowIt": "clean"
+       },
+       "ap": [],
+       "av": [],
+       "dlp": [],
+       "clicktimeProtection": [],
+       "shadowIt": []
+      },
+      "entityActions": [],
+      "entityAvailableActions": []
+     }
+    ]
    },
    "status": 200
   },
@@ -40,24 +155,36 @@
    "method": "POST",
    "path": "^/app/hec-api/v1.0/event/query$",
    "body": {
+    "responseEnvelope": {
+     "requestId": "7f3c0d1e-0000-4000-8000-000000000001",
+     "responseCode": 200,
+     "responseText": "",
+     "additionalText": "",
+     "scrollId": "",
+     "recordsNumber": 1
+    },
     "responseData": [
      {
-      "eventId": "av-evt-001",
-      "type": "spam",
+      "eventId": "4d2e9a0b7c1f4e6a8b3d5c7e9f1a2b3c",
+      "customerId": "acme",
+      "saas": "office365_emails",
+      "entityId": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
       "state": "detected",
-      "severity": "low",
-      "eventCreated": "2026-09-20T06:00:00Z",
-      "description": "Spam campaign from vendor.example",
-      "senderAddress": "news@vendor.example",
-      "recipients": [
-       "arun.k@acme-demo.com"
-      ],
+      "type": "spam",
+      "confidenceIndicator": "spam",
+      "eventCreated": "2026-09-20T06:00:00.000000+00:00",
+      "severity": "2",
+      "description": "Spam detected in an email from news@vendor.example - 'Spring offers from vendor.example'",
+      "data": "",
+      "additionalData": null,
+      "availableEventActions": null,
       "actions": [
        {
-        "actionType": "tag"
+        "actionType": "tag",
+        "createTime": "2026-09-20T06:00:05Z",
+        "relatedEntityId": ""
        }
-      ],
-      "entityId": "av-ent-0009"
+      ]
      }
     ]
    },
