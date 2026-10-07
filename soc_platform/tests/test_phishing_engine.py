@@ -3,7 +3,7 @@
 The rest of the suite runs the heuristic analyser only (conftest pins SOC_PHISHING_ENGINE=0) so it stays fast and
 does not need PyTorch. These tests prove the engine and the platform work together: every agent answers, the two
 opinions are fused as documented, engine status notes are not cited as evidence, and a failing engine falls back.
-Tests that load the models are skipped when PyTorch / transformers are not installed.
+Tests that load the models are skipped when the engine's libraries (requirements/phishing.txt) are not installed.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "artifacts" / "phishing" / "corpus"
 AGENTS = {"header_agent", "content_agent", "url_agent", "attachment_agent", "sandbox_agent", "threat_intel_agent",
           "user_behavior_agent"}
-needs_models = pytest.mark.skipif(not az.EngineAnalyzer.available(), reason="PyTorch / transformers not installed")
+needs_models = pytest.mark.skipif(not az.EngineAnalyzer.available(), reason="ML engine libraries not installed")
 
 
 def _result(verdict, score, signals=(), backend="heuristic"):
@@ -106,7 +106,7 @@ def test_the_setting_auto_follows_whether_the_engine_is_installed(monkeypatch):
 @pytest.fixture(scope="module")
 def engine():
     if not az.EngineAnalyzer.available():
-        pytest.skip("PyTorch / transformers not installed")
+        pytest.skip("ML engine libraries not installed")
     e = az.EngineAnalyzer(offline=True)
     az.warm_up_engine()                                     # loads the models once for the module
     return e
@@ -275,3 +275,28 @@ def test_the_engine_makes_no_outbound_connection_in_offline_mode(engine, monkeyp
         monkeypatch.setattr(socket.socket, "connect", real_connect)
     assert attempts == [], attempts
     assert engine_settings.azure_ocr_key is None and engine_settings.enable_urlhaus_lookup is False
+
+
+def test_the_engine_never_writes_its_ioc_store_into_the_source_tree(monkeypatch):
+    # .env carries a relative IOC_DB_PATH for the engine's own deployment; resolved by the engine it pointed inside
+    # artifacts/phishing and in-platform runs rewrote a tracked file
+    from soc_platform.domains.phishing.engine.configs.settings import settings as engine_settings
+
+    repo = Path(__file__).resolve().parents[2]
+    for value in ("data/ioc_store.db", ""):
+        monkeypatch.setenv("IOC_DB_PATH", value)
+        monkeypatch.setattr(engine_settings, "ioc_db_path", "data/ioc_store.db", raising=False)
+        az.EngineAnalyzer.enforce_offline()
+        assert repo not in engine_settings.ioc_db_file.resolve().parents
+
+
+def test_engine_behaviour_does_not_depend_on_a_developers_env_file(monkeypatch):
+    # the engine reads the project's .env itself: with local QR/barcode decoding switched on there and off in a
+    # container, the same e-mail scored 0.82 on a laptop and 0.92 in Docker. In the platform the setting is pinned.
+    from soc_platform.domains.phishing.engine.configs.settings import settings as engine_settings
+
+    for value in (False, True):
+        monkeypatch.setattr(engine_settings, "enable_ocr_extraction", value, raising=False)
+        az.EngineAnalyzer.enforce_offline()
+        assert engine_settings.enable_ocr_extraction is True
+        assert engine_settings.azure_ocr_endpoint is None and engine_settings.azure_ocr_key is None   # local only

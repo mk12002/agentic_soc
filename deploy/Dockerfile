@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY requirements/ requirements/
 RUN pip install --no-cache-dir --prefix=/install -r requirements/platform.txt \
  && if [ "$WITH_PHISHING_ENGINE" = "true" ]; then \
-      pip install --no-cache-dir --prefix=/install torch --index-url https://download.pytorch.org/whl/cpu && \
       pip install --no-cache-dir --prefix=/install -r requirements/phishing.txt ; \
     else pip install --no-cache-dir --prefix=/install pyzbar Pillow ppdeep ; fi
 

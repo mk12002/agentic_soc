@@ -416,13 +416,13 @@ def _err(exc: Exception) -> HTTPException:
 # ----------------------------------------------------------------------------- system
 
 
-_CHAIN_CACHE: dict[str, Any] = {"at": 0.0, "ok": None}
+_CHAIN_CACHE: dict[str, Any] = {"at": None, "ok": None}   # "at" None = never verified (monotonic time can be < 300 s after boot)
 
 
 @app.get("/health")
 def health(s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
     now = __import__("time").monotonic()
-    if now - _CHAIN_CACHE["at"] > 300:  # full verification at most every 5 min; /api/v1/audit/verify is on demand
+    if _CHAIN_CACHE["at"] is None or now - _CHAIN_CACHE["at"] > 300:  # at most every 5 min; /api/v1/audit/verify on demand
         _CHAIN_CACHE.update(at=now, ok=AuditLog(s).verify()["ok"])
     return {"status": "ok", "version": __version__, "audit_chain": _CHAIN_CACHE["ok"],
             "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings()),

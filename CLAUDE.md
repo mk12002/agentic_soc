@@ -269,7 +269,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): ~329 platform tests on SQLite and on PostgreSQL, 205
+- Current counts (keep docs in sync when they change): 345 platform tests passing on SQLite and on PostgreSQL (360 collected, 15 opt-in/engine-specific skips), 205
   engine tests, 103/103 features verified.
 
 ---
@@ -360,6 +360,19 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   into the wrong database).
 - **Leases are released only after the run is recorded**, due-ness is re-checked after taking the lease, and taking a
   lease is a compare-and-swap whose insert race returns "not acquired" - each closed a real race.
+- **A compare-and-swap version must change on every write.** `updated_at = utcnow()` repeats within one Windows
+  clock tick, so a stale writer still matches (ABA). Write `jobs.next_version(seen)` (always later than what was read).
+- **The engine reads the project's `.env` itself**, so anything there that changes behaviour makes a laptop and a
+  container disagree (QR decoding on in `.env`, off in Docker: 0.82 vs 0.92 for one e-mail). Pin verdict-relevant
+  engine settings in `EngineAnalyzer.OFFLINE_SETTINGS`.
+- **Job order matters on a first start**: everything is due at once and runs in `jobs.JOBS` order - vulnerability
+  first, or incidents are scored without exposure data. Open incidents are reassessed when new KEV exposure appears
+  (`IncidentService.reassess_open`); evidence creation is idempotent so reassessments never duplicate rows.
+- **Wall-clock windows over vendor data age out.** "Newly KEV-listed" once meant "last 14 days of real time", so the
+  demo's finding vanished a week later; anchor such windows to the data (the catalogue's latest addition, capped at
+  today), as risk does.
+- **`time.monotonic()` is uptime on Windows**: a cache initialised to 0 and "refreshed after 300 s" skipped the first
+  check after a reboot (`/health` audit_chain null). Start caches as "never refreshed" (None).
 - **"First insert" of a `system_flags` row races** (two threads both see no row): catch `IntegrityError` and treat
   it as lost / retry onto the existing row (`jobs._lease`, `Scheduler._beat`, `audit._lock_chain`). Two writers of
   one row must not read-modify-write: use a compare-and-swap on `updated_at` (`_lease`, `_write_beat`).

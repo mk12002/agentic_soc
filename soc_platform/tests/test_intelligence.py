@@ -426,3 +426,11 @@ def test_claude_through_a_gateway_can_skip_the_beta_fallback(monkeypatch):
     p.client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: calls.setdefault("plain", kw) and _msg("{}")))
     assert p.complete("sys", "user", tier="large").text == "{}"
     assert "fallbacks" not in calls["plain"] and "betas" not in calls["plain"]
+
+
+def test_a_newly_kev_listed_cve_does_not_age_out_of_a_frozen_catalogue(session, world, monkeypatch):
+    # "newly listed" is measured from the catalogue's latest addition, not the wall clock: a year later the fixture
+    # catalogue (or an offline mirror) still shows its newest KEV exposure, and live data keeps a two-week window
+    monkeypatch.setenv("SOC_CLOCK_OFFSET_SECONDS", str(365 * 86400))
+    rules = {i.rule for i in IntelligenceService(session, vm=world).refresh()}
+    assert "new_kev_exposure" in rules

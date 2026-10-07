@@ -354,6 +354,10 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
 
 * **Standard reports, preconfigured** - board monthly (PowerPoint), CISO weekly, vulnerability weekly, phishing
   and awareness monthly, post-incident report (per case), quarterly control assurance, SOC daily situation report.
+* **Charts from the same computed figures** - cases opened per day, open findings and SLA breaches by team, cloud
+  misconfigurations and incidents by severity, verdicts of reported e-mails, highest-risk users and hosts. PowerPoint
+  reports get native charts (editable, data in the embedded sheet); Word reports get the chart as an image. The model
+  never sees or shapes chart data.
 * **Any other report, described in words** - e.g. *"a one-page board brief on phishing and supplier risk this
   quarter, as slides"*. A planner (the LLM when configured, keyword rules otherwise) turns the request into sections,
   audience, format and period, using **only** the 16 sources in the data catalogue. You review the plan, then

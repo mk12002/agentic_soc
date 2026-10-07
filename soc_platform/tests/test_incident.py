@@ -170,3 +170,41 @@ def test_deferred_narration_keeps_the_case_usable_then_adds_the_written_explanat
         assert (c.verdict, c.severity) == (first[c.id]["verdict"], first[c.id]["severity"])   # decisions unchanged
     assert CaseService(session).pending_narration("incident") == []
     assert svc.narrate_pending([c.id for c in cases]) == 0                            # nothing left to do
+
+
+def test_an_open_incident_is_reassessed_once_when_exposure_appears_on_its_host(session):
+    # On a first start the incident job ran before the first vulnerability sync, so an incident on an exposed host was
+    # scored without knowing it, and nothing ever looked again. Open incidents are now reassessed when KEV-listed
+    # exposure appears on their hosts - once, without duplicating evidence.
+    from soc_platform.core.models import Evidence
+    from soc_platform.core.schema import severity_rank
+    from soc_platform.domains.vulnerability.service import VulnerabilityService
+
+    reg = ConnectorRegistry.all_fake()
+    im = IncidentService(session, reg)
+    im.ingest()
+    cases = [c for c in im.cluster() if c.status != "closed"]
+    for c in cases:
+        im.investigate(c.id)
+    before = {c.id: session.get(Case, c.id).severity for c in cases}
+    assert im.reassess_open() == []                                   # nothing new yet: nothing to do
+
+    VulnerabilityService(session, reg).refresh()                      # the first scan arrives
+    redone = im.reassess_open()
+    assert redone
+    for cid in redone:
+        case = session.get(Case, cid)
+        assert severity_rank(case.severity) >= severity_rank(before[cid])
+        assert any("KEV-listed" in e.summary for e in session.query(Evidence).filter(Evidence.case_id == cid))
+    assert any(severity_rank(session.get(Case, cid).severity) > severity_rank(before[cid]) for cid in redone)
+
+    # a reassessment's own lookups can reveal more exposure (e.g. the EDR's vulnerability records); it settles
+    for _ in range(3):
+        if not im.reassess_open():
+            break
+    assert im.reassess_open() == []
+    for cid in before:
+        im.investigate(cid)                                           # even a forced re-run repeats no evidence row
+        rows = [(e.source_tool, e.summary, e.dimension, e.entity_id, (e.data or {}).get("lookup"), (e.data or {}).get("value"))
+                for e in session.query(Evidence).filter(Evidence.case_id == cid)]
+        assert len(rows) == len(set(rows))

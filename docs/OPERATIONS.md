@@ -48,9 +48,9 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 
 | Job | Default interval | Does |
 |---|---|---|
-| incident | 5 min | ingest alerts, cluster, investigate; commit the cases, then add the model's explanations in parallel |
-| phishing | 2 min | pull reported mail, analyse; commit the verdicts, then add the model's explanations in parallel |
 | vulnerability | 6 h | ingest, consolidate, enrich, prioritise, Wiz misconfigurations; keep the risk register current (new P1 CVEs proposed, entries updated / marked remediated) |
+| incident | 5 min | ingest alerts, cluster, investigate; reassess open incidents when KEV-listed exposure appeared on their hosts since they were scored; commit the cases, then add the model's explanations in parallel |
+| phishing | 2 min | pull reported mail, analyse; commit the verdicts, then add the model's explanations in parallel |
 | follow_up | 24 h | ITSM ticket sync (+ closure validation), weekly follow-up per remediation plan (`SOC_VM_FOLLOWUP_DAYS`, default 7), exception expiry |
 | intelligence | 10 min | risk + correlation + drift, insight narration |
 | daily_report | 24 h | daily exposure report |
@@ -59,7 +59,8 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 | self_check | 1 h | platform consistency checks (see below) |
 | notify | 1 min | send new findings at or above the threshold to the configured Teams / Slack / webhook channels; retry failures |
 
-Intervals: `SOC_JOB_<NAME>_SECONDS` (`SOC_JOB_NOTIFY_SECONDS` for notify). Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
+When several jobs are due at once (first start) they run in this order, vulnerability first, so incidents are
+scored knowing which hosts are exposed. Intervals: `SOC_JOB_<NAME>_SECONDS` (`SOC_JOB_NOTIFY_SECONDS` for notify). Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
 failing 3 runs in a row is marked **dead_letter** and raises a high insight; fix the cause and use
 *Run now* / `POST /api/v1/jobs/{name}/run`. Jobs are idempotent, so replays never duplicate incidents or actions.
 
@@ -101,7 +102,7 @@ SOC_PUBLIC_URL=https://soc.example    # optional: messages link to the console
 | `SOC_LLM_CONCURRENCY` | 4 | Model calls in flight at once for batches (finding narratives, report sections); keep under the provider's rate limit |
 | `SOC_BRIEF_CACHE_SECONDS` | 900 | Reuse an unchanged situation brief |
 | `SOC_LLM_EXPLAIN_AUTO_CLOSED` | 0 | 1 = the model also explains reports that auto-close |
-| `SOC_PHISHING_ENGINE` | auto | The trained ML engine analyses reported e-mail with the heuristic analyser: `auto` = when PyTorch / transformers are installed (`requirements/phishing.txt`), `1` = on, `0` = heuristic only |
+| `SOC_PHISHING_ENGINE` | auto | The trained ML engine analyses reported e-mail with the heuristic analyser: `auto` = when the engine's libraries are installed (`requirements/phishing.txt`: scikit-learn, XGBoost, LangGraph; no PyTorch), `1` = on, `0` = heuristic only |
 | `SOC_PHISHING_SANDBOX` | 0 | 1 = also run the engine's sandbox agent (only with an isolated detonation host configured; without one its static fallback measured no better than chance) |
 | `SOC_PHISHING_ENGINE_LOG_LEVEL` | WARNING | Log level of the in-process engine (it logs every decision step at INFO) |
 | `SOC_VM_FOLLOWUP_DAYS` | 7 | At most one follow-up per remediation plan per this many days |

@@ -24,10 +24,10 @@ import json
 import logging
 import re
 from collections import defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from soc_platform.core.audit import AuditLog
@@ -239,7 +239,12 @@ class CorrelationEngine:
         from soc_platform.domains.vulnerability.models import ConsolidatedFinding, VulnIntel
 
         out = []
-        recent = (utcnow() - timedelta(days=14)).date().isoformat()
+        # "newly listed" = within 14 days of the catalogue's latest addition (capped at today): live, that is the last
+        # two weeks; on a frozen catalogue (fixtures, an offline mirror) it does not silently age out with the calendar
+        latest = self.s.execute(select(func.max(VulnIntel.kev_date_added)).where(VulnIntel.kev.is_(True))).scalar()
+        today = utcnow().date()
+        anchor = min(today, date.fromisoformat(latest[:10])) if latest else today
+        recent = (anchor - timedelta(days=14)).isoformat()
         for vi in self.s.execute(select(VulnIntel).where(VulnIntel.kev.is_(True))).scalars():
             if not vi.kev_date_added or vi.kev_date_added < recent:
                 continue

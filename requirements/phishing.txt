@@ -1,11 +1,9 @@
 # Phishing domain ML/analysis stack (install after platform.txt)
-transformers>=4.36.0
 scikit-learn>=1.8,<1.9   # the trained header/URL/attachment/sandbox models were saved with 1.8; other versions warn and may change results
 xgboost>=2.0.0
 lightgbm>=4.1.0
 pandas>=2.1.0
 numpy>=1.26.0
-torch>=2.1.0
 scipy>=1.11.0
 joblib>=1.3.0
 python-whois>=0.9.0
@@ -25,7 +23,6 @@ python-dotenv>=1.0.0
 loguru>=0.7.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.1.1
-google-auth-oauthlib>=1.0.0
 pyzbar>=0.1.9
 Pillow>=10.2.0
 azure-ai-vision-imageanalysis>=1.0.0

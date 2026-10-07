@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from soc_platform.connectors.base import BaseConnector, LookupResult
@@ -139,6 +140,14 @@ class EnrichmentOrchestrator:
                         self.store.ingest(rec)
                 except Exception:
                     logging.getLogger(__name__).warning("an enrichment record could not be stored in the context store", exc_info=True)
+            # the same lookup (type and value, not just the same wording) answered the same way is already on the case
+            same = next((e for e in self.s.execute(select(Evidence).where(
+                Evidence.case_id == case_id, Evidence.source_tool == c.tool, Evidence.summary == r.summary,
+                Evidence.entity_id.is_(None) if t.entity_id is None else Evidence.entity_id == t.entity_id)).scalars()
+                if (e.data or {}).get("lookup") == t.etype and (e.data or {}).get("value") == t.value), None)
+            if same is not None:        # a reassessment re-collects it: keep one row
+                evidence.append(same)
+                continue
             ev = Evidence(case_id=case_id, entity_id=t.entity_id, dimension=r.dimension or c.dimension,
                           source_tool=c.tool, summary=r.summary, deep_link=r.deep_link,
                           data={"lookup": t.etype, "value": t.value, "elapsed_ms": r.elapsed_ms, "signals": r.signals,

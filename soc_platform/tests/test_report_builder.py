@@ -169,3 +169,27 @@ def test_report_builder_over_http_scope_and_encryption(tmp_path, monkeypatch):
     finally:
         get_settings.cache_clear()
         dbm._default = None
+
+
+def test_reports_carry_charts_drawn_from_the_computed_figures(session, estate, tmp_path):
+    from docx import Document
+    from pptx import Presentation
+
+    from soc_platform.domains.phishing.service import PhishingService
+    from soc_platform.reporting import charts
+
+    B.build_report(session, estate, B.get_template(session, "board_monthly"), tmp_path / "b", llm=None, by="t")
+    deck = Presentation(str(next((tmp_path / "b").iterdir())))
+    found = {sh.chart.chart_title.text_frame.text: sh.chart for sl in deck.slides for sh in sl.shapes if sh.has_chart}
+    assert "Verdicts of user-reported emails" in found                       # native, editable PowerPoint chart
+    plot = found["Verdicts of user-reported emails"].plots[0]
+    mix = PhishingService(session, estate).metrics()["verdict_mix"]
+    assert dict(zip(plot.categories, plot.series[0].values, strict=True)) == {k: float(v) for k, v in mix.items() if v}
+
+    B.build_report(session, estate, B.get_template(session, "vm_weekly"), tmp_path / "w", llm=None, by="t")
+    doc = Document(str(next((tmp_path / "w").iterdir())))
+    assert len(doc.inline_shapes) >= 2                                          # chart images in the Word report
+
+    c = {"title": "t", "categories": ["a", "b"], "series": [{"name": "n", "values": [3, 1]}]}
+    assert charts.to_png(c) == charts.to_png(c)                                 # same figures, same bytes
+    assert charts.from_counts("t", {"low": 0}) is None and not charts.valid(None)

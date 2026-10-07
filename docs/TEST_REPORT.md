@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-09-29 (round 13; earlier rounds 2026-09-24 to 2026-09-29) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-07 (round 15; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,78 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 13 (2026-09-29) - latest results: new content model, the ML engine made strictly offline
+## 0. Round 15 (2026-10-07) - latest results: the 4-week development plan checked item by item
+
+Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **345 passed**, 0 failed, 15 skipped |
+| Platform suite on PostgreSQL 16 | **345 passed**, 0 failed, 15 skipped |
+| Feature verification | **103 of 103 features verified** (`--browser --engine --live --llm`): 260 mapped test cases incl. live LLM and live feeds; ML engine suite 205 passed; evaluations and browser tour clean |
+| Phishing evaluation, built-in labelled corpus (20 messages) | combined analysis 20 of 20 exact; 14 of 14 malicious caught, 0 false positives (engine alone 13 of 14, 0 false positives) |
+| Docker (Desktop 29.8, Compose 5.5) | images built (core 1.7 GB; with the ML engine 3.7 GB, no PyTorch); stack started from empty volumes; first scheduler pass vulnerability -> incident -> phishing; after `demo`: 7 + 3 cases, 34 actions awaiting approval (phishing 16, incident 15, vulnerability 3), 6 open vulnerabilities, verdicts identical to a laptop with and without the engine; figures survive a restart; reports with charts built and downloaded through the API; no errors in the API or scheduler logs |
+| Lint / bandit / pip-audit / JS syntax | clean / 0 medium or high / **0 known vulnerabilities** / clean |
+
+Every checklist item of the development plan was compared with the code and with real runs (a fresh `demo` load:
+7 phishing and 3 incident cases, 17 raw scanner findings consolidated into 6 vulnerabilities). Found and fixed:
+
+| Plan item | What was wrong | Fix |
+|---|---|---|
+| Week 3 - reports "with charts" | no report contained a chart | charts from the computed figures: native, editable charts in PowerPoint, PNG (Pillow) in Word; test compares chart values with the platform's own figures |
+| Week 4 - "zero high/medium findings" (pip-audit) | one known vulnerability (oauthlib 3.3.1, PYSEC-2026-4114), pulled in only by the unused `google-auth-oauthlib` | dependency removed; pip-audit reports none |
+| Week 4 - security / tests never write into the project | the in-platform ML engine read the project's `.env` itself; its relative `IOC_DB_PATH` resolved inside `artifacts/phishing/` and runs rewrote a tracked file | the platform always keeps the engine's IOC store outside the source tree; regression test |
+| Week 4 - health and monitoring | `/health` reported `audit_chain: null` for the first 5 minutes after a host boots (the verification cache started at monotonic time 0, which on Windows is the uptime) | the cache starts as "never verified"; regression test |
+| Week 3 - correlation rules | the "newly KEV-listed exposure" rule used the wall clock, so the demo's finding disappeared two weeks after the fixture date (found because a week had passed) | measured from the catalogue's latest addition, capped at today (live behaviour unchanged); test moves the clock a year ahead |
+| Week 1 - scheduler / job leases (a random failure in one full run) | compare-and-swap writes used `updated_at = now` as the version; the Windows clock moves in ~15 ms steps, so two writes in one tick got the same stamp and a stale writer still matched: the heartbeat put back an older "running job" (1 failure in 1 of 5 full runs), and a lease could in principle be taken twice | every swap writes a version strictly later than the one it read; a frozen-clock test reproduces the race every time (fails before the fix, passes after); the original test passed 40 of 40 repeats |
+| Week 4 - feature verification | the verification report ran only the engine's unit tests (162) while the docs quote 205 (unit + integration) | the report runs both |
+| Week 4 - Docker deployment (found by running it) | no `.dockerignore`: the build context would have carried `.env`, `.venv`, local databases and documents | `.dockerignore` added; the image contains no `.env` and runs as uid 1001 |
+| Week 2 - incident workflow (found by the Docker run) | scheduled from a fresh start, the incident job ran before the first vulnerability sync, so the Exchange incident was scored without its host's exposure (medium, no actions instead of high, three actions) and nothing ever looked again | jobs run vulnerability first when several are due; open incidents are reassessed when KEV-listed exposure appears on their hosts; evidence creation is idempotent (same case, source, wording, entity and lookup), so reassessments never duplicate rows; tests for reassessment, idempotence and unchanged evidence on a single run (132 rows before and after) |
+| Week 4 - ML engine in Docker (found by the Docker run) | the engine read the developer's `.env`: local QR decoding was on on the laptop and off in the container, so one e-mail scored 0.82 vs 0.92 | the setting is pinned in the platform's offline settings; the container now scores exactly like the laptop; regression test |
+| Week 4 - ML engine packaging | the engine was "available" only with PyTorch and transformers installed, but nothing imports them (the content model is TF-IDF) | availability checks the libraries really used; PyTorch and transformers removed from requirements and the image; the 7 models were run with both libraries blocked from import |
+
+Not fully met, and why (`docker compose up`, open earlier in this round, is now verified - see the Docker row):
+- **"Migration support"** (week 1): new tables and new nullable columns reach existing databases automatically, and
+  PostgreSQL text columns are widened; there is no migration framework for required columns, renames or drops.
+- **Plan wording:** the plan calls the board deck "a formatted Word document"; it is a PowerPoint deck by design.
+
+## Round 14 (2026-09-30): connector formats audited, client deployment readiness
+
+Final results for this round's code are in round 15 (its full runs were interrupted when the machine restarted).
+
+**Connector data formats audited against the vendors.** Every connector's requests and parsed fields were compared
+with the vendor's public API reference and, where the reference is gated, with public reference integrations and
+their recorded sample responses. Found and fixed (the fixtures now reproduce the real shapes, so the demo shows what a
+live tenant returns):
+
+| Connector | What was wrong | Effect in a live tenant before the fix |
+|---|---|---|
+| Avanan (Check Point HEC) | security events carry no sender, recipients, subject or Message-ID - only an entity id; `combinedVerdict` is one verdict per engine, not a string; the search filter key is `entityExtendedFilter`; actions need `entityType`; severities are "1"-"5" | events without people or messages; reconciliation crashing on the verdict; searches and quarantine rejected |
+| Wiz | the issue rule is a GraphQL union (needs fragments); cloud resources have no top-level `externalId` / `region` / `updatedAt` | both queries rejected by the API |
+| ServiceNow | `sysparm_display_value=true` returns timestamps in the integration user's timezone; `get_ticket` sent no display parameter, so the group came back as a bare link | times shifted by the user's offset; ticket sync without the assignment group |
+| Rapid7 InsightVM | a vulnerability definition has no `solution` field (fix text lives under `/solutions`); its severity words ("Severe", "Moderate") were copied through; `RAPID7_VERIFY_TLS=false` evaluated to true | no fix text; severities off the platform scale; verification could not be turned off |
+| Defender for Endpoint | alerts carry evidence only with `$expand=evidence` | alerts without files, IPs and URLs |
+| Entra sign-ins | `mfaDetail` / `authenticationRequirement` exist only in the beta API | fields always empty on v1.0 |
+| Defender for Office 365 | alert message evidence (recipient, sender, Message-IDs) was not read | recipients only from separate user evidence |
+| Generic SIEM | `field_map` from an environment variable is a JSON string | ingestion crashed when the map was set via the environment |
+
+Checked and correct: CrowdStrike, Umbrella, Canary, Jira, Sentinel, Delinea (paths are settings), NVD / EPSS / KEV
+(also live), and all eight threat-intelligence sources. Each fix has a regression test.
+
+**Ready for the client's environment:**
+- `docs/CLIENT_DEPLOYMENT_GUIDE.md`: hosting, Entra sign-in, every tool's permissions, settings and egress hosts,
+  the client's in-house LLM, action rollout, first-sync plan, hardening checklist.
+- The console had no production sign-in (only the dev form). It now runs Entra ID authorization code + PKCE itself;
+  `GET /api/v1/auth/config` supplies the public values. Covered by a configuration test and the pentest's
+  unauthenticated-route sweep; the full flow needs a real tenant.
+- An organisation's own LLM gateway (Claude, Gemini and OpenAI models behind one endpoint) is configuration only:
+  auth header and prefix, extra headers, CA bundle, JSON mode, beta fallback switch - with tests.
+- The database URL can come from a vault file; `init-db` no longer prints the database password.
+
+**Not claimed:** no connector has yet run against the client's tenants, and the console sign-in has not run against
+a real Entra tenant.
+
+## Round 13 (2026-09-29): new content model, the ML engine made strictly offline
 
 Results on the final code (this round's work together with the round 12 security fixes):
 

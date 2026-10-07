@@ -24,10 +24,13 @@ from sqlalchemy.orm import Session
 
 from soc_platform.core.models import JobRun, SystemFlag, utcnow
 
-JOBS: dict[str, tuple[str, int]] = {  # name -> (interval env var, default seconds)
+# name -> (interval env var, default seconds). Order matters when several are due at once (first start): exposure data
+# (vulnerability) is collected before incidents and phishing are scored, so a fresh deployment does not score an
+# incident without knowing its host is exposed.
+JOBS: dict[str, tuple[str, int]] = {
+    "vulnerability": ("SOC_JOB_VM_SECONDS", 6 * 3600),
     "incident": ("SOC_JOB_INCIDENT_SECONDS", 300),
     "phishing": ("SOC_JOB_PHISHING_SECONDS", 120),
-    "vulnerability": ("SOC_JOB_VM_SECONDS", 6 * 3600),
     "follow_up": ("SOC_JOB_FOLLOWUP_SECONDS", 24 * 3600),
     "daily_report": ("SOC_JOB_DAILY_REPORT_SECONDS", 24 * 3600),
     "weekly_reports": ("SOC_JOB_WEEKLY_REPORTS_SECONDS", 7 * 24 * 3600),
@@ -57,9 +60,11 @@ def _body(name: str, s: Session) -> dict[str, Any]:
         done = [c.id for c in cases if c.status != "closed"]
         for cid in done:
             sv["incident"].investigate(cid, narrate=False)
+        reassessed = sv["incident"].reassess_open(exclude=set(done), narrate=False)   # new exposure on their hosts
         s.commit()          # the cases are visible and actionable now; the written explanations follow
-        narrated = sv["incident"].narrate_pending(done)
-        return {"synced": ing.synced, "new_incidents": len(cases), "investigated": len(done), "narrated": narrated}
+        narrated = sv["incident"].narrate_pending(done + reassessed)
+        return {"synced": ing.synced, "new_incidents": len(cases), "investigated": len(done),
+                "reassessed": len(reassessed), "narrated": narrated}
     if name == "phishing":
         subs = [x for x in sv["phishing"].ingest_reported() if x.status == "new"]
         case_ids = [sv["phishing"].process(sub.id, narrate=False)["case"]["id"] for sub in subs]
@@ -131,6 +136,14 @@ def _holder() -> str:
     return f"{HOLDER}:{threading.get_ident()}"
 
 
+def next_version(seen: datetime | None) -> datetime:
+    """The ``updated_at`` a compare-and-swap writes: now, but always later than the version it read. The Windows clock
+    moves in ~15 ms steps, so two writes in one tick got the same stamp and a writer holding a stale copy still matched
+    (ABA): a heartbeat put back an old "running job", and a lease could in principle be taken twice."""
+    now = utcnow()
+    return now if seen is None or now > _aware(seen) else _aware(seen) + timedelta(microseconds=1)
+
+
 def _lease(db: Any, name: str, *, release: bool = False) -> bool:
     """Take (or release) a job's lease. Atomic across schedulers: the row is changed with a compare-and-swap on its
     ``updated_at``, and the first-ever lease is an insert that only one scheduler can win - the loser of either race
@@ -162,7 +175,7 @@ def _lease(db: Any, name: str, *, release: bool = False) -> bool:
                 value = mine
             s.expunge(f)
             changed = s.execute(update(SystemFlag).where(SystemFlag.name == key, SystemFlag.updated_at == seen)
-                                .values(value=value, updated_by="scheduler", updated_at=now)).rowcount
+                                .values(value=value, updated_by="scheduler", updated_at=next_version(seen))).rowcount
             return release or changed == 1                    # 0 rows: someone else changed it first
     except IntegrityError:
         return False

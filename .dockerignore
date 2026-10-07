@@ -1,0 +1,33 @@
+# Build context = repository root (deploy/docker-compose.yml: context ..). Only what the Dockerfile copies is needed;
+# secrets, local data and environments must never reach the image builder.
+.git
+.gitignore
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.hypothesis
+
+# secrets and private data
+.env
+.env.*
+!.env.example
+gdrive_credentials.json
+test_reports
+*.docx
+*.pptx
+*.xlsx
+
+# local runtime data (the trained-model data under artifacts/ is needed)
+data
+logs
+*.db
+!artifacts/**/*.db
+
+# not needed in the image
+docs
+node_modules
+scripts/ui_tour/node_modules
+deploy/sandbox

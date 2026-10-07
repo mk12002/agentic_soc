@@ -338,3 +338,13 @@ def test_scoped_users_only_see_and_decide_their_domain_actions(client):
                  if a["domain"] == "incident")
     assert client.post(f"/api/v1/actions/{other['id']}/approve", headers=vm_only, json={"note": "x"}).status_code == 404
     assert client.get("/api/v1/entities/find?kind=asset&key=fqdn&value=web01.acme-demo.com", headers=vm_only).status_code == 403
+
+
+def test_health_verifies_the_audit_chain_even_right_after_boot(client, monkeypatch):
+    # the cache used to start at monotonic time 0, so a host up for under 5 minutes skipped verification and reported
+    # audit_chain = None; a never-verified cache must verify on the first call whatever the clock says
+    from soc_platform.api import app as appmod
+
+    monkeypatch.setitem(appmod._CHAIN_CACHE, "at", None)
+    monkeypatch.setitem(appmod._CHAIN_CACHE, "ok", None)
+    assert client.get("/health").json()["audit_chain"] is True

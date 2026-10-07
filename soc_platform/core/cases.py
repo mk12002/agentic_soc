@@ -86,6 +86,12 @@ class CaseService:
     def add_evidence(self, case_id: str, *, summary: str, source: str, dimension: str, data: dict[str, Any] | None = None,
                      entity_id: str | None = None, deep_link: str | None = None, is_inference: bool = False,
                      observed_at: datetime | None = None) -> Evidence:
+        same = self.s.execute(select(Evidence).where(
+            Evidence.case_id == case_id, Evidence.summary == summary, Evidence.source_tool == source,
+            Evidence.dimension == dimension, Evidence.entity_id.is_(None) if entity_id is None
+            else Evidence.entity_id == entity_id).limit(1)).scalar()
+        if same is not None:            # a reassessment re-collects what is already on the case: keep one row
+            return same
         ev = Evidence(case_id=case_id, summary=summary, source_tool=source, dimension=dimension, data=data or {},
                       entity_id=entity_id, deep_link=deep_link, is_inference=is_inference, observed_at=observed_at)
         self.s.add(ev)

@@ -433,7 +433,8 @@ def main() -> int:
     browser = run_browser_tour(with_llm=args.llm) if args.browser else None
     engine = None
     if args.engine:
-        p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "soc_platform/domains/phishing/tests/unit"],
+        p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "soc_platform/domains/phishing/tests/unit",
+                            "soc_platform/domains/phishing/tests/integration"],
                            cwd=ROOT, capture_output=True, text=True, check=False)
         engine = (p.returncode == 0, (p.stdout.strip().splitlines() or ["no output"])[-1])
 

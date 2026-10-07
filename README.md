@@ -54,7 +54,6 @@ once installed (`SOC_PHISHING_ENGINE=auto`; `0` = rule-based analyser only):
 
 ```bash
 git lfs pull
-pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements/phishing.txt
 ```
 

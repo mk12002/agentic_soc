@@ -286,3 +286,33 @@ def test_an_embedded_scheduler_whose_heartbeat_write_is_waiting_is_not_reported_
         sc.shutdown()
     with db.session() as s:                                      # stopped: no local scheduler any more
         assert sched.status(s)["state"] == "stale"
+
+
+def test_a_stale_writer_cannot_win_a_swap_even_when_the_clock_does_not_move(tmp_path, monkeypatch):
+    # Windows' clock moves in ~15 ms steps: two writes in one tick used to get the same updated_at, so a writer that had
+    # read the row before the other's write still matched the compare-and-swap and put back an older value (ABA). A
+    # frozen clock makes every write share one tick, deterministically.
+    from sqlalchemy import update
+
+    monkeypatch.setenv("SOC_CLOCK_FREEZE", "2026-09-28T10:00:00+00:00")
+    db = Database(f"sqlite:///{tmp_path / 'aba.db'}")
+    db.create_all()
+    s = sched.Scheduler(db)
+    s._beat(loop=True, job="first")
+    with db.session() as x:
+        stale = x.get(SystemFlag, s.key).updated_at                  # a writer reads the row ...
+    s._beat(loop=True, job="newer")                                  # ... another writer changes it in the same tick
+    with db.session() as x:
+        won = x.execute(update(SystemFlag).where(SystemFlag.name == s.key, SystemFlag.updated_at == stale)
+                        .values(value={"job": "stale"})).rowcount
+    assert won == 0                                                  # the stale swap must fail
+    with db.session() as x:
+        assert x.get(SystemFlag, s.key).value["job"] == "newer"
+
+    # the same for job leases: once the row changed, a scheduler holding the old version cannot take the lease
+    assert jobs._lease(db, "vuln_refresh")
+    with db.session() as x:
+        seen = x.get(SystemFlag, "job_lease:vuln_refresh").updated_at
+    assert jobs._lease(db, "vuln_refresh", release=True) and jobs._lease(db, "vuln_refresh")
+    with db.session() as x:
+        assert x.get(SystemFlag, "job_lease:vuln_refresh").updated_at > seen

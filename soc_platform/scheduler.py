@@ -93,7 +93,7 @@ class Scheduler:
         newer value (the heartbeat once put back a stale "running job"). A lost insert race also just retries."""
         from sqlalchemy.exc import IntegrityError
 
-        for _ in range(20):
+        for _ in range(200):                                  # each failed swap means a newer write landed: cheap to retry
             try:
                 if self._write_beat(loop=loop, job=job):
                     return
@@ -118,7 +118,8 @@ class Scheduler:
                 seen = f.updated_at
                 s.expunge(f)
                 written = s.execute(update(SystemFlag).where(SystemFlag.name == self.key, SystemFlag.updated_at == seen)
-                                    .values(value=v, updated_by="scheduler", updated_at=now)).rowcount == 1
+                                    .values(value=v, updated_by="scheduler",
+                                            updated_at=jobs.next_version(seen))).rowcount == 1
             if written and not loop:                          # forget schedulers gone for a day (old processes)
                 cutoff = now - timedelta(days=1)
                 for old in s.execute(select(SystemFlag).where(SystemFlag.name.like(KEY_PREFIX + "%"),

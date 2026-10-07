@@ -219,6 +219,25 @@ class IncidentService:
         self.cases.recommend(case, recs, self.actions, self.policy, agent=AGENT)
         return self.cases.view(case_id)
 
+    def reassess_open(self, *, exclude: set[str] | frozenset[str] = frozenset(), narrate: bool = True) -> list[str]:
+        """Investigate open incidents again when KEV-listed exposure appeared on their hosts after they were assessed
+        (a later scan, or a first start where incidents arrived before the first vulnerability sync). Evidence is
+        idempotent, so a reassessment only adds what is new; recommendations keep their idempotency keys."""
+        out = []
+        open_cases = self.s.execute(select(Case).where(Case.domain == "incident", Case.status != "closed")
+                                    .order_by(Case.created_at, Case.id)).scalars().all()
+        for case in open_cases:
+            if case.id in exclude:
+                continue
+            known = {(e.entity_id, e.summary) for e in self.s.execute(select(Evidence).where(
+                Evidence.case_id == case.id, Evidence.dimension == "exposure")).scalars()}
+            new = [f for f in self._kev_findings_on_case_hosts(case.id)
+                   if not any(eid == f["host_id"] and f["cve"] in (summary or "") for eid, summary in known)]
+            if new:
+                self.investigate(case.id, narrate=narrate)
+                out.append(case.id)
+        return out
+
     def narrate_pending(self, case_ids: list[str] | None = None) -> int:
         """Add the model's written explanation to cases investigated with ``narrate=False`` (parallel model calls)."""
         ids = list(dict.fromkeys((case_ids or []) + self.cases.pending_narration("incident")))

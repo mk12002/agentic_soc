@@ -279,6 +279,9 @@ class EngineAnalyzer:
                                          "virustotal_hash_lookup", "external_feed_harvesting")},
         "storyline_enable_llm_mitre_enrichment": False, "threat_intel_auto_refresh_enabled": False,
         "azure_search_enabled": False, "sandbox_local_docker_enabled": False,
+        # QR/barcode text from images is decoded locally (the Azure OCR credentials are cleared below); pinned so the
+        # verdicts do not depend on whether a developer's .env happens to enable it (the evaluations ran with it on)
+        "enable_ocr_extraction": True,
         **{k: None for k in ("azure_ocr_endpoint", "azure_ocr_key", "azure_openai_endpoint", "azure_openai_api_key",
                              "virustotal_api_key", "google_safe_browsing_api_key", "otx_api_key", "abuseipdb_api_key",
                              "urlscan_api_key", "shodan_api_key", "azure_search_api_key", "graph_client_secret",
@@ -297,6 +300,13 @@ class EngineAnalyzer:
         for attr, value in cls.OFFLINE_SETTINGS.items():
             if hasattr(engine_settings, attr):
                 object.__setattr__(engine_settings, attr, value)
+        # the engine reads the project's .env itself, and a relative IOC_DB_PATH there resolves inside the repository
+        # (artifacts/phishing/data): in the platform the local IOC store always lives outside the source tree
+        ioc = os.environ.get("IOC_DB_PATH", "")
+        if not ioc or not Path(ioc).is_absolute():
+            ioc = str(Path(tempfile.gettempdir()) / "soc_platform_ioc_store.db")
+        if hasattr(engine_settings, "ioc_db_path"):
+            object.__setattr__(engine_settings, "ioc_db_path", ioc)
 
     @staticmethod
     def active_agents(agents: dict[str, Any]) -> dict[str, Any]:
@@ -309,9 +319,13 @@ class EngineAnalyzer:
 
     @classmethod
     def available(cls) -> bool:
+        # what the 7 agents and their orchestration really load (the models are scikit-learn / XGBoost; PyTorch and
+        # transformers are not needed since the content model became a TF-IDF classifier)
         try:
-            import torch  # noqa: F401
-            import transformers  # noqa: F401
+            import joblib  # noqa: F401
+            import langgraph  # noqa: F401
+            import sklearn  # noqa: F401
+            import xgboost  # noqa: F401
 
             return True
         except Exception:
@@ -446,7 +460,7 @@ _ENGINE_AVAILABLE: bool | None = None
 def engine_enabled() -> bool:
     """Whether reported e-mail is analysed by the trained ML engine as well as the heuristic analyser.
 
-    ``SOC_PHISHING_ENGINE``: ``auto`` (default) - on whenever the engine's libraries (PyTorch, transformers) are
+    ``SOC_PHISHING_ENGINE``: ``auto`` (default) - on whenever the engine's libraries (scikit-learn, XGBoost, LangGraph) are
     installed; ``1`` - on (analysis records an engine error and falls back to the heuristic if they are missing);
     ``0`` - heuristic only."""
     global _ENGINE_AVAILABLE

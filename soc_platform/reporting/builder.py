@@ -14,12 +14,14 @@ A report is a **spec**: title, audience, format (docx | pptx) and sections. Each
 
 from __future__ import annotations
 
+import io
 import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.shared import Inches as DInches
 from docx.shared import Pt, RGBColor
 from pptx import Presentation
 from pptx.util import Inches
@@ -29,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from soc_platform.core.models import Case, utcnow
 from soc_platform.llm.gateway import BudgetExceeded, LLMGateway
+from soc_platform.reporting import charts
 
 Facts = list[tuple[str, Any]]
 
@@ -63,8 +66,13 @@ def src_overview(c: Ctx) -> dict:
                     ("Actions awaiting approval", a["pending_approval"]), ("Actions in window", a["in_window"]),
                     ("Automation rate", f"{a['automation_rate_pct']}%"), ("Median hours to close", cs["median_hours_to_close"]),
                     ("Open correlated insights", o["insights"]["open"])]
-    return {"facts": facts, "table": {"header": ["Date", "Phishing", "Incident", "Vulnerability"],
-                                      "rows": [[d["date"], d["phishing"], d["incident"], d["vulnerability"]] for d in o["trend"] if any(d[k] for k in ("phishing", "incident", "vulnerability"))]},
+    trend = [d for d in o["trend"] if any(d[k] for k in ("phishing", "incident", "vulnerability"))]
+    chart = ({"title": "Cases opened per day", "categories": [str(d["date"]) for d in trend],
+              "series": [{"name": k.capitalize(), "values": [d[k] for d in trend]} for k in ("phishing", "incident", "vulnerability")]}
+             if len(trend) > 1 else charts.from_counts("Open cases by severity", cs["open_by_severity"], name="Open cases",
+                                                       order=charts.SEVERITY_ORDER))
+    return {"facts": facts, "chart": chart, "table": {"header": ["Date", "Phishing", "Incident", "Vulnerability"],
+                                      "rows": [[d["date"], d["phishing"], d["incident"], d["vulnerability"]] for d in trend]},
             "det": lambda f: (f"There are {f['Open cases']} open cases ({f['Open cases by domain']}); {f['Actions awaiting approval']} actions await "
                               f"approval and the automation rate is {f['Automation rate']}. {f['Open correlated insights']} correlated findings are open.")}
 
@@ -76,7 +84,10 @@ def src_vm(c: Ctx) -> dict:
                     ("Mean time to remediate (days)", m.get("mttr_days")), ("Asset match rate", _pct(m.get("asset_match_rate"))),
                     ("Priority mix", ", ".join(f"{k} {v}" for k, v in sorted(m["by_priority"].items())))]
     rows = [[t, v.get("open", 0), v.get("sla_breached", 0)] for t, v in sorted(m.get("per_team", {}).items())]
-    return {"facts": facts, "table": {"header": ["Team", "Open", "Past SLA"], "rows": rows}, "domain": "vulnerability",
+    chart = ({"title": "Open findings and SLA breaches by team", "categories": [r[0] for r in rows],
+              "series": [{"name": "Open", "values": [r[1] for r in rows]}, {"name": "Past SLA", "values": [r[2] for r in rows]}]}
+             if rows else charts.from_counts("Open findings by priority", m["by_priority"], name="Open findings"))
+    return {"facts": facts, "chart": chart, "table": {"header": ["Team", "Open", "Past SLA"], "rows": rows}, "domain": "vulnerability",
             "det": lambda f: (f"{f['Open findings']} vulnerability findings are open ({f['Priority mix']}); {f['KEV-listed open findings']} are "
                               f"known-exploited (CISA KEV), {f['Internet-exposed open findings']} sit on internet-exposed assets and "
                               f"{_n(f['Findings past SLA'], 'is', 'are')} past SLA.")}
@@ -103,6 +114,8 @@ def src_misconfig(c: Ctx) -> dict:
     facts: Facts = [("Open cloud misconfigurations", m["open"]), ("Past SLA", m["overdue"]), ("False closures detected", m["false_closures"]),
                     ("By severity", ", ".join(f"{k} {v}" for k, v in m["by_severity"].items()) or "none")]
     return {"facts": facts, "domain": "vulnerability",
+            "chart": charts.from_counts("Open cloud misconfigurations by severity", m["by_severity"], name="Open",
+                                        order=charts.SEVERITY_ORDER),
             "table": {"header": ["Severity", "Rule", "Resource", "Owner", "Status"],
                       "rows": [[x["severity"], x["rule"], x["resource"], x["platform_team"] or "unknown", x["status"]] for x in items[:10]]},
             "det": lambda f: (f"{f['Open cloud misconfigurations']} cloud misconfigurations are open ({f['By severity']}); {f['Past SLA']} past SLA "
@@ -123,6 +136,8 @@ def src_phishing(c: Ctx) -> dict:
                     ("Median minutes from report to containment", ttc["median"] if ttc["median"] is not None
                      else "not measured yet (no containment action executed)")]
     return {"facts": facts, "domain": "phishing",
+            "chart": charts.from_counts("Verdicts of user-reported emails", p["verdict_mix"], name="Reports",
+                                        order=("malicious", "suspicious", "spam", "safe")),
             "table": {"header": ["User", "Clicks"], "rows": sorted(([u, n] for u, n in p["clickers"].items()), key=lambda r: -r[1])[:10]},
             "det": lambda f: (f"Users reported {_n(f['Emails reported by users (all verdicts, not all phishing)'], 'email')} "
                               f"({f['Verdicts of the reported emails']}); {_n(f['Distinct phishing campaigns (malicious or suspicious reports only)'], 'phishing campaign')} "
@@ -148,6 +163,8 @@ def src_incidents(c: Ctx) -> dict:
     facts: Facts = [("Open incidents", h["open_total"]), ("By severity", ", ".join(f"{k} {v}" for k, v in h["open_by_severity"].items()) or "none"),
                     ("Awaiting approval", len(h["awaiting_approval"])), ("Closed in period", h["closed_this_shift"])]
     return {"facts": facts, "domain": "incident",
+            "chart": charts.from_counts("Open incidents by severity", h["open_by_severity"], name="Open incidents",
+                                        order=charts.SEVERITY_ORDER),
             "table": {"header": ["Severity", "Incident", "Status"], "rows": [[x.severity, x.title, x.status] for x in open_cases[:10]]},
             "det": lambda f: (f"{f['Open incidents']} incidents are open ({f['By severity']}); {f['Awaiting approval']} have actions awaiting "
                               f"approval and {f['Closed in period']} were closed in the period.")}
@@ -205,7 +222,9 @@ def src_risk(c: Ctx) -> dict:
 
     top = RiskEngine(c.s).top(None, 8)
     facts: Facts = [(p.name, f"risk {p.score:.0f}/100 ({p.band}) across {', '.join(p.dimensions)}") for p in top]
-    return {"facts": facts or [("Risky entities", 0)], "domain": "*",
+    chart = ({"title": "Highest-risk users and hosts (risk score 0-100)", "categories": [p.name for p in top],
+              "series": [{"name": "Risk", "values": [round(p.score) for p in top]}]} if top else None)
+    return {"facts": facts or [("Risky entities", 0)], "domain": "*", "chart": chart,
             "table": {"header": ["User / host", "Risk", "Band", "Dimensions"], "rows": [[p.name, round(p.score), p.band, ", ".join(p.dimensions)] for p in top]},
             "det": lambda f: "Highest-risk users and hosts: " + "; ".join(f"{k} ({v.split(' across')[0]})" for k, v in list(f.items())[:4]) + "."}
 
@@ -466,6 +485,8 @@ def _docx(path: Path, spec: dict, sections: list[dict], meta: dict) -> None:
     for s in sections:
         d.add_heading(s["title"], level=1)
         d.add_paragraph(s["narrative"]["text"])
+        if charts.valid(s["data"].get("chart")):
+            d.add_picture(io.BytesIO(charts.to_png(s["data"]["chart"])), width=DInches(6.3))
         tbl = s["data"]["table"]
         if tbl["header"] and tbl["rows"]:
             t = d.add_table(rows=1, cols=len(tbl["header"]))
@@ -512,6 +533,10 @@ def _pptx(path: Path, spec: dict, sections: list[dict], meta: dict) -> None:
             para.text = f"{k}: {v}"[:160]
             for r in para.runs:
                 r.font.size = PPt(12)
+        if charts.valid(s["data"].get("chart")):
+            cs = prs.slides.add_slide(prs.slide_layouts[5])
+            cs.shapes.title.text = s["title"]
+            charts.add_pptx_chart(cs, s["data"]["chart"], Inches(0.8), Inches(1.4), Inches(11.7), Inches(5.6))
     end = prs.slides.add_slide(prs.slide_layouts[5])
     end.shapes.title.text = "About this report"
     tb = end.shapes.add_textbox(Inches(0.6), Inches(1.5), Inches(12), Inches(3)).text_frame

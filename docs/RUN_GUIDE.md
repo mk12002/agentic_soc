@@ -67,7 +67,7 @@ If PowerShell refuses to run `Activate.ps1`, allow local scripts once for your u
 the sandbox model only with a detonation host) runs automatically when its libraries are installed:
 
 ```powershell
-pip install -r requirements\phishing.txt     # PyTorch, transformers, scikit-learn 1.8, XGBoost (once; a large download)
+pip install -r requirements\phishing.txt     # scikit-learn 1.8, XGBoost, LightGBM, LangGraph (no PyTorch needed)
 ```
 
 Then every reported e-mail is analysed by the models **and** the platform's rule-based analyser, and each case shows
@@ -545,11 +545,20 @@ docker compose -f deploy\docker-compose.yml --env-file .env exec platform-api py
 docker compose -f deploy\docker-compose.yml logs -f platform-api                  # watch the logs (Ctrl+C to stop watching)
 ```
 
-Open http://127.0.0.1:8080 as before.
+Open http://127.0.0.1:8080 as before (`SOC_API_PORT` changes the host port).
+
+What you should see (checked end to end on Docker Desktop 29 / Compose 5, 2026-10-07): `/health` reports
+`audit_chain: true` and the scheduler `running` in `service` mode; the scheduler's first pass runs the vulnerability
+job first, then incidents and phishing; after `demo` the figures are the same as on a laptop (7 phishing and 3
+incident cases, 34 actions awaiting approval, 6 open vulnerabilities), and they survive `docker compose restart`.
 
 **With the phishing ML models in the container:** add `WITH_PHISHING_ENGINE=true` to `.env` before `up --build`. The
-image then includes PyTorch and the model libraries and the models run automatically (`SOC_PHISHING_ENGINE=auto`).
-Without it the image is smaller and the rule-based analyser works alone.
+image then includes the model libraries (scikit-learn, XGBoost, LightGBM, LangGraph - no PyTorch; about 3.7 GB instead
+of 1.7 GB) and the models run automatically (`SOC_PHISHING_ENGINE=auto`); `demo` then prints "analysis: ML engine +
+heuristic" and gives the same figures and verdicts. Without it the rule-based analyser works alone.
+
+The build context is the repository root; `.dockerignore` keeps `.env`, `.venv`, local databases, `data/`, `logs/`
+and documents out of it (about 480 MB is sent, almost all of it the trained models).
 
 **Stop, or wipe everything:**
 

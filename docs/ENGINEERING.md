@@ -1044,7 +1044,9 @@ Important findings are pushed to Teams, Slack or any webhook by the `notify` job
   is 64 characters. Rows gone for a day are pruned. Both threads write the same row, so each write merges its own
   fields into the latest version with a compare-and-swap on `updated_at` (retried on conflict). A plain
   read-modify-write let the heartbeat put back an older copy, so the "running job" could briefly be wrong; a race
-  test reproduced it in 1 of 10 runs and now guards it.
+  test reproduced it in 1 of 10 runs and now guards it. The version a swap writes is always later than the one it
+  read (`jobs.next_version`): with `now` alone, two writes in one ~15 ms Windows clock tick got the same stamp and a
+  stale writer still matched (it showed once in a full run); a frozen-clock test reproduces that every time.
 - **`status()`** for `/health`:
   - `running`
   - `stuck`: alive, but a job has run past its lease (30 min)
@@ -1228,6 +1230,9 @@ immediately.
   - A report described in words is planned by the LLM (or keyword rules) using catalogue sources only, and shown
     for review first.
   - Narrative per section cites fact ids (F#); uncited or unsupported sentences are dropped.
+  - **Charts** (`reporting/charts.py`): a source may return chart data built from its own figures. PowerPoint gets
+    a native python-pptx bar chart; Word gets a PNG drawn with Pillow (no plotting library; the same data gives the
+    same bytes, so reports stay deterministic).
   - Downloads re-check that the reader's scope covers every domain in the report.
 - **Recurring and per-case reports** (`reporting/reports.py`): daily exposure, weekly VM, weekly management deck,
   per-case investigation record. A client's `.docx` or `.pptx` template can be the base.
@@ -1265,7 +1270,7 @@ immediately.
 ## 21. The phishing ML engine (trained models per e-mail component)
 
 `soc_platform/domains/phishing/engine/` is an earlier, self-contained phishing analysis system. It runs **inside the
-platform by default** whenever its libraries (PyTorch, transformers) are installed:
+platform by default** whenever its libraries (scikit-learn, XGBoost, LangGraph) are installed:
 - a seven-agent swarm: header, content NLP, URL, attachment/OCR, sandbox, threat intel, user behaviour
 - a LangGraph decision graph (weighted scoring with a consensus boost), a counterfactual engine, MITRE mapping
 - RabbitMQ workers, Redis caching and a sandbox executor for detonation, when deployed as its own service
@@ -1455,8 +1460,19 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 
 - **Image** (`deploy/Dockerfile`): a multi-stage build on `python:3.11-slim`; build dependencies only in the builder
   stage; a non-root `soc` user (uid 1001); `HEALTHCHECK` on `/health`; Uvicorn with 2 workers. The ML engine's
-  libraries come from the `WITH_PHISHING_ENGINE=true` build argument (CPU PyTorch); compose sets
-  `SOC_PHISHING_ENGINE=auto`, so an image built with them runs the models and one without uses the heuristic.
+  libraries come from the `WITH_PHISHING_ENGINE=true` build argument (scikit-learn, XGBoost, LightGBM, LangGraph; no
+  PyTorch); compose sets `SOC_PHISHING_ENGINE=auto`, so an image built with them runs the models and one without uses
+  the heuristic. `.dockerignore` keeps secrets, environments and local data out of the build context. Verified on
+  Docker: build, start from empty volumes, scheduler-driven first pass, demo figures identical to a laptop (with and
+  without the engine), restart persistence, report download with charts.
+- **Job order on a first start**: `jobs.JOBS` lists vulnerability first, so when everything is due at once the
+  exposure picture exists before incidents are scored; the incident job also reassesses open incidents when KEV-listed
+  exposure appears on their hosts later. Evidence is idempotent (same case, source, wording, entity and lookup), so a
+  reassessment adds only what is new. Found by the Docker test: scheduled from a fresh start, one incident came out
+  medium with no actions instead of high with three.
+- **The in-platform engine ignores the developer's `.env`** for behaviour that changes verdicts: local QR/barcode
+  decoding is pinned on in `OFFLINE_SETTINGS` (it was on in the laptop's `.env` and off in the container, and one
+  e-mail scored 0.82 vs 0.92).
 - **Compose** (`deploy/docker-compose.yml`):
   - `postgres`
   - `platform-api` (built-in scheduler off)
