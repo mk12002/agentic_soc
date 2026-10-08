@@ -114,7 +114,9 @@ class IntelligenceAnalyst:
                  "dimensions": p.dimensions} for p in self.risk.top(kind or None, int(limit or 5))]
 
     def _list_insights(self, severity: str | None = None, rule: str | None = None) -> Any:
-        q = select(Insight).where(Insight.status != "dismissed")
+        # open findings only (as every other surface counts them): a resolved one - a budget alert that cleared, an
+        # integrity check that passed again - must not be presented as a current threat in answers or the brief
+        q = select(Insight).where(Insight.status.in_(("new", "acknowledged")))
         if severity:
             q = q.where(Insight.severity == severity)
         if rule:

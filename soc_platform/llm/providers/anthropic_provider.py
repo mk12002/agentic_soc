@@ -44,9 +44,9 @@ class AnthropicProvider(Provider):
             extra["http_client"] = httpx.Client(**llm_verify())
         self.client = anthropic.Anthropic(api_key=key or None, base_url=base_url, **extra)
 
-    def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
         model = self.models.get(tier) or self.models["large"]
-        request = {"model": model, "max_tokens": 16000, "system": system + JSON_RULE,
+        request = {"model": model, "max_tokens": int(max_tokens or 16000), "system": system + JSON_RULE,
                    "messages": [{"role": "user", "content": user}]}
         # a gateway between us and the Claude API may not pass the beta fallback through: SOC_LLM_SERVER_FALLBACK=0
         use_fallback = os.environ.get("SOC_LLM_SERVER_FALLBACK", "1").strip().lower() not in {"0", "false", "no", "off"}

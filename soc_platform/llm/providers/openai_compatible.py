@@ -22,7 +22,7 @@ import os
 import httpx  # noqa: F401 - kept importable here: tests patch httpx.post through this module
 
 from soc_platform.config import Settings, secret
-from soc_platform.llm.gateway import Completion, Provider, llm_extra_headers, post_with_retry
+from soc_platform.llm.gateway import Completion, Provider, llm_extra_headers, max_tokens_field, post_with_retry
 
 JSON_RULE = ("\n\nOutput format: reply with a single JSON object only - no prose before or after it, "
              "no markdown fences.")
@@ -46,7 +46,7 @@ class OpenAICompatibleProvider(Provider):
         prefix = os.environ.get("SOC_LLM_AUTH_PREFIX", "Bearer ")
         return {**llm_extra_headers(), **({name: f"{prefix}{self.key}"} if self.key else {})}
 
-    def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
         model = self.models.get(tier) or self.models["large"]
         if not (self.base and model) or (self.requires_key and not self.key):
             return None
@@ -54,6 +54,8 @@ class OpenAICompatibleProvider(Provider):
         headers = self._headers()
         body: dict = {"model": model, "temperature": 0.1,
                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if max_tokens:
+            body[max_tokens_field()] = max_tokens
         if os.environ.get("SOC_LLM_JSON_MODE", "1").strip().lower() in {"0", "false", "no", "off"}:
             body["messages"][0]["content"] = system + JSON_RULE
         else:

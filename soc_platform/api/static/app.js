@@ -72,6 +72,7 @@ const I = {
   access: '<path d="M8 11V7a4 4 0 0 1 8 0v4M5 11h14v10H5zM12 15v2"/>',
   audit: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7"/>',
   reports: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  ai: '<path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4zM18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/>',
   sun: '<path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/>',
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"/>',
@@ -152,7 +153,7 @@ const NAV = [
     ['cloud', 'Cloud posture', 'cloud', 'vulnerability']]],
   ['Insight', [['coverage', 'ATT&CK coverage', 'coverage'], ['shadow-it', 'Shadow IT', 'shadow', 'incident'],
     ['suppliers', 'Supplier risk', 'supplier', 'phishing']]],
-  ['Govern', [['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['reports', 'Reports', 'reports'],
+  ['Govern', [['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['ai-usage', 'AI usage', 'ai'], ['reports', 'Reports', 'reports'],
     ['access', 'Access', 'access'], ['audit', 'Audit log', 'audit']]],
 ];
 const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity', search: 'Search'};

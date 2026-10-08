@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-08 (rounds 15-17; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-08 (rounds 15-18; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,39 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 17 (2026-10-08) - latest results: connecting and administering tools
+## 0. Round 18 (2026-10-08) - latest results: AI budgets, per-person limits and model choice
+
+Aim: no person, script or burst of work can run up the AI bill or starve scheduled work; administrators decide the
+limits and each feature's model; the choice between the small and the large model is made from measured figures.
+Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **553 passed**, 0 failed, 15 skipped (568 collected; the same opt-in / single-database skips) |
+| Platform suite on PostgreSQL 16 | **553 passed**, 0 failed, 15 skipped |
+| Browser tour | **0 problems** (33 screenshots; the new *AI usage* screen at 4 widths, light and dark, axe-core, stored XSS) |
+| Feature verification (`--browser --engine --live --llm`) | **103 of 103 features verified**; 221 mapped tests run, 0 failed; ML engine 205 passed; browser tour with the live LLM 0 problems |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / **0 known vulnerabilities** / clean |
+
+New: the AI usage policy (`llm/usage_policy.py`, *Govern -> AI usage*; LLM_TOKENS_AND_COST.md sections 4 and 4b;
+ENGINEERING.md decisions 57-58) and `test_llm_usage.py` (18 tests).
+
+Found and fixed:
+
+| What was wrong | Effect | Fix |
+|---|---|---|
+| Only a monthly cap | a burst (a script asking questions in a loop, a flood of incidents) could spend the month in a day | daily cap (default a tenth of the month) with a finding while it is used up |
+| No per-person limit | one person could use the whole budget, leaving scheduled explanations without the model | per-person hourly / daily limits (role and person overrides; 0 = off); scheduled work counts only against the platform caps |
+| Answer length bounded only by the prompt (except the Claude provider, 16,000) | a misbehaving model could write - and bill - pages | a hard cap per call (1,500 small / 3,000 large by default), set per feature |
+| Budget only in an environment variable | changing it needed a restart and left no record | set on the AI usage screen by administrators, versioned and audited |
+| Tier choice fixed in code, with no data to judge it | no way to know whether a cheaper model would do | the call log now records tier, who asked and the statements the evidence check kept and removed; the screen advises a tier from those figures |
+| An answer that was not JSON was logged as `ok` | quality figures overstated | logged as `unparseable` |
+| The AI usage screen's role table overflowed at 1280 px (found by the browser tour) | sideways scroll | tables laid out to fit |
+| The analyst assistant's findings tool (and the brief built from it) counted resolved findings as current - found when the new daily-budget finding cleared and the self-check saw 2 open findings on the assistant against 1 everywhere else | a cleared alert could be presented as a current threat | only open findings (new, acknowledged), as every other surface counts them |
+| Test runs and the browser tour left their temporary folders behind (about 400 small folders per run, the tour's database and screenshots each time) | the system temp directory grew run after run - repeated runs here filled the disk | the test session puts every temporary folder under one root removed at exit; the tour deletes its folder when it finishes |
+| The first daily-budget alert reused the monthly alert's rule and fired alongside it once the month was used up | two findings for one cause | its own rule (`llm_daily_budget`), silent while the monthly finding stands |
+
+## Round 17 (2026-10-08): connecting and administering tools
 
 Aim: an administrator connects, configures, rolls out, pauses and restores tools from the console - no file edit, no
 restart - and no configuration mistake can take the platform down. Results on the final code:

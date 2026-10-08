@@ -73,6 +73,12 @@ def llm_verify() -> dict[str, Any]:
     return {"verify": __import__("ssl").create_default_context(cafile=ca)} if ca else {}
 
 
+def max_tokens_field() -> str:
+    """The request field that caps the answer: ``max_tokens`` (most gateways, gpt-4.1) or ``max_completion_tokens``
+    (reasoning models, some newer gateways): SOC_LLM_MAX_TOKENS_FIELD."""
+    return os.environ.get("SOC_LLM_MAX_TOKENS_FIELD", "").strip() or "max_tokens"
+
+
 def post_with_retry(url: str, *, headers: dict[str, str], json: dict[str, Any], tier: str = "large") -> Any:
     """POST to a model endpoint: bounded timeouts, one retry on throttling / transient server errors."""
     import time as _time
@@ -128,13 +134,14 @@ class Provider(ABC):
     name = "none"
 
     @abstractmethod
-    def complete(self, system: str, user: str, *, tier: str) -> Completion | None: ...
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
+        """``max_tokens``: the most the answer may contain (from the AI usage policy); None = the provider's default."""
 
 
 class NullProvider(Provider):
     """No model configured: callers use their deterministic fallback."""
 
-    def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
         return None
 
 
@@ -153,7 +160,7 @@ class AzureOpenAIProvider(Provider):
         if approved and self.endpoint not in approved:
             raise ValueError(f"LLM endpoint {self.endpoint} is not on the approved list")
 
-    def complete(self, system: str, user: str, *, tier: str) -> Completion | None:
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
         deployment = self.deployments.get(tier) or self.deployments["large"]
         if not (self.endpoint and deployment and self.key):
             return None
@@ -162,7 +169,8 @@ class AzureOpenAIProvider(Provider):
             url,
             headers={**llm_extra_headers(), "api-key": self.key},
             json={"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                  "temperature": 0.1, "response_format": {"type": "json_object"}},
+                  "temperature": 0.1, "response_format": {"type": "json_object"},
+                  **({max_tokens_field(): max_tokens} if max_tokens else {})},
             tier=tier,
         )
         body = resp.json()
@@ -192,13 +200,32 @@ def build_provider(settings: Settings) -> Provider:
 
 
 class BudgetExceeded(Exception):
+    """The model may not be used for this call (monthly or daily cap, the person's limit, or the feature switched off
+    in the AI usage policy). Every caller falls back to its deterministic, cited text."""
+
+
+class UserLimitExceeded(BudgetExceeded):
     pass
+
+
+def _accepts_max_tokens(provider: Any) -> bool:
+    import inspect
+
+    try:
+        return "max_tokens" in inspect.signature(provider.complete).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 class LLMGateway:
     def __init__(self, session: Session, settings: Settings, provider: Provider | None = None,
-                 redactor: Redactor | None = None) -> None:
+                 redactor: Redactor | None = None, *, actor: Any = None) -> None:
+        """``actor``: the person whose request this is (analyst questions, deep analysis, reports) - their limits
+        apply; None for scheduled work, which counts only against the platform caps."""
         self.s = session
+        self.actor = actor
+        self.notice: str | None = None        # why the model was not used for the last refused call (shown to people)
+        self._policy: dict[str, Any] | None = None
         # The session is used only for the budget check and the call log, under this lock. The model calls themselves
         # run outside it, so several can be in flight at once (parallel narratives and report sections).
         self._lock = threading.RLock()
@@ -240,46 +267,111 @@ class LLMGateway:
                      "p95_ms": sorted(xs)[min(len(xs) - 1, round(0.95 * (len(xs) - 1)))]}
                 for wf, xs in sorted(per.items())}
 
+    def policy(self) -> dict[str, Any]:
+        """The AI usage policy in force (read once per gateway: one request or one job run)."""
+        if self._policy is None:
+            from soc_platform.llm.usage_policy import UsagePolicyStore
+
+            with self._lock:
+                self._policy = UsagePolicyStore(self.s, self.settings).active()
+        return self._policy
+
     def budget_status(self) -> dict[str, Any]:
+        from soc_platform.core.models import utcnow
+        from soc_platform.llm.usage_policy import day_start, tokens_since
+
+        pol = self.policy()
         used = self.tokens_this_month()
-        budget = self.settings.llm_monthly_token_budget
+        budget = int(pol.get("monthly_tokens") or 0)
+        with self._lock:
+            today = tokens_since(self.s, day_start(utcnow()))
+        daily = int(pol.get("daily_tokens") or 0)
+        alert_at = float(pol.get("alert_at") or 0.8)
         return {"used": used, "budget": budget, "fraction": round(used / budget, 4) if budget else None,
-                "alert": bool(budget and used >= 0.8 * budget), "exceeded": bool(budget and used >= budget)}
+                "alert": bool(budget and used >= alert_at * budget), "exceeded": bool(budget and used >= budget),
+                "today": today, "daily_budget": daily, "daily_exceeded": bool(daily and today >= daily)}
+
+    def _refusal(self, workflow: str) -> tuple[str, str] | None:
+        """(status, reason) when this call may not use the model, else None."""
+        from datetime import timedelta
+
+        from soc_platform.core.models import utcnow
+        from soc_platform.llm.usage_policy import day_start, limits_for, rule_for, tokens_since
+
+        pol = self.policy()
+        if not rule_for(pol, workflow, "large")["enabled"]:
+            return "disabled_by_policy", "the model is switched off for this feature (AI usage policy)"
+        b = self.budget_status()
+        if b["exceeded"]:
+            return "budget_exceeded", "the monthly AI budget is used up"
+        if b["daily_exceeded"]:
+            return "daily_budget_exceeded", "today's AI budget is used up"
+        if self.actor is not None:
+            uid = getattr(self.actor, "id", str(self.actor))
+            roles = sorted(getattr(r, "value", str(r)) for r in getattr(self.actor, "roles", ()))
+            lim = limits_for(pol, uid, roles)
+            now = utcnow()
+            with self._lock:
+                hour = tokens_since(self.s, now - timedelta(hours=1), uid)
+                day = tokens_since(self.s, day_start(now), uid)
+            if lim["hourly_tokens"] == 0 or lim["daily_tokens"] == 0:
+                return "user_limit", "AI text is not enabled for your account (AI usage policy)"
+            if hour >= lim["hourly_tokens"]:
+                return "user_limit", f"your hourly AI limit ({lim['hourly_tokens']:,} tokens) is reached"
+            if day >= lim["daily_tokens"]:
+                return "user_limit", f"your daily AI limit ({lim['daily_tokens']:,} tokens) is reached"
+        return None
 
     # ------------------------------------------------------------------ calls
 
     def complete_json(self, workflow: str, system: str, user: str, *, tier: str = "large",
                       redactor: Redactor | None = None) -> dict[str, Any] | None:
+        return self._complete(workflow, system, user, tier=tier, redactor=redactor)[0]
+
+    def _complete(self, workflow: str, system: str, user: str, *, tier: str = "large",
+                  redactor: Redactor | None = None) -> tuple[dict[str, Any] | None, LLMCall | None]:
+        """The model call: the usage policy decides whether it may run, on which tier and how long its answer may be.
+        Returns the parsed answer and its log row (grounded() records how many statements survived the evidence
+        check on it). Raises BudgetExceeded when the policy refuses - every caller falls back."""
+        from soc_platform.llm.usage_policy import rule_for
+
         red = redactor or self.redactor_factory()
         red.internal_domains |= set(self.settings.org_domains)
         prompt = red.redact(user) if self.settings.llm_redact_pii else user
-        if self.budget_status()["exceeded"]:
-            self._log(workflow, prompt, "", 0, 0, "none", status="budget_exceeded")
-            raise BudgetExceeded(f"monthly LLM token budget exhausted ({workflow})")
+        rule = rule_for(self.policy(), workflow, tier)
+        refused = self._refusal(workflow)
+        if refused:
+            self.notice = refused[1]
+            self._log(workflow, prompt, refused[1], 0, 0, "none", status=refused[0], tier=rule["tier"])
+            raise (UserLimitExceeded if refused[0] == "user_limit" else BudgetExceeded)(f"{refused[1]} ({workflow})")
         if _Breaker.is_open():
             self._log(workflow, prompt, "model endpoint failing - circuit open, deterministic path used", 0, 0, "none",
-                      status="circuit_open")
-            return None
+                      status="circuit_open", tier=rule["tier"])
+            return None, None
+        kwargs: dict[str, Any] = {"tier": rule["tier"]}
+        if rule["max_output_tokens"] and _accepts_max_tokens(self.provider):
+            kwargs["max_tokens"] = int(rule["max_output_tokens"])
         started = time.perf_counter()
         try:
-            out = self.provider.complete(system, prompt, tier=tier)
+            out = self.provider.complete(system, prompt, **kwargs)
         except Exception as exc:  # noqa: BLE001 - logged; the caller falls back to the deterministic text
             _Breaker.record(False)
             self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error",
-                      latency_ms=round((time.perf_counter() - started) * 1000))
-            return None
+                      latency_ms=round((time.perf_counter() - started) * 1000), tier=rule["tier"])
+            return None, None
         latency = round((time.perf_counter() - started) * 1000)
         if out is None:
-            return None
+            return None, None
         _Breaker.record(True)
         pinned = self.settings.llm_model_version
-        status = "ok" if not pinned or pinned in out.model else "model_version_mismatch"
-        self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status,
-                  latency_ms=latency)
         parsed = _parse_json(out.text)
+        status = ("unparseable" if parsed is None else
+                  "ok" if not pinned or pinned in out.model else "model_version_mismatch")
+        row = self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status,
+                        latency_ms=latency, tier=rule["tier"])
         if parsed is None:
-            return None
-        return json.loads(red.restore(json.dumps(parsed)))
+            return None, row
+        return json.loads(red.restore(json.dumps(parsed))), row
 
     def grounded(self, workflow: str, question: str, evidence: list[dict[str, Any]], *,
                  tier: str = "large", redactor: Redactor | None = None,
@@ -295,9 +387,9 @@ class LLMGateway:
                 '"claims": [{"text": "...", "kind": "fact|inference", "evidence_ids": ["E1"]}]'
                 f"{extra_schema}}}")
         try:
-            data = self.complete_json(workflow, GROUNDING_RULES, user, tier=tier, redactor=redactor)
+            data, row = self._complete(workflow, GROUNDING_RULES, user, tier=tier, redactor=redactor)
         except BudgetExceeded:
-            data = None
+            data, row = None, None
         if data:
             claims = validate_claims(data.get("claims"), valid)
             by_id = {str(e["id"]): f"{e['claim']} {json.dumps({k: v for k, v in e.items() if k not in {'id', 'claim'}}, default=str)}"
@@ -306,6 +398,11 @@ class LLMGateway:
             checked = [c for c in claims
                        if not unsupported_numbers(c["text"], question + " " + " ".join(by_id[i] for i in c["evidence_ids"]))]
             summary, removed = supported_summary(str(data.get("summary", "")), everything)
+            if row is not None:              # the quality signal the usage screen uses to advise a model tier
+                raw = data.get("claims") if isinstance(data.get("claims"), list) else []
+                with self._lock:
+                    row.claims_kept, row.claims_dropped = len(checked), max(0, len(raw) - len(checked)) + removed
+                    self.s.flush()
             if checked or data.get("insufficient_evidence"):
                 return {**data, "summary": summary, "claims": checked, "grounded": True,
                         "insufficient_evidence": bool(data.get("insufficient_evidence")), "source": "llm",
@@ -313,12 +410,15 @@ class LLMGateway:
         return deterministic_grounded(evidence)
 
     def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str,
-             latency_ms: int | None = None) -> None:
+             latency_ms: int | None = None, tier: str | None = None) -> LLMCall:
+        actor = getattr(self.actor, "id", self.actor) if self.actor is not None else None
         with self._lock:
-            self.s.add(LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
-                               response=response, prompt_tokens=pt, completion_tokens=ct, status=status,
-                               grounded=True, latency_ms=latency_ms))
+            row = LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
+                          response=response, prompt_tokens=pt, completion_tokens=ct, status=status, grounded=True,
+                          latency_ms=latency_ms, tier=tier, actor=str(actor)[:256] if actor else None)
+            self.s.add(row)
             self.s.flush()
+        return row
 
 
 # Standalone quantities in model text (counts, scores, percentages, times). Digits inside names, IPs, CVE ids,

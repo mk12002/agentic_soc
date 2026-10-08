@@ -143,6 +143,12 @@ and a unified cross-tool timeline.
   self-approval of four-eyes actions, policies, exceptions or access grants). Service accounts can never approve.
 * **Session control:** per-token revocation (log out) and revoke-all-sessions per user.
 * **Platform grants:** time-bound, justified, domain-scoped role assignments on top of Entra roles.
+* **AI usage & limits** (*Govern -> AI usage*): administrators set the monthly and daily token budgets, per-person
+  hourly / daily limits (overrides per role and per person; 0 = no model text), and per feature the model tier, the
+  longest answer and on/off - versioned and audited, in force for the next call. The screen shows use and cost per
+  feature and per person, how often answers were usable and how many statements the evidence check removed, and
+  advises small or large per feature from those figures. Over a limit the platform answers without the model and
+  says why.
 * **Data protection:** raw tool payloads and reported emails **encrypted at rest** (Fernet, key rotation);
   retention job with legal hold for open cases (old telemetry events are pruned too, unless a case or insight cites
   them, so the context store stays bounded at client volume); PII pseudonymised before any LLM call.

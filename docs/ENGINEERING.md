@@ -436,7 +436,7 @@ unresolved, by design.
 
 ## 8. Data model and persistence
 
-### 8.1 Tables (39)
+### 8.1 Tables (40)
 
 | Area | Tables |
 |---|---|
@@ -444,7 +444,7 @@ unresolved, by design.
 | Resolution | `resolution_overrides`, `unresolved_items` |
 | Cases | `cases`, `case_entities`, `case_notes`, `dispositions` |
 | Actions and policy | `action_requests`, `policy_versions` |
-| Governance | `audit_log`, `llm_calls`, `access_log`, `role_assignments`, `api_keys`, `token_revocations`, `system_flags` |
+| Governance | `audit_log`, `llm_calls`, `llm_usage_policies`, `access_log`, `role_assignments`, `api_keys`, `token_revocations`, `system_flags` |
 | Operations | `connector_checkpoints`, `connector_config_versions`, `connector_preflights`, `enrichment_cache`, `job_runs`, `notifications` |
 | Phishing | `ph_submissions` |
 | Vulnerability | `vm_findings`, `vm_vuln_intel`, `vm_campaigns`, `vm_action_plans`, `vm_exceptions`, `vm_risk_register`, `vm_validations`, `vm_misconfigurations` |
@@ -873,10 +873,18 @@ model)`).
 8. **Circuit breaker** (`_Breaker`): after 3 consecutive failures, calls are skipped for 60 s (logged as
    `circuit_open`) and callers use the deterministic path instantly. The next success closes it. Before this, a hung
    endpoint could make an 8-section report take about 16 minutes.
-9. **Budget.** Monthly token budget (default 50 M); `BudgetExceeded` above it. Findings at 80 % and 100 % come from
-   the self-check job.
-10. **Logging.** Every call goes to `llm_calls`: workflow, provider, model, tokens, status, grounded flag, redacted
-    prompt and response. The text is purged after `SOC_LLM_LOG_RETENTION_DAYS`; token counts are kept.
+9. **Usage policy** (`llm/usage_policy.py`, set by administrators on the AI usage screen, versioned and audited,
+   read once per gateway - one request or job run): monthly and daily token budgets; per-person hourly / daily limits
+   (person override > most generous role override > default; 0 = no model text) for calls made on a person's behalf
+   (`LLMGateway(actor=)`, set by `api/app.py:llm(s, p)` for questions, deep analysis and reports); per feature the
+   tier, the answer cap (passed to providers as `max_tokens` when their `complete()` accepts it) and on/off. A refused
+   call raises `BudgetExceeded` (`UserLimitExceeded` for a person's limit), logged with its reason; every caller
+   already falls back to deterministic text, and `gateway.notice` tells the person why. Findings at the warning level
+   and at 100 % of the month, and while a day's budget is used up, come from the self-check job.
+10. **Logging.** Every call goes to `llm_calls`: workflow, tier, actor (None = scheduled), provider, model, tokens,
+    status (`unparseable` when the answer was not JSON), the statements the grounding guardrail kept and removed,
+    grounded flag, redacted prompt and response. `usage_report` turns it into per-feature use, cost, quality and a
+    tier recommendation computed from those figures. The text is purged after `SOC_LLM_LOG_RETENTION_DAYS`; token counts are kept.
 
 ### 12.3 Concurrency
 
@@ -1594,6 +1602,8 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 54 | Rollout stages (Fixtures -> Recording -> Read-only -> Recommend -> Automate) with a passing preflight before any live stage | One fake/live switch | A tool is trusted step by step; `recommend` caps every action at L2 whatever the policy says | Promotion is per tool, one proposal per step |
 | 55 | Pause takes effect at once without a second approver | Four-eyes for every change | Switching a misbehaving tool off only reduces what the platform does | Audited with a reason; switching it back on needs approval |
 | 56 | Connector development kit (scaffold + one-command conformance) | A written guide only | A new connector starts compliant and cannot pass `check` until paging, faults and missing fields behave | The template is a starting point: endpoints and fields must be adapted to the vendor |
+| 57 | AI budgets, per-person limits and per-feature tier / answer cap set by administrators in the console (versioned, audited, no restart) | Environment settings only; one monthly cap | A burst could spend the month in a day; one person could starve scheduled work; answer length was bounded only by the prompt | Limits are checked before a call against what was already used, so the call that crosses a limit still completes |
+| 58 | Tier advice computed from the call log (usable rate, statements the guardrail removed, answer length), never by a model | Fixed tiers in code; ask a model to judge quality | The guardrail already measures whether a model keeps to the evidence; the same figure on both tiers is a fair comparison | Advice needs 20 calls in the period; it is a recommendation, the administrator decides |
 
 ---
 

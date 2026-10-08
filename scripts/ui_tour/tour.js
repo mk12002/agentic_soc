@@ -269,6 +269,8 @@ async function visit(page, hash, name, full = true) {
   if (!(await page.$('#kout code'))) problems.push('service-account key was not shown');
   await page.evaluate(() => { const c = document.querySelector('#kout code'); if (c) c.textContent = c.textContent.slice(0, 7) + '•'.repeat(24) + '  (masked for the screenshot)'; });
   await shot(page, '18-access');
+  await visit(page, 'ai-usage', '33-ai-usage');
+  if (!(await page.$('[data-fn="saveLlmPolicy"]'))) problems.push('admin cannot save AI usage limits');
   await page.goto(`${BASE}/#/integrations`); await settle(page);
   if (await page.$('[data-fn="notifyTest"]')) {
     await page.click('[data-fn="notifyTest"]'); await page.waitForTimeout(1500);
@@ -344,7 +346,7 @@ async function visit(page, hash, name, full = true) {
   await page.fill('#si-user', EST.lead); await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
-    `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'reports', 'access', 'audit',
+    `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'ai-usage', 'reports', 'access', 'audit',
     `search/${encodeURIComponent(term)}`];
   for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light']]) {
     await page.setViewportSize({width: w, height: 900});

@@ -111,6 +111,10 @@ python scripts/verify_features.py --browser --engine --live --llm # + browser to
 `python -c "import pgserver; print(pgserver.get_server('D:/pgtest_soc', cleanup_mode=None).get_uri())"` → use the
 printed URI as `SOC_TEST_POSTGRES`.
 
+**Disk space**: the test session removes its own temporary folders at exit (conftest redirects `tempfile` to one
+root), and the browser tour removes its folder. A `--basetemp` folder you name is yours to delete, as is an embedded
+PostgreSQL data folder: delete both after the run (repeated full runs once filled the disk).
+
 **Running two full suites at once**: give each its own `--basetemp=<dir>`; otherwise they share pytest's numbered
 temp folders and the variant-estate builders overwrite each other (seen as "demo names leaked" failures).
 
@@ -171,7 +175,10 @@ soc_platform/
   domains/incident/service.py
   domains/vulnerability/ service.py, misconfig.py, models.py
   intelligence/          risk.py, correlation.py, story.py, deep_analysis.py, analyst.py, attack_coverage.py, shadow_it.py, drift.py
-  llm/gateway.py         LLMGateway, providers, grounding, numeric guardrail, breaker, timeouts, budget, llm_concurrency()
+  llm/gateway.py         LLMGateway, providers, grounding, numeric guardrail, breaker, timeouts, llm_concurrency();
+                         enforces the usage policy (refusal -> BudgetExceeded / UserLimitExceeded, gateway.notice)
+  llm/usage_policy.py    AI usage policy (budgets, per-person limits, per-feature tier / answer cap / on-off), its
+                         store (admin-only, versioned, audited) and usage_report (cost, quality, tier advice)
   llm/redaction.py       pseudonymisation before any prompt leaves; restore after
   llm/providers/         openai_compatible (also azure_foundry), anthropic_provider
   reporting/             builder.py (16 sources, 7 standard reports, planner), reports.py, compliance.py
@@ -263,7 +270,12 @@ fingerprints hash the evidence.
 - Citations are validated; uncited claims and figures not in the cited evidence are dropped (numeric-fidelity
   guardrail). Internal identities are pseudonymised by `Redactor` and restored.
 - Always provide a deterministic fallback path - the platform must behave identically (figures, verdicts, actions)
-  with the LLM off. Small tier for routine narrative, large for summaries/deep analysis/reports.
+  with the LLM off. Catch `BudgetExceeded` around `complete_json` (the usage policy raises it for every refusal).
+- A route that calls the model on a person's behalf builds its gateway with `llm(s, p)` (their limits apply) and
+  returns `_with_notice(out, gw)`; scheduled work uses `llm(s)`. A new feature name goes into
+  `usage_policy.KNOWN_WORKFLOWS` (tier, who triggers it, description) or it cannot be configured.
+- Providers implement `complete(system, user, *, tier, max_tokens=None)`; the gateway passes the cap only to providers
+  whose signature accepts it. Small tier for routine narrative, large for summaries/deep analysis/reports.
 
 **Security**
 - Routes declare `Depends(need(Perm.X, "domain"))`; record-level scope checks in handlers (`_case_in_scope`).
@@ -306,6 +318,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   page; interrupted backfill resumes), `test_traffic.py` (pool, 503 under saturation, a real multi-process server
   under concurrent analysts), `test_recording.py` (record-and-sanitise leaves no identity and replays),
   `test_real_world.py` (an empty tenant; every tool down at once - every pipeline, screen, report still works),
+  `test_llm_usage.py` (budgets, per-person limits, tier routing, answer caps, tier advice, the admin API),
   `test_connector_admin.py` (isolation, strict config, stages, preflight, propose / approve / pause / restore /
   export / import through the store and the API, hot reload, supplier / sanctioned lists, the scaffold),
   `test_commit_before_response.py` (commit before reply, real server),
@@ -314,7 +327,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 535 platform tests passing on SQLite and on PostgreSQL (550 collected, 15 skips: 12 opt-in live tests, 2 per-estate repeats of input fuzzing, 1 database-specific check), 205
+- Current counts (keep docs in sync when they change): 553 platform tests passing on SQLite and on PostgreSQL (568 collected, 15 skips: 12 opt-in live tests, 2 per-estate repeats of input fuzzing, 1 database-specific check), 205
   engine tests, 103/103 features verified.
 
 ---

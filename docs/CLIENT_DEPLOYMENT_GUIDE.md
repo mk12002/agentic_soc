@@ -687,7 +687,8 @@ calls; `SOC_LLM_SERVER_FALLBACK=0` turns it off (a refusal then simply uses the 
 
 | Setting | Default | Set it to |
 |---|---|---|
-| `SOC_LLM_MONTHLY_TOKEN_BUDGET` | 50,000,000 | the client's allocation; findings at 80 % and 100 %, deterministic text after that. Measured tokens per component are in `docs/LLM_TOKENS_AND_COST.md` - reprice them with the client's per-model rates. |
+| `SOC_LLM_MONTHLY_TOKEN_BUDGET` | 50,000,000 | the starting monthly allocation. After go-live, administrators manage the monthly and daily budgets, per-person limits and each feature's tier and answer cap on the **AI usage** screen (no restart; versioned, audited). Enter the client's per-model prices there so cost is shown in its terms. Measured tokens per component: `docs/LLM_TOKENS_AND_COST.md`. |
+| `SOC_LLM_MAX_TOKENS_FIELD` | `max_tokens` | `max_completion_tokens` if the gateway or model rejects `max_tokens` (the answer cap the AI usage policy sets) |
 | `SOC_LLM_CONCURRENCY` | 4 | at most the gateway's per-application concurrency |
 | `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` / `SOC_LLM_CONNECT_TIMEOUT_SECONDS` | 30 / 120 / 10 | raise the large timeout if the gateway queues requests |
 | `SOC_LLM_BREAKER_FAILURES` / `SOC_LLM_BREAKER_SECONDS` | 3 / 60 | how quickly screens stop waiting for a failing gateway |

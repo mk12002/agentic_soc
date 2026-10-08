@@ -312,7 +312,9 @@ def run_pytest(tests: list[str], extra_env: dict[str, str] | None = None) -> dic
     subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={xml}", *ids],
                    cwd=ROOT, env=env, check=False)
     res: dict[str, list[str]] = defaultdict(list)
-    for tc in ET.parse(xml).getroot().iter("testcase"):  # nosec B314 - our own pytest junit output, local temp file
+    root = ET.parse(xml).getroot()  # nosec B314 - our own pytest junit output, local temp file
+    shutil.rmtree(xml.parent, ignore_errors=True)
+    for tc in root.iter("testcase"):
         cls, name = tc.get("classname", ""), tc.get("name", "").split("[")[0]
         key = cls.replace("soc_platform.tests.", "").split(".")[0] + ".py::" + name
         outcome = "fail" if tc.find("failure") is not None or tc.find("error") is not None else \
@@ -416,6 +418,12 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
         server.terminate()
         server.wait(timeout=20)
         hook.shutdown()
+        if shots.resolve().is_relative_to(tmp.resolve()):     # screenshots kept only when the caller chose a folder
+            shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            shutil.rmtree(tmp / "reports", ignore_errors=True)
+            for f in tmp.glob("soc.db*"):
+                f.unlink(missing_ok=True)
 
 
 def main() -> int:

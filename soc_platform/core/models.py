@@ -359,6 +359,10 @@ class LLMCall(Base):
     grounded: Mapped[bool] = mapped_column(Boolean, default=False)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)   # time the model took to answer
     status: Mapped[str] = mapped_column(String(32), default="ok")
+    tier: Mapped[str | None] = mapped_column(String(16), nullable=True)      # small | large, as routed by the policy
+    actor: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)   # the person who asked; None = scheduled
+    claims_kept: Mapped[int | None] = mapped_column(Integer, nullable=True)   # grounded answers: statements kept ...
+    claims_dropped: Mapped[int | None] = mapped_column(Integer, nullable=True)  # ... and removed by the evidence check
 
 
 # --------------------------------------------------------------------------- connectors

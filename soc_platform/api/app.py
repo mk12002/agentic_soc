@@ -439,9 +439,18 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-def llm(s: Session) -> LLMGateway | None:
+def llm(s: Session, p: Principal | None = None) -> LLMGateway | None:
+    """The gateway for this request. ``p``: the person asking (analyst questions, deep analysis, reports) - their
+    AI usage limits apply; omitted for scheduled and shared work (platform budgets only)."""
     st = get_settings()
-    return LLMGateway(s, st) if st.llm_provider != "none" else None
+    return LLMGateway(s, st, actor=p) if st.llm_provider != "none" else None
+
+
+def _with_notice(out: Any, gw: LLMGateway | None) -> Any:
+    """Tell the person when their answer was written without the model because of an AI usage limit."""
+    if gw is not None and gw.notice and isinstance(out, dict):
+        return {**out, "llm_notice": f"Written by the platform without the model: {gw.notice}."}
+    return out
 
 
 def _services(s: Session):
@@ -1323,7 +1332,7 @@ def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = 
     _case_in_scope(s, p, cid)
     from soc_platform.reporting.reports import ReportService
 
-    run = ReportService(s, get_settings().report_output_dir, llm=llm(s)).investigation_report(CaseService(s).view(cid), by=p.id)
+    run = ReportService(s, get_settings().report_output_dir, llm=llm(s, p)).investigation_report(CaseService(s).view(cid), by=p.id)
     return _protected_file(run.path)
 
 
@@ -1390,8 +1399,9 @@ def deep_analysis(cid: str, body: DeepBody | None = None, p: Principal = Depends
     if not p.acting_in(case.domain).can(Perm.INVESTIGATE):
         raise HTTPException(403, f"investigate is not granted for {case.domain} data")
     story = story_for_case(s, cid, registry())
-    return run_deep_analysis(s, story, llm(s), actor=p.id, force=bool(body and body.force),
-                             org_domains=get_settings().org_domains)
+    gw = llm(s, p)
+    return _with_notice(run_deep_analysis(s, story, gw, actor=p.id, force=bool(body and body.force),
+                                          org_domains=get_settings().org_domains), gw)
 
 
 @app.get("/api/v1/llm/status")
@@ -1419,6 +1429,46 @@ def drift(recent_days: int = Query(7, ge=1, le=90), baseline_days: int = Query(2
     out = drift_report(s, recent_days=recent_days, baseline_days=baseline_days)
     out["domains"] = {d: v for d, v in out.get("domains", {}).items() if p.in_domain(d)}
     return out
+
+
+class LlmPolicyBody(BaseModel):
+    policy: dict[str, Any]
+    note: str = Field(default="", max_length=2000)
+
+
+@app.get("/api/v1/admin/llm/policy")
+def llm_policy_get(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
+    """The AI usage policy in force (budgets, per-user limits, per-feature tiers), its defaults and its history."""
+    from soc_platform.llm.usage_policy import KNOWN_WORKFLOWS, ROLES, TIERS, UsagePolicyStore, defaults
+
+    st = UsagePolicyStore(s, get_settings())
+    return {"policy": st.active(), "defaults": defaults(get_settings()), "history": st.history(),
+            "workflows": {k: {"default_tier": v[0], "triggered_by": v[1], "description": v[2]}
+                          for k, v in KNOWN_WORKFLOWS.items()}, "roles": list(ROLES), "tiers": list(TIERS)}
+
+
+@app.post("/api/v1/admin/llm/policy")
+def llm_policy_set(body: LlmPolicyBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                   s: Session = Depends(db_session, scope="function")):
+    """Set budgets, per-user / per-role limits and per-feature model choice (administrators; audited; in force for
+    the next model call, no restart)."""
+    from soc_platform.llm.usage_policy import UsagePolicyStore
+
+    try:
+        row = UsagePolicyStore(s, get_settings()).save(body.policy, p, body.note)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"id": row.id, "policy": UsagePolicyStore(s, get_settings()).active()}
+
+
+@app.get("/api/v1/admin/llm/usage")
+def llm_usage(days: int = Query(30, ge=1, le=366), _: Principal = Depends(need(Perm.READ_AUDIT)),
+              s: Session = Depends(db_session, scope="function")):
+    """Measured use per feature and per person, cost, answer quality and speed, with a tier recommendation per
+    feature computed from those figures."""
+    from soc_platform.llm.usage_policy import UsagePolicyStore, usage_report
+
+    return usage_report(s, UsagePolicyStore(s, get_settings()).active(), days=days)
 
 
 @app.get("/api/v1/llm/budget")
@@ -1766,7 +1816,8 @@ def report_plan(body: PlanBody, p: Principal = Depends(need(Perm.READ)), s: Sess
     """Turn a report described in words into a spec (catalogue sources only) for review before generating."""
     from soc_platform.reporting.builder import plan_report
 
-    spec = plan_report(body.request, llm(s))
+    gw = llm(s, p)
+    spec = _with_notice(plan_report(body.request, gw), gw)
     AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="report.planned", subject_type="report",
                        subject_id="plan", payload={"planner": spec["planner"], "sections": [x["source"] for x in spec["sections"]]})
     return spec
@@ -1811,9 +1862,10 @@ def build_custom_report(body: BuildBody, p: Principal = Depends(need(Perm.READ))
             raise HTTPException(422, "this report is about one case: case_id is required")
         _case_in_scope(s, p, body.case_id)
     denied = frozenset() if p.acting_in("*").can(Perm.EXPORT_EVIDENCE) else frozenset({"compliance"})
-    r = build_report(s, registry(), spec, get_settings().report_output_dir, llm=llm(s), by=p.id,
+    gw = llm(s, p)
+    r = build_report(s, registry(), spec, get_settings().report_output_dir, llm=gw, by=p.id,
                      domains=frozenset(p.domains), case_id=body.case_id, denied_sources=denied)
-    return r
+    return _with_notice(r, gw)
 
 
 @app.post("/api/v1/reports/{kind}")
@@ -1932,10 +1984,10 @@ def metrics(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Dep
 # ----------------------------------------------------------------------------- intelligence layer
 
 
-def _intel(s: Session):
+def _intel(s: Session, gw: LLMGateway | None = None):
     from soc_platform.intelligence.analyst import IntelligenceService
 
-    return IntelligenceService(s, llm(s), vm=_services(s)["vulnerability"])
+    return IntelligenceService(s, gw if gw is not None else llm(s), vm=_services(s)["vulnerability"])
 
 
 def _insight(i) -> dict[str, Any]:
@@ -1999,7 +2051,8 @@ class AskBody(BaseModel):
 
 @app.post("/api/v1/intelligence/ask")
 def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
-    out = _intel(s).analyst.ask(body.question)
+    gw = llm(s, p)
+    out = _with_notice(_intel(s, gw).analyst.ask(body.question), gw)
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="intelligence.ask", subject_type="question",
                        subject_id="ask", payload={"question": body.question, "planner": out["planner"],
                                                   "tool_calls": out["tool_calls"]})

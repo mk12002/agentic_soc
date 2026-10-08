@@ -14,6 +14,11 @@ from soc_platform.core.db import Database
 # same database, each in-memory database gets its own. Engines do not pool, so ~200 tests stay within limits.
 # Tests never write into the project folder: raw payloads and reports go to a per-run temporary directory unless a
 # test chooses its own.
+# Every temporary folder a test run makes (mkdtemp in tests, raw payloads, reports) goes under one root that is removed
+# when the run ends: hundreds of small folders per run used to pile up in the system temp directory.
+_RUN_TMP = __import__("tempfile").mkdtemp(prefix="soc-tests-")
+__import__("tempfile").tempdir = _RUN_TMP
+__import__("atexit").register(__import__("shutil").rmtree, _RUN_TMP, True)
 __import__("os").environ.setdefault("SOC_EMBEDDED_SCHEDULER", "0")     # tests drive jobs explicitly
 __import__("os").environ.setdefault("SOC_PHISHING_ENGINE", "0")        # heuristic by default; test_phishing_engine.py turns the ML engine on
 __import__("os").environ.setdefault("SOC_RAW_PAYLOAD_DIR", __import__("tempfile").mkdtemp(prefix="soc-test-raw-"))

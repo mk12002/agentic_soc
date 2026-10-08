@@ -87,7 +87,7 @@ async function askIntel() {
   $('#ia').innerHTML = `<div class="divider"></div><div class="prose">${esc(r.answer)}</div>
     ${(r.claims || []).length ? (() => { const row = c => `<div class="${c.kind === 'fact' ? 'fact' : 'inf'}">${esc(c.text)} ${(c.evidence_ids || []).map(x => `<abbr class="cite">${esc(x)}</abbr>`).join('')}</div>`;
       return `<div class="mt small"><div class="strong" style="margin-bottom:4px">Evidence behind the answer</div>${r.claims.slice(0, 6).map(row).join('')}${r.claims.length > 6 ? `<details><summary>${r.claims.length - 6} more</summary>${r.claims.slice(6).map(row).join('')}</details>` : ''}</div>`; })() : ''}
-    <div class="small muted mt">How this was answered: ${esc(r.planner)} planner · ${r.tool_calls.map(t => `<span class="tag">${esc(t.tool)}</span>`).join('')}</div>`;
+    <div class="small muted mt">How this was answered: ${esc(r.planner)} planner · ${r.tool_calls.map(t => `<span class="tag">${esc(t.tool)}</span>`).join('')}</div>${llmNotice(r)}`;
 }
 async function refreshIntel() { await post('/api/v1/intelligence/refresh'); toast('Correlation refreshed'); Intelligence(); }
 async function insightAct(id, verb) { await post(`/api/v1/intelligence/insights/${id}/${verb}`); toast(`Insight ${verb}d`); Intelligence(); }
@@ -562,6 +562,74 @@ async function notifyTest() {
 async function testConn(name) { return preflight(name); }
 async function runJob(name) { toast(`Running ${name}…`); const r = await post(`/api/v1/jobs/${name}/run`); toast(`${name}: ${r.status}${r.error ? ' - ' + r.error : ''}`, r.status !== 'ok'); Integrations(); }
 
+// ================================================================= AI usage
+const llmNotice = r => r && r.llm_notice ? `<div class="callout info mt"><div class="small">${esc(r.llm_notice)}</div></div>` : '';
+const ADV_K = {'try small': 'ok', 'use large': 'high', keep: 'info', 'not enough data': 'info'};
+const tok = n => n == null ? '–' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
+const usd = x => x == null ? '–' : '$' + (x < 1 ? x.toFixed(4) : x.toFixed(2));
+async function AiUsage() {
+  const __g = GEN;
+  const [u, pol] = await Promise.all([api('/api/v1/admin/llm/usage?days=30'), api('/api/v1/admin/llm/policy')]);
+  window.__llmpol = pol;
+  const edit = can('manage_access'), P = pol.policy, b = u.budget;
+  const bar = (used, cap) => cap ? `${meter(Math.min(100, 100 * used / cap))}<div class="small muted">${tok(used)} of ${tok(cap)} tokens (${Math.round(100 * used / cap)} %)</div>` : `<div class="small muted">${tok(used)} tokens · no cap</div>`;
+  const wf = f => { const r = (P.workflows || {})[f.workflow] || {};
+    return `<tr><td><div class="t-title mono small">${esc(f.workflow)}</div><div class="t-sub">${esc(f.description)} · ${esc(f.triggered_by === 'person' ? 'asked by a person' : 'scheduled')}</div></td>
+      <td class="num small">${nf(f.calls)}${f.refused ? `<div class="t-sub">${nf(f.refused)} refused</div>` : ''}</td><td class="num small">${tok(f.mean_in)} / ${tok(f.mean_out)}</td>
+      <td class="num small">${usd(f.cost)}<div class="t-sub">${usd(f.cost_on_other_tier)} on ${esc(f.other_tier)}</div></td>
+      <td class="num small">${f.usable_rate == null ? '–' : pct(f.usable_rate)}${f.claims_dropped_rate == null ? '' : `<div class="t-sub">${pct(f.claims_dropped_rate)} statements dropped</div>`}</td>
+      <td class="num small">${f.p95_ms == null ? '–' : (f.p95_ms / 1000).toFixed(1) + ' s'}</td>
+      <td>${status(ADV_K[f.advice] || 'info', cap(f.advice))}<div class="t-sub">${esc(f.why)}</div></td>
+      <td>${edit ? `<select id="wt-${esc(f.workflow)}" aria-label="Tier for ${esc(f.workflow)}" data-orig="${esc(r.tier || '')}"><option value="">${esc(f.code_default_tier)} (default)</option>${pol.tiers.map(t => `<option value="${t}"${r.tier === t ? ' selected' : ''}>${t}</option>`).join('')}</select>
+        <input class="input" style="width:90px;margin-top:4px" id="wm-${esc(f.workflow)}" aria-label="Output cap for ${esc(f.workflow)}" placeholder="cap ${esc(P.max_output_tokens[f.tier] || '')}" value="${esc(r.max_output_tokens || '')}">
+        <label class="inline small" style="margin-top:4px"><input type="checkbox" id="we-${esc(f.workflow)}"${r.enabled === false ? '' : ' checked'}> on</label>`
+        : `<span class="tag">${esc(f.tier)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}`}</td></tr>`; };
+  const lim = (id, v, ph, label) => `<input class="input" style="width:100%;max-width:130px" id="${id}" aria-label="${esc(label || id)}" value="${v == null ? '' : esc(v)}" placeholder="${esc(ph || '')}"${edit ? '' : ' readonly'}>`;
+  const roleRows = pol.roles.map(r => { const v = (P.roles || {})[r] || {}; return `<tr><td class="small">${esc(cap(r))}</td><td>${lim('rh-' + r, v.hourly_tokens, 'everyone', cap(r) + ' per hour')}</td><td>${lim('rd-' + r, v.daily_tokens, 'everyone', cap(r) + ' per day')}</td></tr>`; });
+  const row2 = (label, a, b) => `<tr><td class="small">${label}</td><td>${a}</td><td>${b || ''}</td></tr>`;
+  const userOver = Object.entries(P.users || {}).map(([k, v]) => `${k} | ${v.hourly_tokens ?? ''} | ${v.daily_tokens ?? ''}`).join('\n');
+  setMainG(__g, page('AI usage & limits', 'Who and what uses the model, what it costs, and the limits that apply. Over any limit the platform answers from the same evidence without the model - nothing fails.', '',
+    `<div class="grid g-3">
+      ${card('This month', bar(b.month_used, b.monthly_tokens), {sub: 'platform cap'})}
+      ${card('Today', bar(b.today_used, b.daily_tokens), {sub: 'resets at midnight UTC'})}
+      ${kpi('Cost, last 30 days', usd(u.cost_total), 'at the prices set below')}
+    </div>
+    <div class="mt">${card('By feature - which model each uses, and whether it should', table(['Feature', {h: 'Calls', num: 1}, {h: 'Tokens in / out', num: 1}, {h: 'Cost', num: 1}, {h: 'Usable', num: 1}, {h: 'p95', num: 1}, 'Advice', 'Tier · cap · on'], u.features.map(wf)),
+      {flush: true, sub: 'advice is computed from these figures: usable answers, statements the evidence check removed, answer length'})}</div>
+    <div class="grid g-2e mt">
+      ${card('Budgets', table(['', 'Value', ''], [
+          row2('Monthly tokens', lim('lp-month', P.monthly_tokens, '', 'Monthly tokens')),
+          row2('Daily tokens', lim('lp-day', P.daily_tokens, '', 'Daily tokens')),
+          row2('Warn at (fraction of the month)', lim('lp-alert', P.alert_at, '', 'Warn at')),
+          row2('Longest answer: small / large tier', lim('lp-cs', P.max_output_tokens.small, '', 'Small tier longest answer'), lim('lp-cl', P.max_output_tokens.large, '', 'Large tier longest answer')),
+          row2('Small tier $ per million: in / out', lim('lp-psi', P.prices.small.input, '', 'Small tier input price'), lim('lp-pso', P.prices.small.output, '', 'Small tier output price')),
+          row2('Large tier $ per million: in / out', lim('lp-pli', P.prices.large.input, '', 'Large tier input price'), lim('lp-plo', P.prices.large.output, '', 'Large tier output price'))]), {flush: true, sub: 'tokens; 0 = no cap'})}
+      ${card('Limits per person', `<div class="small muted" style="margin-bottom:6px">Questions, deep analysis and reports a person asks for. Scheduled work counts only against the budgets. 0 = no model text for them.</div>
+        ${table(['Who', 'Per hour', 'Per day'], [row2('<b>Everyone</b>', lim('lu-h', P.user_default.hourly_tokens, '', 'Everyone per hour'), lim('lu-d', P.user_default.daily_tokens, '', 'Everyone per day')), ...roleRows], {flush: true})}
+        <label class="small" style="display:block;margin-top:10px" for="lusers">Per person (overrides the role), one per line: <span class="mono">name@company.com | per hour | per day</span></label>
+        <textarea id="lusers" rows="4" class="mono" style="width:100%"${edit ? '' : ' readonly'}>${esc(userOver)}</textarea>`, {sub: 'tokens; a role overrides everyone'})}
+    </div>
+    ${edit ? `<div class="form-row mt"><input class="input" id="lp-note" aria-label="Why" placeholder="Why (kept in the history and the audit log)">${btn('Save limits and model choices', 'saveLlmPolicy', [], 'primary')}</div><div id="lpout"></div>` : `<div class="small muted mt">Only an administrator changes these.</div>`}
+    <div class="grid g-2e mt">
+      ${card('Who used it (last 30 days)', table(['Person', {h: 'Last hour', num: 1}, {h: 'Today', num: 1}, {h: '30 days', num: 1}, {h: 'Calls', num: 1}], u.users.map(x => `<tr><td class="small">${esc(x.user)}</td><td class="num small">${tok(x.hour)}</td><td class="num small">${tok(x.today)}</td><td class="num small">${tok(x.period)}</td><td class="num small">${nf(x.calls)}</td></tr>`), {flush: true, empty: 'No one has asked the model for anything yet.'}))}
+      ${card('History', table(['Version', 'By', 'When', 'Why'], pol.history.map(h => `<tr><td class="mono">#${esc(h.id)}</td><td class="small">${esc(h.set_by)}</td><td class="mono small muted">${dt(h.created_at)}</td><td class="small">${esc(h.note || '')}</td></tr>`), {flush: true, empty: 'Defaults in force - nothing changed yet.'}))}
+    </div>`));
+}
+async function saveLlmPolicy() {
+  const pol = window.__llmpol, P = JSON.parse(JSON.stringify(pol.policy));
+  const num = (id, fl) => { const v = ($('#' + id).value || '').trim(); if (v === '') return null; const n = fl ? parseFloat(v) : parseInt(v, 10); return Number.isNaN(n) ? v : n; };
+  P.monthly_tokens = num('lp-month') ?? 0; P.daily_tokens = num('lp-day') ?? 0; P.alert_at = num('lp-alert', true) ?? 0.8;
+  P.max_output_tokens = {small: num('lp-cs'), large: num('lp-cl')};
+  P.prices = {small: {input: num('lp-psi', true), output: num('lp-pso', true)}, large: {input: num('lp-pli', true), output: num('lp-plo', true)}};
+  P.user_default = {hourly_tokens: num('lu-h') ?? 0, daily_tokens: num('lu-d') ?? 0};
+  P.roles = {}; pol.roles.forEach(r => { const h = num('rh-' + r), d = num('rd-' + r); if (h != null || d != null) P.roles[r] = {...(h != null ? {hourly_tokens: h} : {}), ...(d != null ? {daily_tokens: d} : {})}; });
+  P.users = {}; ($('#lusers').value || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(l => { const [who, h, d] = l.split('|').map(x => (x || '').trim()); const o = {}; if (h !== '') o.hourly_tokens = parseInt(h, 10); if (d !== '' && d !== undefined) o.daily_tokens = parseInt(d, 10); P.users[who] = o; });
+  P.workflows = {}; Object.keys(pol.workflows).forEach(w => { const t = $(`[id="wt-${w}"]`), m = $(`[id="wm-${w}"]`), e = $(`[id="we-${w}"]`); if (!t) return; const r = {};
+    if (t.value) r.tier = t.value; if ((m.value || '').trim()) r.max_output_tokens = parseInt(m.value, 10); if (!e.checked) r.enabled = false; if (Object.keys(r).length) P.workflows[w] = r; });
+  try { await post('/api/v1/admin/llm/policy', {policy: P, note: $('#lp-note').value.trim()}); toast('AI usage policy saved - in force for the next model call'); AiUsage(); }
+  catch (e) { let d; try { d = JSON.parse(e.message).detail; } catch (x) { d = null; } if (d) $('#lpout').innerHTML = `<div class="callout danger mt"><div class="small">${esc(d)}</div></div>`; }
+}
+
 // ================================================================= Policy
 async function Policy() {
   const __g = GEN;
@@ -619,7 +687,7 @@ async function reportPlan() {
   $('#rplan').innerHTML = `<div class="plan-box"><div class="t-title">${esc(sp.title)}</div>
       <div class="t-sub">${esc(sp.audience)} · ${sp.format === 'pptx' ? 'PowerPoint' : 'Word'} · last ${esc(sp.days)} day(s) · planned by ${sp.planner === 'llm' ? 'the LLM (catalogue sources only)' : 'keyword rules (no LLM)'}</div>
     <ol class="plan-secs">${sp.sections.map(x => `<li><b>${esc(x.title)}</b> <span class="tag">${esc(x.source)}</span><div class="small muted">${esc(x.instruction)}</div></li>`).join('')}</ol>
-    <div class="inline">${btn('Generate', 'buildPlanned', [], 'primary', 'download')}${btn('Save as template', 'savePlanned', [])}</div></div>`;
+    <div class="inline">${btn('Generate', 'buildPlanned', [], 'primary', 'download')}${btn('Save as template', 'savePlanned', [])}</div></div>${llmNotice(sp)}`;
 }
 async function buildPlanned() { if (window.__plan) await runBuild({spec: window.__plan}); }
 async function savePlanned() {
@@ -637,7 +705,7 @@ async function runBuild(body) {
   $('#rout').innerHTML = card('Generating report', '<div class="skeleton"></div><div class="skeleton"></div>');
   let r;
   try { r = await post('/api/v1/reports/build', body); } catch (e) { $('#rout').innerHTML = ''; throw e; }
-  $('#rout').innerHTML = card(esc(r.title), `<div class="small muted" style="margin-bottom:10px">Narrative: ${esc(r.writer)}${r.skipped.length ? ` · skipped: ${r.skipped.map(x => esc(x.source + ' (' + x.reason + ')')).join(', ')}` : ''}</div>
+  $('#rout').innerHTML = card(esc(r.title), `${llmNotice(r)}<div class="small muted" style="margin-bottom:10px">Narrative: ${esc(r.writer)}${r.skipped.length ? ` · skipped: ${r.skipped.map(x => esc(x.source + ' (' + x.reason + ')')).join(', ')}` : ''}</div>
     ${r.sections.map(x => `<div class="rep-sec"><h3>${esc(x.title)} <span class="tag">${esc(x.writer)}</span></h3><p>${esc(x.narrative)}</p>
       <details><summary class="small">Figures (${x.facts.length})</summary><dl class="kv">${x.facts.map(([k, v], i) => `<dt>F${i + 1} · ${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></details></div>`).join('')}`,
     {right: btn('Download ' + (r.format === 'pptx' ? 'PowerPoint' : 'Word'), 'dl', ['/api/v1/reports/' + r.id + '/download'], 'primary', 'download')});
@@ -802,8 +870,8 @@ function deepHtml(d, evById) {
 async function runDeep(id, force) {
   const el = $('#deep'); if (el) el.innerHTML = '<div class="inline muted"><span class="spin"></span> Analysing the evidence…</div>';
   const r = await post(`/api/v1/cases/${id}/deep-analysis`, {force});
-  if (r.available === false) { toast(r.reason, true); return; }
-  toast(r.ok ? 'Deep analysis complete' : r.reason, !r.ok);
+  if (r.available === false) { toast(r.llm_notice || r.reason, true); return; }
+  toast(r.llm_notice || (r.ok ? 'Deep analysis complete' : r.reason), !r.ok || !!r.llm_notice);
   Story(id);
 }
 async function approveBundle(id) {
@@ -817,8 +885,8 @@ async function approveBundle(id) {
 
 // ================================================================= registry
 window.VIEWS = {search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
-  suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations,
+  suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
 Object.assign(ALLOWED, {notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
-  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});
+  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});

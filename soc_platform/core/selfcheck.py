@@ -147,9 +147,12 @@ def llm_budget_alert(s: Session, settings: Any) -> dict[str, Any] | None:
     from soc_platform.intelligence.models import Insight
     from soc_platform.llm.gateway import LLMGateway
 
-    if (settings.llm_provider or "none") == "none" or not settings.llm_monthly_token_budget:
+    if (settings.llm_provider or "none") == "none":
         return None
-    b = LLMGateway(s, settings).budget_status()
+    b = LLMGateway(s, settings).budget_status()      # the budget the administrator set (AI usage policy)
+    _daily_budget_alert(s, b)
+    if not b["budget"]:
+        return b
     key = _key("platform", "llm_budget")
     cur = s.execute(select(Insight).where(Insight.dedupe_key == key)).scalars().first()
     if not b["alert"]:
@@ -161,8 +164,9 @@ def llm_budget_alert(s: Session, settings: Any) -> dict[str, Any] | None:
              if b["exceeded"] else f"LLM token budget at {pct}% ({b['used']:,} of {b['budget']:,} tokens this month)")
     fields = {"title": title, "severity": "high" if b["exceeded"] else "medium", "score": 60.0 if b["exceeded"] else 40.0,
               "evidence": [{"ref": "llm_budget", "signal": "llm_budget", "source": "platform", "summary": title}],
-              "next_steps": ["Raise SOC_LLM_MONTHLY_TOKEN_BUDGET (see docs/LLM_TOKENS_AND_COST.md for sizing)",
-                             "Or reduce spend: a cheaper SOC_LLM_DEPLOYMENT_SMALL for routine narratives"]}
+              "next_steps": ["Raise the monthly budget on the AI usage screen (sizing: docs/LLM_TOKENS_AND_COST.md)",
+                             ("Or reduce spend there: move features the usage table marks 'try small' to the small "
+                              "tier, or lower per-user limits")]}
     if cur is None:
         s.add(Insight(rule="llm_budget", dedupe_key=key, entity_ids=[], domains=[], requirement_refs=["R10"], **fields))
     else:
@@ -170,3 +174,30 @@ def llm_budget_alert(s: Session, settings: Any) -> dict[str, Any] | None:
             setattr(cur, k, v)
         cur.status, cur.last_seen = "new", utcnow()
     return b
+
+
+def _daily_budget_alert(s: Session, b: dict[str, Any]) -> None:
+    """A finding while today's AI budget is used up (resolved the next day): model text is paused until midnight UTC."""
+    from soc_platform.intelligence.correlation import _key
+    from soc_platform.intelligence.models import Insight
+
+    key = _key("platform", "llm_daily_budget")
+    cur = s.execute(select(Insight).where(Insight.dedupe_key == key)).scalars().first()
+    # the monthly finding already says it all once the month is used up: one alert, not two
+    if not b.get("daily_exceeded") or b.get("exceeded"):
+        if cur is not None and cur.status in {"new", "acknowledged"}:
+            cur.status, cur.decided_by = "resolved", "system:self_check"
+        return
+    title = (f"Today's AI budget is used up ({b['today']:,} of {b['daily_budget']:,} tokens): model text is paused "
+             "until midnight UTC; answers are written by the platform meanwhile")
+    fields = {"title": title, "severity": "medium", "score": 40.0,
+              "evidence": [{"ref": "llm_daily_budget", "signal": "llm_daily_budget", "source": "platform", "summary": title}],
+              "next_steps": ["See which feature or person used it on the AI usage screen",
+                             "Raise the daily budget there if the use was expected"]}
+    if cur is None:
+        s.add(Insight(rule="llm_daily_budget", dedupe_key=key, entity_ids=[], domains=[], requirement_refs=["R10"],
+                      **fields))
+    else:
+        for k, v in fields.items():
+            setattr(cur, k, v)
+        cur.status, cur.last_seen = "new", utcnow()

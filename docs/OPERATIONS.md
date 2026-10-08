@@ -33,8 +33,15 @@ SOC_LLM_API_KEY=<key>                      # or SOC_LLM_API_KEY_FILE=/run/secret
 SOC_LLM_DEPLOYMENT=gpt-4.1-mini            # SOC_LLM_DEPLOYMENT_SMALL for a cheaper routine tier
 SOC_LLM_APPROVED_ENDPOINTS=https://<resource>.services.ai.azure.com/openai/v1   # anything else is refused
 SOC_LLM_MODEL_VERSION=gpt-4.1-mini         # responses from another model are logged as a mismatch
-SOC_LLM_MONTHLY_TOKEN_BUDGET=50000000      # finding at 80 % and 100 %; deterministic fallback when exhausted
+SOC_LLM_MONTHLY_TOKEN_BUDGET=50000000      # the starting monthly budget; administrators change it on the AI usage screen
 ```
+
+**Budgets and limits are set by administrators on the AI usage screen** (*Govern -> AI usage*): the monthly and daily
+token budgets, per-person hourly / daily limits (with role and person overrides; 0 = no model text for that person),
+and per feature the model tier, the longest answer and on/off. Each change is versioned and audited and applies to
+the next model call. Over a limit the platform answers without the model and tells the person why. The same screen
+shows use and cost per feature and per person and advises small or large per feature from measured quality figures.
+Details and sizing: [LLM_TOKENS_AND_COST.md](LLM_TOKENS_AND_COST.md) sections 4 and 4b.
 
 **An organisation's own LLM gateway** (one internal endpoint in front of Claude, Gemini and OpenAI models) is a
 configuration change, not a code change - full walkthrough in `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 5:
@@ -44,6 +51,7 @@ configuration change, not a code change - full walkthrough in `docs/CLIENT_DEPLO
 | `SOC_LLM_PROVIDER` | `none` | `openai_compatible` for a gateway exposing `/v1/chat/completions`; `anthropic` for one exposing the Claude Messages API |
 | `SOC_LLM_AUTH_HEADER` / `SOC_LLM_AUTH_PREFIX` | `Authorization` / `Bearer ` | header and prefix carrying `SOC_LLM_API_KEY` (openai_compatible) |
 | `SOC_LLM_EXTRA_HEADERS` | empty | JSON object of fixed, non-secret headers the gateway requires |
+| `SOC_LLM_MAX_TOKENS_FIELD` | `max_tokens` | request field carrying the answer cap; `max_completion_tokens` for gateways / models that need it |
 | `SOC_LLM_CA_BUNDLE` | empty | CA file for an internally issued gateway certificate |
 | `SOC_LLM_JSON_MODE` | `1` | `0` when the gateway or model rejects `response_format`; JSON is then requested in the instructions |
 | `SOC_LLM_SERVER_FALLBACK` | `1` | `anthropic` only: `0` if the gateway does not pass the Claude API's beta refusal fallback through |

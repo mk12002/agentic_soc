@@ -121,21 +121,75 @@ Monthly (30 days):
 
 ---
 
-## 4. Budget, alerts and failure behaviour
+## 4. Budgets and limits - set by administrators in the console
 
-| Setting | Default | Effect |
+Everything below is set on the **AI usage** screen (*Govern -> AI usage*) by an administrator (`manage_access`; step-up
+MFA in production). A change is a new version - who, when, why - kept in the history and the audit log, and in force
+for the next model call; no restart. Anyone with `read_audit` (analysts, leads, auditors) sees the screen read-only.
+
+| Limit | Default | Effect |
 |---|---|---|
-| `SOC_LLM_MONTHLY_TOKEN_BUDGET` | 50,000,000 | Hard monthly cap. A finding is raised at **80 %** and at **100 %**. After the cap, every screen, report and answer falls back to deterministic, cited text until the month rolls over. |
-| `SOC_LLM_DEPLOYMENT_SMALL` | = large deployment | The model used for routine narrative and planners. |
+| Monthly tokens | `SOC_LLM_MONTHLY_TOKEN_BUDGET` (50,000,000) | Hard cap for the whole platform. A finding is raised at the warning level (80 %) and at 100 %; after the cap, model text falls back to the platform's own cited text until the month rolls over. |
+| Daily tokens | a tenth of the month | No single day may use more, so a runaway script or a flood of incidents cannot spend the month in an afternoon. A finding is raised while today's budget is used up; it clears itself the next day. |
+| Per person, per hour / per day | 100,000 / 400,000 | For what a person asks for: analyst questions, deep analysis, reports they build. An override per role (the most generous of a person's roles applies) and per person (wins over the role). **0 = no model text for that person.** Scheduled work (incident and phishing explanations, finding narratives, the brief, scheduled reports) counts only against the platform caps, so one person can never starve it. |
+| Per feature: tier | the tier the code asks for (section 1) | `small` or `large` for that feature alone. |
+| Per feature: max answer | small 1,500 / large 3,000 tokens | The most one answer may contain, sent to the provider (`max_tokens`; `SOC_LLM_MAX_TOKENS_FIELD=max_completion_tokens` for gateways or models that need that name). The largest answer measured was about 2,000 tokens (deep analysis), so the defaults never cut a normal answer; they stop a misbehaving model from writing - and billing - pages. |
+| Per feature: on / off | on | Off = that feature always uses the platform's own text. |
+| Prices per tier | gpt-4.1-mini list prices for both | Used only to show cost and what a tier change would save. |
+
+**Over any limit nothing fails.** The call is not sent; the caller uses its deterministic, cited fallback (the same
+figures and verdicts - only the wording differs); the refusal is logged with its reason (`budget_exceeded`,
+`daily_budget_exceeded`, `user_limit`, `disabled_by_policy`). A person whose request was refused sees *"Written by the
+platform without the model: your hourly AI limit (100,000 tokens) is reached."* on the answer, report or analysis.
+
+| Other setting (environment) | Default | Effect |
+|---|---|---|
+| `SOC_LLM_DEPLOYMENT_SMALL` | = large deployment | The model behind the small tier. |
 | `SOC_LLM_EXPLAIN_AUTO_CLOSED` | 0 | 1 = also have the model explain reports that auto-close (not recommended at volume). |
 | `SOC_BRIEF_CACHE_SECONDS` | 900 | The longest time an unchanged brief is reused. |
 | `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` | 30 / 120 | Read timeouts: small-tier calls are short; large-tier calls (deep analysis, reports) can produce ~2,000 tokens, about 30 s at ~70 tokens/s. Connect timeout is 10 s. One retry is made on throttling or transient server errors. |
 | `SOC_LLM_BREAKER_FAILURES` / `SOC_LLM_BREAKER_SECONDS` | 3 / 60 | After 3 consecutive failures, model calls are skipped for 60 s and screens answer instantly from the deterministic path. |
-| `SOC_LLM_CONCURRENCY` | 4 | Narratives, report sections and the case explanations of a job run (incident, phishing - written after the cases are saved) are sent in parallel, up to this many at once. It changes speed, not cost: the same calls are made. |
+| `SOC_LLM_CONCURRENCY` | 4 | Narratives, report sections and the case explanations of a job run are sent in parallel, up to this many at once. It changes speed, not cost. |
 
-**Sizing the budget:** take the monthly tokens for your profile from section 3 and add 50 % headroom. The 50 M
-default fits a small or mid-size SOC. A large SOC should set roughly 250-300 M. (The previous default of 5 M would
-have run out within days even for a small SOC.)
+**Sizing the monthly budget:** take the monthly tokens for your profile from section 3 and add 50 % headroom. The 50 M
+default fits a small or mid-size SOC; a large SOC should set roughly 250-300 M. Keep the daily cap at 2-4 times an
+average day (the default, a tenth of the month, is about three times an average day).
+
+**Sizing per-person limits:** an analyst question costs about 1,500 tokens, a deep analysis about 5,000, a six-section
+report about 4,000. The default 100,000 an hour is about 60 questions or 20 deep analyses - generous for a person,
+small against a runaway script. Lower it for roles that rarely need the model (auditors); set 0 for accounts that
+must not use it.
+
+---
+
+## 4b. Choosing the small or the large model for each feature
+
+The **By feature** table on the AI usage screen shows, per feature, over the last 30 days: calls, mean tokens in and
+out, cost on its tier and what it would cost on the other, how often the answer was **usable** (it arrived, parsed,
+on the pinned model), how many of its **statements the evidence check removed** (the grounding guardrail drops any
+statement that cites no evidence or states a figure its evidence does not contain), and the 95th-percentile response
+time. From those figures - computed in code, never by a model - it advises:
+
+| Advice | When | What to do |
+|---|---|---|
+| **try small** | on large; at least 20 calls; at least 98 % usable; at most 5 % of statements removed; answers average 600 tokens or less | Switch the feature to small, then compare the same row a week later. If usable or removed statements get worse, switch back. |
+| **use large** | on small; more than 5 % of answers unusable, or more than 15 % of statements removed | Switch to large: the small model is writing claims the evidence does not support, so readers get thinner text. |
+| **keep** | anything else | Quality and cost are in balance. |
+| **not enough data** | fewer than 20 calls in the period | Keep the code's default. |
+
+How to think about it:
+
+- **The large tier earns its price where the model must reason across a lot of evidence**: incident summaries (many
+  tools), deep analysis of an attack story, the situation brief, the analyst's answer, report sections. Errors there
+  are costly, and the guardrail removing statements means a thinner explanation for the person who needs it most.
+- **The small tier is enough for short, single-source, templated text**: why one e-mail got its verdict, one
+  correlated finding, choosing tools for a question (the planner), planning a report, short report commentary.
+- **The figures that matter are the guardrail's removed-statement rate and the usable rate**, not the tone of the
+  text: they say directly whether the cheaper model keeps to the evidence. Cost per call is in the same row.
+- **Change one feature at a time**, for a week, and compare - every call is logged with its tier, so the table shows
+  both periods.
+- Nothing numeric changes either way: figures, verdicts, scores and actions are computed in code; the tier changes
+  only the wording quality and the cost.
 
 ---
 
@@ -149,8 +203,9 @@ python scripts/measure_llm_usage.py --estate out/estate.json --out usage.json
 
 The script runs every component above once, including a second brief view to show the cache. It then reports
 calls, mean and max tokens per component and totals from the platform's call log. In production the same log
-(`llm_calls`, retention `SOC_LLM_LOG_RETENTION_DAYS`) holds every call's workflow, model, token counts, status and
-duration; `GET /api/v1/llm/budget` shows this month's use against the cap, and `GET /api/v1/llm/status` the median
+(`llm_calls`, retention `SOC_LLM_LOG_RETENTION_DAYS`) holds every call's workflow, tier, the person who asked (or
+none for scheduled work), model, token counts, status, duration and how many statements the evidence check kept and
+removed; the AI usage screen (`GET /api/v1/admin/llm/usage`) summarises it per feature and per person; `GET /api/v1/llm/budget` shows this month's use against the cap, and `GET /api/v1/llm/status` the median
 and 95th-percentile response time per workflow over the last 30 days.
 
 ## Assumptions
