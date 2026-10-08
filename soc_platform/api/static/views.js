@@ -374,43 +374,192 @@ async function ShadowIt() {
 }
 
 // ================================================================= Integrations
+const STAGE_HELP = {fake: 'Sample data, no credentials', record: 'Live reads; responses saved (sanitised) as test fixtures; no actions',
+  read: 'Live reads; recommendations appear as manual steps', recommend: 'Actions offered; a person approves every one (never above L2)',
+  automate: 'Actions follow the automation policy'};
+const STAGE_K = {fake: 'info', record: 'medium', read: 'medium', recommend: 'ok', automate: 'ok'};
+const PF_K = {ok: 'ok', info: 'info', warning: 'medium', error: 'high', skipped: 'info'};
+const fmtVal = v => v === null || v === undefined || v === '' ? '–' : typeof v === 'object' ? JSON.stringify(v) : String(v);
 async function Integrations() {
   const __g = GEN;
   const canCheck = can('read_audit') && window.ME.domains.includes('*');
-  const [cs, jr, sc, nt] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200'),
+  const [cs, jr, sc, nt, cfg] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200'),
     canCheck ? api('/api/v1/admin/self-check') : Promise.resolve(null),
-    canCheck ? api('/api/v1/admin/notifications') : Promise.resolve(null)]);
+    canCheck ? api('/api/v1/admin/notifications') : Promise.resolve(null),
+    can('read_audit') ? api('/api/v1/config/connectors') : Promise.resolve(null)]);
+  window.__cfg = cfg;
+  const byName = cfg ? Object.fromEntries(cfg.connectors.map(c => [c.name, c])) : {};
   const last = {}; jr.runs.forEach(r => { if (!last[r.job]) last[r.job] = r; });
   const stc = {healthy: 'ok', on_demand: 'info', stale: 'medium', error: 'high', misconfigured: 'high', disabled: 'info'};
   const jst = {ok: 'ok', error: 'high', dead_letter: 'critical'};
-  setMainG(__g, page('Integrations', 'Connector health, data freshness against each stream\'s expected cadence, and scheduled job runs.', '',
-    `${sc ? `<div class="mb">${card('Platform self-check', `<div class="inline" style="margin-bottom:${sc.ok ? 0 : 10}px">${status(sc.ok ? 'ok' : 'high', sc.ok ? 'Consistent' : 'Attention')}<span class="small">${sc.passed} of ${sc.total} checks pass - the same figures agree on every screen, report and answer; every stored reference resolves; nothing is duplicated; the audit chain verifies.</span></div>` +
+  const manage = can('manage_connectors');
+  const pfCell = c => { const p = (byName[c.name] || {}).last_preflight; return p ? `<div class="t-sub">Preflight: ${status(p.ok ? (p.warnings ? 'medium' : 'ok') : 'high', cap(p.verdict))} <span class="muted">${dt(p.ran_at)}</span></div>` : ''; };
+  const fileProblems = cfg && cfg.file_problems.length ? `<div class="callout danger mb"><div><b>Configuration file problems</b> - these entries are ignored until fixed (<span class="mono">python -m soc_platform config check</span> lists them all):
+      ${cfg.file_problems.map(p => `<div class="small">${esc(p.where)}: ${esc(p.message)}${p.fix ? ' - ' + esc(p.fix) : ''}</div>`).join('')}</div></div>` : '';
+  const pending = cfg && cfg.pending.length ? `<div class="mb">${card('Configuration changes awaiting approval', cfg.pending.map(v => pendingRow(v)).join(''), {sub: 'proposed by one person, approved by another; a newer approved change makes older proposals stale'})}</div>` : '';
+  setMainG(__g, page('Integrations', 'Connect, roll out and monitor every security tool: stage, preflight checks, data freshness and scheduled jobs.',
+    cfg ? `<span class="status-pill"><span class="dot"></span>Configuration version ${esc(cfg.active_version || 'file only')}</span>` : '',
+    `${fileProblems}${pending}<div id="cfgpanel"></div>
+    ${sc ? `<div class="mb">${card('Platform self-check', `<div class="inline" style="margin-bottom:${sc.ok ? 0 : 10}px">${status(sc.ok ? 'ok' : 'high', sc.ok ? 'Consistent' : 'Attention')}<span class="small">${sc.passed} of ${sc.total} checks pass - the same figures agree on every screen, report and answer; every stored reference resolves; nothing is duplicated; the audit chain verifies.</span></div>` +
       sc.checks.filter(c => !c.ok).map(c => `<div class="list-row small"><span class="grow"><b>${esc(c.check)}</b></span><span class="mono muted">${esc(JSON.stringify(c.detail)).slice(0, 160)}</span></div>`).join(''), {sub: 'runs hourly; a failure raises a finding'})}</div>` : ''}
-    ${card(`Connectors <span class="muted">(${cs.filter(c => c.enabled).length} enabled)</span>`, table(['Tool', 'State', 'Mode', 'Streams · age / expected', ''], cs.map(c => `<tr>
+    ${card(`Connectors <span class="muted">(${cs.filter(c => c.enabled).length} enabled)</span>`, table(['Tool', 'Stage', 'State', 'Streams · age / expected', ''], cs.map(c => `<tr>
       <td><div class="t-title">${esc(c.tool)}</div><div class="t-sub">${esc(c.name)} · ${esc(c.category)}</div></td>
-      <td>${status(stc[c.state] || 'info', cap(c.state))}${c.config_problems.map(p => `<div class="t-sub" style="color:var(--high)">${esc(p)}</div>`).join('')}</td>
-      <td><span class="tag">${esc(c.mode || '')}</span></td>
+      <td>${c.enabled ? `<span class="chip plain ${STAGE_K[c.stage] || ''}" title="${esc(STAGE_HELP[c.stage] || '')}">${esc(c.stage_label || c.stage || '')}</span>` : '<span class="muted small">Off</span>'}</td>
+      <td>${status(stc[c.state] || 'info', cap(c.state))}${c.config_problems.map(p => `<div class="t-sub" style="color:var(--high)">${esc(p)}</div>`).join('')}${pfCell(c)}</td>
       <td class="small">${c.streams.map(s => `<div>${esc(s.stream)}: <span class="mono">${s.age_hours == null ? 'never' : hours(s.age_hours)}</span> <span class="muted">/ within ${s.expected_within_hours} h</span>${s.fresh ? '' : ' ' + chip('stale', 'medium plain')}${s.last_error ? `<div class="t-sub" style="color:var(--crit)">${esc(s.last_error)}</div>` : ''}</div>`).join('') || '<span class="muted">queried on demand during investigations</span>'}</td>
-      <td>${c.enabled && can('manage_connectors') ? btn('Test', 'testConn', [c.name], 'sm') : ''}</td></tr>`)), {flush: true})}
+      <td><div class="inline" style="gap:6px;flex-wrap:wrap">${manage ? btn('Preflight', 'preflight', [c.name], 'sm') : ''}${manage && cfg ? btn('Configure', 'configure', [c.name], 'sm') : ''}${manage && cfg && c.enabled ? btn('Pause', 'pauseConn', [c.name], 'sm danger') : ''}</div></td></tr>`)), {flush: true, sub: 'Preflight checks sign-in, every permission, parsing, data freshness and volume before a tool is trusted'})}
+    ${cfg ? `<div class="mt">${card('Configuration', configBody(cfg), {sub: 'file + approved console changes; secrets are never stored here'})}</div>` : ''}
     ${nt ? `<div class="mt">${card('Notifications', (nt.channels.length
         ? `<div class="small" style="margin-bottom:8px">Findings rated <b>${esc(nt.min_severity)}</b> or higher are sent to ${nt.channels.map(c => `<span class="tag">${esc(c)}</span>`).join(' ')} - once per channel, again if a finding escalates.</div>`
         : `<div class="small muted" style="margin-bottom:8px">No channels configured. Set <span class="mono">SOC_NOTIFY_WEBHOOKS</span> (Teams, Slack or JSON webhooks) to be told about important findings.</div>`) +
       (nt.recent.length ? table(['When', 'Channel', 'Severity', 'Outcome'], nt.recent.map(r => `<tr><td class="mono small muted">${dt(r.at)}</td><td class="small">${esc(r.channel)}</td><td>${chip(r.severity)}</td>
         <td>${status(r.status === 'sent' ? 'ok' : 'high', cap(r.status))}${r.error ? `<div class="t-sub" style="color:var(--high)">${esc(r.error.slice(0, 140))} · attempt ${r.attempts} of ${nt.max_attempts}</div>` : ''}</td></tr>`), {flush: true}) : '') +
-      (nt.channels.length && can('manage_connectors') ? `<div class="mt">${btn('Send test message', 'notifyTest', [])}</div>` : ''),
+      (nt.channels.length && manage ? `<div class="mt">${btn('Send test message', 'notifyTest', [])}</div>` : ''),
       {sub: 'sent by the notify job every minute'})}</div>` : ''}
     <div class="mt">${card('Scheduled jobs', table(['Job', 'Last run', 'Outcome', {h: 'Duration', num: 1}, 'Detail', ''], Object.keys(jr.jobs).map(j => { const r = last[j]; return `<tr>
       <td class="t-title">${esc(cap(j))}</td><td class="mono small muted">${r ? dt(r.started_at) : 'never'}</td>
       <td>${r ? status(jst[r.status], cap(r.status)) + `${r.attempts > 1 ? `<div class="t-sub">${r.attempts} attempts</div>` : ''}` : ''}</td>
       <td class="num small">${r && r.duration_s != null ? r.duration_s + ' s' : ''}</td><td class="small muted wrap">${r ? esc((r.error || JSON.stringify(r.summary)).slice(0, 140)) : ''}</td>
-      <td>${can('manage_connectors') ? btn('Run now', 'runJob', [j], 'sm') : ''}</td></tr>`; })), {flush: true, sub: 'retried with backoff; dead-lettered after 3 failed runs'})}</div>`));
+      <td>${manage ? btn('Run now', 'runJob', [j], 'sm') : ''}</td></tr>`; })), {flush: true, sub: 'retried with backoff; dead-lettered after 3 failed runs'})}</div>`));
 }
+function changeList(chs) {
+  return chs.length ? table(['Tool', 'Setting', 'From', 'To'], chs.map(c => `<tr><td class="small">${esc(c.connector)}</td><td class="mono small">${esc(c.field)}</td>
+    <td class="mono small muted wrap">${esc(fmtVal(c.from))}</td><td class="mono small wrap">${esc(fmtVal(c.to))}</td></tr>`), {flush: true}) : empty('No changes');
+}
+function pendingRow(v) {
+  const mine = v.proposed_by === window.ME.id;
+  const pf = Object.entries(v.preflight || {}).map(([n, p]) => `<span class="tag">${esc(n)}: ${esc(p.verdict)}${p.warnings ? ` (${p.warnings} warning${p.warnings > 1 ? 's' : ''})` : ''}</span>`).join(' ');
+  return `<div class="list-row" style="display:block"><div class="inline" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div class="small"><b>#${esc(v.id)}</b> ${esc(cap(v.kind))} by ${esc(v.proposed_by)} <span class="muted">${dt(v.created_at)}</span>${v.note ? `<div class="t-sub">${esc(v.note)}</div>` : ''}${pf ? `<div class="t-sub">Preflight: ${pf}</div>` : ''}</div>
+      <div class="inline" style="gap:6px">${can('approve_policy') && !mine ? btn('Approve', 'approveConfig', [v.id], 'sm primary') : ''}${can('approve_policy') && !mine ? btn('Reject', 'rejectConfig', [v.id], 'sm') : ''}${mine ? btn('Withdraw', 'rejectConfig', [v.id], 'sm') : ''}</div></div>
+    <div class="mt">${changeList(v.changes)}</div></div>`;
+}
+function configBody(cfg) {
+  const manage = can('manage_connectors');
+  return `<div class="inline" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">${btn('Export configuration', 'dl', ['/api/v1/config/export'], '', 'download')}
+      ${manage ? btn('Import…', 'showImport', [], '') : ''}${btn('History', 'showHistory', [], '')}${btn('Suppliers & sanctioned services', 'showLists', [], '')}
+      <span class="small muted">Stages: ${cfg.stages.map(s => `<span class="tag" title="${esc(STAGE_HELP[s.id])}">${esc(s.label)}</span>`).join(' ')}</span></div><div id="cfgextra"></div>`;
+}
+async function showHistory() {
+  const h = await api('/api/v1/config/history?limit=30');
+  $('#cfgextra').innerHTML = h.length ? table(['Version', 'Kind', 'Status', 'By', 'Approved by', 'Changes', ''], h.map(v => `<tr><td class="mono">#${esc(v.id)}</td><td class="small">${esc(cap(v.kind))}</td>
+      <td>${status(v.status === 'active' ? 'ok' : v.status === 'proposed' ? 'medium' : 'info', cap(v.status))}</td><td class="small">${esc(v.proposed_by)}<div class="t-sub">${dt(v.created_at)}</div></td>
+      <td class="small">${esc(v.approved_by || '–')}</td><td class="small">${v.changes.slice(0, 3).map(c => `<div><span class="mono">${esc(c.connector)}.${esc(c.field)}</span> → ${esc(fmtVal(c.to))}</div>`).join('')}${v.changes.length > 3 ? `<div class="muted">+${v.changes.length - 3} more</div>` : ''}</td>
+      <td>${can('manage_connectors') && ['active', 'superseded'].includes(v.status) ? btn('Restore', 'restoreConfig', [v.id], 'sm') : ''}</td></tr>`), {flush: true}) : empty('No console changes yet - the file alone is in force.');
+}
+function showLists() {
+  const L = window.__cfg.lists, manage = can('manage_connectors');
+  const sup = L.suppliers.items.map(s => `${s.name} | ${s.domains.join(', ')} | ${s.criticality}`).join('\n');
+  $('#cfgextra').innerHTML = `<div class="grid g-2e">
+    <div class="stack" style="gap:6px"><label class="small" for="lsup"><b>Key suppliers</b> (vendor e-mail compromise) · from ${esc(L.suppliers.source)} · one per line: <span class="mono">Name | domain1, domain2 | low/medium/high</span></label>
+      <textarea id="lsup" rows="10" class="mono" spellcheck="false"${manage ? '' : ' readonly'}>${esc(sup)}</textarea></div>
+    <div class="stack" style="gap:6px"><label class="small" for="lsan"><b>Sanctioned services</b> (shadow IT) · from ${esc(L.sanctioned.source)} · one domain per line</label>
+      <textarea id="lsan" rows="10" class="mono" spellcheck="false"${manage ? '' : ' readonly'}>${esc(L.sanctioned.items.join('\n'))}</textarea></div></div>
+    ${manage ? `<div class="form-row mt"><input class="input" id="lnote" aria-label="Why" placeholder="Why (shown to the approver)">${btn('Propose lists', 'proposeLists', [], 'primary')}</div>` : ''}<div id="lout"></div>`;
+}
+async function proposeLists() {
+  const suppliers = $('#lsup').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const [name, doms, crit] = l.split('|').map(x => (x || '').trim());
+    return {name, domains: (doms || '').split(',').map(d => d.trim()).filter(Boolean), criticality: (crit || 'medium').toLowerCase()};
+  });
+  const sanctioned = $('#lsan').value.split('\n').map(l => l.trim()).filter(Boolean);
+  try {
+    const v = await api('/api/v1/config/proposals', {method: 'POST', body: JSON.stringify({changes: {}, lists: {suppliers, sanctioned}, note: $('#lnote').value.trim()})});
+    toast(`Proposed as version ${v.id} - another person approves it`); Integrations();
+  } catch (e) { $('#lout').innerHTML = rejected(e); }
+}
+function showImport() {
+  $('#cfgextra').innerHTML = `<div class="stack" style="gap:8px"><label class="small" for="cfgimp">Paste an exported configuration (YAML). It becomes one proposal; tools not in it are switched off.</label>
+    <textarea id="cfgimp" rows="10" class="mono" spellcheck="false"></textarea><input class="input" id="cfgimpnote" aria-label="Why" placeholder="Why (shown to the approver)">
+    <div>${btn('Propose import', 'importConfig', [], 'primary')}</div><div id="cfgimpout"></div></div>`;
+}
+async function importConfig() {
+  try {
+    const v = await api('/api/v1/config/import', {method: 'POST', body: JSON.stringify({yaml: $('#cfgimp').value, note: $('#cfgimpnote').value.trim()})});
+    toast(`Proposed as version ${v.id} - another person approves it`); Integrations();
+  } catch (e) { $('#cfgimpout').innerHTML = rejected(e); }
+}
+async function restoreConfig(id) {
+  try { const v = await post(`/api/v1/config/versions/${id}/restore`, {reason: `restore version ${id}`}); toast(`Restore proposed as version ${v.id}`); Integrations(); }
+  catch (e) { $('#cfgextra').innerHTML = rejected(e); }
+}
+function rejected(e) {
+  let d; try { d = JSON.parse(e.message).detail; } catch (x) { d = null; }
+  if (!d || typeof d !== 'object') return '';
+  return `<div class="callout danger mt"><div><b>${esc(d.message)}</b>${(d.problems || []).map(p => `<div class="small">${esc(p.where)}: ${esc(p.message)}${p.fix ? ' - ' + esc(p.fix) : ''}</div>`).join('')}</div></div>${d.preflight && d.preflight.checks ? preflightHtml(d.preflight) : ''}`;
+}
+function preflightHtml(r) {
+  return `<div class="mt">${card(`Preflight · ${esc(r.tool)} · ${esc(r.stage_label || r.stage)}`, `<div class="inline" style="margin-bottom:8px">${status(r.ok ? (r.warnings ? 'medium' : 'ok') : 'high', cap(r.verdict))}<span class="small muted">${esc(r.errors)} error(s), ${esc(r.warnings)} warning(s) · ${esc(r.duration_ms)} ms · ${dt(r.ran_at)}</span></div>` +
+    r.checks.map(c => `<div class="list-row" style="display:block"><div class="inline">${status(PF_K[c.status] || 'info', c.check)}<span class="small">${esc(c.detail)}</span></div>
+      ${c.fix ? `<div class="t-sub">Fix: ${esc(c.fix)}</div>` : ''}${(c.streams || []).map(s => `<div class="small" style="margin-left:18px">${status(PF_K[s.status] || 'info', s.stream)} ${s.records != null ? `<span class="muted">${esc(s.records)} record(s) · ${esc(s.latency_ms)} ms${s.volume ? ' · ' + esc(s.volume) : ''}</span>` : ''}
+        ${(s.notes || []).map(n => `<div class="t-sub">${esc(n)}</div>`).join('')}${s.fix ? `<div class="t-sub">Fix: ${esc(s.fix)}</div>` : ''}</div>`).join('')}</div>`).join(''), {sub: 'nothing is written to the tool or the context store'})}</div>`;
+}
+async function preflight(name) {
+  toast(`Preflight of ${name} running…`);
+  try { const r = await post(`/api/v1/config/connectors/${encodeURIComponent(name)}/preflight`); $('#cfgpanel').innerHTML = preflightHtml(r); $('#cfgpanel').scrollIntoView({behavior: 'smooth'}); toast(`${name}: ${r.verdict}`, !r.ok); }
+  catch (e) { $('#cfgpanel').innerHTML = rejected(e); }
+}
+async function pauseConn(name) {
+  const reason = window.prompt(`Pause ${name} now? It stops syncing and offering actions at once (switching it back on needs an approved change).\nReason:`);
+  if (!reason || reason.trim().length < 3) { toast('Not paused: a reason is required', true); return; }
+  await post(`/api/v1/config/connectors/${encodeURIComponent(name)}/pause`, {reason: reason.trim()});
+  toast(`${name} paused`); Integrations();
+}
+function fieldInput(c, f) {
+  const id = `cf-${f.name}`, lab = `aria-label="${esc(f.name)}"`;
+  if (f.kind === 'secret') return `<div class="small"><span class="mono">${esc(f.env_var)}</span> ${f.set === true ? status('ok', 'Set') : f.set === false ? status('high', 'Not set') : '<span class="muted">not needed in the Fixtures stage</span>'}${f.rotated_at ? ` <span class="muted">· file changed ${dt(f.rotated_at)}</span>` : ''}</div>`;
+  const v = f.value == null ? '' : typeof f.value === 'object' ? JSON.stringify(f.value) : String(f.value);
+  if (f.kind === 'choice' || f.kind === 'bool') {
+    const opts = f.kind === 'bool' ? ['true', 'false'] : f.choices;
+    return `<select id="${id}" ${lab} data-orig="${esc(v)}"><option value="">(default)</option>${opts.map(o => `<option value="${esc(o)}"${String(v).toLowerCase() === String(o) ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  }
+  const ph = f.env_var && f.value == null ? `from \${${f.env_var}}${f.resolved ? ' = ' + f.resolved : ''}` : (f.required ? 'required' : 'optional');
+  return `<input class="input wide" id="${id}" ${lab} data-orig="${esc(v)}" value="${esc(v)}" placeholder="${esc(ph)}">`;
+}
+function configure(name) {
+  const c = (window.__cfg.connectors || []).find(x => x.name === name); if (!c) return;
+  const rows = f => `<tr><td><div class="t-title mono small">${esc(f.name)}${f.required ? ' *' : ''}</div><div class="t-sub">${esc(f.description)}</div><div class="t-sub muted">${esc(f.source)}</div></td><td>${fieldInput(c, f)}</td></tr>`;
+  const secrets = c.config.filter(f => f.secret), plain = c.config.filter(f => !f.secret && !f.common), adv = c.config.filter(f => !f.secret && f.common);
+  $('#cfgpanel').innerHTML = `<div class="mb">${card(`Configure ${esc(c.tool)}`, `
+    ${c.problems.length ? `<div class="callout danger mb"><div>${c.problems.map(p => `<div class="small"><b>${esc(p.where)}</b>: ${esc(p.message)}${p.fix ? ' - ' + esc(p.fix) : ''}</div>`).join('')}</div></div>` : ''}
+    <ol class="small" style="margin-top:0;padding-left:18px"><li><b>Secrets</b> go in the vault or environment under the names below - never typed here.</li><li><b>Settings</b> and <b>stage</b> are set here.</li>
+      <li><b>Propose</b>: a live stage runs the preflight on your proposal first; another person approves it; it applies within seconds, no restart.</li></ol>
+    ${secrets.length ? `<h3 class="section-h" style="margin-top:4px">1 · Secrets</h3>${table(['Secret', 'Where it comes from'], secrets.map(rows), {flush: true})}` : ''}
+    <h3 class="section-h">2 · Settings</h3>${plain.length ? table(['Setting', 'Value'], plain.map(rows), {flush: true}) : empty('No settings')}
+    <details class="mt"><summary class="small">Advanced</summary>${table(['Setting', 'Value'], adv.map(rows), {flush: true})}</details>
+    <h3 class="section-h">3 · Stage</h3><div class="form-row"><select id="cf-stage" aria-label="Stage">${window.__cfg.stages.map(s => `<option value="${esc(s.id)}"${s.id === c.stage ? ' selected' : ''}>${esc(s.label)} - ${esc(STAGE_HELP[s.id])}</option>`).join('')}</select>
+      <label class="inline small" style="flex:0 0 auto"><input type="checkbox" id="cf-enabled"${c.enabled ? ' checked' : ''}> Switched on</label></div>
+    <h3 class="section-h">4 · Propose</h3><div class="form-row"><input class="input" id="cf-note" aria-label="Why" placeholder="Why (shown to the approver)">${btn('Propose change', 'proposeConfig', [name], 'primary')}${btn('Cancel', 'closePanel', [], '')}</div>
+    <div id="cfout"></div>`, {sub: `${esc(c.vendor)} · ${esc(c.category)} · currently ${esc(c.stage_label)}${c.enabled ? '' : ' (off)'}`})}</div>`;
+  $('#cfgpanel').scrollIntoView({behavior: 'smooth'});
+}
+function closePanel() { $('#cfgpanel').innerHTML = ''; }
+async function proposeConfig(name) {
+  const c = window.__cfg.connectors.find(x => x.name === name);
+  const ch = {}, settings = {};
+  c.config.filter(f => !f.secret).forEach(f => { const el = $(`#cf-${f.name}`); if (el && el.value !== el.dataset.orig) settings[f.name] = el.value === '' ? null : el.value; });
+  if (Object.keys(settings).length) ch.settings = settings;
+  const st = $('#cf-stage').value, on = $('#cf-enabled').checked;
+  if (st !== c.stage) ch.stage = st;
+  if (on !== c.enabled) ch.enabled = on;
+  if (!Object.keys(ch).length) { toast('Nothing changed', true); return; }
+  $('#cfout').innerHTML = `<div class="small muted mt">Checking${ch.stage && ch.stage !== 'fake' || on ? ' and running the preflight' : ''}…</div>`;
+  try {
+    const v = await api('/api/v1/config/proposals', {method: 'POST', body: JSON.stringify({changes: {[name]: ch}, note: $('#cf-note').value.trim()})});
+    toast(`Proposed as version ${v.id} - another person approves it in this screen`); Integrations();
+  } catch (e) { $('#cfout').innerHTML = rejected(e); }
+}
+async function approveConfig(id) {
+  try { await post(`/api/v1/config/proposals/${id}/approve`); toast(`Configuration version ${id} is in force`); Integrations(); }
+  catch (e) { const h = rejected(e); if (h) $('#cfgpanel').innerHTML = h; }
+}
+async function rejectConfig(id) { await post(`/api/v1/config/proposals/${id}/reject`, {reason: ''}); toast(`Version ${id} withdrawn or rejected`); Integrations(); }
 async function notifyTest() {
   const r = await post('/api/v1/admin/notifications/test');
   const bad = r.results.filter(x => !x.ok);
   toast(bad.length ? `Failed: ${bad.map(x => `${x.channel} (${x.error})`).join('; ')}` : `Test message sent to ${r.results.map(x => x.channel).join(', ')}`, bad.length > 0);
 }
-async function testConn(name) { const r = await post(`/api/v1/connectors/${name}/test`); toast(r.ok ? `${name}: connected (${r.latency_ms} ms, ${r.sample_records ?? 0} records)` : `${name}: ${r.error}`, !r.ok); }
+async function testConn(name) { return preflight(name); }
 async function runJob(name) { toast(`Running ${name}…`); const r = await post(`/api/v1/jobs/${name}/run`); toast(`${name}: ${r.status}${r.error ? ' - ' + r.error : ''}`, r.status !== 'ok'); Integrations(); }
 
 // ================================================================= Policy
@@ -671,4 +820,5 @@ window.VIEWS = {search: Search, story: Story, overview: Overview, intelligence: 
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
 Object.assign(ALLOWED, {notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
-  campaign, vmAsk, misRoute, misVerb, testConn, runJob, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});
+  campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
+  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});

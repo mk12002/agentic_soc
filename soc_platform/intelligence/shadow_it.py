@@ -36,7 +36,10 @@ def registrable(domain: str) -> str:
     return ".".join(parts[-2:]) if len(parts) >= 2 else domain.lower()
 
 
-def load_sanctioned(path: str | Path | None = None) -> set[str]:
+def load_sanctioned(path: str | Path | None = None, *, override: list[str] | None = None) -> set[str]:
+    """The sanctioned services: the list approved in the console (``override``) when there is one, else the file."""
+    if override is not None:
+        return {registrable(str(d)) for d in override}
     p = Path(path or CONFIG)
     if not p.is_file():
         return set()
@@ -114,5 +117,11 @@ def analyse(rows: list[dict[str, Any]], *, sanctioned: set[str] | None = None) -
 def shadow_it_report(registry: Any, *, since: str = "-7days", max_rows: int = 50_000) -> dict[str, Any]:
     if "umbrella" not in registry.enabled_names():
         return {"available": False, "reason": "umbrella connector not enabled"}
-    rows, truncated = registry.get("umbrella").activity_all(since=since, max_rows=max_rows)
-    return {"available": True, "window": since, "truncated": truncated, **analyse(rows)}
+    from soc_platform.connectors.base import ConnectorError
+
+    try:
+        rows, truncated = registry.get("umbrella").activity_all(since=since, max_rows=max_rows)
+    except ConnectorError as exc:     # Umbrella down or unreachable: the screen and reports say so, they do not fail
+        return {"available": False, "reason": f"Umbrella unavailable: {str(exc)[:200]}"}
+    sanctioned = load_sanctioned(override=(getattr(registry, "lists", None) or {}).get("sanctioned"))
+    return {"available": True, "window": since, "truncated": truncated, **analyse(rows, sanctioned=sanctioned)}

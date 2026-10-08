@@ -29,6 +29,7 @@ from pptx.util import Pt as PPt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from soc_platform.connectors.base import ConnectorError
 from soc_platform.core.models import Case, utcnow
 from soc_platform.llm.gateway import BudgetExceeded, LLMGateway
 from soc_platform.reporting import charts
@@ -563,7 +564,13 @@ def build_report(session: Session, registry: Any, spec: dict, out_dir: str | Pat
         if sec["source"] in denied_sources:
             skipped.append({"source": sec["source"], "reason": "your role cannot include this data"})
             continue
-        data = SOURCES[sec["source"]][2](ctx)
+        try:
+            data = SOURCES[sec["source"]][2](ctx)
+        except ConnectorError as exc:
+            # a section reading a tool live (shadow IT asks Umbrella) is left out when the tool is unreachable; the
+            # report itself is still produced and says what is missing
+            skipped.append({"source": sec["source"], "reason": f"source unavailable: {str(exc)[:160]}"})
+            continue
         dom = data.get("domain")
         if dom == "*" and "*" not in domains or dom not in (None, "*") and not ("*" in domains or dom in domains):
             skipped.append({"source": sec["source"], "reason": "outside your data scope"})

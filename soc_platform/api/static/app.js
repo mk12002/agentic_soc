@@ -36,7 +36,7 @@ async function api(path, opts = {}) {
   if (!r.ok) {
     const t = await r.text(); let d = t;
     try { d = JSON.parse(t).detail || t; } catch (e) { /* not JSON */ }
-    toast((typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 300), true);
+    toast((typeof d === 'string' ? d : (d && d.message) || JSON.stringify(d)).slice(0, 300), true);
     throw new Error(t);
   }
   return (r.headers.get('content-type') || '').includes('json') ? r.json() : r;

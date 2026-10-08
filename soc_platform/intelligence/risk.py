@@ -8,11 +8,13 @@ score can be audited and argued with. No model is involved; the LLM layer narrat
 from __future__ import annotations
 
 import math
+import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from soc_platform.core.context_store import ContextStore
@@ -80,9 +82,14 @@ class RiskEngine:
     def _now(self) -> datetime:
         if self.as_of:
             return _aware(self.as_of)
-        # Reference "now" = the latest observation in the store, so replayed/historic data decays sensibly.
-        latest = self.s.execute(select(Entity.last_seen).order_by(Entity.last_seen.desc()).limit(1)).scalar()
-        return _aware(latest)
+        # Reference "now" = the latest observation in the store, so replayed/historic data decays sensibly. Read once
+        # per engine until data is written (a ranking profiles thousands of entities; it was one query each - but an
+        # engine kept across writes must see the new latest observation, or figures drift between screens).
+        memo = getattr(self, "_latest", None)
+        if memo is None or memo[0] != _GENERATION[0]:
+            latest = self.s.execute(select(Entity.last_seen).order_by(Entity.last_seen.desc()).limit(1)).scalar()
+            memo = self._latest = (_GENERATION[0], _aware(latest))
+        return memo[1]
 
     def _decay(self, when: datetime | None, now: datetime) -> float:
         age = max(0.0, (now - _aware(when)).total_seconds() / 86400) if when else 0.0
@@ -208,8 +215,61 @@ class RiskEngine:
                     ConsolidatedFinding.status.in_(("open", "reopened")))).scalars()))
 
     def top(self, kind: str | None = None, limit: int = 10) -> list[RiskProfile]:
-        """Highest-risk users / hosts (profiles only entities with a risk source: fast on large tenants)."""
+        """Highest-risk users / hosts (profiles only entities with a risk source).
+
+        Ranking means a profile per user and host: seconds on a large tenant (9 s at 22,000 entities), far too slow to
+        repeat on every visit to the brief or the Intelligence screen. Risk is a pure function of the stored data
+        (even "now" is the latest observation), so the ranking is reused while the data it reads is unchanged: the
+        cache key is a fingerprint of those tables plus a counter every local write to them bumps, so a reused
+        ranking is the one a fresh computation would give. Other processes' writes change the fingerprint; the age
+        limit (SOC_RISK_CACHE_SECONDS, default 300) is a backstop."""
+        key = (_data_fingerprint(self.s), _GENERATION[0], kind, self.as_of, self.window)
+        hit = _TOP_CACHE.get(key)
+        if hit is not None and time.monotonic() - hit[0] < _cache_seconds():
+            return hit[1][:limit]
         candidates = self.candidates()
         q = select(Entity.id).where(Entity.kind.in_([kind] if kind else ["asset", "identity"]))
         out = [p for eid in self.s.execute(q).scalars() if eid in candidates and (p := self.profile(eid)) and p.score > 0]
-        return sorted(out, key=lambda p: -p.score)[:limit]
+        ranked = sorted(out, key=lambda p: (-p.score, p.entity_id))
+        if len(_TOP_CACHE) > 32:
+            _TOP_CACHE.clear()
+        _TOP_CACHE[key] = (time.monotonic(), ranked)
+        return ranked[:limit]
+
+
+_TOP_CACHE: dict[tuple, tuple[float, list[RiskProfile]]] = {}
+_GENERATION = [0]          # bumped by every flush in this process that touches a table risk reads
+
+
+def _cache_seconds() -> float:
+    try:
+        return float(os.environ.get("SOC_RISK_CACHE_SECONDS", "300"))
+    except ValueError:
+        return 300.0
+
+
+def _data_fingerprint(s: Session) -> tuple:
+    """Cheap aggregates over everything a risk profile reads (indexed maxima and counts, a few milliseconds)."""
+    from soc_platform.core.models import Relation
+    from soc_platform.domains.vulnerability.models import ConsolidatedFinding, VulnIntel
+
+    return (tuple(s.execute(select(func.count(), func.max(Entity.updated_at), func.max(Entity.last_seen))
+                            .select_from(Entity)).one()),
+            tuple(s.execute(select(func.count(), func.max(Relation.last_seen)).select_from(Relation)).one()),
+            s.execute(select(func.count()).select_from(CaseEntity)).scalar(),
+            tuple(s.execute(select(func.count(), func.max(Case.updated_at)).select_from(Case)).one()),
+            tuple(sorted((str(a), str(b), str(c), n) for a, b, c, n in s.execute(
+                select(ConsolidatedFinding.status, ConsolidatedFinding.priority_band, ConsolidatedFinding.internet_exposed,
+                       func.count()).group_by(ConsolidatedFinding.status, ConsolidatedFinding.priority_band,
+                                              ConsolidatedFinding.internet_exposed)).all())),
+            tuple(s.execute(select(func.count(), func.max(VulnIntel.fetched_at)).select_from(VulnIntel)).one()))
+
+
+@event.listens_for(Session, "after_flush")
+def _bump_generation(session: Session, _ctx) -> None:
+    from soc_platform.core.models import Relation
+    from soc_platform.domains.vulnerability.models import ConsolidatedFinding, VulnIntel
+
+    watched = (Entity, Relation, CaseEntity, Case, ConsolidatedFinding, VulnIntel)
+    if any(isinstance(o, watched) for o in (*session.new, *session.dirty, *session.deleted)):
+        _GENERATION[0] += 1

@@ -206,7 +206,7 @@ The permissions of every role are listed on **Access → Role permissions**, so 
    - **Role permissions**: what every role may do.
 3. Show separation of duties: the admin has **no Approve buttons** (Approvals, case pages) and cannot change their
    own access. Administering the platform and approving changes to security tools are different jobs.
-4. **Integrations** as admin: *Test* each connector and *Run now* any job.
+4. **Integrations** as admin: *Preflight* a connector, *Configure* one (change a setting, propose; sign in as a lead to approve it) and *Run now* any job.
 
 To show a grant working: as Ada, grant `sam@acme-demo.com` the **Lead** role for 1 day. In a private window, sign
 in as `sam@acme-demo.com` with role **Auditor**. Sam now has the Lead's permissions too (for example the Approve
@@ -579,11 +579,13 @@ After the demo, when the client provides access. Summary here; the full procedur
 [OPERATIONS.md](OPERATIONS.md).
 
 1. For each tool, create a **read-only** service principal first. Write scopes come later, per action type.
-2. Put its settings in `config\connectors.yaml` and its secrets in files. Every secret `X` can come from `X_FILE`,
-   for example a vault mount.
-3. Set `SOC_CONNECTOR_MODE=live` and restart.
-4. **Integrations** → **Test** on each connector. It authenticates and reads one page.
-5. Leave the server running: its scheduler pulls from each tool on schedule, and freshness is watched per stream.
+2. Put its secrets in the vault or environment under the names **Integrations → Configure** shows (every secret `X`
+   can come from `X_FILE`, for example a vault mount). Secrets are never typed into the console.
+3. **Integrations → Configure**: the tool's settings and the stage **Recording** or **Read-only**; *Propose change*.
+   The preflight runs on your proposal and says exactly what to fix if anything is wrong. A lead approves; it is in
+   force within seconds, no restart. (From a shell: `python -m soc_platform preflight <name>`.)
+4. Leave the server running: its scheduler pulls from each tool on schedule, and freshness is watched per stream.
+5. Promote one stage at a time: **Recommend** (actions offered, a person approves each), later **Automate**.
 
 Keep automation at L2 (recommend) until shadow mode shows agreement with your analysts.
 
@@ -606,6 +608,19 @@ $env:SOC_TEST_POSTGRES = "<that URI>"; python -m pytest soc_platform\tests -q
 ```
 
 The browser tour needs Node.js and Chrome or Edge. It installs its own two packages on first run.
+
+**Volume and traffic** (real data is larger and messier than the demo, and many people use the console at once):
+
+```powershell
+python scripts\measure_scale.py --scales 1,20,40                  # messy estates of growing size: time and SQL per stage, statements per record, review queue
+python scripts\measure_scale.py --scales 20,40 --db <postgresql-url>   # the same on PostgreSQL (its tables are dropped and recreated)
+python scripts\load_test.py --users 40 --seconds 60 --workers 4   # a real server, 40 analysts at once while the incident job runs: p50/p95/p99, errors, 429s
+python scripts\build_estate_variant.py out --seed 7 --scale 40 --messy   # just the estate (people, machines, events, disorder)
+```
+
+The load test fails (exit 1) on any server error. Against a target environment, run it with the expected number of
+analysts before go-live. To serve many analysts, start several processes: `$env:SOC_API_WORKERS = 4` before
+`python -m soc_platform serve` (one per CPU core; the container image runs 4).
 
 ---
 
@@ -633,6 +648,10 @@ The browser tour needs Node.js and Chrome or Edge. It installs its own two packa
 | An approval is refused | Four-eyes or self-approval: approve as a *different* Lead. That's the control working. |
 | Numbers differ from screenshots | Time has passed (§10). Correct behaviour. |
 | `load_env.ps1` "cannot be loaded because running scripts is disabled" | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, once. |
+| The server refuses to start: "the connector configuration has errors" | A typo in `config\connectors.yaml` (tool, key, stage, setting). The lines above the message name each one with its fix; `python -m soc_platform config check` lists them all. |
+| A connector shows *misconfigured* | Its secret is missing or a setting is invalid - the reason is under the state. Every other tool keeps working. Fix the secret / setting (Configure), then *Preflight*. |
+| A proposal is refused with a preflight report | The tool is not ready for a live stage: each failed check says what to fix (permission to grant, URL, proxy, certificate, clock). Fix it and propose again. |
+| "another change was approved after this one was proposed" | Two people changed the configuration at once. Propose your change again so it is reviewed against the configuration now in force. |
 | Variables "disappear" | `load_env.ps1` was run without the leading dot, or in another window. Each window needs `. .\scripts\load_env.ps1`. |
 
 ---
@@ -653,6 +672,9 @@ SEARCH       box at the top of every screen (names, e-mails, hosts, CVEs, case t
 OWN A CASE   case > Take case ; Cases > Mine / Unassigned ; notes on the case page
 NOTIFY       SOC_NOTIFY_WEBHOOKS=teams|https://... (then Integrations > Notifications)
 TOKEN        python -m soc_platform token lena@acme-demo.com lead
+CONNECT TOOL Integrations > Configure (settings, stage) > Propose ; a Lead approves ; Preflight button checks a tool
+CONFIG       python -m soc_platform config check | config export --out f.yaml | preflight --all
+NEW TOOL     python -m soc_platform connector new <name> --category edr --tool "Vendor X" ; connector check <name>
 LLM?         Reports page callout, or GET /api/v1/llm/status
 RESET        stop server; python -m soc_platform reset-demo --yes ; serve
 OTHER ORG    python scripts\build_estate_variant.py out\veridian --seed 7  (then §9)

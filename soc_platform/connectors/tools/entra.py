@@ -15,7 +15,7 @@ from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ok_lookup, parse_ts, targets_of
+from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, targets_of
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, ARM, MicrosoftConnector, graph_and_arm_transport
 from soc_platform.core.identity import email_aliases
 from soc_platform.core.schema import EntityRef, NormalizedRecord
@@ -47,16 +47,17 @@ class EntraConnector(MicrosoftConnector):
                     "User-PasswordProfile.ReadWrite.All")
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
-        path, params = {
+        path, params, watermark = {
             "users": ("/v1.0/users", {"$select": "id,userPrincipalName,mail,displayName,department,jobTitle,"
                                                   "accountEnabled,onPremisesSamAccountName,onPremisesSecurityIdentifier,proxyAddresses,otherMails",
-                                      "$top": 999}),
-            "signins": ("/v1.0/auditLogs/signIns", {"$top": 500}),
-            "risky_users": ("/v1.0/identityProtection/riskyUsers", {"$top": 500}),
-            "risk_detections": ("/v1.0/identityProtection/riskDetections", {"$top": 500}),
-            "directory_audits": ("/v1.0/auditLogs/directoryAudits", {"$top": 500}),
+                                      "$top": 999}, None),                       # directory: read in full each sync
+            "signins": ("/v1.0/auditLogs/signIns", {"$top": 500}, "createdDateTime"),
+            "risky_users": ("/v1.0/identityProtection/riskyUsers", {"$top": 500}, "riskLastUpdatedDateTime"),
+            "risk_detections": ("/v1.0/identityProtection/riskDetections", {"$top": 500}, "detectedDateTime"),
+            "directory_audits": ("/v1.0/auditLogs/directoryAudits", {"$top": 500}, "activityDateTime"),
         }[stream]
-        return self.odata_page(path, cursor, params)
+        # event logs resume from the newest time seen, so a sync reads what is new, not 30 days of sign-ins again
+        return self.odata_page(path, cursor, params, watermark=watermark)
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         if stream == "users":
@@ -71,7 +72,7 @@ class EntraConnector(MicrosoftConnector):
 
     def _user(self, u: dict[str, Any]) -> NormalizedRecord:
         return NormalizedRecord(
-            kind="identity", tool=self.tool, source_type="user", source_id=u["id"], dimension="identity",
+            kind="identity", tool=self.tool, source_type="user", source_id=need(u, "id"), dimension="identity",
             keys={"entra_object_id": u["id"], "upn": u.get("userPrincipalName"), "email": u.get("mail"),
                   "sid": u.get("onPremisesSecurityIdentifier"), "sam": u.get("onPremisesSamAccountName")},
             attributes={"display_name": u.get("displayName"), "department": u.get("department"),
@@ -95,7 +96,7 @@ class EntraConnector(MicrosoftConnector):
                                   attributes={"hostname": dev.get("displayName")}))
         risky = s.get("riskLevelDuringSignIn") not in (None, "none", "hidden")
         return NormalizedRecord(
-            kind="signin", tool=self.tool, source_type="signin", source_id=s["id"], dimension="identity",
+            kind="signin", tool=self.tool, source_type="signin", source_id=need(s, "id"), dimension="identity",
             observed_at=parse_ts(s.get("createdDateTime")),
             title=f"Sign-in {'failure' if st.get('errorCode') else 'success'} to {s.get('appDisplayName')}",
             severity=_RISK.get(s.get("riskLevelDuringSignIn") or "none") if risky else "informational", refs=refs,
@@ -109,7 +110,7 @@ class EntraConnector(MicrosoftConnector):
 
     def _risky_user(self, r: dict[str, Any]) -> NormalizedRecord:
         return NormalizedRecord(
-            kind="alert", tool=self.tool, source_type="risky_user", source_id=r["id"], dimension="identity",
+            kind="alert", tool=self.tool, source_type="risky_user", source_id=need(r, "id"), dimension="identity",
             observed_at=parse_ts(r.get("riskLastUpdatedDateTime")), title=f"Risky user: {r.get('userPrincipalName')}",
             severity=_RISK.get(r.get("riskLevel") or "none"), refs=[self._uref(r.get("userPrincipalName"), r.get("id"))],
             attributes={"risk_level": r.get("riskLevel"), "risk_state": r.get("riskState"), "risk_detail": r.get("riskDetail")},
@@ -120,7 +121,7 @@ class EntraConnector(MicrosoftConnector):
         if r.get("ipAddress"):
             refs.append(EntityRef(kind="indicator", role="source_ip", keys={"value": r["ipAddress"]}, attributes={"type": "ip"}))
         return NormalizedRecord(
-            kind="alert", tool=self.tool, source_type="risk_detection", source_id=r["id"], dimension="identity",
+            kind="alert", tool=self.tool, source_type="risk_detection", source_id=need(r, "id"), dimension="identity",
             observed_at=parse_ts(r.get("detectedDateTime")), title=f"Identity risk: {r.get('riskEventType')}",
             severity=_RISK.get(r.get("riskLevel") or "none"), refs=refs,
             attributes={"risk_event_type": r.get("riskEventType"), "ip": r.get("ipAddress"),
@@ -136,7 +137,7 @@ class EntraConnector(MicrosoftConnector):
                 refs.append(EntityRef(kind="identity", role="target", keys={"upn": t["userPrincipalName"]}))
         return NormalizedRecord(
             kind="alert" if a.get("category") in {"RoleManagement"} else "signin", tool=self.tool,
-            source_type="directory_audit", source_id=a["id"], dimension="identity",
+            source_type="directory_audit", source_id=need(a, "id"), dimension="identity",
             observed_at=parse_ts(a.get("activityDateTime")), title=a.get("activityDisplayName", "Directory change"),
             severity="informational", refs=refs,
             attributes={"category": a.get("category"), "result": a.get("result")})
@@ -318,7 +319,10 @@ MANIFEST = ConnectorManifest(
     factory=lambda s, t: EntraConnector(s, t, rate_per_sec=5, burst=10),
     live_transport=graph_and_arm_transport, actions=_actions, confidence="High",
     config=[*APP_FIELDS, ConfigField("azure_subscriptions", "Azure subscription ids to read role assignments from "
-                                     "(comma-separated; empty = every subscription the app can read)", required=False)],
+                                     "(comma-separated; empty = every subscription the app can read)", required=False,
+                                     kind="list"),
+            ConfigField("graph_base", "Microsoft Graph base (national clouds only)", required=False, kind="url"),
+            ConfigField("arm_base", "Azure Resource Manager base (national clouds only)", required=False, kind="url")],
     to_confirm="Entra ID P2 for Identity Protection risk data; write permissions for response actions; the Reader "
                "role on the Azure subscriptions (or a management group) for Azure role assignments",
     focus_areas=("incident", "phishing"),

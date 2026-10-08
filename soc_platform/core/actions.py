@@ -66,12 +66,14 @@ class ActionRegistry:
         try:
             return self._specs[action_type]
         except KeyError as exc:
-            raise KeyError(f"unknown action type {action_type!r}") from exc
+            raise KeyError(f"unknown action type {action_type!r}: no enabled connector can perform it now (the tool "
+                           "may be disabled, paused, misconfigured or in a read-only rollout stage)") from exc
 
     def catalog(self) -> list[dict[str, Any]]:
         return [
             {"action_type": s.action_type, "description": s.description, "tool": s.tool,
-             "destructive": s.destructive, "reversible": s.reversible, "reverse_type": s.reverse_type}
+             "destructive": s.destructive, "reversible": s.reversible, "reverse_type": s.reverse_type,
+             "max_level": getattr(s, "max_level", None)}
             for s in sorted(self._specs.values(), key=lambda x: x.action_type)
         ]
 
@@ -131,8 +133,9 @@ class ActionService:
             return shared
 
         failures = spec.preconditions(params, targets)
+        ceiling = (spec.max_level, spec.max_level_reason) if getattr(spec, "max_level", None) is not None else None
         decision = self.policy.decide(action_type, targets, destructive=spec.destructive,
-                                      precondition_failures=failures)
+                                      precondition_failures=failures, ceiling=ceiling)
         req = ActionRequest(
             action_type=action_type, params=params, targets=targets, case_id=case_id, domain=domain,
             rationale=rationale, evidence_ids=list(evidence_ids or []), requested_by=requested_by.id,

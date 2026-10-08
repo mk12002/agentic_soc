@@ -10,16 +10,16 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import DataError
+from sqlalchemy.exc import DataError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as SQLATimeoutError
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -27,12 +27,13 @@ from starlette.requests import Request
 from soc_platform import __version__
 from soc_platform.config import Settings, get_settings
 from soc_platform.connectors.base import SyncRunner
-from soc_platform.connectors.registry import ConnectorRegistry
+from soc_platform.connectors.registry import ConfigError, ConnectorRegistry
 from soc_platform.core.access import AccessService, kill_switch_on, permissions_matrix
 from soc_platform.core.actions import ActionService
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.auth import AuthError, Perm, Principal, issue_dev_token, principal_from_token
 from soc_platform.core.cases import CaseService, agreement_report, detection_quality
+from soc_platform.core.connector_config import ConfigRejected, ConfigStore, version_dict
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.db import get_database
 from soc_platform.core.entity_resolution import EntityResolver
@@ -49,6 +50,8 @@ async def _lifespan(_app: FastAPI):
     from soc_platform import scheduler as sched
     from soc_platform.domains.phishing.agents.analyzer import engine_enabled, warm_up_engine
 
+    threads = int(__import__("os").environ.get("SOC_API_THREADS", "40") or 40)
+    __import__("anyio").to_thread.current_default_thread_limiter().total_tokens = max(4, threads)  # request threads
     if engine_enabled():   # load the trained models in the background; the server answers meanwhile
         __import__("threading").Thread(target=warm_up_engine, name="soc-engine-warmup", daemon=True).start()
     sch = None
@@ -161,6 +164,23 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityMiddleware)
+
+
+@app.exception_handler(SQLATimeoutError)
+async def _pool_exhausted(_request: Request, _exc: Exception) -> JSONResponse:
+    """Every database connection is busy: tell the client to retry shortly instead of holding the request."""
+    return JSONResponse({"detail": "the platform is busy - retry in a moment"}, status_code=503,
+                        headers={"Retry-After": "2"})
+
+
+@app.exception_handler(OperationalError)
+async def _database_busy(_request: Request, exc: Exception) -> JSONResponse:
+    """SQLite still locked after its busy timeout, or the database briefly unreachable: a retryable 503, not a 500."""
+    import logging
+
+    logging.getLogger(__name__).warning("database unavailable: %s", str(exc).splitlines()[0][:200])
+    return JSONResponse({"detail": "the database is busy or unreachable - retry in a moment"}, status_code=503,
+                        headers={"Retry-After": "5"})
 
 
 @app.exception_handler(DataError)
@@ -293,9 +313,64 @@ def _log_access(request: Request, status: int, latency_ms: float) -> None:
 # ----------------------------------------------------------------------------- dependencies
 
 
-@lru_cache(maxsize=1)
-def registry() -> ConnectorRegistry:
-    return ConnectorRegistry.from_file()
+class _Registry:
+    """The connector registry in force: ``config/connectors.yaml`` plus the approved console version
+    (``core/connector_config.py``). The active version is re-read at most every SOC_CONFIG_RELOAD_SECONDS (5), so
+    every API process and the scheduler pick an approved change up within seconds, without a restart; the process
+    that approves it rebuilds at once (``cache_clear``)."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self.cache_clear()
+
+    def cache_clear(self) -> None:
+        self._reg: ConnectorRegistry | None = None
+        self._db: Any = None
+        self._version: int | None = None
+        self._checked: float | None = None          # None = never checked (monotonic time can be small after boot)
+
+    @staticmethod
+    def _active_version(db: Any) -> int | None:
+        from soc_platform.core.models import ConnectorConfigVersion
+
+        try:
+            with db.session() as s:
+                return s.execute(select(func.max(ConnectorConfigVersion.id))
+                                 .where(ConnectorConfigVersion.status == "active")).scalar()
+        except SQLAlchemyError:
+            return None          # no table yet (init-db not run) or the database is busy: the file alone applies
+
+    @staticmethod
+    def _build(db: Any) -> ConnectorRegistry:
+        try:
+            with db.session() as s:
+                return ConfigStore(s).registry()
+        except SQLAlchemyError:
+            import logging
+
+            logging.getLogger(__name__).warning("console configuration unreadable; using the file", exc_info=True)
+            return ConnectorRegistry.from_file()
+
+    def __call__(self) -> ConnectorRegistry:
+        import os
+        import time
+
+        db, now = get_database(), time.monotonic()
+        every = float(os.environ.get("SOC_CONFIG_RELOAD_SECONDS", "5") or 5)
+        with self._lock:
+            if (self._reg is not None and self._db is db and self._checked is not None
+                    and now - self._checked < every):
+                return self._reg
+            version = self._active_version(db)
+            self._checked = now
+            if self._reg is None or self._db is not db or version != self._version:
+                self._reg, self._db, self._version = self._build(db), db, version
+            return self._reg
+
+
+registry = _Registry()
 
 
 def db_session() -> Iterator[Session]:
@@ -488,10 +563,15 @@ def connectors(_: Principal = Depends(need(Perm.READ))) -> list[dict[str, Any]]:
 @app.post("/api/v1/connectors/{name}/sync")
 def connector_sync(name: str, stream: str, full: bool = False, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
                    s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
+    reg = registry()
+    if name not in reg.manifests:
+        raise HTTPException(404, "unknown connector")
+    if name not in reg.enabled_names():
+        raise HTTPException(409, "; ".join(reg.problems_of(name)) or f"{name} is switched off")
     try:
-        conn = registry().get(name)
-    except KeyError:
-        raise HTTPException(404, "unknown connector") from None
+        conn = reg.get(name)
+    except ConfigError as exc:
+        raise HTTPException(409, str(exc)) from exc
     if stream not in conn.streams:
         raise HTTPException(400, f"unknown stream; available: {list(conn.streams)}")
     rep = SyncRunner(s, ContextStore(s)).sync(conn, stream, full_backfill=full)
@@ -503,15 +583,137 @@ def connector_sync(name: str, stream: str, full: bool = False, p: Principal = De
 @app.post("/api/v1/connectors/{name}/test")
 def connector_test(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
                    s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
-    """Authenticate against the tool and read one page (NFR-13): proves credentials, scopes and reachability."""
+    """Authenticate against the tool and read one page (NFR-13): proves credentials, scopes and reachability.
+    The full check is the preflight (POST /api/v1/config/connectors/{name}/preflight)."""
     try:
         conn = registry().get(name)
     except KeyError:
         raise HTTPException(404, "unknown connector") from None
+    except ConfigError as exc:
+        return {"connector": name, "ok": False, "error": str(exc)}
     res = conn.health()
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="connector.test", subject_type="connector",
                        subject_id=name, payload={"ok": res.get("ok"), "error": res.get("error")})
     return {"connector": name} | res
+
+
+# ----------------------------------------------------------------------------- connector configuration (console)
+
+
+def _config_err(exc: Exception) -> HTTPException:
+    if isinstance(exc, ConfigRejected):
+        return HTTPException(422, exc.detail())          # problems and preflight, so the screen can show what to fix
+    return _err(exc)
+
+
+class ConfigChangeBody(BaseModel):
+    changes: dict[str, Any] = Field(default_factory=dict)
+    lists: dict[str, Any] | None = None          # suppliers / sanctioned (a list replaces the file's; null restores it)
+    note: str = Field(default="", max_length=2000)
+
+
+class ReasonBody(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
+class ImportBody(BaseModel):
+    yaml: str = Field(min_length=1, max_length=500_000)
+    note: str = Field(default="", max_length=2000)
+
+
+@app.get("/api/v1/config/connectors")
+def config_view(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
+    """Every connector: stage, settings (secrets only as 'set / not set' and the variable they come from), problems,
+    last preflight; plus the pending changes awaiting approval."""
+    return ConfigStore(s).view()
+
+
+@app.post("/api/v1/config/connectors/{name}/preflight")
+def config_preflight(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
+                     s: Session = Depends(db_session, scope="function")):
+    try:
+        return ConfigStore(s).preflight(name, p)
+    except Exception as exc:
+        raise _config_err(exc) from exc
+
+
+@app.post("/api/v1/config/proposals")
+def config_propose(body: ConfigChangeBody, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
+                   s: Session = Depends(db_session, scope="function")):
+    try:
+        return version_dict(ConfigStore(s).propose(body.changes, p, body.note, lists=body.lists))
+    except ConfigRejected as exc:
+        if exc.preflight:
+            s.commit()      # nothing was proposed, but the preflight run and its audit entry are kept as evidence
+        raise _config_err(exc) from exc
+    except Exception as exc:
+        raise _config_err(exc) from exc
+
+
+@app.post("/api/v1/config/proposals/{vid}/approve")
+def config_approve(vid: int, p: Principal = Depends(need(Perm.APPROVE_POLICY)),
+                   s: Session = Depends(db_session, scope="function")):
+    try:
+        v = ConfigStore(s).approve(vid, p)
+    except Exception as exc:
+        raise _config_err(exc) from exc
+    s.commit()
+    registry.cache_clear()                  # this process uses it at once; the others within SOC_CONFIG_RELOAD_SECONDS
+    return version_dict(v)
+
+
+@app.post("/api/v1/config/proposals/{vid}/reject")
+def config_reject(vid: int, body: ReasonBody, p: Principal = Depends(current_user),
+                  s: Session = Depends(db_session, scope="function")):
+    try:
+        return version_dict(ConfigStore(s).reject(vid, p, body.reason))
+    except Exception as exc:
+        raise _config_err(exc) from exc
+
+
+@app.post("/api/v1/config/connectors/{name}/pause")
+def config_pause(name: str, body: ReasonBody, p: Principal = Depends(current_user),
+                 s: Session = Depends(db_session, scope="function")):
+    """Switch one tool off at once (audited; switching it back on is a normal, approved change)."""
+    try:
+        v = ConfigStore(s).pause(name, p, body.reason)
+    except Exception as exc:
+        raise _config_err(exc) from exc
+    s.commit()
+    registry.cache_clear()
+    return version_dict(v)
+
+
+@app.post("/api/v1/config/versions/{vid}/restore")
+def config_restore(vid: int, body: ReasonBody, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
+                   s: Session = Depends(db_session, scope="function")):
+    try:
+        return version_dict(ConfigStore(s).restore(vid, p, body.reason))
+    except Exception as exc:
+        raise _config_err(exc) from exc
+
+
+@app.get("/api/v1/config/history")
+def config_history(limit: int = Query(default=50, ge=1, le=500), _: Principal = Depends(need(Perm.READ_AUDIT)),
+                   s: Session = Depends(db_session, scope="function")):
+    return [version_dict(v) for v in ConfigStore(s).history(limit)]
+
+
+@app.get("/api/v1/config/export")
+def config_export(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
+    """The configuration in force as one YAML file (secrets only as ${VAR} references) - for review, staging and
+    disaster recovery; re-imported with POST /api/v1/config/import."""
+    return PlainTextResponse(ConfigStore(s).export_yaml(), media_type="text/yaml",
+                             headers={"Content-Disposition": 'attachment; filename="connectors.yaml"'})
+
+
+@app.post("/api/v1/config/import")
+def config_import(body: ImportBody, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)),
+                  s: Session = Depends(db_session, scope="function")):
+    try:
+        return version_dict(ConfigStore(s).import_yaml(body.yaml, p, body.note))
+    except Exception as exc:
+        raise _config_err(exc) from exc
 
 
 # ----------------------------------------------------------------------------- access management (NFR-09)
@@ -658,6 +860,9 @@ def ingest_alerts(body: PushedAlerts, p: Principal = Depends(need(Perm.INVESTIGA
                   s: Session = Depends(db_session, scope="function")) -> dict[str, int]:
     """Push endpoint for any SIEM/SOAR (IM-T02 webhook ingestion; duplicates suppressed on replay)."""
     reg = registry()
+    if "generic_siem" not in reg.enabled_names():
+        raise HTTPException(409, "the generic SIEM connector is switched off or misconfigured: "
+                                 + ("; ".join(reg.problems_of("generic_siem")) or "switch it on in Integrations"))
     conn = reg.get("generic_siem")
     store = ContextStore(s)
     n = 0
@@ -717,7 +922,9 @@ def kill_switch(on: bool, p: Principal = Depends(need(Perm.KILL_SWITCH)), s: Ses
 @app.get("/api/v1/actions/catalog")
 def action_catalog(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     pol = policy_engine(s)
-    return [{**a, "level": int(pol.view(a["action_type"]).level)} for a in registry().action_registry().catalog()]
+    # the level shown is the one that applies: the policy's, lowered by a tool's rollout stage (recommend -> L2)
+    return [{**a, "level": min(int(pol.view(a["action_type"]).level), 4 if a["max_level"] is None else a["max_level"])}
+            for a in registry().action_registry().catalog()]
 
 
 @app.get("/api/v1/actions")

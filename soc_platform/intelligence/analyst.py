@@ -441,6 +441,26 @@ def _facts_summary(results: list[dict[str, Any]]) -> str:
     return text + "."
 
 
+def _every_stage(steps: list[str], n: int) -> list[str]:
+    """Up to ``n`` steps of an attack chain, in time order, with every stage represented: a long chain (a busy tenant)
+    used to lose its later - most serious - stages to a plain "first ten". Steps read "<time> <stage>: <title>"."""
+    if len(steps) <= n:
+        return steps
+    stage = lambda s: s.split(" ", 1)[-1].split(":", 1)[0]
+    keep: list[int] = []
+    seen: set[str] = set()
+    for i, s in enumerate(steps):
+        if stage(s) not in seen:
+            seen.add(stage(s))
+            keep.append(i)
+    for i in range(len(steps)):
+        if len(keep) >= n:
+            break
+        if i not in keep:
+            keep.append(i)
+    return [steps[i] for i in sorted(keep[:n])]
+
+
 def _readable_claims(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One fact per piece of evidence, in words, citing the tool result (R#) it came from."""
     claims: list[dict[str, Any]] = []
@@ -468,7 +488,7 @@ def _readable_claims(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for a in res.get("pending_actions", [])[:3]:
                 add(f"Awaiting approval: {a['action']} - {a['rationale']}", r)
         elif r["tool"] == "attack_story" and isinstance(res, dict) and res.get("steps"):
-            for stp in res["steps"][:10]:
+            for stp in _every_stage(res["steps"], 10):
                 add(stp, r)
             for g in res.get("gaps", [])[:3]:
                 add(g, r, "inference")

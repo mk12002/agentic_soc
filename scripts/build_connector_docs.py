@@ -26,19 +26,34 @@ Every connector runs in one of two modes, set per connector in `config/connector
 on fixtures shaped like the documented responses (`soc_platform/tests/test_connectors.py`). Request and response
 formats were audited field by field against the vendors' public API references and public reference integrations
 (round 14 in `docs/TEST_REPORT.md` lists what that audit corrected). The public feeds (NVD, EPSS, CISA KEV) are also
-verified live. The vendor connectors have **not yet been run against the client's tenants**: do that per connector with
-the *Test* button (Integrations screen) or `POST /api/v1/connectors/{name}/test`, which authenticates and reads one
-page. Items under *To confirm* are licence or permission questions for the client (A01, A03). Step-by-step onboarding
-of every tool in the client's environment: `docs/CLIENT_DEPLOYMENT_GUIDE.md`.
+verified live. Beyond the documented shapes, every connector passes a conformance suite
+(`soc_platform/tests/test_connector_conformance.py`, round 16): reading across pages in its vendor's own paging style,
+resuming the next sync correctly (a time watermark with an overlap for late logs, or a fresh read - never an expired
+continuation token), throttling with `Retry-After`, a refused token renewed once, a missing permission reported at
+once, and every field of every record missing or null. The demo fixtures are one scripted scenario, far smaller and
+tidier than a tenant; `scripts/build_estate_variant.py --messy --scale N` generates large, disorderly estates for
+volume tests, and record-and-sanitise (`SOC_RECORD_FIXTURES_DIR`) turns the first live responses into fixtures.
+The vendor connectors have **not yet been run against the client's tenants**: do that per connector with
+the *Preflight* button (Integrations screen), `python -m soc_platform preflight <name>` or
+`POST /api/v1/config/connectors/{name}/preflight`, which checks sign-in, every stream and the permission it needs,
+parsing, data freshness and volume, and says how to fix each failure. Items under *To confirm* are licence or
+permission questions for the client (A01, A03). Step-by-step onboarding of every tool in the client's environment:
+`docs/CLIENT_DEPLOYMENT_GUIDE.md`.
 
 **Onboarding a tool (live):**
 
 1. Create a dedicated service principal / API client with the read scopes listed (write scopes only for the
    actions you intend to approve).
-2. Put the secrets in the vault and reference them from `config/connectors.yaml`, set `mode: live`.
-3. Test the connection, then run one sync (`POST /api/v1/connectors/{name}/sync?stream=...`) and check the
-   Integrations screen: records ingested, freshness, reconciliation against the tool's own total.
-4. Actions stay at autonomy level L2 (recommend, human approves) until a policy change promotes them.
+2. Put the secrets in the vault (or environment) under the names *Integrations -> Configure* shows (convention
+   `<CONNECTOR>_<SETTING>`); they are never typed into the console.
+3. *Configure*: the non-secret settings and the stage **Recording** or **Read-only**; propose. The preflight runs on the
+   proposal; a lead approves; it applies within seconds, no restart. (Or `stage: read` in `config/connectors.yaml`.)
+4. Check the Integrations screen: records ingested, freshness, reconciliation against the tool's own total.
+5. Promote to **Recommend** (actions offered, never above L2), later **Automate** (the autonomy policy decides).
+
+**Adding a tool that has no connector:** `python -m soc_platform connector new <name> --category <cat> --tool "Vendor
+Product"` writes a connector that already follows the platform's rules, its fixtures, its paging test and a switched-off
+config entry; adapt the endpoints and fields, then `python -m soc_platform connector check <name>`.
 
 """
 

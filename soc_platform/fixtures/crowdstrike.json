@@ -42,7 +42,7 @@
   },
   {
    "method": "GET",
-   "path": "^/devices/queries/devices/v1$",
+   "path": "^/devices/queries/devices-scroll/v1$",
    "body": {
     "resources": [
      "cs-aid-jane01",
@@ -52,7 +52,7 @@
     ],
     "meta": {
      "pagination": {
-      "offset": 0,
+      "offset": "scroll-token-1",
       "limit": 100,
       "total": 4
      }

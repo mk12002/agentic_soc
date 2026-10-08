@@ -84,9 +84,12 @@ python -m soc_platform reset-demo [--yes]      # server stopped: wipe the demo D
 python -m soc_platform serve                   # API + console + built-in scheduler on 127.0.0.1:8080 (SOC_PORT/SOC_HOST)
 python -m soc_platform scheduler [--once]      # optional separate scheduler service
 python -m soc_platform token lena@acme-demo.com lead   # dev token (needs SOC_DEV_JWT_SECRET)
+python -m soc_platform config check [FILE] [--no-env]  # every configuration problem with its fix; exit 1 on errors
+python -m soc_platform preflight NAME... | --all       # every check a tool must pass before it goes live
+python -m soc_platform connector new NAME --category CAT --tool "Vendor X"   # scaffold;  connector check NAME
 # minimum env for a local run: SOC_DEV_JWT_SECRET=<long random>, SOC_ORG_DOMAINS=acme-demo.com
 
-# tests (full suite ~17 min SQLite, ~23 min PostgreSQL; run the relevant files first)
+# tests (full suite ~25 min SQLite, ~50 min PostgreSQL when both run at once; run the relevant files first)
 python -m pytest soc_platform/tests -q -p no:cacheprovider
 python -m pytest soc_platform/tests/test_phishing.py -q -p no:cacheprovider -k <name>
 SOC_TEST_POSTGRES=<postgresql://...> python -m pytest soc_platform/tests -q -p no:cacheprovider   # same suite on PostgreSQL
@@ -112,8 +115,10 @@ printed URI as `SOC_TEST_POSTGRES`.
 temp folders and the variant-estate builders overwrite each other (seen as "demo names leaked" failures).
 
 **Other scripts** (`scripts/`): `build_fixtures.py` + `fixture_builders.py` (regenerate fake-mode fixtures),
-`build_email_corpus.py` (labelled `.eml` corpus), `build_estate_variant.py OUT --seed N [--scale X]` (a different
-organisation: fixtures, settings, suppliers, corpus, `estate.json`), `rename_estate.py`, `eval_phishing.py`,
+`build_email_corpus.py` (labelled `.eml` corpus), `build_estate_variant.py OUT --seed N [--scale X] [--messy]` (a
+different organisation: fixtures, settings, suppliers, corpus, `estate.json`; `--messy` adds real-tenant disorder and
+event volume), `measure_scale.py --scales 1,20,40 [--db URL]` (time and SQL per stage on growing messy estates),
+`load_test.py --users N --seconds S --workers W [--db URL]` (a real multi-process server under concurrent analysts), `rename_estate.py`, `eval_phishing.py`,
 `eval_identity_resolution.py`, `eval_resolution_at_scale.py`, `measure_llm_usage.py` (token/cost measurement),
 `build_connector_docs.py`, `ui_tour/tour.js` (Playwright browser tour: layout at 4 widths, axe-core accessibility,
 stored-XSS probe, screen-vs-API cross-check; needs Node + installed Chrome/Edge), `load_env.ps1`.
@@ -132,8 +137,15 @@ soc_platform/
   api/dashboards.py      read models: overview, ATT&CK coverage, shadow IT, Prometheus text
   api/static/            index.html, app.js (shell/router/auth/click delegation), views.js (screens), theme.js, styles.css
   connectors/base.py     BaseConnector, TokenBucket, with_backoff, SyncRunner (sync, sync_many), Page, LookupResult
-  connectors/http.py     Transport protocol, HttpTransport, FixtureTransport (fake mode), auth strategies
-  connectors/registry.py discovery (tools/*.py MANIFEST or entry points), config/connectors.yaml, ConnectorRegistry
+  connectors/http.py     Transport protocol, HttpTransport, FixtureTransport (fake mode; `times`, `headers`), auth
+                         strategies, raise_for_status (one status -> error mapping for live and fake)
+  connectors/recording.py  record-and-sanitise (SOC_RECORD_FIXTURES_DIR): live responses -> sanitised fixtures
+  connectors/registry.py discovery (tools/*.py MANIFEST or entry points), ConnectorRegistry (isolation of unusable
+                         connectors, stages, StagedAction cap), ConfigField (secret, required, kind)
+  connectors/config_schema.py  strict config checking (Problem with fix, "did you mean"), stages, YAML line errors
+  connectors/preflight.py      run_preflight: config, start-up, sign-in, every stream (permission, parsing,
+                         freshness, clock, volume), write scopes - each failure with its fix
+  connectors/devkit.py   `connector new` scaffold + `connector check`
   connectors/tools/      one module per tool; _common.py (ToolConnector, parse_ts, ok_lookup), _microsoft.py (Graph/OData)
   core/schema.py         NormalizedRecord / EntityRef - the canonical schema every connector emits
   core/models.py         core ORM tables; utcnow() (THE clock); new_id() (uuid4 hex)
@@ -152,6 +164,8 @@ soc_platform/
   core/audit.py          hash-chained append-only audit; _lock_chain serialises appends
   core/crypto.py         Fernet/MultiFernet, write_protected (atomic, 0600, Windows replace retry), read_protected
   core/retention.py      retention + legal hold;  core/selfcheck.py  cross-surface consistency proof
+  core/connector_config.py  ConfigStore: console connector config + supplier / sanctioned lists over the files;
+                         propose / approve (four-eyes) / reject / pause / restore / export / import; preflight gate
   core/notify.py         Notification table + Teams/Slack/JSON webhook delivery (notify job); HTTPS-only config
   domains/phishing/      service.py (pipeline), models.py, supplier.py, agents/{decompose,analyzer,investigation}.py, engine/
   domains/incident/service.py
@@ -218,7 +232,31 @@ fingerprints hash the evidence.
   `ThreadPoolExecutor.map` for lookups (order-preserving), the LLM gateway's `_lock` around its session use so
   model calls can overlap (`SOC_LLM_CONCURRENCY`, default 4), `ConnectorRegistry` builds connectors under a lock.
 - Every outbound call goes through the connector's `TokenBucket` (thread-safe), so parallelism never exceeds a
-  vendor's rate budget. `Retry-After` is honoured but capped at 120 s.
+  vendor's rate budget. `Retry-After` is honoured but capped at 120 s. 401 -> the token is renewed once
+  (`transport.reauthenticate()`), 403 -> `PermissionDenied`, never retried.
+
+**Connector sync semantics** (a new connector must follow them; `test_connector_conformance.py` checks every one)
+- `fetch_page` returns `Page(records, next_cursor, has_more=...)`. On the **last** page of a stream set `reset=True`:
+  `next_cursor` is then where the NEXT sync starts - a watermark (`Watermark.of(self, key)`: `start(cursor)` gives the
+  time to ask from, `see(records, field)`, `finish()`) for event streams, or `None` to read an inventory in full. Never
+  leave a continuation token (next link, page token, offset, page number) as the resume point.
+- Normalisers tolerate any missing or null optional field; a record without its identifier raises `ValueError` via
+  `need(rec, "id")` (not a KeyError).
+- Add the stream to the paging table in `test_connector_conformance.py` (or `NO_PAGING` with the reason), or put
+  `PAGING_TESTED = {(name, stream)}` in its own `test_connector_<name>.py` (what `connector new` generates).
+- Declare **every** setting a connector reads as a `ConfigField` with its `kind` (url, bool, int, choice, map, list,
+  email, path): the strict checker rejects undeclared settings and the console draws its form from them.
+
+**Connector configuration in force** = `config/connectors.yaml` + the active `ConnectorConfigVersion` (console).
+- The API's `registry()` is a `_Registry` object (still has `cache_clear()`): it re-reads the active version every
+  `SOC_CONFIG_RELOAD_SECONDS` (5) and rebuilds on a change or another database. Approve / pause routes clear it.
+- Stages: `fake` (fixtures) / `record` / `read` (no actions) / `recommend` (actions capped at L2 via
+  `PolicyEngine.decide(ceiling=)`) / `automate`. `mode: live` = `automate`.
+- `enabled_names()` = switched on **and** usable; `configured_names()` = switched on. Use `enabled_names()` before
+  `get(name)`; a broken connector raises `ConfigError` from `get` and is skipped by `enabled()` / `action_registry()`.
+- Never store a secret value in a config version: only `${VAR}` references (enforced; tests check exports and rows).
+- `SyncRunner` commits after every page (one savepoint per page). Do not wrap a sync in a caller's savepoint or rely
+  on rolling a sync back.
 
 **LLM use**
 - Call through `LLMGateway` only (`grounded()` / `complete_json()`), passing computed figures as evidence with ids.
@@ -263,21 +301,30 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `test_incident.py`, `test_vulnerability.py`, `test_intelligence.py`, `test_report_builder.py`, `test_api.py`,
   `test_access_security.py`, `test_resilience_security.py`, `test_connectors.py`, `test_core_*.py`, `test_jobs.py`,
   `test_notify.py` (webhooks), `test_schema.py` (column addition on both engines), `test_cli.py` (`reset-demo`),
+  `test_connector_conformance.py` (every connector: vendor paging, resume, 429 / 401 / 403, missing and null fields,
+  Sentinel / Jira / SIEM-push content), `test_volume.py` (cost per record and per new host stays flat; savepoints per
+  page; interrupted backfill resumes), `test_traffic.py` (pool, 503 under saturation, a real multi-process server
+  under concurrent analysts), `test_recording.py` (record-and-sanitise leaves no identity and replays),
+  `test_real_world.py` (an empty tenant; every tool down at once - every pipeline, screen, report still works),
+  `test_connector_admin.py` (isolation, strict config, stages, preflight, propose / approve / pause / restore /
+  export / import through the store and the API, hot reload, supplier / sanctioned lists, the scaffold),
   `test_commit_before_response.py` (commit before reply, real server),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 345 platform tests passing on SQLite and on PostgreSQL (360 collected, 15 opt-in/engine-specific skips), 205
+- Current counts (keep docs in sync when they change): 535 platform tests passing on SQLite and on PostgreSQL (550 collected, 15 skips: 12 opt-in live tests, 2 per-estate repeats of input fuzzing, 1 database-specific check), 205
   engine tests, 103/103 features verified.
 
 ---
 
 ## 7. How to extend
 
-- **A connector**: add `soc_platform/connectors/tools/<tool>.py` exporting `MANIFEST` (name, kind, config fields with
-  `secret=True` where relevant, factory, `fake_settings`, fixture file, action factory). Implement `streams`,
+- **A connector**: start with `python -m soc_platform connector new <name> --category <cat>` (writes the module,
+  fixtures, paging test and a switched-off config entry) and finish with `connector check <name>`. By hand: add
+  `soc_platform/connectors/tools/<tool>.py` exporting `MANIFEST` (name, kind, config fields with
+  `secret=True` / `kind` where relevant, factory, `fake_settings`, fixture file, action factory). Implement `streams`,
   `fetch_page`, `normalize` → `NormalizedRecord`s (entities with strong `keys` + weak `hints`, events with `refs`),
   optional `lookup`. Add `soc_platform/fixtures/<tool>.json` routes (`FixtureTransport`: method, path regex, listed
   params only, `~` regex / `*` any, optional `body_contains`). Add it to `config/connectors.yaml`, a test in
@@ -409,10 +456,37 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `narrate=False` only where a later `narrate_pending` is guaranteed (job or bulk endpoint).
 - **Notifications are deduplicated by (`dedupe_key`, `severity`, `channel`)**: don't delete `notifications` rows in
   retention, or every open finding is sent again.
+- **PostgreSQL rejects what SQLite accepts, again**: `SELECT DISTINCT ... ORDER BY <column not selected>` is an
+  error on PostgreSQL only (it once failed every DNS record of a sync there). Run the relevant tests on PostgreSQL
+  for any new query with DISTINCT, GROUP BY or window functions.
+- **A savepoint per record** ran PostgreSQL out of lock memory on a large sync ("out of shared memory - increase
+  max_locks_per_transaction"): each savepoint holds a lock until the transaction ends. Batch (one per page) and
+  commit per page; never loop thousands of `begin_nested()` in one transaction.
+- **A query that grows with the estate** is the scale bug to look for: per-candidate queries (each new host loaded
+  every host behind the NAT address), `LIKE 'x%'` with no usable index, SQLite picking a low-selectivity index.
+  `test_volume.py` counts statements per record and per new host; `measure_scale.py` shows the stage.
+- **Risk is cached** (`RiskEngine.top`): reuse is keyed on a data fingerprint plus `_GENERATION`, which every flush
+  touching Entity / Relation / CaseEntity / Case / ConsolidatedFinding / VulnIntel bumps. A new input to risk must be
+  added to both, or the brief and Intelligence screen show stale figures.
+- **uvicorn workers on Windows**: terminating the master leaves its worker processes running (they keep the port and
+  the database open). Stop the process tree (`taskkill /PID <pid> /T /F`, the specific PID) - `load_test.py` does.
+- **Shell heredocs turn `\b` into a backspace** (and `\n` into a newline) inside Python strings: write patch files
+  with the Write tool.
 - **ReDoS in e-mail parsing**: patterns like `<[^>]+>`, `<a…>(.*?)</a>`, `[\w.+-]+@…` or `\d+[.,]?\d*` are
   quadratic on hostile input (one 240 KB message took 16 s; 25 MB would take hours). Bound every run (`{1,64}`), stop
   scans at the next tag (`<[^<>]*>`), anchor with a look-behind; `test_hostile_email_content_costs_linear_time` guards it.
-- **`X-Forwarded-For`**: proxies append, so only the right-most untrusted hop is the client (`_client_ip`).
+- **`X-Forwarded-For`**: proxies append, so only the right-most untrusted hop is the client (`_client_ip`). uvicorn's
+  own proxy-header handling is off (`serve` passes `proxy_headers=False`) so only the app's tested rule applies.
+- **Vendor paging caps**: Falcon's query APIs refuse offset + limit past 10,000 (hosts use the scroll query, alerts
+  restart from their watermark). Check a new vendor's documented maximum offset before using offset paging.
+- **An outage must degrade, not fail**: a job, screen or report that reads a tool live catches `ConnectorError`
+  and says "unavailable"; a feed outage keeps the last known values (an empty KEV answer once would have cleared
+  every KEV flag). `test_real_world.py` runs everything with every tool down.
+- **A test that runs `python -m soc_platform serve` must fail before uvicorn starts** (the config refusal does): never
+  start a real server from a test without the `load_test` / commit-before-response pattern of stopping it by PID.
+- **Event retention** (`SOC_EVENT_RETENTION_DAYS`, 400) deletes old telemetry entities with their keys, hints,
+  relations and source records. A new table that points at entities must be added to its "held" set in
+  `core/retention.py`, or pruning leaves a dangling reference.
 - **Risk "now"** is the latest observation in the data, not wall time; open exposures/incidents never decay
   (`STANDING_SIGNALS`); amplifiers fade with their triggers.
 

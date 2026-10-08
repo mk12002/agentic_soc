@@ -254,7 +254,7 @@ A connector subclasses `BaseConnector` (via `ToolConnector` in `tools/_common.py
 | `normalize(stream, raw) -> list[NormalizedRecord]` | Raw vendor record → canonical records (entities and/or events) |
 | `lookup(entity_type, value) -> LookupResult` | On-demand enrichment (per IP, domain, hash, user, host...) |
 | actions (`ConnectorAction`) | Write operations with optional pre-conditions and a `reverse_type` |
-| `health()` | Used by *Test* on the Integrations screen |
+| `health()` | One page of the health stream (`POST /connectors/{name}/test`); the full check is the preflight (§5.5) |
 
 ### 5.2 Rate limits and retries
 
@@ -266,17 +266,27 @@ A connector subclasses `BaseConnector` (via `ToolConnector` in `tools/_common.py
   - on `RateLimited` (429): the vendor's `Retry-After` is honoured, capped at `MAX_RETRY_AFTER` = 120 s, so one
     answer can never stall a job for hours
 
-  After that it raises `ConnectorError`. 4xx other than 429 is not retried (it will not get better).
+  After that it raises `ConnectorError`. 4xx other than 429 is not retried (it will not get better), with two
+  distinctions: **401** (`AuthExpired`) - the token is renewed once (`transport.reauthenticate()`, which drops the
+  cached OAuth token) and the call repeated, fake mode included; **403** (`PermissionDenied`) stops at once and the
+  health check reports `missing_permission` with the connector's `required_scopes`. `Retry-After` may be seconds or an
+  HTTP date.
 
 ### 5.3 Transports and authentication (`connectors/http.py`)
 
 Connectors talk to a `Transport` protocol, never to httpx directly. That is what makes fake and live modes run the
 same code:
-- **`HttpTransport`:** base URL, auth strategy, timeout (30 s), TLS verification, error mapping
-  (429 → `RateLimited`, 5xx and transport errors → `TransientError`, other 4xx → `ConnectorError`).
+- **`HttpTransport`:** base URL, auth strategy, timeout (30 s), TLS verification, error mapping shared with the
+  fixture transport (`raise_for_status`: 429 → `RateLimited`, 5xx and transport errors → `TransientError`, 401 →
+  `AuthExpired`, 403 → `PermissionDenied`, other 4xx → `ConnectorError`). An HTML page answering instead of JSON (a
+  proxy or login page) is a clear `ConnectorError`; an unparsable JSON body is retried.
 - **`FixtureTransport`:** routes loaded from `fixtures/<tool>.json`. Each route matches method, path regex, listed
   parameters (only the listed ones; `~` means regex, `*` means any value) and optional body substrings. Routes can
-  answer any status, including 429 to exercise backoff, and can select fields from the request.
+  answer any status (429 / 401 / 403 / 5xx raise exactly what the live transport raises), carry `headers`
+  (`Retry-After`), answer only `times` times before the next matching route answers (pages in order, "throttled once"),
+  and can select fields from the request.
+- **`RecordingTransport`** (`connectors/recording.py`): wraps a live transport when `SOC_RECORD_FIXTURES_DIR` is set and
+  writes each response, sanitised, as a replayable fixture (#43 in the decision log).
 - **`RoutingTransport`:** several upstreams behind one connector (threat-intel fusion).
 - **Auth strategies:**
   - `NoAuth`
@@ -288,10 +298,18 @@ same code:
 
 ### 5.4 Sync runner (`SyncRunner.sync`)
 
-- **Incremental.** It resumes from the stored cursor (`ConnectorCheckpoint`) and checkpoints after **every page**, so
-  an interrupted backfill resumes rather than restarts. `full_backfill=True` starts from scratch.
-- **Per-record fault isolation.** Each record is normalised and ingested inside a savepoint (`begin_nested`). One bad
-  record is counted and logged; the rest of the page continues.
+- **Incremental.** It resumes from the stored cursor (`ConnectorCheckpoint`) and checkpoints and **commits** after
+  every page, so an interrupted backfill resumes rather than restarts. `full_backfill=True` starts from scratch. A
+  page marked `reset` ends the stream: its cursor is what the next sync starts from - a time watermark
+  (`since:<time>`, the newest change seen; queried minus `SOC_WATERMARK_OVERLAP_MINUTES` for late logs; times more
+  than an hour in the future ignored) or nothing (read the inventory in full). Continuation tokens are never kept
+  between syncs. `SOC_SYNC_MAX_PAGES` (1,000) bounds one sync; a larger backlog continues next time (`truncated`).
+- **Fault isolation without a savepoint per record.** A page is normalised record by record (a normaliser error
+  fails only that record) and stored in **one** savepoint; only if that fails is the page replayed record by record,
+  and 20 identical failures in a row end the replay as a systematic fault. (A savepoint per record exhausted
+  PostgreSQL's lock table on large streams.)
+- **Bounded parallel download.** `sync_many` downloads every stream at once but keeps at most 8 pages per stream ahead
+  of ingestion; pages ingestion did not take are drained so a download never blocks.
 - **Reconciliation.** Source records, ingested and failed counts are accumulated on the checkpoint. Where the tool
   reports a total, `SyncReport.reconciled` compares them.
 - **Freshness.** `last_success_at` per stream is compared with the stream's expected cadence for the Integrations
@@ -301,14 +319,33 @@ same code:
 
 - **Discovery.** Every module in `connectors/tools` that exports `MANIFEST`/`MANIFESTS`, plus any installed package
   exposing the `soc_platform.connectors` entry-point group. A third-party connector needs no platform change.
-- **`ConnectorManifest`:** name, kind, config fields (secret flags), factory, fake settings, fixture file, action
-  factory.
-- **Configuration.** `config/connectors.yaml` sets enabled, mode (`fake`/`live`) and settings per tool, with
-  `${ENV}` substitution; secrets can come from `<NAME>_FILE`. `SOC_CONNECTOR_MODE` sets the default mode.
-  `SOC_FIXTURES_DIR` points fake mode at another estate, which may carry `fixtures/settings.json` for its
-  tenant-specific settings.
-- **`ConnectorRegistry`:** instantiation, `enabled_names()`, `get(name)`, and `action_registry()` (collects every
-  connector's actions into one `ActionRegistry`).
+- **`ConnectorManifest`:** name, kind, config fields, factory, fake settings, fixture file, action factory. Each
+  `ConfigField` declares whether it is secret or required and its **kind** (`url`, `bool`, `int`, `choice`, `map`,
+  `list`, `email`, `path`, `text`) - used to check values and to draw the console form. Every setting a connector reads
+  must be declared (`COMMON_FIELDS` holds the ones the shared code reads, e.g. `watermark_overlap_minutes`).
+- **Configuration.** `config/connectors.yaml` sets `enabled`, the rollout **stage** (`fake`, `record`, `read`,
+  `recommend`, `automate`; the older `mode: fake | live` still works) and settings per tool, with `${ENV}`
+  substitution; secrets can come from `<NAME>_FILE`. Approved console changes are layered on top
+  (`core/connector_config.py`). `SOC_CONNECTOR_MODE` sets the default mode. `SOC_FIXTURES_DIR` points fake mode at
+  another estate, which may carry `fixtures/settings.json` for its tenant-specific settings.
+- **Strict checking** (`connectors/config_schema.py`): unknown tools, keys, stages and settings ("did you mean ...?"),
+  malformed values, a secret written in clear, and missing secrets of a live tool (naming the variable). `serve` and
+  `scheduler` refuse to start on file errors; a missing secret only isolates that tool.
+- **`ConnectorRegistry`:** `configured_names()` (switched on), `enabled_names()` (switched on *and* usable),
+  `get(name)`, `construct(name)` (an uncached instance, for preflight) and `action_registry()` (every usable
+  connector's actions in one `ActionRegistry`). **Isolation:** a connector whose entry is invalid, whose secret is
+  missing, whose constructor or action factory fails, or whose module does not import is left out of every workflow
+  with the reason (`problems_of`); it used to raise `ConfigError` out of `action_registry()` and stop every domain.
+- **Stages in code:** `record` wraps the live transport for record-and-sanitise; `record` and `read` offer no
+  actions (the recommendation becomes a manual step); `recommend` wraps each action in a `StagedAction` with
+  `max_level = 2`, passed to `PolicyEngine.decide(..., ceiling=)` so the policy can never take it above L2.
+- **Preflight** (`connectors/preflight.py`): configuration, start-up, sign-in, one page of every stream (the
+  permission each needs, parsing of up to 20 records, freshness of the newest event, a clock or time-zone fault, the
+  volume to expect) and the write scopes actions need. It builds its own instance (no shared paging state) and writes
+  nothing to the context store; results are kept in `connector_preflights`.
+- **Development kit** (`connectors/devkit.py`): `connector new` writes a connector that already follows the sync
+  rules, its fixtures, its paging test and a switched-off config entry; `connector check` runs it through the shared
+  conformance suite. The coverage test reads `PAGING_TESTED` from every `test_connector_<name>.py`.
 
 ### 5.6 The 20 connectors
 
@@ -399,7 +436,7 @@ unresolved, by design.
 
 ## 8. Data model and persistence
 
-### 8.1 Tables (37)
+### 8.1 Tables (39)
 
 | Area | Tables |
 |---|---|
@@ -408,7 +445,7 @@ unresolved, by design.
 | Cases | `cases`, `case_entities`, `case_notes`, `dispositions` |
 | Actions and policy | `action_requests`, `policy_versions` |
 | Governance | `audit_log`, `llm_calls`, `access_log`, `role_assignments`, `api_keys`, `token_revocations`, `system_flags` |
-| Operations | `connector_checkpoints`, `enrichment_cache`, `job_runs`, `notifications` |
+| Operations | `connector_checkpoints`, `connector_config_versions`, `connector_preflights`, `enrichment_cache`, `job_runs`, `notifications` |
 | Phishing | `ph_submissions` |
 | Vulnerability | `vm_findings`, `vm_vuln_intel`, `vm_campaigns`, `vm_action_plans`, `vm_exceptions`, `vm_risk_register`, `vm_validations`, `vm_misconfigurations` |
 | Intelligence | `insights` |
@@ -1113,7 +1150,9 @@ itself; durable kill switch; hostile-input hardening. The full table is in [FAIL
 
 | Hot path | Technique | Measured |
 |---|---|---|
-| Risk ranking | `candidates()` pre-filter | 20,000 entities: ~16 s → 0.06 s |
+| Risk ranking | `candidates()` pre-filter; reuse while the data is unchanged (#47) | 20,000 entities, little activity: ~16 s → 0.06 s; 21,728 entities, realistic activity: 9.4 s → 4.7 s once, then 0.02 s |
+| Ingestion | exact resolution candidates, (kind, canonical key) index, page-level savepoints (#42, #45) | 40x messy estate: sync 244 s → 149 s, flat 29 statements per record; per new host flat (was 1,846 statements at 600 hosts) |
+| Request load | several server processes, sized pool, 503 under saturation (#46) | 1 process: 43 requests/s, everything queued; 4 processes: 150 requests/s for 100 analysts, no error |
 | Correlation | runs over risk candidates only | 36.5 s → 0.09 s |
 | A case's shared actions | database-side `LIKE` narrowing on the JSON result before the Python check | 20,000 actions: 0.47 s → 0.005 s |
 | Situation brief | cached by facts fingerprint (15 min) | one model call per change, however many viewers |
@@ -1121,8 +1160,10 @@ itself; durable kill switch; hostile-input hardening. The full table is in [FAIL
 | Access log | batched background writes (up to 500 rows per batch) | no per-request write latency |
 | Finding narratives | rewritten only when evidence or severity changes | token saving (LLM_TOKENS_AND_COST.md) |
 
-The API is stateless and scales horizontally. The scheduler coordinates through the database. It has not been
-load-tested at client volume (§26).
+The API is stateless and scales horizontally. The scheduler coordinates through the database. Volume and request
+load are measured with `scripts/measure_scale.py` (messy estates of growing size, statements per record, review
+queue) and `scripts/load_test.py` (a real multi-process server, concurrent analysts, jobs writing); figures in
+OPERATIONS.md. The client's own volume is measured during deployment (§26).
 
 ### 16.1 Latency: measured end to end
 
@@ -1252,7 +1293,10 @@ immediately.
   - no `/docs`, no dev sign-in
   - a data key required
   - test clocks ignored
-- **Connectors:** `config/connectors.yaml`. **Suppliers:** `config/suppliers.yaml` (or `SOC_SUPPLIER_DOMAINS`).
+- **Connectors:** `config/connectors.yaml` plus approved console changes (§5.5; OPERATIONS.md "Connecting and
+  changing tools"). Each process re-reads which console version is in force every `SOC_CONFIG_RELOAD_SECONDS`
+  (5), so an approved change applies everywhere without a restart. The supplier and sanctioned-service lists can be
+  replaced in the console the same way (`load_suppliers(session=)`, `registry.lists`). **Suppliers:** `config/suppliers.yaml` (or `SOC_SUPPLIER_DOMAINS`).
   **Sanctioned services:** `config/sanctioned_services.yaml`. **Organisation domains:** `SOC_ORG_DOMAINS`.
 - **Settings from the environment are strings.** Boolean and JSON connector settings are parsed explicitly
   (`RAPID7_VERIFY_TLS=false` turns verification off; `GENERIC_SIEM_FIELD_MAP` is a JSON object), and the database URL,
@@ -1533,6 +1577,23 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 37 | Console single sign-on implemented in the console itself (authorization code + PKCE against Entra ID, no library), configured from a public `GET /api/v1/auth/config` | MSAL.js; sign-in at a reverse proxy (Easy Auth / oauth2-proxy) | Keeps the strict CSP (`script-src 'self'`, only `login.microsoftonline.com` added to `connect-src`) and no third-party script; one app registration serves API and console | No silent token refresh: an expired token means one more click on *Sign in with Microsoft* (Entra keeps the session). Exercised end to end only in a real tenant |
 | 38 | An organisation's own LLM gateway is reached through settings, not code: auth header and prefix, fixed extra headers, CA bundle, JSON mode off, beta fallback off | A provider per client | Multi-vendor gateways (Claude, Gemini, OpenAI behind one endpoint) mostly speak the OpenAI chat-completions protocol but differ in these details; everything else (redaction, guardrails, budget, breaker) stays in the gateway | Token-per-call (OAuth) gateways or non-OpenAI protocols still need a small provider class (`docs/CLIENT_DEPLOYMENT_GUIDE.md` 5.7) |
 | 39 | Connector formats audited against vendors' public references and reference integrations; fixtures regenerated in the real shapes | Trusting the first implementation | The audit found mismatches that would only have shown in a live tenant: HEC events without message fields and per-engine verdicts, Wiz union fields and resource fields, ServiceNow local-time display timestamps, InsightVM fix text and severity words, MDE alert evidence, Graph beta-only sign-in fields | Each connector still needs its first run against the client's tenant |
+| 40 | A conformance suite runs every connector through the API behaviour a tenant has and the demo fixtures do not: its vendor's paging, resume, 429, 401, 403, missing / null fields; fixtures can say "answer this way N times" and carry headers | More hand-written demo data | The demo is one tidy scenario; the suite found resume bugs in nine connectors, crashes on missing fields in fourteen, a swallowed timezone offset and Sentinel incidents without entities | Proves behaviour against documented shapes, not the client's: record-and-sanitise (#43) closes that gap during deployment |
+| 41 | Event streams resume from a time watermark (newest change seen, minus a 30-minute overlap; future times ignored); inventories are read in full; a continuation token is never kept between syncs; a stream says when it is complete (`Page.reset`) | Keep the last cursor (the previous behaviour) | Continuation tokens expire or point past the end; offsets into moving windows skip or repeat; logs arrive late | Each sync re-reads up to 30 minutes of events (de-duplicated); inventories cost one full read per sync |
+| 42 | Ingest is committed per page with one savepoint per page (record-by-record replay only when a page fails, stopped after 20 identical failures) | One transaction per sync with a savepoint per record | A savepoint per record ran PostgreSQL's lock table out on large streams; an uncommitted checkpoint made every interrupted backfill restart from zero; SQLite blocked other writers for the whole sync | A sync is no longer all-or-nothing: what was stored before a failure stays (it is idempotent, so a retry changes nothing) |
+| 43 | Record-and-sanitise: live responses written as fixtures with keyed, stable pseudonyms; secrets never recorded; vendor vocabulary kept; a scan report for review | Ask the client for samples by hand | Tests against the tenant's real shapes without tenant access; the same input always maps to the same pseudonym, so cross-references and replay survive | Sanitising is rule-based: a person's name inside free text is redacted wholesale, and the scan plus a human review gate any recording leaving the client |
+| 44 | Umbrella stores only security-categorised DNS by default (`dns_sync`) | Every DNS query as a record | Tens of millions of queries a day per tenant; only security-categorised events feed any analysis, and "did anyone reach this site?" asks Umbrella live | `dns_sync: all` for small tenants; if the category list is unreadable, blocked queries only |
+| 45 | Entity-resolution candidates retrieved exactly: name near-misses by an indexed range (plus a separator-free name hint that is collation-proof), IP candidates within the window when the record has a name, nameless-record absorption by one query; all candidate data read in three queries | Prefix scan with LIMIT 50; per-candidate queries | A NAT address shared by the fleet and a shared naming prefix made each new host cost a query per known host (1,846 statements per host at 600 hosts) | Identical matching results on the stress estate; near misses beyond 100 lexicographic neighbours under one prefix are not considered |
+| 46 | Several server processes (`SOC_API_WORKERS`), a sized and self-checking connection pool, 503 + `Retry-After` when the database is saturated or locked | One process; default pool | Measured: one process queued every request at 43 requests/s; four served 100 analysts at 150 requests/s with no error | Rate limits and caches are per process; put a gateway limit in front for many replicas |
+| 47 | The risk ranking is reused while its inputs are unchanged (data fingerprint + a local write counter; 5-minute backstop for other processes) | Recompute per request; persist scores in a job | Risk is a pure function of the data, so reuse is exact; ranking 22,000 entities took 9.4 s per request | The first request after new data pays the full ranking once per process (4.7 s at 22,000 entities) |
+| 48 | Outages degrade, never fail: a down feed keeps its last values (KEV never cleared), the reporting mailbox records the outage on its checkpoint and resumes later, live-reading screens and report sections say "unavailable" | Let the job or request fail | One unreachable tool crashed the vulnerability refresh, the phishing job, shadow IT and every report that contained it; an empty KEV answer would have lowered every KEV priority | A section left out of a report is listed with its reason; the report is still produced |
+| 49 | CrowdStrike hosts listed through the scroll query; alerts restart from their watermark before offset 10,000 | Offset paging | Falcon refuses offset + limit past 10,000, so a larger fleet or alert backfill stopped with an error | 10,000 alerts sharing one second would still hit the limit (reported as an error, never silently truncated) |
+| 50 | Telemetry events (sign-ins, DNS, mail events, secret accesses, elevations) pruned after `SOC_EVENT_RETENTION_DAYS` (400), except those a case, evidence, insight or override refers to | Keep everything; archive to cold storage | A client tenant writes hundreds of thousands of events a day; risk decays them long before 400 days, and the source tools keep their own history | Investigations older than the window rely on the tool's own records (deep links) |
+| 51 | A connector that cannot be used is isolated, not fatal | Fail the domain (as before: `ConfigError` out of `action_registry()`) | One missing secret stopped phishing, incident and vulnerability handling and the approvals screen | The isolated tool's data and actions are missing until fixed - shown as "misconfigured" with the reason |
+| 52 | Strict configuration schema; start-up refuses file errors | Ignore unknown keys and names | A misspelled tool was ignored and `enabeld: false` left a tool on - silently | A file with errors stops `serve`; `config check` lists every problem first |
+| 53 | Connector configuration and the organisation lists (key suppliers, sanctioned services) editable in the console, layered over the files, governed like the autonomy policy (propose, second-person approval, versioned, audited, hot reload) | File edits and a restart; a separate config service | Admins change tools without a deployment, and every change is reviewed and reversible | Secrets stay in the vault/environment (the console only references them); the file remains the deployment-time base |
+| 54 | Rollout stages (Fixtures -> Recording -> Read-only -> Recommend -> Automate) with a passing preflight before any live stage | One fake/live switch | A tool is trusted step by step; `recommend` caps every action at L2 whatever the policy says | Promotion is per tool, one proposal per step |
+| 55 | Pause takes effect at once without a second approver | Four-eyes for every change | Switching a misbehaving tool off only reduces what the platform does | Audited with a reason; switching it back on needs approval |
+| 56 | Connector development kit (scaffold + one-command conformance) | A written guide only | A new connector starts compliant and cannot pass `check` until paging, faults and missing fields behave | The template is a starting point: endpoints and fields must be adapted to the vendor |
 
 ---
 
@@ -1542,7 +1603,12 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 - **No schema migration framework.** Additive changes (new tables, new optional columns, wider text) are automatic
   on both engines; required columns, renames and drops need Alembic, which should be introduced before the first
   such change in production.
-- **Load at client volume untested.** Scale benchmarks go to 20,000 entities and actions.
+- **Load at the client's own volume not yet measured.** Measured on generated messy estates up to 21,675 records /
+  21,728 entities (cost per record flat as they grow) and with 100 concurrent analysts on one laptop (no error). The
+  client's volume, network latency to PostgreSQL and vendor API budgets are measured during deployment with the same
+  scripts against the target environment. Ingestion is ORM-bound (about 29 statements per record): around 146
+  records/s on SQLite and 75 on a local PostgreSQL; a first backfill of a very large tenant takes hours (it is
+  committed per page and resumable). Each new incident's enrichment waits on the tools' request budgets (about 1.5 s).
 - **SQLite is for demos and development only.** On SQLite, a job that calls the LLM inside its transaction holds the
   write lock for the call's duration, so a user's write can wait up to the 30 s busy timeout. The incident and
   phishing jobs now commit their cases before the model is asked, which shortens this, but the explanation step

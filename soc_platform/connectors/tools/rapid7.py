@@ -15,7 +15,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import BasicAuth, HttpTransport
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ToolConnector, ok_lookup, parse_ts, sev_from_score
+from soc_platform.connectors.tools._common import ToolConnector, need, ok_lookup, parse_ts, sev_from_score
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 log = logging.getLogger(__name__)
@@ -56,7 +56,11 @@ class Rapid7Connector(ToolConnector):
                     rows.append({"asset": a, "finding": v, "definition": self._definition(v["id"])})
             assets = rows
         total_pages = int(info.get("totalPages", 1))
-        return Page(assets, str(page + 1), source_total=None, has_more=page + 1 < total_pages)
+        if page + 1 < total_pages:
+            return Page(assets, str(page + 1), has_more=True)
+        # assets and their findings change: read in full each sync (the page number used to be kept, so the next
+        # sync asked for the page after the last one and never saw an asset again)
+        return Page(assets, None, has_more=False, reset=True)
 
     def _definition(self, vuln_id: str) -> dict[str, Any]:
         if vuln_id not in self._vuln_cache:
@@ -98,7 +102,9 @@ class Rapid7Connector(ToolConnector):
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         if stream == "assets":
             return [self._asset(raw)]
-        a, f, d = raw["asset"], raw["finding"], raw["definition"]
+        a, f, d = raw.get("asset") or {}, raw.get("finding") or {}, raw.get("definition") or {}
+        if not a.get("id") or not f.get("id"):
+            raise ValueError("Rapid7 finding without its asset id or vulnerability id")
         cves = d.get("cves") or []
         cvss = ((d.get("cvss") or {}).get("v3") or {}).get("score") or ((d.get("cvss") or {}).get("v2") or {}).get("score")
         out = []
@@ -113,7 +119,7 @@ class Rapid7Connector(ToolConnector):
                                 attributes={"hostname": a.get("hostName"), "fqdn": a.get("hostName") if "." in str(a.get("hostName") or "") else None,
                                             "ip": a.get("ip"), "os": a.get("os")})],
                 attributes={"cve": cve, "vuln_id": f["id"], "title": d.get("title"), "cvss": cvss,
-                            "status": "open" if f.get("status", "vulnerable").startswith("vulnerable") else f.get("status"),
+                            "status": "open" if str(f.get("status") or "vulnerable").startswith("vulnerable") else f.get("status"),
                             "first_seen": f.get("since"), "exploits": d.get("exploits", 0),
                             "malware_kits": d.get("malwareKits", 0), "solution": d.get("_solution")},
                 deep_link=f"{self.console}/asset.jsp?devid={a['id']}"))
@@ -123,7 +129,7 @@ class Rapid7Connector(ToolConnector):
         host = a.get("hostName") or ""
         macs = [x.get("mac") for x in a.get("addresses") or [] if x.get("mac")]
         return NormalizedRecord(
-            kind="asset", tool=self.tool, source_type="asset", source_id=str(a["id"]), dimension="exposure",
+            kind="asset", tool=self.tool, source_type="asset", source_id=str(need(a, "id")), dimension="exposure",
             observed_at=parse_ts(((a.get("history") or [{}])[-1]).get("date")),
             keys={"rapid7_asset_id": str(a["id"]), "mac": macs[0] if macs else None},
             attributes={"hostname": host.split(".")[0] if host else None, "fqdn": host if "." in host else None,
@@ -183,11 +189,12 @@ MANIFEST = ConnectorManifest(
     name="rapid7", tool="Rapid7 InsightVM / Nexpose", vendor="Rapid7", category="vuln", dimension="exposure",
     description="Asset inventory and vulnerability findings from the Security Console API (or CSV export fallback).",
     factory=lambda s, t: Rapid7Connector(s, t, rate_per_sec=4, burst=8), live_transport=_live,
-    config=[ConfigField("console_url", "Security Console URL, e.g. https://ivm.example.local:3780"),
+    config=[ConfigField("console_url", "Security Console URL, e.g. https://ivm.example.local:3780", kind="url"),
             ConfigField("username", "Read-only API user", secret=True),
             ConfigField("password", "API user password", secret=True),
-            ConfigField("verify_tls", "Verify console TLS certificate", required=False, default=True),
-            ConfigField("export_csv", "Fallback: path to a findings CSV export (legacy Nexpose)", required=False)],
+            ConfigField("verify_tls", "Verify console TLS certificate", required=False, default=True, kind="bool"),
+            ConfigField("export_csv", "Fallback: path to a findings CSV export (legacy Nexpose)", required=False,
+                        kind="path")],
     confidence="Medium-High", to_confirm="Authoritative product/version; live API availability",
     fake_settings={"console_url": "https://ivm.acme-demo.com:3780"},
     focus_areas=("vulnerability", "incident"),

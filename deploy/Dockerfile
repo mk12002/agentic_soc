@@ -25,7 +25,8 @@ COPY artifacts/ artifacts/
 RUN pip install --no-cache-dir --no-deps -e . && mkdir -p /app/data && chown -R soc:soc /app
 USER soc
 ENV SOC_CONNECTORS_CONFIG=/app/config/connectors.yaml SOC_RAW_PAYLOAD_DIR=/app/data/raw \
-    SOC_REPORT_OUTPUT_DIR=/app/data/reports SOC_PHISHING_HOME=/app/artifacts/phishing PYTHONUNBUFFERED=1
+    SOC_REPORT_OUTPUT_DIR=/app/data/reports SOC_PHISHING_HOME=/app/artifacts/phishing PYTHONUNBUFFERED=1     SOC_HOST=0.0.0.0 SOC_PORT=8080 SOC_API_WORKERS=4
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 CMD curl -fs http://localhost:8080/health || exit 1
-CMD ["uvicorn", "soc_platform.api.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+# workers: one per CPU core given to the container (SOC_API_WORKERS); X-Forwarded-For is handled by the app
+CMD ["python", "-m", "soc_platform", "serve"]

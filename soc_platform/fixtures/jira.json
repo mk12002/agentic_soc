@@ -5,7 +5,8 @@
    "path": "^/rest/api/3/issue$",
    "body": {
     "id": "10001",
-    "key": "SEC-101"
+    "key": "SEC-101",
+    "self": "https://acme-demo.atlassian.net/rest/api/3/issue/10001"
    },
    "status": 200
   },
@@ -13,7 +14,112 @@
    "method": "GET",
    "path": "^/rest/api/3/search/jql$",
    "body": {
-    "issues": [],
+    "issues": [
+     {
+      "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+      "id": "10112",
+      "self": "https://acme-demo.atlassian.net/rest/api/3/issue/10112",
+      "key": "SEC-112",
+      "fields": {
+       "summary": "Restrict public access to storage account acmebackups",
+       "updated": "2026-09-18T11:47:03.000+0530",
+       "components": [
+        {
+         "self": "https://acme-demo.atlassian.net/rest/api/3/component/112",
+         "id": "112",
+         "name": "Cloud Platform"
+        }
+       ],
+       "status": {
+        "self": "https://acme-demo.atlassian.net/rest/api/3/status/3",
+        "name": "Done",
+        "id": "3",
+        "statusCategory": {
+         "id": 4,
+         "key": "done",
+         "name": "Done"
+        }
+       },
+       "priority": {
+        "self": "https://acme-demo.atlassian.net/rest/api/3/priority/2",
+        "name": "High",
+        "id": "2"
+       },
+       "resolution": {
+        "self": "https://acme-demo.atlassian.net/rest/api/3/resolution/10000",
+        "id": "10000",
+        "name": "Done",
+        "description": "Work has been completed."
+       }
+      }
+     },
+     {
+      "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+      "id": "10117",
+      "self": "https://acme-demo.atlassian.net/rest/api/3/issue/10117",
+      "key": "SEC-117",
+      "fields": {
+       "summary": "Patch CVE-2024-21412 on finance laptops",
+       "updated": "2026-09-20T14:05:12.481+0530",
+       "components": [
+        {
+         "self": "https://acme-demo.atlassian.net/rest/api/3/component/117",
+         "id": "117",
+         "name": "End User Computing"
+        }
+       ],
+       "status": {
+        "self": "https://acme-demo.atlassian.net/rest/api/3/status/3",
+        "name": "To Do",
+        "id": "3",
+        "statusCategory": {
+         "id": 4,
+         "key": "new",
+         "name": "To Do"
+        }
+       },
+       "priority": {
+        "self": "https://acme-demo.atlassian.net/rest/api/3/priority/2",
+        "name": "High",
+        "id": "2"
+       },
+       "resolution": null
+      }
+     },
+     {
+      "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+      "id": "10118",
+      "self": "https://acme-demo.atlassian.net/rest/api/3/issue/10118",
+      "key": "SEC-118",
+      "fields": {
+       "summary": "Rotate the SAP-Prod-Finance-Service secret after suspicious access",
+       "updated": "2026-09-20T15:10:00.000+0530",
+       "components": [
+        {
+         "self": "https://acme-demo.atlassian.net/rest/api/3/component/118",
+         "id": "118",
+         "name": "Identity & Access"
+        }
+       ],
+       "status": {
+        "self": "https://acme-demo.atlassian.net/rest/api/3/status/3",
+        "name": "In Progress",
+        "id": "3",
+        "statusCategory": {
+         "id": 4,
+         "key": "indeterminate",
+         "name": "In Progress"
+        }
+       },
+       "priority": {
+        "self": "https://acme-demo.atlassian.net/rest/api/3/priority/2",
+        "name": "Highest",
+        "id": "2"
+       },
+       "resolution": null
+      }
+     }
+    ],
     "isLast": true
    },
    "status": 200

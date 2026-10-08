@@ -11,7 +11,7 @@ and the analyst experience. The code paths are the same as in live mode.
 
 **It does not prove (say so if asked):** behaviour on the client's own tenants and data volumes. The vendor connectors
 are built to the documented APIs and verified on fixtures, but must each be connected and tested in the client's
-environment (connector *Test* button), and accuracy/latency targets must be measured on the client's historical data
+environment (connector *Preflight* button, then the rollout stages), and accuracy/latency targets must be measured on the client's historical data
 (A07, A09). The LLM is optional: without one the platform gives deterministic, cited answers; with an approved
 endpoint it adds narrative - claims are still restricted to cited evidence.
 

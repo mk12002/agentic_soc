@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-07 (round 15; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-08 (rounds 15-17; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,91 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 15 (2026-10-07) - latest results: the 4-week development plan checked item by item
+## 0. Round 17 (2026-10-08) - latest results: connecting and administering tools
+
+Aim: an administrator connects, configures, rolls out, pauses and restores tools from the console - no file edit, no
+restart - and no configuration mistake can take the platform down. Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **535 passed**, 0 failed, 15 skipped (550 collected; the same 15 opt-in / single-database skips as round 16) |
+| Platform suite on PostgreSQL 16 | **535 passed**, 0 failed, 15 skipped |
+| Browser tour (layout at 4 widths, light + dark, axe-core, stored XSS, screen-vs-API) | **0 problems** - now also runs a preflight, opens *Configure* and proposes a change |
+| Feature verification (`--browser --engine --live --llm`) | **103 of 103 features verified**; 221 mapped tests run, 0 failed; ML engine 205 passed |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / **0 known vulnerabilities** / clean |
+
+New: strict configuration schema, connector isolation, rollout stages, preflight, console configuration with
+four-eyes approval and hot reload, pause, history / restore, export / import, editable supplier and sanctioned-service
+lists, the connector development kit (OPERATIONS.md "Connecting and changing tools"; ENGINEERING.md §5.5 and decisions
+51-56). New test file `test_connector_admin.py` (36 tests).
+
+Found and fixed while building it (each with a regression test):
+
+| What was wrong | Effect | Fix |
+|---|---|---|
+| One live connector with a missing secret raised `ConfigError` out of the action registry and enrichment | phishing, incident and vulnerability handling and the approvals screen all failed | the connector is isolated with the reason; the rest work |
+| A connector module that failed to import stopped discovery | the whole platform failed to start | the module is skipped and logged |
+| Typos in `connectors.yaml` were ignored (`crowdstrik:`, `enabeld: false`, a misspelled setting) | a tool silently never ran, or stayed on | strict schema with "did you mean"; `serve` / `scheduler` refuse a broken file; YAML errors name the line |
+| Settings read by connectors were never declared (`sync_from` in three tools, `since`, `issue_type`, `graph_base` in two, `arm_base`) | invisible to validation and to any form | declared, with kinds |
+| The fixture transport did not treat an HTML page as the live transport does | a proxy page read as a connector defect in tests | one `html_page_error` for both |
+| Recording needed a separate salt | the Recording stage could not be chosen without another secret | salt derived from `SOC_DATA_KEY` when `SOC_RECORD_SALT` is unset; the config check says when neither exists |
+| Exported supplier domains were not in the console's normal form | re-importing an unchanged export proposed a change | both sides normalised |
+
+## Round 16 (2026-10-07): real-tenant behaviour, volume and traffic
+
+Aim: nothing a real tenant does (paging, throttling, expired tokens, missing permissions, missing fields, outages,
+late logs, client-scale volume, concurrent users) should first be met in production. Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **499 passed**, 0 failed, 15 skipped (514 collected; skips are the opt-in live LLM and live feed tests, input fuzzing run once on the built-in estate, and one check that runs only on the other database) |
+| Platform suite on PostgreSQL 16 | **499 passed**, 0 failed, 15 skipped |
+| ML engine suite | 205 passed, 2 skipped |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / **0 known vulnerabilities** / clean |
+
+New test files:
+
+| File | What it proves |
+|---|---|
+| `test_connector_conformance.py` | every connector and stream: paging to the last page and resuming correctly (time watermark or full re-read, never a stale continuation token); 429 (seconds or date), 401 (token renewed once), 403 (stops, names the permission); every field of every record removed and nulled; HTML instead of JSON; page limit; bounded page buffer; late records; realistic Sentinel (with entities), Jira and SIEM push (flat, Splunk ES notable, Elastic Security) samples |
+| `test_volume.py` | entity resolution cost stays flat for a NAT'd fleet and namesake hosts; the queries use the indexes; messy estates at 2x and 8x; one savepoint per page; an interrupted backfill resumes; one bad record never sinks its page |
+| `test_traffic.py` | connection pool limits; a saturated pool answers 503 + `Retry-After` instead of hanging; a real multi-worker server under concurrent load |
+| `test_recording.py` | record-and-sanitise mode: pseudonyms are stable and keyed, nothing identifying survives (`_scan.json`), recordings replay through the same parsers |
+| `test_real_world.py` | an empty tenant and every tool down at once: every pipeline, screen read model, report, the brief and the self-check still work |
+
+Found and fixed (each with a regression test; details in FAILURE_MODES.md):
+
+| Area | What was wrong | Fix |
+|---|---|---|
+| Resume (9 connectors) | the last page's continuation token was kept as the next sync's start: re-read pages, expired tokens, or (Rapid7) never seeing an asset again | event streams resume from a time watermark with a 30-minute overlap (late logs); inventories are re-read in full |
+| Tokens / permissions / throttling | a refused token was reused until its own expiry; a 403 was retried; `Retry-After` as a date was ignored | renew once on 401; stop on 403 and name the scope; both `Retry-After` forms honoured (capped at 120 s) |
+| Missing fields | 14 connectors crashed on some missing or null field | optional fields tolerated; a record without its identifier is refused and counted |
+| Timestamps | `.000+0530` lost its offset | offset kept |
+| Sentinel | incidents read without their entities | entities read per incident |
+| Umbrella | every DNS query stored (tens of millions a day in a real tenant) | security-categorised queries only by default (`dns_sync`) |
+| CrowdStrike | offset paging stops at 10,000 hosts or alerts | hosts via the scroll query; alerts restart from the watermark |
+| PostgreSQL at volume | a failed page replayed in savepoints until "out of shared memory"; `SELECT DISTINCT ... ORDER BY` rejected | one savepoint per page, replay stops after 20 identical failures; query fixed |
+| Entity resolution at volume | candidate search scanned by name pattern and IP without bounds | exact and bounded range queries, a squashed-hostname hint, IP candidates only with a name, three new indexes added to existing databases at start-up |
+| Risk ranking | recomputed on every screen | cached on a data fingerprint, invalidated on every relevant write |
+| Vulnerability intel | one unreachable feed crashed the refresh; an empty KEV answer would clear every KEV flag | feed skipped, last values kept, KEV never cleared by an outage |
+| Reporting mailbox | job failed on an outage; read from the oldest message every run (5,000 cap - new reports unreachable once the mailbox held more) | resumes from its checkpoint; outage recorded; unreadable message retried next run |
+| Shadow IT / reports | crashed when Umbrella was down | "unavailable" screen; report section skipped with the reason |
+| Context store growth | retention kept every event record forever (unbounded tables at client volume) | telemetry events older than `SOC_EVENT_RETENTION_DAYS` (400) pruned unless a case, evidence, insight or override cites them |
+| Connection failures | "gave up after N retries" with no cause | the last error's type and text (e.g. TLS inspection) |
+| Server under load | single process; pool exhaustion hung requests | `SOC_API_WORKERS` (4 in Docker), pool settings, 503 + `Retry-After` |
+
+Measured (this machine, details in ENGINEERING.md §16 and OPERATIONS.md):
+- 40x messy estate on SQLite: full sync 244 s -> 149 s; 29 statements per record; review queue at 20x 142 -> 18.
+  On PostgreSQL the 40x estate syncs with 0 failed records.
+- Risk ranking 9.4 s -> 4.7 s cold, 0.02 s warm; situation brief 9.4 s -> 0.03 s.
+- Load: one process 43 requests/s; four processes 128 requests/s at 40 users and 150 requests/s at 100 users, 0 errors.
+- Identity resolution evaluation: 195 records/s (was 122); unchanged accuracy (31 splits, 5.41 % unresolved,
+  0 false merges); at `SOC_RESOLUTION_AUTO_THRESHOLD=0.75`, 2.18 % unresolved.
+
+Still needs the client's environment: real throughput limits of each tenant, the client's proxy/TLS inspection and
+real data quality; the record-and-sanitise mode exists so the first week's live responses become fixtures.
+
+## Round 15 (2026-10-07): the 4-week development plan checked item by item
 
 Results on the final code:
 

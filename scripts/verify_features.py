@@ -294,7 +294,7 @@ FEATURES: list[tuple[str, str, list[str]]] = [
 
 NOT_AUTOMATED = [
     ("Vendor connectors against the client's real tenants", ("Each connector is built to the vendor's documented API and exercised on vendor-shaped "
-     "fixtures through the same code. Real tenants need credentials: press *Test* per connector (Integrations screen).")),
+     "fixtures through the same code. Real tenants need credentials: run *Preflight* per connector (Integrations screen).")),
     ("Other LLM providers with real keys (Azure OpenAI deployments API, Anthropic, self-hosted)", ("Azure AI Foundry is verified live "
      "with `--llm`; the other adapters are tested against the official request shapes with stubbed responses.")),
     ("Detonation on an isolated sandbox host / CAPEv2", ("Hardening and fail-closed behaviour are unit-tested in the engine suite; "

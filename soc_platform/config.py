@@ -50,6 +50,7 @@ class Settings(BaseModel):
     raw_retention_days: int = 180
     access_log_retention_days: int = 400
     llm_log_retention_days: int = 180
+    event_retention_days: int = 400
 
     # Autonomy (section 5.2). Global kill switch halts every automated action.
     kill_switch: bool = False
@@ -91,6 +92,7 @@ def get_settings() -> Settings:
         raw_retention_days=int(env.get("SOC_RAW_RETENTION_DAYS", "180")),
         access_log_retention_days=int(env.get("SOC_ACCESS_LOG_RETENTION_DAYS", "400")),
         llm_log_retention_days=int(env.get("SOC_LLM_LOG_RETENTION_DAYS", "180")),
+        event_retention_days=int(env.get("SOC_EVENT_RETENTION_DAYS", "400")),
         kill_switch=_env_bool("SOC_KILL_SWITCH", False),
         connector_mode=env.get("SOC_CONNECTOR_MODE", "fake"),
         fixtures_dir=env.get("SOC_FIXTURES_DIR", str(Path(__file__).parent / "fixtures")),

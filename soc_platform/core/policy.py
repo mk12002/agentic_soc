@@ -140,7 +140,9 @@ class PolicyEngine:
         )
 
     def decide(self, action_type: str, targets: list[dict[str, Any]], *, destructive: bool,
-               precondition_failures: list[str] | None = None) -> PolicyDecision:
+               precondition_failures: list[str] | None = None,
+               ceiling: tuple[int, str] | None = None) -> PolicyDecision:
+        """``ceiling`` (level, reason): the most a tool's rollout stage allows (``recommend`` -> L2)."""
         v = self.view(action_type)
         level = v.level
         reasons: list[str] = [f"configured level L{int(v.level)} for {action_type}"]
@@ -160,6 +162,8 @@ class PolicyEngine:
 
         if self.kill_switch:
             cap(Level.L3_APPROVE, "kill switch engaged: autonomous execution disabled")
+        if ceiling is not None:
+            cap(Level(int(ceiling[0])), ceiling[1])
         if destructive:
             cap(Level.L3_APPROVE, "destructive action type: never autonomous")
         vip_hits = [t for t in targets if is_vip_target(t, self.document.get("vip", {}))]

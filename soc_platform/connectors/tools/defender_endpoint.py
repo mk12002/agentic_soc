@@ -12,7 +12,7 @@ from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ok_lookup, parse_ts, sev_name, targets_of
+from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, sev_name, targets_of
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, kql_str, mde_transport
 from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
@@ -44,7 +44,8 @@ class DefenderEndpointConnector(MicrosoftConnector):
         params = {"$top": 1000}
         if stream == "alerts":                  # the Alerts API returns evidence (files, URLs, IPs) only on request
             params["$expand"] = "evidence"
-        return self.odata_page(path, cursor, params)
+            return self.odata_page(path, cursor, params, watermark="lastUpdateTime")   # new and updated alerts
+        return self.odata_page(path, cursor, params)                                    # inventory: in full
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         return [{"alerts": self._alert, "machines": self._machine, "vulnerabilities": self._vuln}[stream](raw)]
@@ -52,7 +53,7 @@ class DefenderEndpointConnector(MicrosoftConnector):
     def _machine(self, m: dict[str, Any]) -> NormalizedRecord:
         fqdn = m.get("computerDnsName") or ""
         return NormalizedRecord(
-            kind="asset", tool=self.tool, source_type="machine", source_id=m["id"], observed_at=parse_ts(m.get("lastSeen")),
+            kind="asset", tool=self.tool, source_type="machine", source_id=need(m, "id"), observed_at=parse_ts(m.get("lastSeen")),
             keys={"mde_device_id": m["id"], "aad_device_id": m.get("aadDeviceId")},
             attributes={"hostname": fqdn.split(".")[0], "fqdn": fqdn if "." in fqdn else None,
                         "ip": m.get("lastIpAddress"), "ips": [x for x in [m.get("lastIpAddress")] if x],
@@ -80,7 +81,7 @@ class DefenderEndpointConnector(MicrosoftConnector):
                 refs.append(EntityRef(kind="indicator", role="observable", keys={"value": ev["url"]},
                                       attributes={"type": "url"}))
         return NormalizedRecord(
-            kind="alert", tool=self.tool, source_type="alert", source_id=a["id"],
+            kind="alert", tool=self.tool, source_type="alert", source_id=need(a, "id"),
             observed_at=parse_ts(a.get("alertCreationTime")), title=a.get("title", "Defender alert"),
             severity=sev_name(a.get("severity")), refs=refs, dimension="endpoint",
             attributes={"category": a.get("category"), "status": a.get("status"),
@@ -90,7 +91,7 @@ class DefenderEndpointConnector(MicrosoftConnector):
 
     def _vuln(self, v: dict[str, Any]) -> NormalizedRecord:
         return NormalizedRecord(
-            kind="finding", tool=self.tool, source_type="machine_vulnerability", source_id=v["id"],
+            kind="finding", tool=self.tool, source_type="machine_vulnerability", source_id=need(v, "id"),
             title=f"{v.get('cveId')} on {v.get('machineId')}", severity=sev_name(v.get("severity")), dimension="exposure",
             refs=[EntityRef(kind="asset", role="host", keys={"mde_device_id": v.get("machineId")})],
             attributes={"cve": v.get("cveId"), "product": f"{v.get('productName', '')} {v.get('productVersion', '')}".strip(),
@@ -222,7 +223,7 @@ MANIFEST = ConnectorManifest(
     factory=lambda s, t: DefenderEndpointConnector(s, t, rate_per_sec=1.5, burst=20),  # MDE: 100 calls/min per app
     live_transport=mde_transport,
     config=APP_FIELDS + [ConfigField("user_domain", "UPN suffix for alert users", required=False),
-                         ConfigField("mde_base", "API base (regional endpoints)", required=False)],
+                         ConfigField("mde_base", "API base (regional endpoints)", required=False, kind="url")],
     actions=_actions, confidence="High",
     to_confirm="Licence tier (P2 for advanced hunting/TVM); app permissions; hunting quota",
     fake_settings={"user_domain": "acme-demo.com", "tenant_id": "demo-tenant"},

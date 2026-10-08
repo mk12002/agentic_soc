@@ -1,6 +1,6 @@
 """Generate a seeded variant of the sample estate: a different organisation with different volumes.
 
-    python scripts/build_estate_variant.py OUT_DIR [--seed 7] [--scale 1.0]
+    python scripts/build_estate_variant.py OUT_DIR [--seed 7] [--scale 1.0] [--messy]
 
 What changes per seed (so tests on several seeds prove nothing depends on one data set):
 
@@ -10,6 +10,13 @@ What changes per seed (so tests on several seeds prove nothing depends on one da
 * **volumes**: extra staff (directory users with groups and methods), extra laptops - some with CrowdStrike, some
   with Defender, some with both, some with no EDR at all and some missing from the CMDB - extra vulnerable
   machines, a larger phishing campaign, more shadow-IT activity and extra benign / bulk emails
+
+``--messy`` adds what a real tenant looks like and a demo does not, to the generated population (the storyline is
+untouched): event volume (sign-ins, DNS activity, low-severity EDR alerts, more findings per machine), people with
+accented and non-Latin names, renamed users (new UPN, old SAM and alias), leavers with live devices, re-imaged laptops
+(two EDR records, one serial), stale devices, hostname case and FQDN differences between tools, missing and null
+optional fields, epoch-millisecond timestamps, ServiceNow custom ``u_`` fields and untidy values, and a CVE no
+intelligence feed knows. With ``--scale`` it is the volume test estate (``scripts/measure_scale.py``).
 
 The attack storyline stays the one the built-in estate models; everything around it varies. Output:
 ``fixtures/`` (+ ``settings.json``), ``corpus/`` (+ ``labels.json``), ``suppliers.yaml``, ``estate.json``.
@@ -27,6 +34,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -149,8 +157,135 @@ def _insert_before(routes, anchor, new):
     routes[i:i] = new
 
 
+UNICODE_FIRST = ["José", "Zoë", "Łukasz", "Søren", "Ana-María", "François", "Đặng", "李伟", "Μαρία", "Ömer", "Siobhán", "Ngozi"]
+BENIGN_DNS = [("login.microsoftonline.com", "SaaS and B2B"), ("outlook.office365.com", "SaaS and B2B"),
+              ("github.com", "Software/Technology"), ("zoom.us", "Online Meetings"), ("slack.com", "Chat"),
+              ("windowsupdate.com", "Software Updates"), ("salesforce.com", "SaaS and B2B"), ("bbc.co.uk", "News")]
+NOISE_ALERTS = [("Suspicious file dropped by browser", "Low", "Execution"),
+                ("Unwanted software detected", "Informational", "Malware"),
+                ("Suspicious scheduled task created", "Low", "Persistence"),
+                ("Possible credential dumping tool blocked", "Medium", "CredentialAccess")]
+
+
+def make_messy(fx: dict, extra: list[dict], laptops: list[dict], rng: random.Random, seed: int, org: str, nb: str,
+               scale: float) -> dict:
+    """Real-tenant disorder and volume on the generated population (see the module docstring). Returns counts."""
+    stats = {"renamed": 0, "unicode": 0, "leavers": 0, "reimaged": 0, "stale": 0, "signins": 0, "dns_rows": 0,
+             "noise_alerts": 0, "extra_findings": 0}
+    ent = fx["entra"]["routes"]
+    users = _route(ent, "GET", r"^/v1.0/users$")["body"]["value"]
+    by_id = {u["id"]: u for u in users}
+    for u in extra:
+        rec = by_id[u["id"]]
+        r = rng.random()
+        if r < 0.15:                                          # accented / non-Latin display names
+            rec["displayName"] = f"{rng.choice(UNICODE_FIRST)} {u['name'].split()[-1]}"
+            stats["unicode"] += 1
+        elif r < 0.25:                                        # renamed: new UPN, the old one kept as an alias
+            old = rec["userPrincipalName"]
+            new = f"{u['sam'].split('.')[0]}.{rng.choice(['okoro', 'lindgren', 'mbeki', 'castell'])}{stats['renamed']}@{org}"   # UPNs are unique
+            rec.update(userPrincipalName=new, mail=new, proxyAddresses=[f"SMTP:{new}", f"smtp:{old}"])
+            u["renamed_from"] = old
+            stats["renamed"] += 1
+        if rng.random() < 0.2:
+            rec.pop("department", None)
+        if rng.random() < 0.1:
+            rec["jobTitle"] = None
+        if rng.random() < 0.05:                               # left the company, device still reporting
+            rec["accountEnabled"] = False
+            stats["leavers"] += 1
+
+    cs = fx["crowdstrike"]["routes"]
+    cs_ids = _route(cs, "GET", r"^/devices/queries/devices-scroll/v1$")["body"]["resources"]
+    cs_devs = _route(cs, "POST", r"^/devices/entities/devices/v2$")["body"]["resources"]
+    mde = fx["defender_endpoint"]["routes"]
+    md_all = _route(mde, "GET", r"^/api/machines$")["body"]["value"]
+    for d in [d for d in cs_devs if d["device_id"].startswith(f"cs-x{seed}-")]:
+        if rng.random() < 0.2:
+            d["serial_number"] = None
+        if rng.random() < 0.15:
+            d.pop("local_ip", None)
+        d["_unknown_vendor_field"] = {"ring": rng.choice(["pilot", "broad"])}
+        if rng.random() < 0.1:                                # re-imaged: a second sensor id, same box, older
+            twin = dict(d, device_id=d["device_id"] + "-old", last_seen="2026-06-17T08:00:00Z", agent_version="7.10.17706.0")
+            cs_devs.append(twin)
+            cs_ids.append(twin["device_id"])
+            stats["reimaged"] += 1
+    for m in [m for m in md_all if str(m.get("id", "")).startswith(f"mde-x{seed}-")]:
+        if rng.random() < 0.3:
+            m["computerDnsName"] = m["computerDnsName"].upper()
+        if rng.random() < 0.2:
+            m.pop("lastIpAddress", None)
+        if rng.random() < 0.1:
+            m["osVersion"] = None
+    n_stale = max(1, int(len(laptops) * 0.08))
+    for i in range(n_stale):                                  # machines nobody retired: last seen months ago
+        did = f"cs-x{seed}-stale{i:03d}"
+        cs_ids.append(did)
+        cs_devs.append({"device_id": did, "hostname": f"{nb}-OLD-{i:03d}", "local_ip": None, "external_ip": None,
+                        "serial_number": f"OLD{seed}{i:04d}", "os_version": "Windows 10 Enterprise", "platform_name": "Windows",
+                        "agent_version": "6.45.15802.0", "status": "normal", "last_seen": "2026-03-01T06:00:00Z", "tags": []})
+        stats["stale"] += 1
+
+    sn = fx["servicenow"]["routes"]
+    for ci in _route(sn, "GET", r"^/api/now/table/cmdb_ci_computer$")["body"]["result"]:
+        ci["u_cost_centre"] = {"value": f"CC{rng.randint(1000, 9999)}", "display_value": f"CC{rng.randint(1000, 9999)}"}
+        ci["u_patch_window"] = {"value": rng.choice(["sat-02", "sun-04", ""]), "display_value": ""}
+        if rng.random() < 0.15:
+            ci.pop("business_criticality", None)
+        if rng.random() < 0.2 and "environment" in ci:
+            ci["environment"] = {**ci["environment"], "display_value": ci["environment"]["display_value"] + " "}
+
+    # ---------------- volume
+    per_user = max(2, int(4 * max(1.0, scale ** 0.5)))
+    signins = _route(ent, "GET", r"^/v1.0/auditLogs/signIns$")["body"]["value"]
+    tmpl = dict(signins[0])
+    k = 0
+    for u in extra:
+        rec = by_id[u["id"]]
+        for j in range(per_user):
+            k += 1
+            signins.append(dict(tmpl, id=f"si-x{seed}-{k:06d}", userPrincipalName=rec["userPrincipalName"], userId=u["id"],
+                                createdDateTime=f"2026-09-{19 + j % 2}T{(7 + j) % 24:02d}:{k % 60:02d}:{(k * 7) % 60:02d}Z",
+                                ipAddress=f"198.51.100.{k % 200 + 20}",
+                                riskLevelDuringSignIn="medium" if rng.random() < 0.03 else "none",
+                                deviceDetail={"deviceId": None, "displayName": None, "isCompliant": None},
+                                location={"city": rng.choice(["Pune", "London", "Dublin", None]), "countryOrRegion": None}))
+    stats["signins"] = k
+    dns = _route(fx["umbrella"]["routes"], "GET", r"^/reports/v2/activity/dns$")["body"]["data"]
+    per_host = max(5, int(12 * max(1.0, scale ** 0.5)))
+    for i, h in enumerate(laptops):
+        for j in range(per_host):
+            dom, cat = BENIGN_DNS[(i + j) % len(BENIGN_DNS)]
+            ts = f"2026-09-20T{(j % 14) + 6:02d}:{(i + j) % 60:02d}:{(i * 3 + j) % 60:02d}Z"
+            dns.append({"timestamp": ts if j % 2 else int(datetime.fromisoformat(ts).timestamp() * 1000),
+                        "domain": dom, "verdict": "allowed", "internalip": h["ip"], "externalip": "198.51.100.44",
+                        "querytype": "A", "categories": [{"label": cat, "type": "content"}],
+                        "identities": [{"label": h["hostname"], "type": {"type": "roaming"}}]})
+            stats["dns_rows"] += 1
+    alerts = _route(mde, "GET", r"^/api/alerts$")["body"]["value"]
+    for i, h in enumerate(laptops):
+        if h["mde"] and rng.random() < 0.15:
+            title, sev, cat = rng.choice(NOISE_ALERTS)
+            alerts.append({"id": f"da-x{seed}-{i:04d}", "title": title, "severity": sev, "category": cat, "status": "New",
+                           "machineId": h["mde"], "computerDnsName": h["fqdn"],
+                           "alertCreationTime": f"2026-09-{18 + i % 3}T{(i * 5) % 24:02d}:{i % 60:02d}:00Z",
+                           "lastUpdateTime": f"2026-09-{18 + i % 3}T{(i * 5) % 24:02d}:{i % 60:02d}:30Z",
+                           "mitreTechniques": [], "detectionSource": "WindowsDefenderAv", "evidence": [],
+                           "relatedUser": {"userName": h["user"]["sam"], "domainName": nb}})
+            stats["noise_alerts"] += 1
+    md_vulns = _route(mde, "GET", r"^/api/vulnerabilities/machinesVulnerabilities$")["body"]["value"]
+    for h in laptops:
+        if h["mde"] and h["vulnerable"] and rng.random() < 0.5:   # a CVE no intelligence feed in the estate knows
+            md_vulns.append({"id": f"{h['mde']}_CVE-2024-21338", "machineId": h["mde"], "cveId": "CVE-2024-21338",
+                             "productName": "Microsoft Windows", "productVersion": "11", "severity": "High",
+                             "fixingKbId": None})
+            stats["extra_findings"] += 1
+    return stats
+
+
 # ------------------------------------------------------------------------------------------------ main
-def main(out: str, seed: int = 7, scale: float = 1.0) -> Path:
+def main(out: str, seed: int = 7, scale: float = 1.0, messy: bool = False) -> Path:
     rng = random.Random(seed * 7919)
     ren = _load("rename_estate")
     bf = _load("build_fixtures")
@@ -208,12 +343,14 @@ def main(out: str, seed: int = 7, scale: float = 1.0) -> Path:
         n = 800 + i * 7 + seed
         name = [f"{nb}-NB-{n:04d}", f"{u['sam'].split('.')[0].upper()}-{nb}-L{n % 100:02d}", f"LT{n:05d}-{nb}"][seed % 3]
         edr = rng.choice(["cs", "mde", "both", "both", "none"])
-        laptops.append({"user": u, "hostname": name, "fqdn": f"{name.lower()}.{org}", "ip": f"{net}{100 + i}",
+        _, a8, b8, _ = net.split(".")                      # 150 hosts per /24, then the next subnet (large estates)
+        ip = f"10.{a8}.{(int(b8) + i // 150) % 256}.{100 + i % 150}"
+        laptops.append({"user": u, "hostname": name, "fqdn": f"{name.lower()}.{org}", "ip": ip,
                         "cs": f"cs-x{seed}-{i:03d}" if edr in {"cs", "both"} else None,
                         "mde": f"mde-x{seed}-{i:03d}" if edr in {"mde", "both"} else None, "serial": f"PF{rng.randrange(16**6):06X}",
                         "vulnerable": rng.random() < 0.6, "in_cmdb": rng.random() < 0.7})
     cs, mde = fx["crowdstrike"]["routes"], fx["defender_endpoint"]["routes"]
-    cs_ids = _route(cs, "GET", r"^/devices/queries/devices/v1$")
+    cs_ids = _route(cs, "GET", r"^/devices/queries/devices-scroll/v1$")
     cs_devs = _route(cs, "POST", r"^/devices/entities/devices/v2$")
     cs_star = _route(cs, "GET", r"^/devices/queries/devices/v1$", {"filter": "*"})
     cs_vulns = _route(cs, "GET", r"^/spotlight/combined/vulnerabilities/v1$")
@@ -303,6 +440,8 @@ def main(out: str, seed: int = 7, scale: float = 1.0) -> Path:
         _insert_before(umb, umb_ip_star, [{"method": "GET", "path": r"^/reports/v2/activity/dns$", "status": 200,
                                            "params": {"ip": h["ip"]}, "body": {"data": rows}}])
 
+    messy_stats = make_messy(fx, extra, laptops, rng, seed, org, nb, scale) if messy else None
+
     for name, doc in fx.items():
         (dst / "fixtures" / f"{name}.json").write_text(json.dumps(doc, indent=1), encoding="utf-8")
 
@@ -349,7 +488,7 @@ def main(out: str, seed: int = 7, scale: float = 1.0) -> Path:
               "suppliers_file": str(dst / "suppliers.yaml"), "focus_upn": focus, "campaign_cve": "CVE-2021-44228",
               "phish_subject_token": "password expires", "uploads": sorted(uploads), "lead": f"soc.lead@{org}",
               "extra_users": len(extra), "extra_laptops": len(laptops), "extra_recipients": len(extra_rcpt),
-              "laptops_without_edr": sum(1 for h in laptops if not h["cs"] and not h["mde"]),
+              "laptops_without_edr": sum(1 for h in laptops if not h["cs"] and not h["mde"]), "messy": messy_stats,
               "original_tokens": ["jane", "acme", "krishna", "micros0ft", "web01", "sap-prod", "185.220.101.4"]}
     (dst / "estate.json").write_text(json.dumps(estate, indent=1), encoding="utf-8")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -361,5 +500,6 @@ if __name__ == "__main__":
     ap.add_argument("out")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--messy", action="store_true", help="add real-tenant disorder and event volume")
     a = ap.parse_args()
-    print(main(a.out, a.seed, a.scale))
+    print(main(a.out, a.seed, a.scale, a.messy))

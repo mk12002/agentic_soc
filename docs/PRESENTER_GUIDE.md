@@ -323,9 +323,14 @@ switch, integration freshness."
 ### W11 - Integrations (1 min)
 
 **Click:** Integrations.
-**Say:** "Twenty connectors, each with a Test button that authenticates and reads one page, and freshness checked
-against each stream's expected cadence. Here they're in fake mode. In your environment each is switched to live
-with its own least-privilege service principal."
+**Say:** "Twenty connectors, each with a stage - Fixtures here - and freshness checked against each stream's
+expected cadence. In your environment each tool is connected from this screen: the secrets go in your vault, the
+settings and stage are set here, the platform runs a preflight - sign-in, every permission, parsing, data freshness,
+volume - and a second person approves. It's in force within seconds, no restart. A tool is trusted step by step:
+recording, read-only, recommend - where every action needs a person - then automate."
+**Click:** *Preflight* on CrowdStrike (the checklist), then *Configure* (secrets shown only as the vault names, never
+values). Optionally change a setting and propose it: it appears under *awaiting approval*, approvable only by someone
+else.
 **Point at:** the scheduled jobs (retries with backoff; dead letter after 3 failures raises an alert), and the
 **Notifications** card: "Anything rated high or critical - an attack chain, a dead job, break-glass use - is posted
 to your Teams or Slack channel within a minute, once, and again only if it gets worse. Failed deliveries are
@@ -606,7 +611,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 345 passed on SQLite (with PostgreSQL's rules enforced) and 345 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 535 passed on SQLite (with PostgreSQL's rules enforced) and 535 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -671,12 +676,13 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 
 1. **Not yet run against the client's tenants.** Connectors are built to each vendor's documented API and
    exercised on vendor-shaped fixtures through the same code. Live behaviour needs credentials: each is connected
-   and tested (Integrations → Test) in the client's environment.
+   and preflighted (Integrations → Preflight, then the rollout stages) in the client's environment.
 2. **Accuracy and latency are not proven on the client's data.** The corpus and stress tests are regression
    checks. Real accuracy comes from shadow mode against the client's own analyst decisions, which the platform
    records automatically (agreement, drift).
-3. **Volumes.** The architecture scales horizontally (stateless API, leased jobs, Postgres), but it has not been
-   load-tested at the client's volumes.
+3. **Volumes.** The architecture scales horizontally (stateless API, leased jobs, Postgres) and is measured on
+   generated messy estates up to 40 times the demo and under 100 concurrent users (§16, OPERATIONS.md); the client's
+   real volumes and each tenant's own rate limits are first seen in its environment.
 4. **Detonation** needs an isolated analysis host (or CAPEv2 for Windows payloads). The hardening and fail-closed
    behaviour are tested; actual detonation is not run in the demo.
 5. **SSO** needs an Entra app registration. Token validation is tested with signed tokens; the console's own Entra
@@ -737,17 +743,21 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Does it replace our SIEM/SOAR/EDR? | No. It orchestrates them through their APIs. |
-| What if we change a tool? | A tool change is a connector change; the SDK makes a new connector a single module plus a manifest. |
+| What if we change a tool? | A tool change is a connector change; the SDK makes a new connector a single module plus a manifest, and `connector new` generates one that already follows the platform's rules (`connector check` proves it). |
+| Can admins change the configuration themselves? | Yes, on Integrations: switch tools on or off, set URLs, tenant ids, mailboxes, field mappings, the rollout stage, and the key-supplier and sanctioned-service lists. Each change is proposed by one person, checked (and preflighted when it touches a live tool), approved by another, versioned and audited, and in force within seconds without a restart. Any earlier version can be restored; the whole configuration exports and imports as one file. Platform-wide settings (sign-in, retention, LLM endpoint) stay deployment settings. |
+| Is it plug and play? | For tools it has a connector for, yes: put the secrets in the vault, configure, preflight, approve. Nothing is typed into code or files. A tool it has no connector for needs one module - generated by `connector new` and checked by the same conformance suite as the 20 built in. |
+| What stops a bad configuration breaking things? | A strict schema names every mistake with its fix ("did you mean crowdstrike?") - the server won't start on a broken file and the console won't accept one. A tool going live must pass its preflight. A tool that still fails is isolated: the others keep working. A misbehaving tool can be paused at once. |
+| Where are the passwords? | In your vault. The console never asks for, stores or shows a secret: it shows the variable name and whether it is set. |
 | We don't have tool X. | Coverage and the attack story adapt: stages that no enabled tool can see show as blind spots rather than "clear". |
 | Will it overload our tools' APIs? | Per-tool request budgets sized under vendor limits, caching, backoff and reconciliation. |
-| How long to go live? | Per tool: provision a read-scoped service principal, configure, press Test (every tool's permissions, settings and egress hosts: CLIENT_DEPLOYMENT_GUIDE.md). Governance, audit and the workflows are already built; the work is integration and validation on real data. |
+| How long to go live? | Per tool: provision a read-scoped service principal, put its secrets in the vault, configure and preflight it on Integrations, approve (every tool's permissions, settings and egress hosts: CLIENT_DEPLOYMENT_GUIDE.md). Governance, audit and the workflows are already built; the work is integration and validation on real data. |
 
 ### About quality and generality
 
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 345 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 535 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -808,7 +818,10 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Does it run on PostgreSQL? | Yes, that is the production engine, and the full suite runs on it. The faster SQLite runs enforce PostgreSQL's rules too, which found several production-only bugs, all now fixed (§16). |
-| How big can it get? | Measured at 20,000 entities: risk ranking 0.06 s, correlation 0.09 s, a case's actions 0.005 s. The API is stateless and scales out; jobs are leased. It has not been load-tested at the client's volumes (§10). |
+| How big can it get? | Measured at 20,000 entities: risk ranking 0.06 s, correlation 0.09 s, a case's actions 0.005 s. The API is stateless and scales out; jobs are leased. A messy estate 40 times the demo syncs in 149 s on SQLite and with 0 failed records on PostgreSQL; four server processes served 100 concurrent users at 150 requests/s with no error. The client's own volumes are first seen in its environment (§10). |
+| What if a tool sends far more data than the demo? | Every stream pages to the end and resumes from where it stopped (a time mark with a 30-minute overlap for late logs); Umbrella stores only security-relevant DNS by default; CrowdStrike lists more than 10,000 hosts through its scroll query; a page limit per sync (`SOC_SYNC_MAX_PAGES`) spreads a first backfill over several runs; one bad record never stops its page. |
+| What if many analysts use it at once, or the database is busy? | Several server processes (`SOC_API_WORKERS`, 4 in Docker), a sized connection pool, and a clear "busy, retry" (503 with `Retry-After`) instead of a hung screen. Rate limits protect the API. |
+| What if a tool is down, or its token expires? | The token is renewed once; a missing permission stops the stream and names the scope to grant; throttling is waited out. A down tool shows as an error on Integrations while everything else keeps working: a reported e-mail is still judged from its own content, reports leave out only the unavailable section, KEV flags are never cleared by a feed outage. Tested with every tool down at once. |
 | What happens during an upgrade? | Start-up creates new tables, adds new optional columns and widens text columns a new release has made longer, on SQLite and PostgreSQL alike. It never narrows, renames or drops anything automatically; a new required column is flagged for a scripted migration. Tested on both engines. |
 
 ---
@@ -825,7 +838,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 345 SQLite, 345 PostgreSQL / 205 |
+| Platform tests / engine tests | 535 SQLite, 535 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
 | Features verified | 103 of 103 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
@@ -1038,7 +1051,7 @@ and every model call writes an **LLM call** row (with its duration). Every notif
 | **Cloud posture** | Open, past SLA, false closures, teams involved; misconfigurations with route / mark fixed / validate | Wiz issues through the same lifecycle as findings | Vulnerability scope |
 | **ATT&CK coverage** | Weighted coverage, priority blind spots, single-source techniques, firing; the matrix; blind spots to close | The enabled tools' detection capabilities (56 techniques) and what has fired | All |
 | **Shadow IT** | Unsanctioned services, high-risk services, users involved, risky sites; by category; risky destinations | Umbrella DNS against `config/sanctioned_services.yaml`; aggregated, never stored | Incident scope |
-| **Integrations** | Each connector's freshness and a Test button; platform self-check; notification channels and recent deliveries; scheduled jobs with history and replay | Connector checkpoints; job runs; the self-check; the notification log | All can view (self-check and notifications: all-domain scope); Test, Sync and job replay need `manage_connectors` |
+| **Integrations** | Each connector's stage, freshness and last preflight; *Preflight*, *Configure* (propose a change; approve another person's) and *Pause*; configuration history, restore, export / import; key suppliers and sanctioned services; platform self-check; notification channels and recent deliveries; scheduled jobs with history and replay | Connector checkpoints; job runs; the self-check; the notification log | All can view (self-check and notifications: all-domain scope); Test, Sync and job replay need `manage_connectors` |
 | **Automation policy** | Every action type with level, limits, four-eyes, reversible; kill switch; pending policy changes | The active policy version | All; changes by role |
 | **Reports** | Seven standard reports; describe a report in words; compliance evidence pack; audit export | The 16-source catalogue (§6.8) | All (scoped); evidence exports need `export_evidence` |
 | **Access** | Your access; role assignments; service accounts; role permissions | Role grants and API keys | Admin (manage), all (own access) |
@@ -1151,8 +1164,9 @@ Full detail: [FAILURE_MODES.md](FAILURE_MODES.md).
   | `SOC_BREAKGLASS_SHA256` | Hash of the sealed emergency credential |
   | `SOC_ORG_DOMAINS` | What counts as internal (for redaction and look-alike detection) |
   | `SOC_CONNECTOR_MODE`, `config/connectors.yaml` | Live or fake mode per tool, with credentials from vault-mounted files |
+  | Integrations → Configure (console), `SOC_CONFIG_RELOAD_SECONDS` | Stage, settings and on/off per tool, and the supplier / sanctioned lists, changed with a second person's approval and in force within seconds |
   | `SOC_LLM_*` | Provider, endpoint, key, deployment, approved endpoints, pinned model version, monthly token budget |
-  | `SOC_RAW_RETENTION_DAYS`, `SOC_LLM_LOG_RETENTION_DAYS`, `SOC_ACCESS_LOG_RETENTION_DAYS` | Retention (180 / 180 / 400 by default) |
+  | `SOC_RAW_RETENTION_DAYS`, `SOC_LLM_LOG_RETENTION_DAYS`, `SOC_ACCESS_LOG_RETENTION_DAYS`, `SOC_EVENT_RETENTION_DAYS` | Retention (180 / 180 / 400 / 400 by default) |
   | `SOC_KILL_SWITCH` | Start with automation halted |
   | `SOC_JOB_*_SECONDS` | Job intervals |
 - **Upgrades:** on PostgreSQL, start-up widens any text column a newer release has made longer. Nothing is ever
@@ -1170,7 +1184,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 345 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 535 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |
@@ -1182,6 +1196,9 @@ browser."
 | **Layout** | Every screen at 1440, 1280, 1024 and 768 px, light and dark: nothing clipped, overflowing or squeezed | 0 problems |
 | **Live** | The real LLM (Azure AI Foundry), NVD, EPSS and CISA KEV | Green |
 | **Stress** | 400 hosts and 300 people with messy naming: no false merges; 20,000-entity scale benchmarks | 0 false merges |
+| **Connector conformance** | Every connector and stream: paging to the end and resuming correctly, throttling, an expired token, a missing permission, every field removed or null, an HTML page instead of JSON, late logs | Green; found 9 resume bugs and 14 connectors crashing on a missing field, all fixed |
+| **Volume and traffic** | Messy estates up to 40 times the demo on SQLite and PostgreSQL; a real multi-process server under 100 concurrent users; a saturated database answers "busy, retry" | 0 failed records; 150 requests/s, 0 errors |
+| **Real-world situations** | An empty tenant; every tool down at once | Everything keeps working; found 4 outage crashes (incl. a KEV wipe), all fixed |
 | **Static analysis** | ruff (whole repository), bandit, pip-audit, npm audit, type checking of the platform core | 0 findings / 0 medium-high / no known vulnerabilities |
 
 **What the testing found, and why that is good news.** Each round of testing from a new angle found real problems.

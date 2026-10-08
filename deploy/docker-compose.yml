@@ -43,6 +43,7 @@ x-platform-env: &platform-env
   SOC_RAW_RETENTION_DAYS: ${SOC_RAW_RETENTION_DAYS:-180}
   SOC_ACCESS_LOG_RETENTION_DAYS: ${SOC_ACCESS_LOG_RETENTION_DAYS:-400}
   SOC_LLM_LOG_RETENTION_DAYS: ${SOC_LLM_LOG_RETENTION_DAYS:-180}
+  SOC_EVENT_RETENTION_DAYS: ${SOC_EVENT_RETENTION_DAYS:-400}
   SOC_SUPPLIER_DOMAINS: ${SOC_SUPPLIER_DOMAINS:-}
 
 x-engine-env: &engine-env
@@ -78,6 +79,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-soc_platform}
     volumes: [pgdata:/var/lib/postgresql/data]
+    # API workers x (pool size + overflow) + the scheduler must fit: 4 x 40 + 40 = 200 at the defaults (PostgreSQL's
+    # own default is 100). A managed server: set the same parameter there.
+    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-300}"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"], interval: 10s, retries: 5}
     restart: unless-stopped
 
@@ -87,6 +91,9 @@ services:
     environment:
       <<: *platform-env
       SOC_EMBEDDED_SCHEDULER: "0"        # platform-scheduler below runs the jobs; one scheduler service per deployment
+      SOC_API_WORKERS: "${SOC_API_WORKERS:-4}"           # server processes: one per CPU core given to the container
+      SOC_DB_POOL_SIZE: "${SOC_DB_POOL_SIZE:-20}"        # per process; keep workers x (size + overflow) < max_connections
+      SOC_DB_MAX_OVERFLOW: "${SOC_DB_MAX_OVERFLOW:-20}"
     ports: ["${SOC_API_BIND:-127.0.0.1}:${SOC_API_PORT:-8080}:8080"]   # expose via a TLS reverse proxy, not directly
     volumes: [platform_data:/app/data]
     depends_on: {postgres: {condition: service_healthy}}

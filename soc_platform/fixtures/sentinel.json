@@ -4,7 +4,224 @@
    "method": "GET",
    "path": "/incidents$",
    "body": {
-    "value": []
+    "value": [
+     {
+      "id": "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Incidents/b7e4c1d2-5a6f-4e8b-9c0d-1a2b3c4d5e61",
+      "name": "b7e4c1d2-5a6f-4e8b-9c0d-1a2b3c4d5e61",
+      "etag": "\"00001073-0000-0100-0000-66ed0b6f0000\"",
+      "type": "Microsoft.SecurityInsights/Incidents",
+      "properties": {
+       "title": "Sign-in from a Tor exit node followed by a mailbox forwarding rule",
+       "description": "Sign-in from a Tor exit node followed by a mailbox forwarding rule (analytics rule).",
+       "severity": "High",
+       "status": "New",
+       "classification": null,
+       "classificationReason": null,
+       "owner": {
+        "objectId": null,
+        "email": null,
+        "assignedTo": null,
+        "userPrincipalName": null
+       },
+       "labels": [
+        {
+         "labelName": "tor",
+         "labelType": "User"
+        }
+       ],
+       "firstActivityTimeUtc": "2026-09-20T09:15:40Z",
+       "lastActivityTimeUtc": "2026-09-20T09:18:02Z",
+       "lastModifiedTimeUtc": "2026-09-20T09:19:10.5521823Z",
+       "createdTimeUtc": "2026-09-20T09:19:10.5521823Z",
+       "incidentNumber": 4211,
+       "additionalData": {
+        "alertsCount": 1,
+        "bookmarksCount": 0,
+        "commentsCount": 0,
+        "alertProductNames": [
+         "Azure Sentinel"
+        ],
+        "tactics": [
+         "InitialAccess",
+         "Collection"
+        ],
+        "techniques": [
+         "T1078",
+         "T1114"
+        ]
+       },
+       "relatedAnalyticRuleIds": [
+        "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/alertRules/b7e4c1d2-rule"
+       ],
+       "incidentUrl": "https://portal.azure.com/#asset/Microsoft_Azure_Security_Insights/Incident/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Incidents/b7e4c1d2-5a6f-4e8b-9c0d-1a2b3c4d5e61",
+       "providerName": "Azure Sentinel",
+       "providerIncidentId": "4211"
+      }
+     },
+     {
+      "id": "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Incidents/c8f5d2e3-6b7a-4f9c-8d1e-2b3c4d5e6f72",
+      "name": "c8f5d2e3-6b7a-4f9c-8d1e-2b3c4d5e6f72",
+      "etag": "\"00001074-0000-0100-0000-66ed0b6f0000\"",
+      "type": "Microsoft.SecurityInsights/Incidents",
+      "properties": {
+       "title": "Unusual file-share enumeration from a workstation",
+       "description": "Unusual file-share enumeration from a workstation (analytics rule).",
+       "severity": "Medium",
+       "status": "Active",
+       "classification": null,
+       "classificationReason": null,
+       "owner": {
+        "objectId": null,
+        "email": null,
+        "assignedTo": null,
+        "userPrincipalName": null
+       },
+       "labels": [],
+       "firstActivityTimeUtc": "2026-09-20T09:21:00Z",
+       "lastActivityTimeUtc": "2026-09-20T09:24:30Z",
+       "lastModifiedTimeUtc": "2026-09-20T09:26:41.1048311Z",
+       "createdTimeUtc": "2026-09-20T09:26:41.1048311Z",
+       "incidentNumber": 4212,
+       "additionalData": {
+        "alertsCount": 2,
+        "bookmarksCount": 0,
+        "commentsCount": 0,
+        "alertProductNames": [
+         "Azure Sentinel"
+        ],
+        "tactics": [
+         "Discovery"
+        ],
+        "techniques": [
+         "T1135"
+        ]
+       },
+       "relatedAnalyticRuleIds": [
+        "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/alertRules/c8f5d2e3-rule"
+       ],
+       "incidentUrl": "https://portal.azure.com/#asset/Microsoft_Azure_Security_Insights/Incident/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Incidents/c8f5d2e3-6b7a-4f9c-8d1e-2b3c4d5e6f72",
+       "providerName": "Azure Sentinel",
+       "providerIncidentId": "4212"
+      }
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "/incidents/b7e4c1d2-5a6f-4e8b-9c0d-1a2b3c4d5e61/entities$",
+   "body": {
+    "entities": [
+     {
+      "id": "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Entities/b7e4c1d2-0",
+      "name": "b7e4c1d2-0",
+      "type": "Microsoft.SecurityInsights/Entities",
+      "kind": "Account",
+      "properties": {
+       "accountName": "jane.doe",
+       "upnSuffix": "acme-demo.com",
+       "aadTenantId": "00000000-0000-0000-0000-00000000a0e1",
+       "aadUserId": "u-jane-0001",
+       "isDomainJoined": true,
+       "displayName": "Jane Doe",
+       "friendlyName": "Jane Doe"
+      }
+     },
+     {
+      "id": "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Entities/b7e4c1d2-1",
+      "name": "b7e4c1d2-1",
+      "type": "Microsoft.SecurityInsights/Entities",
+      "kind": "Ip",
+      "properties": {
+       "address": "185.220.101.4",
+       "location": {
+        "countryCode": "DE",
+        "asn": 208323
+       },
+       "friendlyName": "185.220.101.4"
+      }
+     }
+    ],
+    "metaData": [
+     {
+      "count": 1,
+      "entityKind": "Account",
+      "type": "Entity"
+     },
+     {
+      "count": 1,
+      "entityKind": "Ip",
+      "type": "Entity"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "/incidents/c8f5d2e3-6b7a-4f9c-8d1e-2b3c4d5e6f72/entities$",
+   "body": {
+    "entities": [
+     {
+      "id": "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Entities/c8f5d2e3-0",
+      "name": "c8f5d2e3-0",
+      "type": "Microsoft.SecurityInsights/Entities",
+      "kind": "Account",
+      "properties": {
+       "accountName": "jane.doe",
+       "upnSuffix": "acme-demo.com",
+       "aadTenantId": "00000000-0000-0000-0000-00000000a0e1",
+       "aadUserId": "u-jane-0001",
+       "isDomainJoined": true,
+       "displayName": "Jane Doe",
+       "friendlyName": "Jane Doe"
+      }
+     },
+     {
+      "id": "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Entities/c8f5d2e3-1",
+      "name": "c8f5d2e3-1",
+      "type": "Microsoft.SecurityInsights/Entities",
+      "kind": "Host",
+      "properties": {
+       "hostName": "JANE-LT01",
+       "dnsDomain": "acme-demo.com",
+       "netBiosName": "JANE-LT01",
+       "osFamily": "Windows",
+       "additionalData": {
+        "MdatpDeviceId": "mde-jane01"
+       },
+       "friendlyName": "JANE-LT01"
+      }
+     },
+     {
+      "id": "/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights/Entities/c8f5d2e3-2",
+      "name": "c8f5d2e3-2",
+      "type": "Microsoft.SecurityInsights/Entities",
+      "kind": "Ip",
+      "properties": {
+       "address": "10.20.1.15",
+       "friendlyName": "10.20.1.15"
+      }
+     }
+    ],
+    "metaData": [
+     {
+      "count": 1,
+      "entityKind": "Account",
+      "type": "Entity"
+     },
+     {
+      "count": 1,
+      "entityKind": "Host",
+      "type": "Entity"
+     },
+     {
+      "count": 1,
+      "entityKind": "Ip",
+      "type": "Entity"
+     }
+    ]
    },
    "status": 200
   }

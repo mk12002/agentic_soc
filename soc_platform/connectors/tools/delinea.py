@@ -13,7 +13,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
+from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, need, ok_lookup, parse_ts
 from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -99,7 +99,7 @@ class PrivilegeManagerConnector(ToolConnector):
             refs.append(EntityRef(kind="asset", role="host", attributes={"hostname": e["computerName"]}))
         denied = str(e.get("outcome", "")).lower() in {"denied", "blocked"}
         return [NormalizedRecord(
-            kind="elevation", tool=self.tool, source_type="elevation_event", source_id=str(e["id"]),
+            kind="elevation", tool=self.tool, source_type="elevation_event", source_id=str(need(e, "id")),
             observed_at=parse_ts(e.get("eventTime")), title=f"Elevation {e.get('outcome')}: {e.get('applicationName')}",
             severity="medium" if denied else "informational", dimension="privileged_access", refs=refs,
             attributes={"application": e.get("applicationName"), "outcome": e.get("outcome"), "policy": e.get("policyName"),
@@ -140,11 +140,12 @@ MANIFESTS = [
         dimension="privileged_access",
         description="Secret access audit, privileged sessions, standing privilege; credential rotation.",
         factory=lambda s, t: SecretServerConnector(s, t, rate_per_sec=2, burst=4), live_transport=_ss_live,
-        config=[ConfigField("base_url", "Secret Server URL"), ConfigField("username", "API user", secret=True),
+        config=[ConfigField("base_url", "Secret Server URL", kind="url"), ConfigField("username", "API user", secret=True),
                 ConfigField("password", "API user password", secret=True),
                 ConfigField("user_domain", "UPN suffix", required=False),
                 ConfigField("audit_path", "Secret audit endpoint (default /api/v1/secret-audits)", required=False),
-                ConfigField("sessions_path", "Launched sessions endpoint (default /api/v1/launched-sessions)", required=False)],
+                ConfigField("sessions_path", "Launched sessions endpoint (default /api/v1/launched-sessions)", required=False),
+                ConfigField("sync_from", "First sync starts here (ISO date; default: everything)", required=False)],
         actions=_ss_actions, confidence="Medium",
         to_confirm="API access approval - privileged access data needs extra governance",
         fake_settings={"user_domain": "acme-demo.com", "base_url": "https://pam.acme-demo.com/SecretServer"},
@@ -153,7 +154,8 @@ MANIFESTS = [
         name="delinea_privilege_manager", tool="Delinea Privilege Manager", vendor="Delinea", category="pam",
         dimension="privileged_access", description="Elevation and application-control events.",
         factory=lambda s, t: PrivilegeManagerConnector(s, t, rate_per_sec=2, burst=4), live_transport=_pm_live,
-        config=[ConfigField("base_url", "Privilege Manager URL"), ConfigField("client_id", "API client id", secret=True),
+        config=[ConfigField("base_url", "Privilege Manager URL", kind="url"),
+                ConfigField("client_id", "API client id", secret=True),
                 ConfigField("client_secret", "API client secret", secret=True),
                 ConfigField("user_domain", "UPN suffix", required=False),
                 ConfigField("events_path", "Elevation events endpoint (default /Tms/api/v1/events/elevation)", required=False)],

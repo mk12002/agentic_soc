@@ -29,6 +29,9 @@ responsibility of the hosting environment.
 | Web attacks on the console | Strict CSP (`script-src 'self'`, no inline script or handlers, `frame-ancestors 'none'`; `connect-src` allows only the origin and `login.microsoftonline.com` for sign-in), all dynamic values HTML-escaped, ids URL-encoded in API paths, deep links restricted to http(s), no-store caching, nosniff, DENY framing, HSTS on HTTPS (also behind a TLS-terminating trusted proxy, via its `X-Forwarded-Proto`) | `api/app.py`, `api/static/` |
 | Abuse / DoS | Per-client-address rate limiting (X-Forwarded-For only from configured proxies, and then its right-most hop that is not a proxy; idle buckets evicted, never the whole table), 30 MB request cap enforced on the byte stream (chunked uploads included), 25 MB email cap, **linear-time parsing of hostile e-mail** (every regex over message content is bounded; tested on 2.4 MB pathological bodies), numeric inputs bounded, cached /health, connector request budgets so enrichment cannot degrade source tools (R06) | `api/app.py`, `connectors/base.py`, `domains/phishing/agents/`, `llm/redaction.py` |
 | Secret exposure | No secrets in the repository; `.env` git-ignored; `<NAME>_FILE` vault mounts supported; per-tool least-privilege service principals, read scopes by default | `config.py`, `config/connectors.yaml` |
+| Client data leaving in test fixtures (record-and-sanitise) | Off unless `SOC_RECORD_FIXTURES_DIR` is set; request headers and token / secret / password / key fields never recorded; people, accounts, machines and the client's domains replaced by HMAC-keyed pseudonyms (salt never stored with the recording, so not reversible); internal and public IPs remapped; free text replaced by its length; a scan report of anything still looking like an address or IP; tested to leave no identity of the demo estate | `connectors/recording.py`, `test_recording.py` |
+| Tampering with tool configuration (pointing a connector elsewhere, switching a tool off, promoting it to act) | Console changes are proposed by a person with manage_connectors (never an API key or agent) and approved by another with approve_policy and MFA; versioned, audited, re-checked at approval (stale proposals refused, preflight must still match); only pausing - the safe direction - is immediate. Secrets cannot be entered or stored: a secret setting may only be a `${VAR}` reference, the console shows *set / not set* only; export carries no secret values | `core/connector_config.py`, `api/app.py` |
+| A broken or malicious connector configuration taking the platform down | Strict schema (unknown tools / keys / stages, malformed values, secrets in clear) refused at start-up and at proposal; a connector that cannot be built is isolated, the rest work; a connector module that fails to import is skipped | `connectors/config_schema.py`, `connectors/registry.py` |
 | Supply chain | `pip-audit` clean (setuptools pinned ≥ 83, unused packages removed incl. `nltk` with an unfixed advisory); detonation image built locally and pinned by digest in prod | `requirements/`, `deploy/sandbox/Dockerfile` |
 
 ## Attachment sandbox
@@ -220,4 +223,10 @@ route sweep.
   assignments the Entra app needs only the built-in **Reader** role on the subscriptions (or a management group).
 * Grant the audit-log database role INSERT/SELECT only; back up and retain per the organisation's policy.
 * Store secrets in a vault (Azure Key Vault) and mount them as `*_FILE` (including the notification webhooks).
+* Record-and-sanitise only with the client's agreement: unset `SOC_RECORD_FIXTURES_DIR` after the first syncs, review
+  the files and `_scan.json` before anything leaves the client, keep the salt out of the recording. Sanitising is
+  rule-based; a human review is the gate.
+* Give `automation_admin` / `admin` (propose connector changes) and `lead` (approve them) to different people; review
+  *Integrations → History* with the audit log. Keep `config/connectors.yaml` under change control - it is the base the
+  console layers on.
 * Operate CAPEv2 / the detonation host on an isolated network segment with no route to production.

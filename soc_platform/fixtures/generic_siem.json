@@ -1,3 +1,114 @@
 {
- "routes": []
+ "routes": [],
+ "push_samples": {
+  "flat": {
+   "field_map": {},
+   "alerts": [
+    {
+     "id": "fw-20260920-000981",
+     "title": "Outbound connection to a newly registered domain",
+     "severity": "high",
+     "timestamp": "2026-09-20T09:05:12Z",
+     "host": "JANE-LT01",
+     "user": "jane.doe@acme-demo.com",
+     "src_ip": "10.20.1.15",
+     "domain": "login.micros0ft-helpdesk.com",
+     "source": "perimeter-firewall",
+     "action": "allowed"
+    }
+   ]
+  },
+  "splunk_es_notable": {
+   "field_map": {
+    "id": "event_id",
+    "title": "rule_name",
+    "severity": "urgency",
+    "time": "_time",
+    "host": "dest",
+    "user": "user",
+    "src_ip": "src",
+    "dst_ip": "dest_ip",
+    "url": "url",
+    "source": "source"
+   },
+   "alerts": [
+    {
+     "event_id": "5A1F3C2B-7D6E-4B8A-9C0D-E1F2A3B4C5D6@@notable@@b3a9f1e2c4d5",
+     "rule_name": "Endpoint - Suspicious PowerShell download - Rule",
+     "urgency": "high",
+     "_time": "2026-09-20T14:37:44.000+05:30",
+     "dest": "JANE-LT01",
+     "user": "ACME\\jane.doe",
+     "src": "10.20.1.15",
+     "dest_ip": "203.0.113.50",
+     "url": "https://login.micros0ft-helpdesk.com/verify?u=jane.doe",
+     "source": "Splunk ES",
+     "security_domain": "endpoint",
+     "status_label": "New",
+     "owner": "unassigned",
+     "orig_sourcetype": "XmlWinEventLog"
+    }
+   ]
+  },
+  "elastic_security": {
+   "field_map": {
+    "id": "kibana.alert.uuid",
+    "title": "kibana.alert.rule.name",
+    "severity": "kibana.alert.severity",
+    "time": "@timestamp",
+    "host": "host.name",
+    "user": "user.name",
+    "src_ip": "source.ip",
+    "dst_ip": "destination.ip",
+    "hash": "file.hash.sha256"
+   },
+   "alerts": [
+    {
+     "@timestamp": "2026-09-20T09:07:42.118Z",
+     "kibana": {
+      "alert": {
+       "uuid": "e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2",
+       "rule": {
+        "name": "Suspicious PowerShell download",
+        "uuid": "rule-0001"
+       },
+       "severity": "high",
+       "risk_score": 73,
+       "status": "active"
+      }
+     },
+     "host": {
+      "name": "jane-lt01",
+      "hostname": "jane-lt01",
+      "ip": [
+       "10.20.1.15"
+      ],
+      "os": {
+       "family": "windows"
+      }
+     },
+     "user": {
+      "name": "jane.doe",
+      "domain": "ACME"
+     },
+     "source": {
+      "ip": "10.20.1.15"
+     },
+     "destination": {
+      "ip": "203.0.113.50",
+      "port": 443
+     },
+     "file": {
+      "hash": {
+       "sha256": "a3f5c0e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+      }
+     },
+     "event": {
+      "module": "endpoint",
+      "kind": "signal"
+     }
+    }
+   ]
+  }
+ }
 }

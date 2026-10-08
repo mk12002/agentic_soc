@@ -9,6 +9,11 @@ Retention removes *copies of sensitive source data* once they are no longer need
 * LLM prompt/response text older than ``llm_log_retention_days`` (token counts and metadata kept
   for budget reporting)
 * access-log rows older than ``access_log_retention_days``
+* high-volume telemetry in the context store (sign-ins, DNS, mail events, secret accesses, elevations) last seen
+  more than ``event_retention_days`` ago (0 keeps everything). A client tenant writes hundreds of thousands of such
+  events a day; kept forever they grow every table and index without bound. An event is kept while anything still
+  points at it: a case, evidence, an insight or a resolution override. Alerts, findings, assets, people and
+  indicators are never pruned here.
 
 The audit log is never pruned by the platform. Every run is itself audited.
 """
@@ -21,12 +26,30 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from soc_platform.config import Settings
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.models import AccessLogRecord, AuditRecord, Case, LLMCall, SourceRecord, utcnow
+from soc_platform.core.models import (
+    AccessLogRecord,
+    AuditRecord,
+    Case,
+    CaseEntity,
+    Entity,
+    EntityHint,
+    EntityKey,
+    Evidence,
+    LLMCall,
+    Relation,
+    ResolutionOverride,
+    SourceRecord,
+    UnresolvedItem,
+    utcnow,
+)
+
+EVENT_KINDS = ("signin", "dns", "mail_event", "secret_access", "elevation")
+PRUNE_BATCH = 500           # ids per delete statement: bounded statements and parameter lists on both engines
 
 
 def _unlink(path: str | None) -> bool:
@@ -86,11 +109,43 @@ def run_retention(session: Session, settings: Settings, *, actor: str = "system:
         # Core DELETE: the ORM refuses deletes on this table; this audited job is the only prune path.
         session.execute(delete(AccessLogRecord).where(AccessLogRecord.ts < acc_cut))
 
+    report["events"] = _prune_events(session, settings, now, dry_run)
+    if settings.event_retention_days > 0:
+        report["cutoffs"]["events"] = (now - timedelta(days=settings.event_retention_days)).isoformat()
+
     if not dry_run:
         AuditLog(session).append(actor_type="system", actor_id=actor, event_type="retention.run", subject_type="system",
                                  subject_id="retention", payload=report)
     session.flush()
     return report
+
+
+def _prune_events(session: Session, settings: Settings, now, dry_run: bool) -> int:
+    """Delete old telemetry events no case, evidence, insight or override refers to; returns how many."""
+    if settings.event_retention_days <= 0:
+        return 0
+    from soc_platform.intelligence.models import Insight
+
+    cut = now - timedelta(days=settings.event_retention_days)
+    held = set(session.execute(select(CaseEntity.entity_id)).scalars())
+    held |= set(session.execute(select(Evidence.entity_id).where(Evidence.entity_id.is_not(None))).scalars())
+    held |= set(session.execute(select(ResolutionOverride.entity_id)).scalars())
+    for ids in session.execute(select(Insight.entity_ids)).scalars():
+        held.update(ids or [])
+    old = [e for e in session.execute(select(Entity.id).where(Entity.kind.in_(EVENT_KINDS), Entity.last_seen < cut)
+                                      .order_by(Entity.id)).scalars() if e not in held]
+    if dry_run or not old:
+        return len(old)
+    for i in range(0, len(old), PRUNE_BATCH):
+        ids = old[i:i + PRUNE_BATCH]
+        src = select(SourceRecord.id).where(SourceRecord.entity_id.in_(ids))
+        session.execute(delete(UnresolvedItem).where(UnresolvedItem.source_record_id.in_(src)))
+        session.execute(delete(SourceRecord).where(SourceRecord.entity_id.in_(ids)))
+        session.execute(delete(Relation).where(or_(Relation.src_id.in_(ids), Relation.dst_id.in_(ids))))
+        session.execute(delete(EntityKey).where(EntityKey.entity_id.in_(ids)))
+        session.execute(delete(EntityHint).where(EntityHint.entity_id.in_(ids)))
+        session.execute(delete(Entity).where(Entity.id.in_(ids)))
+    return len(old)
 
 
 def export_audit(session: Session, *, since_seq: int = 0) -> Iterator[str]:

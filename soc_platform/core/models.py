@@ -21,6 +21,7 @@ from sqlalchemy import (
     Boolean,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -62,6 +63,11 @@ class Entity(Base):
     """A canonical, resolved entity: asset, identity, indicator, email, alert, finding, case..."""
 
     __tablename__ = "entities"
+    # every ingested record looks its entity up by (kind, canonical key): one index for both, or SQLite reads every
+    # entity of the kind (measured: 70 % of the sync's database time on a 250-person estate)
+    # (risk reads the newest observation and the latest change: indexed maxima, not a scan of every entity)
+    __table_args__ = (Index("ix_entities_kind_canonical", "kind", "canonical_key"),
+                      Index("ix_entities_last_seen", "last_seen"), Index("ix_entities_updated_at", "updated_at"))
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     kind: Mapped[str] = mapped_column(String(32), index=True)
@@ -372,6 +378,43 @@ class ConnectorCheckpoint(Base):
     source_count: Mapped[int] = mapped_column(Integer, default=0)
     ingested_count: Mapped[int] = mapped_column(Integer, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ConnectorConfigVersion(Base):
+    """Console changes to connector configuration, layered over ``config/connectors.yaml`` (NFR-12). Versioned like
+    the autonomy policy: proposed by one person, approved by another, one active version. Holds no secret - a secret
+    setting may only be a ``${VAR}`` reference to the vault / environment."""
+
+    __tablename__ = "connector_config_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document: Mapped[dict[str, Any]] = mapped_column(JSON)            # all console overrides once this is active
+    changes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)   # what it changes, for review
+    base_version: Mapped[int | None] = mapped_column(Integer, nullable=True)    # the active version it was made from
+    kind: Mapped[str] = mapped_column(String(16), default="change")   # change | pause | import | restore
+    status: Mapped[str] = mapped_column(String(16), default="proposed", index=True)  # proposed|active|superseded|rejected|withdrawn
+    proposed_by: Mapped[str] = mapped_column(String(256))
+    approved_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    note: Mapped[str] = mapped_column(BoundedText(2000), default="")
+    preflight: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)      # connector -> preflight summary
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class ConnectorPreflight(Base):
+    """The result of one preflight (``connectors/preflight.py``), kept for the Integrations screen and approvals."""
+
+    __tablename__ = "connector_preflights"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connector: Mapped[str] = mapped_column(String(64), index=True)
+    ran_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+    ran_by: Mapped[str] = mapped_column(String(256))
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    verdict: Mapped[str] = mapped_column(String(32), default="")
+    stage: Mapped[str] = mapped_column(String(16), default="")
+    fingerprint: Mapped[str] = mapped_column(String(64), default="")
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 # --------------------------------------------------------------------------- access control (NFR-09)

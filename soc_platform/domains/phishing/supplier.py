@@ -53,15 +53,24 @@ class SupplierFinding:
     clicked: list[str] = field(default_factory=list)
 
 
-def load_suppliers(path: str | Path | None = None) -> list[Supplier]:
+def load_suppliers(path: str | Path | None = None, *, override: list[dict[str, Any]] | None = None,
+                   session: Session | None = None, include_env: bool = True) -> list[Supplier]:
+    """The supplier list: the one approved in the console (``override``, or read through ``session``) when there is
+    one, else config/suppliers.yaml (SOC_SUPPLIERS_FILE); SOC_SUPPLIER_DOMAINS adds bare domains to either."""
+    if override is None and session is not None and path is None:
+        from soc_platform.core.connector_config import console_lists
+
+        override = console_lists(session).get("suppliers")
     p = Path(path or os.environ.get("SOC_SUPPLIERS_FILE") or CONFIG)
     out: list[Supplier] = []
-    if p.is_file():
-        for row in (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("suppliers") or []:
+    rows = override if override is not None else (
+        (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("suppliers") or [] if p.is_file() else [])
+    if rows:
+        for row in rows:
             doms = [str(d).lower().strip() for d in row.get("domains") or [] if str(d).strip()]
             if doms:
                 out.append(Supplier(str(row.get("name") or doms[0]), doms, str(row.get("criticality") or "medium").lower()))
-    for d in (os.environ.get("SOC_SUPPLIER_DOMAINS") or "").split(","):
+    for d in (os.environ.get("SOC_SUPPLIER_DOMAINS") or "").split(",") if include_env else []:
         d = d.strip().lower()
         if d and not any(d in s.domains for s in out):
             out.append(Supplier(d, [d]))
@@ -85,7 +94,7 @@ def _auth_failed(auth: dict[str, str]) -> bool:
 class SupplierMonitor:
     def __init__(self, session: Session, suppliers: list[Supplier] | None = None) -> None:
         self.s = session
-        self.suppliers = suppliers if suppliers is not None else load_suppliers()
+        self.suppliers = suppliers if suppliers is not None else load_suppliers(session=session)
 
     def assess(self, *, days: int = 90) -> dict[str, Any]:
         since = utcnow() - timedelta(days=days)

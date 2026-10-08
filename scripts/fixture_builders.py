@@ -3,8 +3,23 @@
 from __future__ import annotations
 
 import base64
+import json
 
+import build_fixtures
 from build_fixtures import CVES, EXPOSURE, HOSTS, ORG, PAYLOAD_SHA, PHISH, TOR_IP, USERS, D, route, write
+
+
+class _Out:
+    """The output folder as build_fixtures has it now (estate builders point it elsewhere)."""
+
+    def __truediv__(self, name):
+        return build_fixtures.OUT / name
+
+    def mkdir(self, **kw):
+        build_fixtures.OUT.mkdir(**kw)
+
+
+OUT = _Out()
 
 
 def u(k):
@@ -380,7 +395,13 @@ def umbrella() -> None:
                [{"label": "Malware", "type": "security"}, {"label": "Newly Seen Domains", "type": "security"}])]
     data += [row(*r) for r in shadow]
     phish_rows = [d for d in data if d["domain"] == PHISH["url_domain"]]
-    write("umbrella", [
+    categories = route("GET", r"^/reports/v2/categories$", {"data": [
+        {"id": 65, "label": "Command and Control", "type": "security", "integration": False, "deprecated": False},
+        {"id": 66, "label": "Malware", "type": "security", "integration": False, "deprecated": False},
+        {"id": 68, "label": "Phishing", "type": "security", "integration": False, "deprecated": False},
+        {"id": 23, "label": "File Storage", "type": "content", "integration": False, "deprecated": False},
+        {"id": 196, "label": "Generative AI", "type": "application", "integration": False, "deprecated": False}]})
+    write("umbrella", [categories, 
         route("GET", r"^/reports/v2/activity/dns$", {"data": phish_rows}, params={"domains": PHISH["url_domain"]}),
         route("GET", r"^/reports/v2/activity/dns$", {"data": phish_rows}, params={"domains": PHISH["sender_domain"]}),
         route("GET", r"^/reports/v2/activity/dns$", {"data": []}, params={"domains": "*"}),
@@ -585,8 +606,31 @@ def servicenow() -> None:
 
 
 def jira() -> None:
-    write("jira", [route("POST", r"^/rest/api/3/issue$", {"id": "10001", "key": "SEC-101"}),
-                   route("GET", r"^/rest/api/3/search/jql$", {"issues": [], "isLast": True})])
+    """A second team's tracker (ServiceNow stays the ticketing system the workflows use). Jira returns times with a
+    four-digit offset and milliseconds ("+0530"), and objects for status / priority / resolution."""
+    site = f"https://{ORG.split('.')[0]}.atlassian.net"
+
+    def issue(iid, key, summary, status, category, component, priority, updated, resolution=None):
+        return {"expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields", "id": iid,
+                "self": f"{site}/rest/api/3/issue/{iid}", "key": key,
+                "fields": {"summary": summary, "updated": updated, "components": [{"self": f"{site}/rest/api/3/component/1{iid[-2:]}",
+                                                                                    "id": f"1{iid[-2:]}", "name": component}],
+                           "status": {"self": f"{site}/rest/api/3/status/3", "name": status, "id": "3",
+                                      "statusCategory": {"id": 4, "key": category, "name": status}},
+                           "priority": {"self": f"{site}/rest/api/3/priority/2", "name": priority, "id": "2"},
+                           "resolution": resolution}}
+
+    issues = [
+        issue("10112", "SEC-112", "Restrict public access to storage account acmebackups", "Done", "done", "Cloud Platform",
+              "High", "2026-09-18T11:47:03.000+0530", {"self": f"{site}/rest/api/3/resolution/10000", "id": "10000",
+                                                      "name": "Done", "description": "Work has been completed."}),
+        issue("10117", "SEC-117", "Patch CVE-2024-21412 on finance laptops", "To Do", "new", "End User Computing",
+              "High", "2026-09-20T14:05:12.481+0530"),
+        issue("10118", "SEC-118", "Rotate the SAP-Prod-Finance-Service secret after suspicious access", "In Progress",
+              "indeterminate", "Identity & Access", "Highest", "2026-09-20T15:10:00.000+0530"),
+    ]
+    write("jira", [route("POST", r"^/rest/api/3/issue$", {"id": "10001", "key": "SEC-101", "self": f"{site}/rest/api/3/issue/10001"}),
+                   route("GET", r"^/rest/api/3/search/jql$", {"issues": issues, "isLast": True})])
 
 
 def cmdb_csv() -> None:
@@ -603,12 +647,98 @@ def cmdb_csv() -> None:
          "environment": "Production", "criticality": "high"}]})])
 
 
+SENTINEL_WS = ("/subscriptions/sub-001/resourceGroups/rg-acme-security/providers/Microsoft.OperationalInsights/"
+               "workspaces/law-acme-sentinel/providers/Microsoft.SecurityInsights")
+
+
 def sentinel() -> None:
-    write("sentinel", [route("GET", r"/incidents$", {"value": []})])
+    """Two incidents raised by the client's own analytics rules (data no other connector reads), in the shape of the
+    Sentinel REST API: the incident list, then each incident's entities (Accounts, Hosts, IPs)."""
+    j = HOSTS["jane"]
+
+    def incident(name, number, title, severity, status, created, first, last, tactics, techniques, alerts, labels=()):
+        rid = f"{SENTINEL_WS}/Incidents/{name}"
+        return {"id": rid, "name": name, "etag": f'"{number:08x}-0000-0100-0000-66ed0b6f0000"',
+                "type": "Microsoft.SecurityInsights/Incidents",
+                "properties": {"title": title, "description": f"{title} (analytics rule).", "severity": severity,
+                               "status": status, "classification": None, "classificationReason": None,
+                               "owner": {"objectId": None, "email": None, "assignedTo": None, "userPrincipalName": None},
+                               "labels": [{"labelName": x, "labelType": "User"} for x in labels],
+                               "firstActivityTimeUtc": first, "lastActivityTimeUtc": last, "lastModifiedTimeUtc": created,
+                               "createdTimeUtc": created, "incidentNumber": number,
+                               "additionalData": {"alertsCount": alerts, "bookmarksCount": 0, "commentsCount": 0,
+                                                  "alertProductNames": ["Azure Sentinel"], "tactics": tactics,
+                                                  "techniques": techniques},
+                               "relatedAnalyticRuleIds": [f"{SENTINEL_WS}/alertRules/{name[:8]}-rule"],
+                               "incidentUrl": f"https://portal.azure.com/#asset/Microsoft_Azure_Security_Insights/Incident{rid}",
+                               "providerName": "Azure Sentinel", "providerIncidentId": str(number)}}
+
+    tor = incident("b7e4c1d2-5a6f-4e8b-9c0d-1a2b3c4d5e61", 4211,
+                   "Sign-in from a Tor exit node followed by a mailbox forwarding rule", "High", "New",
+                   f"{D}09:19:10.5521823Z", f"{D}09:15:40Z", f"{D}09:18:02Z",
+                   ["InitialAccess", "Collection"], ["T1078", "T1114"], 1, ("tor",))
+    smb = incident("c8f5d2e3-6b7a-4f9c-8d1e-2b3c4d5e6f72", 4212,
+                   "Unusual file-share enumeration from a workstation", "Medium", "Active",
+                   f"{D}09:26:41.1048311Z", f"{D}09:21:00Z", f"{D}09:24:30Z", ["Discovery"], ["T1135"], 2)
+    account = {"kind": "Account", "properties": {"accountName": u("jane")["upn"].split("@")[0], "upnSuffix": ORG,
+                                                 "aadTenantId": "00000000-0000-0000-0000-00000000a0e1",
+                                                 "aadUserId": u("jane")["id"], "isDomainJoined": True,
+                                                 "displayName": u("jane")["name"], "friendlyName": u("jane")["name"]}}
+
+    def entities(name, items):
+        out = [{"id": f"{SENTINEL_WS}/Entities/{name[:8]}-{i}", "name": f"{name[:8]}-{i}", "type": "Microsoft.SecurityInsights/Entities", **e}
+               for i, e in enumerate(items)]
+        kinds = sorted({e["kind"] for e in items})
+        return {"entities": out, "metaData": [{"count": sum(1 for e in items if e["kind"] == k), "entityKind": k, "type": "Entity"}
+                                              for k in kinds]}
+
+    write("sentinel", [
+        route("GET", r"/incidents$", {"value": [tor, smb]}),
+        route("POST", rf"/incidents/{tor['name']}/entities$", entities(tor["name"], [
+            account, {"kind": "Ip", "properties": {"address": TOR_IP, "location": {"countryCode": "DE", "asn": 208323},
+                                                   "friendlyName": TOR_IP}}])),
+        route("POST", rf"/incidents/{smb['name']}/entities$", entities(smb["name"], [
+            account,
+            {"kind": "Host", "properties": {"hostName": j["hostname"], "dnsDomain": ORG, "netBiosName": j["hostname"],
+                                            "osFamily": "Windows", "additionalData": {"MdatpDeviceId": j["mde"]},
+                                            "friendlyName": j["hostname"]}},
+            {"kind": "Ip", "properties": {"address": j["ip"], "friendlyName": j["ip"]}}])),
+    ])
 
 
 def generic_siem() -> None:
-    write("generic_siem", [])
+    """Push-only: no routes. ``push_samples`` are payloads as three common SIEM/SOAR shapes send them to
+    POST /api/v1/ingest/alerts, each with the ``field_map`` that maps it (tests ingest every sample)."""
+    j = HOSTS["jane"]
+    samples = {
+        "flat": {"field_map": {}, "alerts": [
+            {"id": "fw-20260920-000981", "title": "Outbound connection to a newly registered domain", "severity": "high",
+             "timestamp": f"{D}09:05:12Z", "host": j["hostname"], "user": u("jane")["upn"], "src_ip": j["ip"],
+             "domain": PHISH["url"].split("/")[2], "source": "perimeter-firewall", "action": "allowed"}]},
+        "splunk_es_notable": {
+            "field_map": {"id": "event_id", "title": "rule_name", "severity": "urgency", "time": "_time", "host": "dest",
+                          "user": "user", "src_ip": "src", "dst_ip": "dest_ip", "url": "url", "source": "source"},
+            "alerts": [{"event_id": "5A1F3C2B-7D6E-4B8A-9C0D-E1F2A3B4C5D6@@notable@@b3a9f1e2c4d5", "rule_name":
+                        "Endpoint - Suspicious PowerShell download - Rule", "urgency": "high",
+                        "_time": "2026-09-20T14:37:44.000+05:30", "dest": j["hostname"], "user": f"ACME\\{u('jane')['upn'].split('@')[0]}",
+                        "src": j["ip"], "dest_ip": "203.0.113.50", "url": PHISH["url"], "source": "Splunk ES",
+                        "security_domain": "endpoint", "status_label": "New", "owner": "unassigned", "orig_sourcetype": "XmlWinEventLog"}]},
+        "elastic_security": {
+            "field_map": {"id": "kibana.alert.uuid", "title": "kibana.alert.rule.name", "severity": "kibana.alert.severity",
+                          "time": "@timestamp", "host": "host.name", "user": "user.name", "src_ip": "source.ip",
+                          "dst_ip": "destination.ip", "hash": "file.hash.sha256"},
+            "alerts": [{"@timestamp": f"{D}09:07:42.118Z",
+                        "kibana": {"alert": {"uuid": "e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2",
+                                             "rule": {"name": "Suspicious PowerShell download", "uuid": "rule-0001"},
+                                             "severity": "high", "risk_score": 73, "status": "active"}},
+                        "host": {"name": j["hostname"].lower(), "hostname": j["hostname"].lower(), "ip": [j["ip"]],
+                                 "os": {"family": "windows"}},
+                        "user": {"name": u("jane")["upn"].split("@")[0], "domain": "ACME"},
+                        "source": {"ip": j["ip"]}, "destination": {"ip": "203.0.113.50", "port": 443},
+                        "file": {"hash": {"sha256": PAYLOAD_SHA}}, "event": {"module": "endpoint", "kind": "signal"}}]},
+    }
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "generic_siem.json").write_text(json.dumps({"routes": [], "push_samples": samples}, indent=1), encoding="utf-8")
 
 
 BUILDERS = [defender_endpoint, defender_office365, entra, rapid7, wiz, umbrella, canary, delinea_secret_server,

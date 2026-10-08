@@ -7,6 +7,12 @@
   scheduler   run recurring jobs as a separate service (serve already runs them unless SOC_EMBEDDED_SCHEDULER=0)
   token       mint a dev token:  python -m soc_platform token alice@acme-demo.com analyst,lead
   fixtures    regenerate connector fixtures and the labelled email corpus
+  config      check | export [--out F] | diff FILE | import FILE --by EMAIL [--note TEXT]
+              check the connector configuration (file + approved console changes) and every secret it needs; export
+              it as one file; compare a file with it; propose a file as a change (approved in the console)
+  preflight   [NAME ... | --all] [--by EMAIL]   run every check a tool must pass before it goes live
+  connector   new NAME --category CAT [--tool "Vendor Product"] [--vendor V]  |  check NAME
+              scaffold a new connector that already follows the platform's rules, then prove it conforms
 """
 
 from __future__ import annotations
@@ -169,11 +175,32 @@ def cmd_reset_demo(*args: str) -> None:
     print("reset complete - start the server with: python -m soc_platform serve")
 
 
+def _refuse_bad_config() -> None:
+    """Typos, unknown tools or keys and broken YAML in config/connectors.yaml stop a start (they would otherwise be
+    silently ignored). A live tool whose secret is missing does not: it is isolated and shown, the rest start."""
+    from soc_platform.connectors.config_schema import errors
+    from soc_platform.core.connector_config import startup_problems
+
+    problems = startup_problems()
+    for pr in problems:
+        print(pr, file=sys.stderr)
+    if errors(problems):
+        sys.exit("the connector configuration has errors (listed above). Fix them and start again; "
+                 "`python -m soc_platform config check` lists every problem with how to fix it.")
+
+
 def cmd_serve() -> None:
+    """One process serves requests on one CPU core: under many analysts at once, requests queue behind each other
+    (measured: 40 analysts on one process waited ~0.3 s even for /health). SOC_API_WORKERS starts several processes
+    on the same port; jobs stay safe with any number of them (each takes a database lease before running)."""
     import uvicorn
 
+    _refuse_bad_config()
+
+    workers = max(1, int(os.environ.get("SOC_API_WORKERS", "1") or 1))
     uvicorn.run("soc_platform.api.app:app", host=os.environ.get("SOC_HOST", "127.0.0.1"),
-                port=int(os.environ.get("SOC_PORT", "8080")))
+                port=int(os.environ.get("SOC_PORT", "8080")), workers=workers,
+                proxy_headers=False)   # X-Forwarded-For is handled by the app (SOC_TRUSTED_PROXIES, right-most hop)
 
 
 def cmd_token(user: str = "analyst@acme-demo.com", roles: str = "analyst") -> None:
@@ -196,7 +223,170 @@ def cmd_scheduler(once: bool = False) -> None:
     safe together: the database decides what is due and a lease stops any job running twice at once."""
     from soc_platform import scheduler
 
+    _refuse_bad_config()
     scheduler.run_forever(once=once)
+
+
+def _store_session():
+    """A database session for the configuration store, or None when the database is not reachable (the file alone
+    is then what applies)."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        db = _db()
+        db.create_all()
+        return db.session()
+    except SQLAlchemyError as exc:
+        print(f"note: database not reachable ({type(exc).__name__}); using config/connectors.yaml alone", file=sys.stderr)
+        return None
+
+
+def _cli_principal(by: str | None):
+    from soc_platform.core.auth import Principal, Role
+
+    who = by or f"cli:{os.environ.get('USERNAME') or os.environ.get('USER') or 'operator'}"
+    return Principal(who, who, frozenset({Role.AUTOMATION_ADMIN}))
+
+
+def cmd_config(*args: str) -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="python -m soc_platform config")
+    ap.add_argument("action", choices=("check", "export", "diff", "import"))
+    ap.add_argument("file", nargs="?")
+    ap.add_argument("--out")
+    ap.add_argument("--by", help="who proposes an import (it is approved by someone else in the console)")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--no-env", action="store_true", help="check: do not require secrets (a build machine)")
+    a = ap.parse_args(list(args))
+    from soc_platform.connectors.config_schema import check_document, errors, load_file, load_yaml
+    from soc_platform.core.connector_config import (
+        ConfigRejected,
+        ConfigStore,
+        default_mode,
+        describe_changes,
+        manifests,
+    )
+
+    ctx = _store_session()
+    if a.action == "check":
+        doc, problems = load_file(a.file)
+        version = None
+        if ctx is not None and not a.file:
+            with ctx as s:
+                store = ConfigStore(s)
+                doc, version = store.effective(), store.active_version()
+        problems += check_document(doc, manifests(), default_mode=default_mode(), check_env=not a.no_env)
+        for pr in problems:
+            print(pr)
+        n_err = len(errors(problems))
+        print(f"{n_err} error(s), {len(problems) - n_err} warning(s) in the configuration"
+              + (f" (file + console version {version})" if version else ""))
+        sys.exit(1 if n_err else 0)
+    if ctx is None:
+        sys.exit("export, diff and import need the database (SOC_DATABASE_URL)")
+    with ctx as s:
+        store = ConfigStore(s)
+        if a.action == "export":
+            text = store.export_yaml()
+            if a.out:
+                Path(a.out).write_text(text, encoding="utf-8")
+                print(f"written to {a.out}")
+            else:
+                print(text)
+            return
+        if not a.file:
+            sys.exit(f"config {a.action} needs a FILE")
+        text = Path(a.file).read_text(encoding="utf-8")
+        if a.action == "diff":
+            doc, problems = load_yaml(text)
+            for pr in problems:
+                print(pr)
+            changes = describe_changes(store.effective(), doc or {})
+            for c in changes:
+                print(f"{c['connector']}.{c['field']}: {c['from']!r} -> {c['to']!r}")
+            print(f"{len(changes)} difference(s) from the configuration in force")
+            return
+        if not a.by:
+            sys.exit("config import needs --by EMAIL (the proposer; someone else approves it in the console)")
+        try:
+            v = store.import_yaml(text, _cli_principal(a.by), a.note)
+        except ConfigRejected as exc:
+            for pr in exc.problems:
+                print(pr)
+            sys.exit(str(exc))
+        s.commit()
+        print(f"proposed as configuration version {v.id} ({len(v.changes)} change(s)); approve it in Integrations")
+
+
+def cmd_preflight(*args: str) -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="python -m soc_platform preflight")
+    ap.add_argument("names", nargs="*")
+    ap.add_argument("--all", action="store_true", help="every switched-on connector")
+    ap.add_argument("--by")
+    a = ap.parse_args(list(args))
+    from soc_platform.connectors.preflight import run_preflight
+    from soc_platform.connectors.registry import ConnectorRegistry
+    from soc_platform.core.connector_config import ConfigStore
+
+    ctx = _store_session()
+    s = ctx.__enter__() if ctx is not None else None
+    try:
+        store = ConfigStore(s) if s is not None else None
+        reg = store.registry() if store else ConnectorRegistry.from_file()
+        names = reg.configured_names() if a.all or not a.names else a.names
+        unknown = [n for n in names if n not in reg.manifests]
+        if unknown:
+            sys.exit(f"unknown connector(s): {', '.join(unknown)}")
+        failed = 0
+        for n in names:
+            res = store.preflight(n, _cli_principal(a.by), registry=reg) if store else run_preflight(reg, n)
+            failed += not res["ok"]
+            print(f"\n{res['tool']} ({n}) - stage {res['stage_label']} - {res['verdict'].upper()}")
+            for c in res["checks"]:
+                print(f"  [{c['status']:>7}] {c['check']}: {c['detail']}" + (f"\n            fix: {c['fix']}" if c.get("fix") else ""))
+                for st in c.get("streams", []):
+                    line = f"            {st['stream']}: {st['status']}"
+                    if st.get("records") is not None:
+                        line += f", {st['records']} record(s), {st.get('latency_ms')} ms"
+                    if st.get("volume"):
+                        line += f", {st['volume']}"
+                    print(line + "".join(f"\n              - {x}" for x in st.get("notes", [])))
+        if s is not None:
+            s.commit()
+        print(f"\n{len(names) - failed} of {len(names)} ready")
+        sys.exit(1 if failed else 0)
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+def cmd_connector(*args: str) -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="python -m soc_platform connector")
+    ap.add_argument("action", choices=("new", "check"))
+    ap.add_argument("name")
+    ap.add_argument("--category")
+    ap.add_argument("--tool", default="")
+    ap.add_argument("--vendor", default="")
+    a = ap.parse_args(list(args))
+    from soc_platform.connectors import devkit
+
+    if a.action == "new":
+        if not a.category:
+            sys.exit(f"--category is required: {', '.join(devkit.CATEGORIES)}")
+        try:
+            files = devkit.scaffold(a.name, a.category, a.tool, a.vendor)
+        except ValueError as exc:
+            sys.exit(str(exc))
+        print("written:\n  " + "\n  ".join(str(f) for f in files))
+        print(f"next: adapt the endpoint paths and fields to the vendor's API, then run "
+              f"`python -m soc_platform connector check {a.name}`")
+        return
+    sys.exit(devkit.check(a.name))
 
 
 def main(argv: list[str]) -> None:

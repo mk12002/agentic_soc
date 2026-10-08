@@ -144,7 +144,8 @@ and a unified cross-tool timeline.
 * **Session control:** per-token revocation (log out) and revoke-all-sessions per user.
 * **Platform grants:** time-bound, justified, domain-scoped role assignments on top of Entra roles.
 * **Data protection:** raw tool payloads and reported emails **encrypted at rest** (Fernet, key rotation);
-  retention job with legal hold for open cases; PII pseudonymised before any LLM call.
+  retention job with legal hold for open cases (old telemetry events are pruned too, unless a case or insight cites
+  them, so the context store stays bounded at client volume); PII pseudonymised before any LLM call.
 * **Audit:** append-only, **hash-chained** audit log (tamper-evident; verification endpoint; JSONL export);
   append-only **access log** of every API call.
 * **Web hardening:** strict CSP, security headers, HSTS on TLS, per-client rate limiting (proxy-aware only for
@@ -315,8 +316,13 @@ for Endpoint, Defender for Office 365 (+ Exchange admin API with its own token a
 (GraphQL, `issuesV2`, full pagination), Avanan, Cisco Umbrella, Thinkst Canary, Delinea Secret Server, Delinea
 Privilege Manager, NIST NVD, FIRST EPSS, CISA KEV, threat-intel fusion (8 sources), ServiceNow (ITSM + CMDB), Jira
 (enhanced search with page tokens), CSV / subscription ownership mapping, Microsoft Sentinel, generic SIEM webhook.
-Each connector has a **Test** button (authenticates and reads one page) and freshness monitoring against its
-stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNECTORS.md).
+Each connector has a **Preflight** button (sign-in, every stream and the permission it needs, parsing, data
+freshness, clock, expected volume, the write scopes actions need - each failure with its fix), a rollout **stage**
+(Fixtures, Recording, Read-only, Recommend, Automate), **Configure** (non-secret settings, stage, on/off - proposed by
+one person, approved by another, in force within seconds without a restart), **Pause** (switch a misbehaving tool off
+at once) and freshness monitoring against its stream's expected cadence. The same screen keeps every configuration
+version (restore any), exports and imports the configuration as one file, and edits the key-supplier and
+sanctioned-service lists. One misconfigured tool is isolated with the reason; the others keep working. Setup and permissions per tool: [CONNECTORS.md](CONNECTORS.md).
 
 ![](screenshots/14-integrations.png)
 
@@ -340,6 +346,17 @@ stream's expected cadence. Setup and permissions per tool: [CONNECTORS.md](CONNE
 * **Observability** - connector freshness and reconciliation, job health, enrichment latency, **measured model
   response times per workflow** (median and p95, `GET /api/v1/llm/status`), drift,
   Prometheus `/metrics` (scraped with an all-domain auditor service-account key).
+* **Real-tenant readiness** - every connector handles its vendor's paging, resumes each sync from where the last one
+  stopped (time watermarks with an overlap for late logs; never an expired continuation token), waits out
+  throttling, renews a refused token, reports a missing permission with the scopes to grant, and tolerates missing or
+  null fields. Large backfills are committed page by page and resumable. Umbrella stores only security-categorised DNS
+  by default (`dns_sync`). One unreachable tool or feed never stops a pipeline: its evidence is "unavailable", a
+  report leaves out the section that needs it and says why.
+* **Record-and-sanitise** - `SOC_RECORD_FIXTURES_DIR` writes the first live responses of each tool as anonymised
+  test fixtures (stable keyed pseudonyms, no secrets, vendor vocabulary kept, a scan report for review).
+* **Capacity** - several server processes (`SOC_API_WORKERS`), a sized and self-checking database pool, 503 with
+  `Retry-After` when the database is saturated; `scripts/measure_scale.py` (volume) and `scripts/load_test.py`
+  (concurrent analysts on a real server) measure the client's environment before go-live.
 * **Reports** - the [report builder](#71-ai-report-builder) plus fixed exports (daily exposure, weekly VM,
   management deck, investigation records); your own templates plug in.
 * **Compliance evidence pack (U17)** - control tests with pass/fail (audit-chain integrity, four-eyes approvals,

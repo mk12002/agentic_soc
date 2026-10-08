@@ -66,8 +66,12 @@ called out where they apply, with the file to change.
 - **Windows hosts** are supported (the platform is developed and fully tested on Windows 11 with SQLite and
   PostgreSQL); containers on Linux are the recommended production shape.
 - **Scaling:** the API is stateless (any number of replicas behind the proxy) and schedulers take database leases,
-  so several are safe. Start with one of each and size from the Integrations screen's job durations and the
-  measured latencies in `docs/ENGINEERING.md`; capacity on the client's data volume has not been measured yet.
+  so several are safe. The image runs `SOC_API_WORKERS=4` processes; give one per CPU core and keep
+  `workers x (SOC_DB_POOL_SIZE + SOC_DB_MAX_OVERFLOW)` under PostgreSQL's `max_connections`. Measured on a laptop
+  (`docs/OPERATIONS.md` - Server and database under load, Connector sync and volume): four processes served 100
+  concurrent analysts at 150 requests/s with no error; sync stores about 146 records/s on SQLite and about 75 on a
+  local PostgreSQL, flat as the estate grows. The client's own volume is measured during deployment
+  (`scripts/measure_scale.py`, `scripts/load_test.py` against the target environment).
 - **Inbound:** only the reverse proxy reaches port 8080. Nothing in the platform accepts connections from the tools
   except the optional SIEM push endpoint (`POST /api/v1/ingest/alerts`, authenticated with an API key).
 - **Outbound:** HTTPS to the hosts listed per connector in section 4, the LLM gateway, and Entra ID. Nothing ever
@@ -241,25 +245,51 @@ ends the Entra session too.
 1. **Create a dedicated identity** in the tool (service principal / API client / integration user) with the **read**
    permissions listed below. Add write permissions only for action types the client has approved (section 6).
 2. **Store the credentials** in the vault; expose them to the container as the environment variables (or `_FILE`
-   mounts) named in the tool's section.
-3. **In `config/connectors.yaml`** set `enabled: true` and `mode: live` for that tool (tools the client does not own:
-   `enabled: false` - they disappear from every workflow and dashboard).
-4. **Allow outbound HTTPS** from the platform to the tool's hosts.
-5. **Test:** Integrations screen → *Test*, or `POST /api/v1/connectors/<name>/test` - authenticates and reads one
-   page. Then run one sync: `POST /api/v1/connectors/<name>/sync?stream=<stream>`.
-6. **Check** the Integrations screen: records ingested, freshness per stream, and reconciliation against the tool's
+   mounts) named in the tool's section - *Integrations → Configure* shows the exact names and whether each is set.
+   Secrets are never typed into the console or stored by the platform.
+3. **Allow outbound HTTPS** from the platform to the tool's hosts.
+4. **Configure and promote it in the console** (*Integrations → Configure*): enter the non-secret settings (base URL,
+   tenant id, mailbox...), choose the stage **Recording** (live reads, responses saved as sanitised fixtures, no
+   actions) or **Read-only**, and propose. The **preflight** runs on the proposal - sign-in, every stream and the
+   permission it needs, parsing, data freshness, clock, expected volume - and refuses it with the fix if anything is
+   wrong. A lead approves (never the proposer); it applies within seconds, no restart. Tools the client does not own:
+   switch them off (they disappear from every workflow and dashboard). The same can be done in
+   `config/connectors.yaml` (`stage: read`) for the deployment baseline; `python -m soc_platform config check` and
+   `python -m soc_platform preflight <name>` give the same checks from a shell.
+5. **Check** the Integrations screen: records ingested, freshness per stream, and reconciliation against the tool's
    own total where the tool reports one; then the resolution queue (Overview → *Awaiting resolution*, or
    `GET /api/v1/resolution/unresolved`) for identity/asset matches needing review.
-7. Leave it running on the scheduler for a day before enabling the next tool, so problems have one cause.
+6. Leave it running on the scheduler for a day before enabling the next tool, so problems have one cause.
+7. **Promote** when the client approves its actions: **Recommend** (every action offered, a person approves each -
+   never above L2 whatever the policy says), later **Automate** (the autonomy policy decides, section 6). A tool that
+   misbehaves can be **paused** at once from the same screen (audited; switching it back on is approved).
 
 All connectors share: a per-connector token-bucket rate limit (never exceeds the vendor's budget, even with parallel
-lookups), retries with back-off that honour `Retry-After` (capped at 120 s), cursors so a restart resumes where it
-stopped, and a circuit that marks the connector *error* on the Integrations screen instead of failing workflows. A
-tool being down makes the affected evidence "unavailable" in the case; it never changes a verdict silently.
+lookups), retries with back-off that honour `Retry-After` (seconds or a date, capped at 120 s), a refused token (401)
+renewed once and the call repeated, a missing permission (403) reported at once - not retried - with the scopes to
+grant (the preflight names the stream, the permission and the scopes), an HTML page answering instead of the API (a proxy
+or login page) reported as such, and a circuit that marks the connector *error* on the Integrations screen instead of
+failing workflows. A tool being down makes the affected evidence "unavailable" in the case; it never changes a
+verdict silently.
+
+**Resuming.** Event streams (sign-ins, audits, risk detections, alerts, reported mail, DNS, Sentinel incidents) resume
+from the newest change time seen, minus a 30-minute overlap for logs indexed late (`SOC_WATERMARK_OVERLAP_MINUTES`):
+a sync reads what is new, not 30 days again. Inventories (users, machines, assets, CMDB, findings) are read in full
+each sync. A continuation token is never kept between syncs (Graph and Jira tokens expire). Each page is committed as
+it is stored, so the first backfill of a large tenant can be interrupted and resumes after its last page; a backlog
+beyond `SOC_SYNC_MAX_PAGES` (1,000 pages per stream per sync) continues on the next sync.
 
 Data formats: each connector parses the vendor's documented response shapes. They were audited field by field
-against the vendors' public documentation and public reference integrations; the fixtures used in the demo reproduce
-those shapes. What remains is running each connector against the client's real tenant - step 5 above.
+against the vendors' public documentation and public reference integrations, and every connector passes a
+conformance suite (`soc_platform/tests/test_connector_conformance.py`): reading across pages in its vendor's paging
+style, resuming correctly, throttling, a refused token, a missing permission, and every field of every record missing
+or null. What remains is running each connector against the client's real tenant - step 5 above.
+
+**Record the first live responses.** Put each tool in the **Recording** stage for its first syncs (or set
+`SOC_RECORD_FIXTURES_DIR` for every live tool; `docs/OPERATIONS.md` - Recording): every live response is written,
+sanitised, as a test fixture. The pseudonym key comes from `SOC_RECORD_SALT`, else from `SOC_DATA_KEY`. After review of the
+files and of `_scan.json` (and the client's approval), the recordings let a connector fix be tested against the
+tenant's real shapes, optional fields and oddities without access to the tenant.
 
 ### 4.2 Microsoft Entra ID (`entra`)
 
@@ -315,7 +345,10 @@ the behaviour model; actions: soft/hard delete and restore across mailboxes, blo
 Allow/Block List), tag, reporter feedback e-mail.
 
 **Prerequisite in the Defender portal:** *Settings → Email & collaboration → User reported settings*: send reported
-messages to **a reporting mailbox** (e.g. `soc-reports@client.com`). The connector reads that mailbox.
+messages to **a reporting mailbox** (e.g. `soc-reports@client.com`). The connector reads that mailbox, resuming
+from the newest message it has seen (minus the watermark overlap), so a mailbox that already holds years of reports
+is not re-read every run. An outage shows as the `reported_messages` checkpoint's error on Integrations; a message
+that cannot be fetched is retried on the next run.
 
 **Create:** app registration; Microsoft Graph application permissions:
 
@@ -417,7 +450,14 @@ destination list.
 `reports.customerDNS:read`, `policies.destinationLists:read`, and (for blocking) `policies.destinations:write`.
 Create a destination list for SOC blocks attached to the relevant policy; note its id.
 
-**Settings:** `UMBRELLA_API_KEY`, `UMBRELLA_API_SECRET`, `UMBRELLA_BLOCK_LIST_ID`.
+**Settings:** `UMBRELLA_API_KEY`, `UMBRELLA_API_SECRET`, `UMBRELLA_BLOCK_LIST_ID`; `dns_sync` (default
+`security`).
+
+**Volume:** a tenant makes tens of millions of DNS queries a day. By default only queries in Umbrella's security
+categories (malware, phishing, command and control...), allowed or blocked, are stored - the only DNS events any
+analysis uses (control gaps, the risk signal). The category ids are read once from `/reports/v2/categories`; if that
+fails, blocked queries only. `dns_sync: all` stores every query (small tenants only). "Did anyone reach this site?"
+and shadow IT query Umbrella live, whatever the setting.
 
 **Egress:** `api.umbrella.com`.
 
@@ -494,13 +534,18 @@ If there is no usable CMDB: a maintained CSV `hostname,owner,platform_team,envir
 
 **Sentinel (pull):** app registration with **Microsoft Sentinel Reader** on the workspace (Azure RBAC). Settings:
 `SENTINEL_TENANT_ID`, `SENTINEL_CLIENT_ID`, `SENTINEL_CLIENT_SECRET`, `SENTINEL_SUBSCRIPTION_ID`,
-`SENTINEL_RESOURCE_GROUP`, `SENTINEL_WORKSPACE`. Egress: `management.azure.com`.
+`SENTINEL_RESOURCE_GROUP`, `SENTINEL_WORKSPACE`. Egress: `management.azure.com`. Each incident's entities
+(accounts, hosts, IPs, URLs, file hashes) are read with *Incidents - List Entities*, so a Sentinel incident joins the
+cases of the hosts and people it names (the same Reader role covers it).
 
 **Any other SIEM/SOAR (push):** create an API key (analyst role, incident domain) and have the SIEM POST
 `{"alerts": [ ... ]}` to `https://soc.client.com/api/v1/ingest/alerts` with header `X-API-Key`. Replays are
 de-duplicated. If its field names differ from the defaults (`id, title, severity, timestamp, host, user, src_ip,
 dst_ip, domain, url, sha256, source`), set `GENERIC_SIEM_FIELD_MAP` to a JSON object, e.g.
-`{"id": "alert_id", "title": "rule_name", "time": "event_time"}`.
+`{"id": "alert_id", "title": "rule_name", "time": "event_time"}`. Nested payloads are mapped with dotted paths
+(Elastic Security: `{"id": "kibana.alert.uuid", "title": "kibana.alert.rule.name", "host": "host.name",
+"user": "user.name"}`); `soc_platform/fixtures/generic_siem.json` has worked samples for a flat payload, a Splunk ES
+notable and an Elastic Security alert. An alert without its id is refused with a reason.
 
 ### 4.16 Public intelligence (`nvd`, `epss`, `cisa_kev`) and threat-intel fusion (`threat_intel`)
 
@@ -530,6 +575,13 @@ dst_ip, domain, url, sha256, source`), set `GENERIC_SIEM_FIELD_MAP` to a JSON ob
 | approved threat-intel sources (4.16) | enrichment |
 | the client's LLM gateway | narrative (section 5) |
 | the client's Teams/Slack webhook hosts | notifications (`SOC_NOTIFY_WEBHOOKS`) |
+
+**Through a forward proxy:** set `HTTPS_PROXY` (and `NO_PROXY` for internal hosts such as the Rapid7 console and the
+Delinea servers) in the platform's environment; every connector and token request uses them. **TLS inspection** (the
+proxy re-signs HTTPS with the organisation's own root): set `SSL_CERT_FILE` to a PEM bundle that includes that root,
+or every call fails. The error then names the cause - `gave up after 5 retries: ... CERTIFICATE_VERIFY_FAILED` -
+rather than a bare failure. A proxy or SSO page answering in place of an API is reported as "returned an HTML page
+instead of the API's JSON".
 
 ---
 
@@ -641,6 +693,7 @@ calls; `SOC_LLM_SERVER_FALLBACK=0` turns it off (a refusal then simply uses the 
 | `SOC_LLM_BREAKER_FAILURES` / `SOC_LLM_BREAKER_SECONDS` | 3 / 60 | how quickly screens stop waiting for a failing gateway |
 | `SOC_LLM_REDACT_PII` | on | **keep on**, even for an in-house model: prompts then carry pseudonyms (`USER_1`, `HOST_2` ...) instead of names and addresses, and names are restored in the answer, so narrative quality is unchanged while the gateway's own logs never hold identities. Turn off only with the client's data-protection approval. |
 | `SOC_LLM_LOG_RETENTION_DAYS` | 180 | the client's retention policy for AI interaction logs |
+| `SOC_EVENT_RETENTION_DAYS` | 400 | how long sign-ins, DNS and other telemetry stay in the context store (events cited by a case or insight are kept); set to the client's security-evidence retention (Q24) |
 
 Being trained on company data does not give the model any of the platform's case data: it only sees the evidence
 the platform sends in each prompt. Nothing in the platform fine-tunes or trains a model.
@@ -682,6 +735,8 @@ redaction and fallbacks stay as they are. Add a test like `test_openai_compatibl
   need a second approver, and every action type has a per-request target limit (e.g. campaign purge 200).
 - **Grant write permissions per action type only when the client approves that action type.** Without the write
   permission the action is still recommended; execution fails cleanly and is recorded.
+- **Per tool, first:** a tool offers actions only from the **Recommend** stage (never above L2 there) and follows the
+  policy only in **Automate** (section 4.1, step 7). In Recording and Read-only its actions appear as manual steps.
 - **Promotion** (e.g. auto-quarantine of a confirmed phishing campaign at L3) is a policy change: proposed by an
   automation admin, approved by a lead, versioned and audited (*Automation policy* screen). Use the shadow-mode metrics
   (`GET /api/v1/metrics/shadow?domain=...`) - agreement between what the platform recommended and what analysts
@@ -720,7 +775,15 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 - [ ] LLM: approved endpoint set, budget set, redaction on, demo keys absent.
 - [ ] Monitoring: `/metrics` scraped with an auditor API key; alerts from `docs/OPERATIONS.md` - Monitoring.
 - [ ] Retention periods and legal-hold process agreed with the client.
-- [ ] Banned-data check: no demo data loaded (`demo` never run), no fixture mode left on for a tool the client owns.
+- [ ] Banned-data check: no demo data loaded (`demo` never run), no tool the client owns left in the Fixtures stage.
+- [ ] `python -m soc_platform config check` clean; `python -m soc_platform preflight --all` ready for every tool in use;
+  the configuration exported (*Integrations → Export*) and kept with the deployment record.
+- [ ] Key suppliers and sanctioned services replaced with the client's lists (*Integrations → Suppliers & sanctioned
+  services*, approved by a lead) - the demo lists must not stay in force.
+- [ ] Recording off: no tool left in the Recording stage and `SOC_RECORD_FIXTURES_DIR` unset after the first syncs; recordings reviewed (`_scan.json`) and kept
+  only where the client approved; the salt not stored with them.
+- [ ] Capacity: `SOC_API_WORKERS` one per core; `workers x (SOC_DB_POOL_SIZE + SOC_DB_MAX_OVERFLOW)` below PostgreSQL's
+  `max_connections`; `scripts/load_test.py` run against the target environment with the expected number of analysts.
 
 ---
 

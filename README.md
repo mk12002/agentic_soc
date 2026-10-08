@@ -80,8 +80,10 @@ API - no Node build step, no external CDNs - and works in current Chrome, Edge, 
 ## Connecting real tools (plug and play)
 
 Connectors live in `soc_platform/connectors/tools/`; each declares its streams, lookups, actions and settings in a
-manifest. To go live with a tool, set `mode: live` in `config/connectors.yaml` and provide its credentials as
-environment variables or `<NAME>_FILE` vault mounts, then press **Test** on the Integrations screen.
+manifest. To go live with a tool, put its credentials in the vault (`<NAME>_FILE`) or environment, then on the
+**Integrations** screen *Configure* it (settings and rollout stage: Recording, Read-only, Recommend, Automate) and
+propose: a preflight checks sign-in, every permission, parsing, freshness and volume, another person approves, and it
+is in force within seconds - no file edit, no restart. One misconfigured tool is isolated; the rest keep working.
 Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md); deploying into a client environment
 (real tools, Entra sign-in, the client's own LLM): [docs/CLIENT_DEPLOYMENT_GUIDE.md](docs/CLIENT_DEPLOYMENT_GUIDE.md).
 
@@ -99,9 +101,11 @@ Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md); deploy
 | ITSM / CMDB | ServiceNow (tickets + CMDB), Jira, CSV / cloud-subscription ownership mapping |
 | SIEM | Microsoft Sentinel, generic webhook (`POST /api/v1/ingest/alerts`) |
 
-**Adding a tool:** create `soc_platform/connectors/tools/<tool>.py` exporting a `ConnectorManifest`, add a fixture
-file, enable it in `connectors.yaml`. Third-party packages can register connectors through the
-`soc_platform.connectors` entry-point group.
+**Adding a tool:** `python -m soc_platform connector new <name> --category <cat> --tool "Vendor Product"` writes a
+connector that already follows the platform's rules, its fixtures, its paging test and a switched-off config entry;
+adapt it to the vendor's API, then `python -m soc_platform connector check <name>`. Third-party packages can register
+connectors through the `soc_platform.connectors` entry-point group. `python -m soc_platform config check` validates the
+configuration (every problem with its fix).
 
 LLM providers (`SOC_LLM_PROVIDER`): `azure_foundry` (Azure AI Foundry / Azure OpenAI v1 API - verified live with
 gpt-4.1-mini), `azure_openai` (deployments API), `anthropic` (Claude via the official SDK), or `openai_compatible`

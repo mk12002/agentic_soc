@@ -148,6 +148,7 @@ def connector_freshness(s: Session, registry: Any) -> list[dict[str, Any]]:
                  "error" if any(x["last_error"] for x in streams) else
                  "stale" if any(not x["fresh"] for x in streams) else "healthy")
         out.append({"name": name, "tool": row.get("tool"), "category": row.get("category"), "mode": row.get("mode"),
+                    "stage": row.get("stage"), "stage_label": row.get("stage_label"),
                     "enabled": row["enabled"], "state": state, "config_problems": row.get("config_problems", []),
                     "streams": streams})
     return out
@@ -190,9 +191,22 @@ def entity_360(s: Session, eid: str) -> dict[str, Any] | None:
             "seen_by": sorted((attrs.get("by_tool") or {}).keys()), "attributes": {k: v for k, v in attrs.items() if k != "by_tool"},
             "per_tool": attrs.get("by_tool") or {},
             "risk": ({"score": prof.score, "band": prof.band, "dimensions": prof.dimensions,
-                      "factors": [f.__dict__ for f in sorted(prof.factors, key=lambda f: -f.decayed)[:15]]} if prof else None),
+                      "factors": _factors_summing_to_score(prof.factors)} if prof else None),
             "activity_by_tool": dict(by_tool), "related": dict(related), "cases": cases, "insights": ins,
             "vulnerabilities": vulns, "timeline": st.timeline([eid])[:100]}
+
+
+def _factors_summing_to_score(factors: list[Any], shown: int = 15) -> list[dict[str, Any]]:
+    """The strongest factors, and the rest as one line, so the list always adds up to the score it explains (with
+    many alerts a host has dozens of factors; listing only the top 15 made the screen's sum disagree with its score)."""
+    ranked = sorted(factors, key=lambda f: -f.decayed)
+    if len(ranked) <= shown:
+        return [f.__dict__ for f in ranked]
+    rest = ranked[shown - 1:]
+    return [f.__dict__ for f in ranked[:shown - 1]] + [{
+        "signal": "other_factors", "dimension": "mixed", "weight": sum(f.weight for f in rest),
+        "decayed": sum(f.decayed for f in rest), "source": "platform", "ref": "", "when": None,
+        "detail": f"{len(rest)} smaller factors"}]
 
 
 def prometheus(s: Session, registry: Any) -> str:

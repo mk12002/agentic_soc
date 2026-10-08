@@ -66,10 +66,12 @@ class Database:
         kwargs: dict = {"future": True}
         if url.startswith("sqlite"):
             kwargs["connect_args"] = {"check_same_thread": False}
-            if url in {"sqlite://", "sqlite:///:memory:"}:
-                from sqlalchemy.pool import StaticPool
+        if url in {"sqlite://", "sqlite:///:memory:"}:
+            from sqlalchemy.pool import StaticPool
 
-                kwargs["poolclass"] = StaticPool
+            kwargs["poolclass"] = StaticPool
+        else:
+            kwargs.update(pool_settings())
         self.engine: Engine = create_engine(url, **kwargs)
         if url.startswith("sqlite"):
             event.listen(self.engine, "connect", _sqlite_pragmas)
@@ -85,8 +87,30 @@ class Database:
 
         Base.metadata.create_all(self.engine)
         self._add_missing_columns()
+        self._add_missing_indexes()
         if self.engine.dialect.name == "postgresql":
             self._widen_columns()
+
+    def _add_missing_indexes(self) -> list[str]:
+        """Like columns, an index the model gained after a table was created is never added by create_all. Indexes
+        are purely additive (no data changes), so create each one the model defines that the database lacks - e.g. the
+        (kind, canonical_key) lookup every ingested record makes, which without it scanned all entities of a kind."""
+        import logging
+
+        insp = inspect(self.engine)
+        existing = set(insp.get_table_names())
+        added: list[str] = []
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing:
+                continue
+            have = {ix["name"] for ix in insp.get_indexes(table.name)}
+            for ix in table.indexes:
+                if ix.name and ix.name not in have:
+                    ix.create(self.engine, checkfirst=True)
+                    added.append(ix.name)
+        if added:
+            logging.getLogger(__name__).info("schema: added index(es) %s", ", ".join(added))
+        return added
 
     def _add_missing_columns(self) -> list[str]:
         """create_all creates missing *tables* but never changes existing ones. Add each column the model defines that
@@ -157,6 +181,24 @@ def _strip_nul(session: Session, _ctx: Any, _instances: Any) -> None:
             v = state.dict.get(attr.key)
             if isinstance(v, str) and "\x00" in v:
                 setattr(obj, attr.key, v.replace("\x00", ""))
+
+
+def pool_settings() -> dict[str, Any]:
+    """Connection pool for a server under load (SOC_DB_POOL_*). The defaults cover the API's request threads plus the
+    scheduler and the access-log writer; a connection is checked before use (a database restart or failover, or a
+    firewall dropping idle connections, otherwise surfaces as errors on the next requests) and recycled after
+    SOC_DB_POOL_RECYCLE seconds. Waiting longer than SOC_DB_POOL_TIMEOUT for a connection answers 503, not a hang."""
+    import os
+
+    def num(name: str, default: int) -> int:
+        try:
+            return max(0, int(os.environ.get(name, default)))
+        except ValueError:
+            return default
+
+    return {"pool_size": max(1, num("SOC_DB_POOL_SIZE", 20)), "max_overflow": num("SOC_DB_MAX_OVERFLOW", 20),
+            "pool_timeout": max(1, num("SOC_DB_POOL_TIMEOUT", 10)), "pool_recycle": num("SOC_DB_POOL_RECYCLE", 1800),
+            "pool_pre_ping": True}
 
 
 def _sqlite_pragmas(dbapi_conn, _record) -> None:

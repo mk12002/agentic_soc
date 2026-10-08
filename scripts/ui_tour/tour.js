@@ -275,6 +275,18 @@ async function visit(page, hash, name, full = true) {
     const t = await page.evaluate(() => { const x = document.getElementById('toast'); return x && !x.hidden ? [x.classList.contains('err'), x.textContent] : [false, '']; });
     if (t[0] || !t[1].includes('Test message sent')) problems.push('send test message: ' + (t[1] || 'no confirmation'));
   }
+  // connector administration: a preflight checklist, the configure panel, a change proposed for approval
+  await page.click('[data-fn="preflight"][data-args=\'["crowdstrike"]\']');
+  await page.waitForSelector('#cfgpanel .card', {timeout: 60000});
+  if (!(await page.textContent('#cfgpanel')).includes('Preflight')) problems.push('preflight result not shown');
+  await shot(page, '30-preflight', false);
+  await page.click('[data-fn="configure"][data-args=\'["crowdstrike"]\']');
+  await page.waitForSelector('#cf-stage');
+  await page.fill('#cf-user_domain', 'corp.example'); await page.fill('#cf-note', 'UPN suffix for bare user names');
+  await shot(page, '31-configure-connector', false);
+  await page.click('[data-fn="proposeConfig"]'); await page.waitForTimeout(1500); await settle(page);
+  if (!(await page.textContent('#main')).includes('awaiting approval')) problems.push('proposed change not listed for approval');
+  await shot(page, '32-change-awaiting-approval', false);
   // auditor: compliance pack
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
   await page.fill('#si-user', `audrey@${EST.org}`); await page.selectOption('#si-role', 'auditor');

@@ -2,6 +2,50 @@
  "routes": [
   {
    "method": "GET",
+   "path": "^/reports/v2/categories$",
+   "body": {
+    "data": [
+     {
+      "id": 65,
+      "label": "Command and Control",
+      "type": "security",
+      "integration": false,
+      "deprecated": false
+     },
+     {
+      "id": 66,
+      "label": "Malware",
+      "type": "security",
+      "integration": false,
+      "deprecated": false
+     },
+     {
+      "id": 68,
+      "label": "Phishing",
+      "type": "security",
+      "integration": false,
+      "deprecated": false
+     },
+     {
+      "id": 23,
+      "label": "File Storage",
+      "type": "content",
+      "integration": false,
+      "deprecated": false
+     },
+     {
+      "id": 196,
+      "label": "Generative AI",
+      "type": "application",
+      "integration": false,
+      "deprecated": false
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
    "path": "^/reports/v2/activity/dns$",
    "body": {
     "data": [

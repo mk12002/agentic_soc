@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from soc_platform.connectors.base import BaseConnector, LookupResult
+from soc_platform.connectors.base import AuthExpired, BaseConnector, LookupResult, PermissionDenied
 from soc_platform.connectors.http import Response, Transport
 from soc_platform.core.actions import ActionSpec
+from soc_platform.core.models import utcnow
 from soc_platform.core.schema import NormalizedRecord
 
 
@@ -22,9 +24,13 @@ def parse_ts(v: Any) -> datetime | None:
     s = str(v).strip().replace("Z", "+00:00")
     if "." in s:  # trim >6 fractional digits (Graph returns 7)
         head, _, rest = s.partition(".")
-        frac = "".join(c for c in rest if c.isdigit())
+        # only the digits right after the dot are the fraction: the offset that may follow (Jira "+0530") was once
+        # swallowed into it, so "12:00:00.000+0530" read as 12:00 UTC
+        frac = re.match(r"\d*", rest).group(0)
         tz = rest[len(frac):]
-        s = f"{head}.{frac[:6]}{tz}"
+        if re.fullmatch(r"[+-]\d{4}", tz):
+            tz = f"{tz[:3]}:{tz[3:]}"
+        s = f"{head}.{frac[:6]}{tz}" if frac else f"{head}{tz}"
     try:
         dt = datetime.fromisoformat(s)
     except ValueError:
@@ -37,6 +43,15 @@ def parse_ts(v: Any) -> datetime | None:
         else:
             return None
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def need(rec: Any, key: str) -> Any:
+    """A record's identifier. Without one a record cannot be stored or de-duplicated, so it is refused with a reason
+    (one failed record in the sync report) rather than crashing on a KeyError."""
+    v = rec.get(key) if isinstance(rec, dict) else None
+    if v in (None, ""):
+        raise ValueError(f"record without its identifier '{key}'")
+    return v
 
 
 def sev_from_score(score: float | None, scale: float = 10.0) -> str:
@@ -58,6 +73,63 @@ def sev_name(v: Any) -> str:
     s = str(v or "").lower()
     return {"informational": "informational", "info": "informational", "low": "low", "medium": "medium",
             "moderate": "medium", "high": "high", "critical": "critical", "severe": "critical"}.get(s, "medium" if s else "informational")
+
+
+FUTURE_TOLERANCE = timedelta(hours=1)
+
+
+def watermark_overlap(conn: Any) -> timedelta:
+    """How far before the newest time seen the next sync asks from. Logs (sign-ins, audits, DNS) are indexed minutes
+    after the event, so a record can arrive with a time older than one already read; asking exactly from the mark
+    would lose it forever. Ingest is idempotent, so the overlap costs a re-read, never a duplicate."""
+    v = (getattr(conn, "settings", None) or {}).get("watermark_overlap_minutes") \
+        or os.environ.get("SOC_WATERMARK_OVERLAP_MINUTES", "30")
+    try:
+        return timedelta(minutes=max(0.0, float(v)))
+    except (TypeError, ValueError):
+        return timedelta(minutes=30)
+
+
+class Watermark:
+    """The newest change time seen while one stream is read, kept on the connector between its pages.
+
+    ``start(cursor)`` -> the time to ask from (the mark minus the overlap; None for a full read); ``see(records,
+    field)`` raises the mark; ``finish()`` -> the next sync's cursor (``since:<newest UTC time seen>``, or None when
+    nothing carried a time). A time more than an hour in the future (a device with a wrong clock) is ignored: it would
+    move the mark past every real record and silently stop the stream."""
+
+    def __init__(self, overlap: timedelta = timedelta(0)) -> None:
+        self.since: str | None = None
+        self.best = None
+        self.overlap = overlap
+
+    @staticmethod
+    def of(conn: Any, key: str) -> Watermark:
+        marks = conn.__dict__.setdefault("_watermarks", {})
+        wm = marks.setdefault(key, Watermark())
+        wm.overlap = watermark_overlap(conn)
+        return wm
+
+    def start(self, cursor: str | None) -> str | None:
+        self.since = cursor[6:] if cursor and cursor.startswith("since:") else None
+        self.best = parse_ts(self.since) if self.since else None
+        if self.best is None:
+            return None
+        return (self.best - self.overlap).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def see(self, records: list[dict[str, Any]], field: str) -> None:
+        limit = utcnow() + FUTURE_TOLERANCE
+        for r in records:
+            v = r
+            for part in field.split("."):
+                v = v.get(part) if isinstance(v, dict) else None
+            t = parse_ts(v)
+            if t is not None and t <= limit and (self.best is None or t > self.best):
+                self.best = t
+
+    def finish(self) -> str | None:
+        # whole seconds, rounded down: asking ">= mark" re-reads the newest record (ingest is idempotent), never skips
+        return f"since:{self.best.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}" if self.best else None
 
 
 class ToolConnector(BaseConnector):
@@ -101,8 +173,13 @@ class ToolConnector(BaseConnector):
             return out | {"ok": True, "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                           "sample_records": len(page.records), "more": page.more}
         except Exception as exc:
-            return out | {"ok": False, "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
-                          "error": f"{type(exc).__name__}: {_redact(str(exc))[:300]}"}
+            res = out | {"ok": False, "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                         "error": f"{type(exc).__name__}: {_redact(str(exc))[:300]}"}
+            if isinstance(exc, PermissionDenied):     # say what to grant, not just that it failed
+                res |= {"missing_permission": True, "required_scopes": list(self.read_scopes)}
+            elif isinstance(exc, AuthExpired):
+                res |= {"auth_failed": True}
+            return res
 
 
 class ConnectorAction(ActionSpec):

@@ -7,7 +7,7 @@ from typing import Any
 from soc_platform.connectors.base import Page
 from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth
 from soc_platform.connectors.registry import ConfigField
-from soc_platform.connectors.tools._common import ToolConnector
+from soc_platform.connectors.tools._common import ToolConnector, Watermark
 
 GRAPH = "https://graph.microsoft.com"
 MDE = "https://api.securitycenter.microsoft.com"
@@ -40,18 +40,38 @@ def mde_transport(settings: dict[str, Any]) -> HttpTransport:
                                         "https://api.securitycenter.microsoft.com/.default"))
 
 
+def odata_page(conn: ToolConnector, path: str, cursor: str | None, params: dict[str, Any] | None = None, *,
+               watermark: str | None = None, filter_field: str | None = None) -> Page:
+    """One page of an OData list (Graph, Defender, Azure Resource Manager).
+
+    The first call uses ``path`` + ``params``; later pages follow ``@odata.nextLink`` (``nextLink`` on ARM). When the
+    list ends, the resume point is a ``@odata.deltaLink`` if the API gave one, else - for a stream with a
+    ``watermark`` field - the newest value seen (``since:<time>``, sent next time as ``$filter=<field> ge <time>``),
+    else nothing (the next sync reads the list again). A continuation link is never kept: they expire."""
+    wm = Watermark.of(conn, path)
+    if cursor and cursor.startswith("http"):
+        body = conn.get(cursor)
+    else:
+        prm = dict(params or {})
+        since = wm.start(cursor)
+        if since and watermark:
+            cond = f"{filter_field or watermark.replace('.', '/')} ge {since}"
+            prm["$filter"] = f"({prm['$filter']}) and {cond}" if prm.get("$filter") else cond
+        body = conn.get(path, params=prm)
+    items = body.get("value") or []
+    if watermark:
+        wm.see(items, watermark)
+    nxt = body.get("@odata.nextLink") or body.get("nextLink")
+    if nxt:
+        return Page(items, nxt, has_more=True)
+    delta = body.get("@odata.deltaLink")
+    return Page(items, delta or wm.finish(), has_more=False, reset=True)
+
+
 class MicrosoftConnector(ToolConnector):
-    def odata_page(self, path: str, cursor: str | None, params: dict[str, Any] | None = None) -> Page:
-        """First call uses ``path``+``params``; subsequent pages follow ``@odata.nextLink``.
-        A trailing ``@odata.deltaLink`` (delta queries) becomes the resume cursor."""
-        if cursor and cursor.startswith("http"):
-            body = self.get(cursor)
-        else:
-            body = self.get(path, params=params or {})
-        items = body.get("value", [])
-        nxt = body.get("@odata.nextLink")
-        delta = body.get("@odata.deltaLink")
-        return Page(items, nxt or delta or cursor, has_more=bool(nxt))
+    def odata_page(self, path: str, cursor: str | None, params: dict[str, Any] | None = None, *,
+                   watermark: str | None = None, filter_field: str | None = None) -> Page:
+        return odata_page(self, path, cursor, params, watermark=watermark, filter_field=filter_field)
 
     def odata_all(self, path: str, params: dict[str, Any] | None = None, limit: int = 1000) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []

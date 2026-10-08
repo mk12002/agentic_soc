@@ -11,7 +11,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ToolConnector, ok_lookup, parse_ts, sev_name
+from soc_platform.connectors.tools._common import ToolConnector, need, ok_lookup, parse_ts, sev_name
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 Q_RESOURCES = """query CloudResources($first: Int, $after: String) {
@@ -56,14 +56,16 @@ class WizConnector(ToolConnector):
                   "issues": (Q_ISSUES, "issuesV2")}[stream]
         data = self.gql(q, {"first": 500, "after": cursor})[key]
         info = data.get("pageInfo") or {}
-        return Page(data.get("nodes") or [], info.get("endCursor") or cursor, source_total=data.get("totalCount"),
-                    has_more=bool(info.get("hasNextPage")))
+        if info.get("hasNextPage") and info.get("endCursor"):
+            return Page(data.get("nodes") or [], info["endCursor"], source_total=data.get("totalCount"), has_more=True)
+        # resources, findings and issues change state: read in full each sync rather than resume after a stale cursor
+        return Page(data.get("nodes") or [], None, source_total=data.get("totalCount"), has_more=False, reset=True)
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         if stream == "resources":
             props = (raw.get("graphEntity") or {}).get("properties") or {}
             return [NormalizedRecord(
-                kind="asset", tool=self.tool, source_type="cloud_resource", source_id=raw["id"], dimension="cloud",
+                kind="asset", tool=self.tool, source_type="cloud_resource", source_id=need(raw, "id"), dimension="cloud",
                 observed_at=parse_ts((raw.get("graphEntity") or {}).get("lastSeen") or props.get("updatedAt")),
                 keys={"wiz_id": raw["id"], "cloud_resource_id": (raw.get("graphEntity") or {}).get("providerUniqueId") or props.get("externalId")},
                 attributes={"hostname": props.get("hostname") or raw.get("name"), "ip": (props.get("privateIpAddresses") or [None])[0],
@@ -75,7 +77,7 @@ class WizConnector(ToolConnector):
         if stream == "vulnerabilities":
             va = raw.get("vulnerableAsset") or {}
             return [NormalizedRecord(
-                kind="finding", tool=self.tool, source_type="vulnerability_finding", source_id=raw["id"],
+                kind="finding", tool=self.tool, source_type="vulnerability_finding", source_id=need(raw, "id"),
                 observed_at=parse_ts(raw.get("lastDetectedAt")), title=f"{raw.get('name')} on {va.get('name')}",
                 severity=sev_name(raw.get("CVSSSeverity")), dimension="exposure",
                 refs=[EntityRef(kind="asset", role="host",
@@ -91,7 +93,7 @@ class WizConnector(ToolConnector):
                 deep_link=raw.get("portalUrl"))]
         es = raw.get("entitySnapshot") or {}
         return [NormalizedRecord(
-            kind="cloud_issue", tool=self.tool, source_type="issue", source_id=raw["id"], dimension="cloud",
+            kind="cloud_issue", tool=self.tool, source_type="issue", source_id=need(raw, "id"), dimension="cloud",
             observed_at=parse_ts(raw.get("createdAt")), title=(raw.get("sourceRule") or {}).get("name", "Wiz issue"),
             severity=sev_name(raw.get("severity")),
             refs=[EntityRef(kind="asset", role="resource", keys={"wiz_id": es.get("id"), "cloud_resource_id": es.get("providerId")},
@@ -147,11 +149,11 @@ MANIFEST = ConnectorManifest(
     name="wiz", tool="Wiz", vendor="Wiz", category="cloud", dimension="cloud",
     description="Cloud inventory, vulnerability findings, internet exposure and misconfiguration issues (GraphQL).",
     factory=lambda s, t: WizConnector(s, t, rate_per_sec=3, burst=6), live_transport=_live,
-    config=[ConfigField("api_url", "Tenant API endpoint, e.g. https://api.eu1.app.wiz.io"),
+    config=[ConfigField("api_url", "Tenant API endpoint, e.g. https://api.eu1.app.wiz.io", kind="url"),
             ConfigField("client_id", "Service account client id", secret=True),
             ConfigField("client_secret", "Service account secret", secret=True),
-            ConfigField("auth_url", "Token URL", required=False),
-            ConfigField("lookup_max_pages", "Max GraphQL pages per lookup (default 20)", required=False)],
+            ConfigField("auth_url", "Token URL", required=False, kind="url"),
+            ConfigField("lookup_max_pages", "Max GraphQL pages per lookup (default 20)", required=False, kind="int")],
     confidence="High", to_confirm="Service account provisioning; scope of cloud coverage",
     focus_areas=("vulnerability", "incident"),
 )

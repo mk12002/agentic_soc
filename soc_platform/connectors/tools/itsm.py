@@ -21,7 +21,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import BasicAuth, HttpTransport, NoAuth, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
+from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, need, ok_lookup, parse_ts
 from soc_platform.core.schema import NormalizedRecord
 
 # Every Table API read asks for sysparm_display_value=all: each field is {"value", "display_value"}. Values give
@@ -51,14 +51,18 @@ class ServiceNowConnector(ToolConnector):
         body = self.get(f"/api/now/table/{table}", params={"sysparm_offset": offset, "sysparm_limit": 500,
                                                            "sysparm_query": q, "sysparm_display_value": SN_DISPLAY})
         rows = body.get("result") or []
-        return Page(rows, str(offset + len(rows)), has_more=len(rows) == 500)
+        if len(rows) == 500:
+            return Page(rows, str(offset + len(rows)), has_more=True)
+        # tickets (last 30 days) and the CMDB are read in full each sync: an offset kept from the last sync points into
+        # a different set of records
+        return Page(rows, None, has_more=False, reset=True)
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         r = {k: _v(x) for k, x in raw.items()}
         d = {k: _dv(x) for k, x in raw.items()}
         if stream == "cmdb":
             return [NormalizedRecord(
-                kind="asset", tool=self.tool, source_type="cmdb_ci", source_id=r["sys_id"], dimension="ticketing",
+                kind="asset", tool=self.tool, source_type="cmdb_ci", source_id=need(r, "sys_id"), dimension="ticketing",
                 observed_at=parse_ts(r.get("sys_updated_on")),
                 keys={"serial_number": r.get("serial_number"), "mac": r.get("mac_address")},
                 attributes={"hostname": r.get("name"), "fqdn": r.get("fqdn") or None, "ip": r.get("ip_address"),
@@ -134,11 +138,12 @@ class JiraConnector(ToolConnector):
             params["nextPageToken"] = cursor
         body = self.get("/rest/api/3/search/jql", params=params)
         nxt = None if body.get("isLast", True) else body.get("nextPageToken")
-        return Page(body.get("issues") or [], nxt, has_more=bool(nxt))
+        # page tokens expire: when the search ends the next sync starts a new search
+        return Page(body.get("issues") or [], nxt, has_more=bool(nxt), reset=not nxt)
 
     def normalize(self, stream: str, i: dict[str, Any]) -> list[NormalizedRecord]:
         f = i.get("fields") or {}
-        return [NormalizedRecord(kind="ticket", tool=self.tool, source_type="issue", source_id=i["id"], dimension="ticketing",
+        return [NormalizedRecord(kind="ticket", tool=self.tool, source_type="issue", source_id=need(i, "id"), dimension="ticketing",
                                  observed_at=parse_ts(f.get("updated")), title=f"{i.get('key')}: {f.get('summary')}",
                                  attributes={"number": i.get("key"), "state": ((f.get("status") or {}).get("name") or "").lower(),
                                              "assignment_group": (f.get("components") or [{}])[0].get("name")})]
@@ -246,7 +251,7 @@ MANIFESTS = [
         name="servicenow", tool="ServiceNow (ITSM + CMDB)", vendor="ServiceNow", category="itsm", dimension="ticketing",
         description="Remediation/incident tickets with bidirectional status; CMDB ownership and criticality.",
         factory=lambda s, t: ServiceNowConnector(s, t, rate_per_sec=3, burst=6), live_transport=_sn_live,
-        config=[ConfigField("instance_url", "https://<instance>.service-now.com"),
+        config=[ConfigField("instance_url", "https://<instance>.service-now.com", kind="url"),
                 ConfigField("client_id", "OAuth client id", secret=True, required=False),
                 ConfigField("client_secret", "OAuth client secret", secret=True, required=False),
                 ConfigField("username", "Basic-auth integration user", secret=True, required=False),
@@ -261,8 +266,10 @@ MANIFESTS = [
         description="Remediation tickets as Jira issues with comments/status sync.",
         factory=lambda s, t: JiraConnector(s, t, rate_per_sec=3, burst=6),
         live_transport=lambda s: HttpTransport(s["base_url"], BasicAuth(s["email"], s["api_token"])),
-        config=[ConfigField("base_url", "https://<site>.atlassian.net"), ConfigField("email", "Integration user email"),
-                ConfigField("api_token", "API token", secret=True), ConfigField("project_key", "Project key", required=False)],
+        config=[ConfigField("base_url", "https://<site>.atlassian.net", kind="url"),
+                ConfigField("email", "Integration user email", kind="email"),
+                ConfigField("api_token", "API token", secret=True), ConfigField("project_key", "Project key", required=False),
+                ConfigField("issue_type", "Issue type for new tickets (default Task)", required=False)],
         actions=_ticket_actions, confidence="Unknown", to_confirm="Only if the client uses Jira (Q03)",
         focus_areas=("vulnerability", "incident")),
     ConnectorManifest(
@@ -270,6 +277,7 @@ MANIFESTS = [
         description="Maintained hostname-pattern to owner/platform-team/criticality mapping (fallback for A04/D06).",
         factory=lambda s, t: CsvCmdbConnector(s, t, rate_per_sec=100, burst=100),
         live_transport=lambda s: HttpTransport("http://localhost", NoAuth()),
-        config=[ConfigField("path", "CSV path: hostname,owner,platform_team,environment,criticality,serial_number")],
+        config=[ConfigField("path", "CSV path: hostname,owner,platform_team,environment,criticality,serial_number",
+                            kind="path")],
         confidence="High", focus_areas=("vulnerability", "incident")),
 ]

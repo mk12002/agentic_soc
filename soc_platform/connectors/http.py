@@ -14,12 +14,13 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
 
-from soc_platform.connectors.base import ConnectorError, RateLimited, TransientError
+from soc_platform.connectors.base import AuthExpired, ConnectorError, PermissionDenied, RateLimited, TransientError
 
 
 @dataclass
@@ -43,6 +44,9 @@ class Transport(Protocol):
 class Auth:
     def apply(self, headers: dict[str, str], params: dict[str, Any]) -> None:
         pass
+
+    def invalidate(self) -> None:
+        """Forget any cached token so the next request authenticates again (static keys have nothing to forget)."""
 
 
 class NoAuth(Auth):
@@ -121,6 +125,10 @@ class OAuth2ClientCredentials(Auth):
     def apply(self, headers, params):
         headers["Authorization"] = f"Bearer {self.token()}"
 
+    def invalidate(self) -> None:
+        with self._lock:
+            self._token, self._expires = None, 0.0
+
 
 def entra_app_auth(tenant_id: str, client_id: str, client_secret: str, scope: str) -> OAuth2ClientCredentials:
     return OAuth2ClientCredentials(f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
@@ -147,16 +155,54 @@ class HttpTransport:
             r = self.client.request(method, url, params=prm, json=json, data=data, headers=hdrs)
         except httpx.TransportError as exc:
             raise TransientError(str(exc)) from exc
-        if r.status_code == 429:
-            ra = r.headers.get("Retry-After")
-            raise RateLimited(float(ra) if ra and ra.replace(".", "", 1).isdigit() else None)
-        if r.status_code >= 500:
-            raise TransientError(f"{method} {path} -> {r.status_code}")
-        if r.status_code >= 400:
-            raise ConnectorError(f"{method} {path} -> {r.status_code}: {r.text[:300]}")
+        raise_for_status(r.status_code, dict(r.headers), f"{method} {path}", r.text[:300])
         ctype = r.headers.get("content-type", "")
-        body: Any = r.json() if "json" in ctype and r.content else r.text
+        if "json" in ctype and r.content:
+            try:
+                body: Any = r.json()
+            except ValueError as exc:            # truncated or corrupted body: worth one more try
+                raise TransientError(f"{method} {path} -> invalid JSON ({len(r.content)} bytes)") from exc
+        else:
+            body = r.text
+            if body.lstrip()[:1] == "<":         # a proxy, captive portal or SSO login page answering instead of the API
+                raise html_page_error(method, path, r.status_code, ctype)
         return Response(r.status_code, body, dict(r.headers))
+
+    def reauthenticate(self) -> None:
+        self.auth.invalidate()
+
+
+def retry_after_seconds(value: str | None) -> float | None:
+    """``Retry-After`` is either seconds or an HTTP date."""
+    if not value:
+        return None
+    v = value.strip()
+    if v.replace(".", "", 1).isdigit():
+        return float(v)
+    try:
+        return max(0.0, parsedate_to_datetime(v).timestamp() - time.time())
+    except (TypeError, ValueError):
+        return None
+
+
+def html_page_error(method: str, path: str, status: int, ctype: str = "") -> ConnectorError:
+    return ConnectorError(f"{method} {path} -> {status} returned an HTML page instead of the API's JSON "
+                          f"({ctype or 'no content type'}): check the proxy / allow-list and the base URL")
+
+
+def raise_for_status(status: int, headers: dict[str, str], what: str, text: str = "") -> None:
+    """One mapping from HTTP status to connector errors, shared by the live and the fixture transport."""
+    if status < 400:
+        return
+    if status == 429:
+        raise RateLimited(retry_after_seconds({k.lower(): v for k, v in headers.items()}.get("retry-after")))
+    if status >= 500:
+        raise TransientError(f"{what} -> {status}")
+    if status == 401:
+        raise AuthExpired(f"{what} -> 401 (token refused)")
+    if status == 403:
+        raise PermissionDenied(f"{what} -> 403 (permission missing){': ' + text if text else ''}")
+    raise ConnectorError(f"{what} -> {status}{': ' + text if text else ''}")
 
 
 class RoutingTransport:
@@ -175,6 +221,12 @@ class RoutingTransport:
                 return transport.request(method, path, **kw)
         return self.default.request(method, path, **kw)
 
+    def reauthenticate(self) -> None:
+        for t in [self.default, *(t for _, t in self.routes)]:
+            fn = getattr(t, "reauthenticate", None)
+            if fn is not None:
+                fn()
+
 
 class FixtureTransport:
     """Serves vendor-shaped fixture responses; records every call (writes included) for inspection.
@@ -185,12 +237,22 @@ class FixtureTransport:
 
     Routes match on method + regex over the path (query string excluded). Unmatched
     writes succeed with an echo so action flows can be exercised; unmatched reads 404.
+
+    A route may also carry ``headers`` (e.g. ``Retry-After``) and ``times`` (answer this way N times, then let the
+    next matching route answer) - so one fixture can say "throttled once, then the page", "token refused once", or
+    serve pages in order. 401 / 403 / 429 / 5xx raise exactly what ``HttpTransport`` raises.
     """
 
     def __init__(self, routes: list[dict[str, Any]], tool: str = "") -> None:
         self.tool = tool
         self.routes = [(r.get("method", "GET").upper(), re.compile(r["path"]), r) for r in routes]
         self.calls: list[dict[str, Any]] = []
+        self.used: dict[int, int] = {}        # route index -> times answered (for ``times``)
+        self.reauthentications = 0
+        self._lock = threading.Lock()
+
+    def reauthenticate(self) -> None:
+        self.reauthentications += 1
 
     @classmethod
     def from_file(cls, path: str | Path, tool: str = "") -> FixtureTransport:
@@ -201,21 +263,31 @@ class FixtureTransport:
     def request(self, method, path, *, params=None, json=None, data=None, headers=None) -> Response:
         method = method.upper()
         clean = re.sub(r"^https?://[^/]+", "", path).split("?")[0]
-        self.calls.append({"method": method, "path": clean, "params": params, "json": json, "data": data})
-        for m, rx, route in self.routes:
-            if m == method and rx.search(clean) and _params_match(route.get("params"), params)                     and _body_match(route.get("body_contains"), json if json is not None else data):
-                status = int(route.get("status", 200))
-                if status == 429:
-                    raise RateLimited(0)
-                if status >= 500:  # behave exactly like HttpTransport so outages are exercised in fake mode
-                    raise TransientError(f"[fixture:{self.tool}] {method} {clean} -> {status}")
-                if status >= 400:
-                    raise ConnectorError(f"[fixture:{self.tool}] {method} {clean} -> {status}")
-                body = json_copy(route.get("body"))
-                sel = route.get("select")
-                if sel and isinstance(body, dict):
-                    body = _select(body, sel, params or {}, json or {})
-                return Response(status, body)
+        with self._lock:
+            self.calls.append({"method": method, "path": clean, "params": params, "json": json, "data": data})
+            route = None
+            for i, (m, rx, r) in enumerate(self.routes):
+                if m == method and rx.search(clean) and _params_match(r.get("params"), params) \
+                        and _body_match(r.get("body_contains"), json if json is not None else data):
+                    if r.get("times") is not None and self.used.get(i, 0) >= int(r["times"]):
+                        continue
+                    self.used[i] = self.used.get(i, 0) + 1
+                    route = r
+                    break
+        if route is not None:
+            status = int(route.get("status", 200))
+            headers = {k: str(v) for k, v in (route.get("headers") or {}).items()}
+            # behave exactly like HttpTransport so throttling, refused tokens, missing permissions and outages are
+            # exercised in fake mode too
+            raise_for_status(status, headers if status != 429 or headers else {"Retry-After": "0"},
+                             f"[fixture:{self.tool}] {method} {clean}")
+            body = json_copy(route.get("body"))
+            if isinstance(body, str) and body.lstrip()[:1] == "<":     # the same answer the live transport gives
+                raise html_page_error(method, path, status, "text/html")
+            sel = route.get("select")
+            if sel and isinstance(body, dict):
+                body = _select(body, sel, params or {}, json or {})
+            return Response(status, body, headers)
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             return Response(200, {"fixture_echo": True, "method": method, "path": clean, "json": json})
         raise ConnectorError(f"[fixture:{self.tool}] no route for {method} {clean}")

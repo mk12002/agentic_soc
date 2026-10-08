@@ -10,6 +10,14 @@
 | Create schema | `python -m soc_platform init-db` |
 | Demo on fixtures | `python -m soc_platform demo` |
 | Start a demo again from nothing | `python -m soc_platform reset-demo [--yes]` (server stopped; refuses in prod; demo databases only - the audit log goes too) |
+| Check the connector configuration | `python -m soc_platform config check [FILE] [--no-env]` - every problem with how to fix it; exit 1 on errors |
+| Check a tool before it goes live | `python -m soc_platform preflight NAME ... \| --all` (also the *Preflight* button on Integrations) |
+| Export / compare / import the configuration | `python -m soc_platform config export [--out F]`, `config diff F`, `config import F --by EMAIL` (import = a proposal approved in the console) |
+| Add a tool | `python -m soc_platform connector new NAME --category CAT --tool "Vendor Product"`, then `connector check NAME` |
+
+`serve` and `scheduler` refuse to start when `config/connectors.yaml` has errors (a misspelled tool, key or stage,
+broken YAML): those used to be ignored silently. A live tool whose secret is missing does *not* stop a start - it is
+isolated and shown on Integrations, and every other tool works.
 
 Environment: see `.env.example`. Secrets are read from `<NAME>_FILE` (vault mount) or `<NAME>`.
 
@@ -55,7 +63,7 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 | intelligence | 10 min | risk + correlation + drift, insight narration |
 | daily_report | 24 h | daily exposure report |
 | weekly_reports | 7 days | weekly VM report (Word) and weekly management deck (PowerPoint), in Reports |
-| retention | 24 h | prune raw payloads / emails / prompts / access log per policy |
+| retention | 24 h | prune raw payloads / emails / prompts / access log / old telemetry events per policy |
 | self_check | 1 h | platform consistency checks (see below) |
 | notify | 1 min | send new findings at or above the threshold to the configured Teams / Slack / webhook channels; retry failures |
 
@@ -116,8 +124,12 @@ Failure behaviour for each dependency: [FAILURE_MODES.md](FAILURE_MODES.md). Cos
 
 ## Sample estates
 
-`scripts/build_estate_variant.py OUT --seed N [--scale X]` generates a different organisation (names, machines, IP
-plan, suppliers, volumes) with its own tenant connector settings (`fixtures/settings.json`). Run the platform on it
+`scripts/build_estate_variant.py OUT --seed N [--scale X] [--messy]` generates a different organisation (names,
+machines, IP plan, suppliers, volumes) with its own tenant connector settings (`fixtures/settings.json`). `--messy`
+adds what a real tenant has and a demo does not: event volume (sign-ins, DNS, low-severity EDR alerts, more findings),
+accented and non-Latin names, renamed users, leavers with live devices, re-imaged and stale machines, hostname case
+and FQDN differences between tools, missing and null optional fields, epoch-millisecond times, ServiceNow custom
+fields and a CVE no feed knows. Run the platform on it
 with `SOC_FIXTURES_DIR=OUT/fixtures SOC_SUPPLIERS_FILE=OUT/suppliers.yaml SOC_ORG_DOMAINS=<org>`, and the browser tour
 with `SOC_TOUR_ESTATE=OUT/estate.json`.
 
@@ -154,6 +166,63 @@ demand: `GET /api/v1/admin/self-check` (auditor / admin, all-domain scope) or th
 |---|---|---|
 | `SOC_TRUSTED_PROXIES` | empty | Comma-separated addresses of your reverse proxies / gateways. Only a request whose direct peer is listed has its `X-Forwarded-For` read, and then the client is the **right-most** hop that is not itself a listed proxy (proxies append to the header, so its left-most entries are whatever the caller sent). The same peers' `X-Forwarded-Proto: https` turns on HSTS. List only real proxies. |
 | `SOC_RATE_LIMIT_RPS` / `SOC_RATE_LIMIT_BURST` | 20 / 120 | Per-client token bucket, in process. Put a gateway / WAF limit in front for several replicas. |
+
+## Server and database under load
+
+Measured with `scripts/load_test.py` (a real server on the demo organisation, analysts clicking every 0.05-0.4 s,
+the incident job replayed meanwhile): one server process reached 43 requests/s with every request queueing (median
+276 ms even for `/health`); four processes served 128 requests/s to 40 analysts with medians of 5-56 ms and no error,
+and 150 requests/s to 100 analysts with no error or timeout (laptop, SQLite; PostgreSQL 127 requests/s, also no error).
+On its own each screen takes 6-50 ms. Real analysts click every few seconds, so this is several times a real SOC's
+load. SQLite allows one writer at a time: under that load note and search writes waited up to seconds (p99), so use
+PostgreSQL in production.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `SOC_API_WORKERS` | 1 (`serve`), 4 (container image) | Server processes on the port. One process uses one CPU core; give one per core. Jobs stay safe with any number (database leases). |
+| `SOC_API_THREADS` | 40 | Request threads per process |
+| `SOC_DB_POOL_SIZE` / `SOC_DB_MAX_OVERFLOW` | 20 / 20 | Database connections per process (request threads, scheduler, access-log writer). PostgreSQL: keep `workers x (size + overflow)` under its `max_connections` |
+| `SOC_DB_POOL_TIMEOUT` | 10 | Seconds a request waits for a connection; then it answers **503** with `Retry-After` (not a hang, not a 500). A locked SQLite database or an unreachable database also answers 503 |
+| `SOC_DB_POOL_RECYCLE` | 1800 | Seconds before a connection is replaced. Connections are also checked before use, so a database restart or failover, or a firewall dropping idle connections, does not surface as errors |
+| `SOC_RISK_CACHE_SECONDS` | 300 | The user / host risk ranking (brief, Intelligence screen) is reused while the data it reads is unchanged - exact within a process, and this is the age limit for changes made by other processes. Ranking 22,000 entities took 9.4 s per request before; now 4.7 s once, then 20 ms |
+
+## Connector sync and volume
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `SOC_WATERMARK_OVERLAP_MINUTES` (or a connector's `watermark_overlap_minutes` setting) | 30 | Event streams (sign-ins, audits, alerts, DNS, Sentinel incidents) resume from the newest change time seen, minus this overlap: logs are indexed minutes late, and asking exactly from the mark would lose them. Re-read records are de-duplicated. A time more than an hour in the future (a device with a wrong clock) never moves the mark |
+| `SOC_SYNC_MAX_PAGES` | 1000 | Pages one stream reads per sync. A larger backlog is not dropped: the stream keeps its place and the next sync continues (the sync report says `truncated`) |
+| `SOC_RESOLUTION_AUTO_THRESHOLD` | 0.85 | Score at which a weak-hint host match merges without analyst review. 0.75 lets "same unique hostname and OS, nothing else" merge: on the 400-host stress estate the unresolved share fell from 5.4 % to 2.2 % with no false merge. Decide on the client's shadow-mode review queue; 0.6 is the floor |
+| Umbrella `dns_sync` | security | `security`: only DNS queries in Umbrella's security categories (allowed or blocked) are stored - the only DNS events any analysis uses; a tenant makes tens of millions of queries a day. `all`: every query (small tenants). "Did anyone reach this site?" and shadow IT always ask Umbrella live |
+
+Each page of a sync is committed as it is stored: an interrupted backfill resumes after its last page, and a long
+sync never holds one database transaction open (on PostgreSQL a sync of tens of thousands of records once ran the lock
+table out; on SQLite it blocked every other writer). One page is one savepoint; if it fails, the page is stored record
+by record so one bad record is isolated, and 20 identical failures in a row stop the retries (a systematic fault).
+
+`scripts/measure_scale.py --scales 1,20,40 [--db postgresql://...]` builds messy estates of growing size (see Sample
+estates) and reports, per stage, time and SQL statements, statements per synced record and the open review queue.
+Measured (laptop, SQLite): 40x = 250 people, 192 laptops, 21,675 records - sync 149 s (about 146 records/s, flat
+from 20x), 29 statements per record at every size, vulnerability refresh 56 s, incident pipeline 48 s (time mostly
+spent waiting on each tool's request budget, about 1.5 s per new incident), intelligence refresh 24 s, overview
+30 ms, self-check 0.3 s. PostgreSQL: sync about 75 records/s (one network round trip per statement).
+
+## Recording the client's real responses (record-and-sanitise)
+
+The demo fixtures are built from vendor documentation. To test against the shapes of the client's real tenants, put a
+tool in the **Recording** stage (Integrations -> Configure; it reads live and records, and offers no actions), or set
+`SOC_RECORD_FIXTURES_DIR=<folder>` to record every live tool. Recordings go to `SOC_RECORD_FIXTURES_DIR`, else to
+`recordings/` next to the raw payload folder. The pseudonyms are keyed with `SOC_RECORD_SALT` (random, at least 16
+characters, never stored with the recording) or, when that is unset, with a key derived from `SOC_DATA_KEY` - so the
+Recording stage needs no extra secret in production. Each recorded connector writes `<folder>/<connector>.json` in
+the fixture format, sanitised as it is written: request headers and any token / secret / password / key field are
+never recorded; people, accounts and machines become stable pseudonyms (keyed with the salt - not reversible); the
+client's own domains and the host names under them are pseudonymised wherever they appear; internal IPs map into
+10.250.0.0/16 and public ones into 198.18.0.0/15; ids keep their shape; free text becomes `[text, N chars]`. Vendor
+vocabulary (severities, categories, states), timestamps, counts, file hashes and external (attacker) domains are
+kept: they are what tests need. `_scan.json` lists anything still looking like an e-mail address or IP - review it,
+and the files, before a recording leaves the client. `SOC_RECORD_MAX_CALLS` (default 200) caps each file. Unset the
+folder when done.
 
 ## Monitoring
 
@@ -219,7 +288,13 @@ survives restarts. `SOC_KILL_SWITCH=1` forces it on from configuration.
 * `SOC_DATA_KEY` (Fernet; comma-separated for rotation, first encrypts) encrypts raw payloads and reported
   emails, generated reports and evidence packs at rest; mandatory in prod. Rotate: prepend a new key, keep the old one until retention has cycled.
 * Retention: `SOC_RAW_RETENTION_DAYS` (180), `SOC_LLM_LOG_RETENTION_DAYS` (180), `SOC_ACCESS_LOG_RETENTION_DAYS`
-  (400). Emails of open cases are kept (legal hold). The audit log is never pruned by the platform.
+  (400), `SOC_EVENT_RETENTION_DAYS` (400; 0 keeps everything). Emails of open cases are kept (legal hold). The audit
+  log is never pruned by the platform.
+* Event retention keeps the context store bounded at client volume: sign-ins, DNS, mail events, secret accesses and
+  elevations last seen longer ago than the setting are deleted with their keys, hints, relations and source records,
+  in batches of 500. An event a case, evidence, an insight or a resolution override refers to is kept; alerts,
+  findings, assets, people and indicators are never pruned. The retention run's report (`events`) and audit entry
+  say how many went; `dry_run` counts without deleting.
 * Audit export for archiving/SIEM: `GET /api/v1/audit/export` (JSON Lines with chain verification).
 * Compliance evidence pack: *Reports* → compliance (`POST /api/v1/reports/compliance`, auditor / lead / admin).
 
@@ -228,6 +303,54 @@ survives restarts. `SOC_KILL_SWITCH=1` forces it on from configuration.
 Back up the database (point-in-time), the raw payload volume and the report volume. The audit chain can be
 verified after restore with `GET /api/v1/audit/verify`.
 
-## Connector changes
+## Connecting and changing tools
 
-See [CONNECTORS.md](CONNECTORS.md). Changing a tool = enabling another connector in `config/connectors.yaml`.
+The configuration in force is `config/connectors.yaml` (deployed with the platform) **plus** the approved console
+changes layered on top. Admins change tools on **Integrations**, without editing files or restarting:
+
+| Step | Who | What happens |
+|---|---|---|
+| 1. Secrets | platform engineer | Put the tool's secrets in the vault (`<NAME>_FILE`) or environment under the names *Configure* shows (convention `<CONNECTOR>_<SETTING>`, e.g. `CROWDSTRIKE_CLIENT_SECRET`). The console never asks for, stores or shows a secret: it shows *set / not set* and when the vault file last changed. |
+| 2. Configure | `automation_admin` or `admin` (manage_connectors) | Non-secret settings (URLs, tenant ids, mailbox, field mappings...), the **stage**, on/off, and a note for the approver. Every value is checked (URL, true/false, number, one of a list, JSON mapping); a misspelled setting gets "did you mean ...?". |
+| 3. Preflight | automatic | Proposing a live stage, switching a live tool on, or changing a live tool's settings runs the preflight on the *proposed* configuration: configuration, start-up, sign-in, every stream (the permission it needs, parsing, how fresh the newest record is, expected volume) and the write permissions actions will need. Errors refuse the proposal and show what to fix; warnings go to the approver. |
+| 4. Approve | `lead` (approve_policy, MFA), never the proposer | The approval re-checks the configuration and that the preflight still matches it (same settings, same secrets present, less than 7 days old). A proposal made before another change was approved must be proposed again. |
+| 5. In force | - | The approving process applies it at once; every other API process and the scheduler within `SOC_CONFIG_RELOAD_SECONDS` (default 5). No restart. |
+
+**Stages** (a tool moves forward one at a time; each step is a proposal):
+
+| Stage | Reads | Actions |
+|---|---|---|
+| Fixtures (`fake`) | vendor-shaped sample data | under the automation policy (demo) |
+| Recording (`record`) | live; responses also saved, sanitised, as fixtures | none (recommendations appear as manual steps) |
+| Read-only (`read`) | live | none (manual steps) |
+| Recommend (`recommend`) | live | offered, **never above L2**: a person approves every one, whatever the policy says |
+| Automate (`automate`) | live | follow the approved autonomy policy (default still L2) |
+
+The older `mode: fake | live` in the file still works (`live` = Automate).
+
+**Pause** (manage_connectors or kill_switch) switches one tool off **at once**, with a reason, audited - for a tool that
+misbehaves. Switching it back on is a normal proposal. Everything a paused, misconfigured or read-only tool would have
+done becomes a manual recommendation; approving an action whose tool is no longer able to act is refused with that
+reason.
+
+**Organisation lists**: the key **suppliers** (vendor e-mail compromise) and the **sanctioned services** (shadow
+IT) are edited on the same screen (*Suppliers & sanctioned services*) and approved the same way; an approved list
+replaces `config/suppliers.yaml` / `config/sanctioned_services.yaml` everywhere (phishing, supplier risk, shadow IT,
+reports), and proposing it empty-handed (`null` through the API) gives the file's list back. Domains are checked.
+
+**History**: every version is kept (who proposed, who approved, what changed). *Restore* proposes an earlier version
+(approved like any change). **Export** gives the configuration in force as one YAML file (secrets only as `${VAR}`
+references) for review, a staging copy or disaster recovery; **Import** proposes such a file as one change (tools
+absent from it are switched off).
+
+**One broken tool never stops the others**: a connector with a missing secret, an invalid entry, a constructor that
+fails or a module that does not import is left out of every workflow, with the reason on Integrations; the rest keep
+working.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `SOC_CONNECTORS_CONFIG` | `config/connectors.yaml` | The file layer |
+| `SOC_CONFIG_RELOAD_SECONDS` | 5 | How often each process re-reads which console version is in force |
+| `SOC_CONNECTOR_MODE` | fake | Mode of a tool listed without `stage` / `mode` |
+
+See [CONNECTORS.md](CONNECTORS.md) for each tool's settings and permissions, and ENGINEERING.md §5.5 for adding one.

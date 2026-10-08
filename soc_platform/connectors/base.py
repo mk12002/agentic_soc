@@ -14,6 +14,9 @@ reconciliation counts. Replacing a tool is a connector swap, not a redesign.
 
 from __future__ import annotations
 
+import logging
+import os
+import queue
 import random
 import threading
 import time
@@ -33,6 +36,20 @@ T = TypeVar("T")
 
 
 MAX_RETRY_AFTER = 120.0   # seconds; a longer Retry-After is capped (the call is retried, then given up)
+log = logging.getLogger(__name__)
+
+
+def max_pages_per_sync() -> int:
+    """Pages one stream may read in one sync (SOC_SYNC_MAX_PAGES). A backlog beyond it is not dropped: the stream
+    keeps its continuation point and the next sync goes on from there (the report says ``truncated``)."""
+    try:
+        return max(1, int(os.environ.get("SOC_SYNC_MAX_PAGES", "1000")))
+    except ValueError:
+        return 1000
+
+
+PAGE_BUFFER = 8   # pages downloaded ahead of ingestion per stream (sync_many): bounded, so memory stays flat
+SYSTEMATIC_FAILURES = 20   # identical consecutive record failures that mean a systematic fault (stop retrying each)
 
 
 class ConnectorError(Exception):
@@ -47,6 +64,14 @@ class RateLimited(ConnectorError):
 
 class TransientError(ConnectorError):
     pass
+
+
+class AuthExpired(ConnectorError):
+    """401: the token was refused (expired, revoked or rotated early). The connector re-authenticates once."""
+
+
+class PermissionDenied(ConnectorError):
+    """403: authenticated, but the identity lacks a permission. Never retried; reported with the scopes needed."""
 
 
 class TokenBucket:
@@ -75,8 +100,13 @@ class TokenBucket:
             time.sleep(min(wait, 1.0))
 
 
+def _sleep(seconds: float) -> None:
+    """Back-off wait (module level, so a test of a long outage can make it instant)."""
+    time.sleep(seconds)
+
+
 def with_backoff(fn: Callable[[], T], *, retries: int = 5, base: float = 0.5, cap: float = 30.0,
-                 sleep: Callable[[float], None] = time.sleep) -> T:
+                 sleep: Callable[[float], None] | None = None) -> T:
     """Retry transient/rate-limit errors with exponential backoff and jitter."""
     attempt = 0
     while True:
@@ -85,12 +115,15 @@ def with_backoff(fn: Callable[[], T], *, retries: int = 5, base: float = 0.5, ca
         except RateLimited as exc:
             # honour the vendor's Retry-After, but never let one answer stall a job indefinitely
             delay = min(exc.retry_after, MAX_RETRY_AFTER) if exc.retry_after is not None else min(cap, base * 2 ** attempt)
-        except TransientError:
+            last: Exception = exc
+        except TransientError as exc:
             delay = min(cap, base * 2 ** attempt) * (0.5 + random.random() / 2)
+            last = exc
         attempt += 1
         if attempt > retries:
-            raise ConnectorError(f"gave up after {retries} retries")
-        sleep(delay)
+            # keep the cause: "CERTIFICATE_VERIFY_FAILED" (TLS inspection), a DNS failure or a 503 need different fixes
+            raise ConnectorError(f"gave up after {retries} retries: {type(last).__name__}: {str(last)[:300]}") from last
+        (sleep or _sleep)(delay)
 
 
 @dataclass
@@ -99,6 +132,10 @@ class Page:
     next_cursor: str | None
     source_total: int | None = None  # tool-reported total, for reconciliation where available
     has_more: bool | None = None  # defaults to "next_cursor is not None"
+    # The stream is complete and ``next_cursor`` is where the NEXT sync starts: a time watermark, or None to read the
+    # stream from the beginning. Without it the last page's continuation token was kept as the resume point, so the
+    # next sync re-read the last page (or failed: Graph skip tokens and Jira page tokens expire).
+    reset: bool = False
 
     @property
     def more(self) -> bool:
@@ -147,10 +184,18 @@ class BaseConnector(ABC):
         return LookupResult(self.tool, self.dimension, False, error=f"{self.tool} has no {entity_type} lookup")
 
     def call(self, fn: Callable[[], T]) -> T:
-        """Wrap an outbound API call with the rate-limit budget and backoff."""
+        """Wrap an outbound API call with the rate-limit budget and backoff. A refused token (401) is renewed once and
+        the call repeated - in fake mode too, so the path is the one a live tenant takes."""
         if not self.budget.acquire():
             raise RateLimited()
-        return with_backoff(fn)
+        try:
+            return with_backoff(fn)
+        except AuthExpired:
+            reauth = getattr(getattr(self, "http", None), "reauthenticate", None)
+            if reauth is None:
+                raise
+            reauth()
+            return with_backoff(fn)
 
     def describe(self) -> dict[str, Any]:
         return {"name": self.name, "tool": self.tool, "dimension": self.dimension, "streams": list(self.streams),
@@ -169,6 +214,7 @@ class SyncReport:
     errors: list[str] = field(default_factory=list)
     cursor: str | None = None
     source_total: int | None = None
+    truncated: bool = False   # page limit reached with more to read: the next sync continues
 
     @property
     def reconciled(self) -> bool:
@@ -179,9 +225,14 @@ class SyncReport:
 class SyncRunner:
     """Incremental pull with checkpointing, resumable backfill and reconciliation (VM-T02)."""
 
-    def __init__(self, session: Session, store: ContextStore) -> None:
+    def __init__(self, session: Session, store: ContextStore, *, commit_pages: bool = True) -> None:
         self.s = session
         self.store = store
+        # Commit after every page: an interrupted backfill then resumes from its last page instead of rolling back to
+        # the start (the checkpoint used to be only flushed, so a failure at page 500 lost all 500), and a long sync
+        # never holds one database transaction open - which on PostgreSQL ran out of lock memory on large streams and
+        # on SQLite blocked every other writer (scheduler heartbeat, API) for the whole sync.
+        self.commit_pages = commit_pages
 
     def _checkpoint(self, connector: BaseConnector, stream: str) -> ConnectorCheckpoint:
         cp = self.s.get(ConnectorCheckpoint, (connector.name, stream))
@@ -202,34 +253,33 @@ class SyncRunner:
                 return
 
     def sync(self, connector: BaseConnector, stream: str, *, full_backfill: bool = False,
-             max_pages: int = 1000, pages: Iterator[Page] | None = None) -> SyncReport:
+             max_pages: int | None = None, pages: Iterator[Page] | None = None) -> SyncReport:
+        max_pages = max_pages or max_pages_per_sync()
         cp = self._checkpoint(connector, stream)
         cursor = None if full_backfill else cp.cursor
         report = SyncReport(connector.name, stream)
         cp.last_attempt_at = utcnow()
+        last: Page | None = None
         try:
             for page in (pages if pages is not None else self._pages(connector, stream, cursor, max_pages)):
+                last = page
                 report.pages += 1
                 report.source_records += len(page.records)
                 if page.source_total is not None:
                     report.source_total = page.source_total
-                for raw in page.records:
-                    try:
-                        with self.s.begin_nested():
-                            for rec in connector.normalize(stream, raw):
-                                if rec.raw is None:
-                                    rec.raw = raw
-                                self.store.ingest(rec)
-                        report.ingested += 1
-                    except Exception as exc:  # one bad record must not stop the stream
-                        report.failed += 1
-                        report.errors.append(f"{type(exc).__name__}: {exc}"[:300])
+                self._ingest_page(connector, stream, page, report)
                 # Checkpoint after every page so an interrupted backfill resumes, not restarts.
-                cursor = page.next_cursor or cursor
+                cursor = page.next_cursor if page.reset else (page.next_cursor or cursor)
                 cp.cursor = cursor
                 self.s.flush()
+                if self.commit_pages and not self.s.in_nested_transaction():
+                    self.s.commit()
             cp.last_success_at = utcnow()
             cp.last_error = None
+            if last is not None and last.more and report.pages >= max_pages:
+                report.truncated = True
+                log.warning("%s.%s: page limit (%d) reached with more to read; the next sync continues",
+                            connector.name, stream, max_pages)
         except Exception as exc:
             cp.last_error = f"{type(exc).__name__}: {exc}"[:1000]
             report.errors.append(cp.last_error)
@@ -239,16 +289,66 @@ class SyncRunner:
         report.cursor = cursor
         return report
 
+    def _ingest_page(self, connector: BaseConnector, stream: str, page: Page, report: SyncReport) -> None:
+        """Normalise every record, then store the page in ONE savepoint. Only if that fails is the page replayed record
+        by record, each in its own savepoint, so one bad record is still isolated. (A savepoint per record is a
+        PostgreSQL subtransaction holding a lock until the transaction ends: thousands of them exhausted the lock
+        table - "out of shared memory" - on a large stream.)"""
+        ready: list[tuple[dict[str, Any], list[NormalizedRecord]]] = []
+        for raw in page.records:
+            try:
+                ready.append((raw, list(connector.normalize(stream, raw))))
+            except Exception as exc:  # one bad record must not stop the stream
+                report.failed += 1
+                report.errors.append(f"{type(exc).__name__}: {exc}"[:300])
+
+        def store(raw: dict[str, Any], recs: list[NormalizedRecord]) -> None:
+            for rec in recs:
+                if rec.raw is None:
+                    rec.raw = raw
+                self.store.ingest(rec)
+
+        try:
+            with self.s.begin_nested():
+                for raw, recs in ready:
+                    store(raw, recs)
+            report.ingested += len(ready)
+            return
+        except Exception as exc:  # replayed below record by record; each failing record is reported there
+            log.info("%s.%s: page not storable in one step (%s: %s); storing record by record",
+                     connector.name, stream, type(exc).__name__, str(exc)[:200])
+        same, last_error = 0, ""
+        for i, (raw, recs) in enumerate(ready):
+            try:
+                with self.s.begin_nested():
+                    store(raw, recs)
+                report.ingested += 1
+                same = 0
+            except Exception as exc:  # one bad record must not stop the stream
+                report.failed += 1
+                err = f"{type(exc).__name__}: {exc}"[:300]
+                report.errors.append(err)
+                same = same + 1 if err.split(":")[0] == last_error.split(":")[0] else 1
+                last_error = err
+                if same >= SYSTEMATIC_FAILURES:
+                    # every record fails the same way: a systematic fault, not a bad record. Stop opening a
+                    # savepoint per record (on PostgreSQL each one holds a lock until commit; 14,000 of them ran
+                    # the lock table out) and report the rest of the page as failed with that error.
+                    rest = len(ready) - i - 1
+                    report.failed += rest
+                    log.error("%s.%s: %d records in a row failed (%s); %d more not attempted", connector.name,
+                              stream, same, err, rest)
+                    return
+
     def sync_many(self, items: list[tuple[BaseConnector, str]], *, full_backfill: bool = False,
-                  max_pages: int = 1000, workers: int = 8) -> list[SyncReport]:
+                  max_pages: int | None = None, workers: int = 8) -> list[SyncReport]:
         """Sync several (connector, stream) pairs: every stream downloads at once, while its pages are ingested here,
         stream by stream and page by page, in the order given - the same result as calling ``sync`` for each in
         turn, in about the time of the slowest stream instead of the sum of all of them.
 
         Only the network half runs in threads (each connector's rate budget still applies). Ingestion stays on this
         thread and this session, which are not shared."""
-        import queue
-
+        max_pages = max_pages or max_pages_per_sync()
         done = object()
         feeds: list[queue.Queue] = []
         pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(items))))
@@ -263,23 +363,38 @@ class SyncRunner:
 
         for connector, stream in items:
             cp = self._checkpoint(connector, stream)
-            feed: queue.Queue = queue.Queue()
+            # bounded: a fast download waits for ingestion instead of holding a whole large stream in memory
+            feed: queue.Queue = queue.Queue(maxsize=PAGE_BUFFER)
             feeds.append(feed)
             pool.submit(fetch, connector, stream, None if full_backfill else cp.cursor, feed)
+
+        finished: set[int] = set()
 
         def drain(feed: queue.Queue) -> Iterator[Page]:
             while True:
                 item = feed.get()
                 if item is done:
+                    finished.add(id(feed))
                     return
                 if isinstance(item, BaseException):
                     raise item
                 yield item
 
+        def discard(feed: queue.Queue) -> None:
+            """Pages ingestion did not take (it stopped early): read them off so the download can finish."""
+            while id(feed) not in finished:
+                if feed.get() is done:
+                    finished.add(id(feed))
+
         try:
-            return [self.sync(c, st, full_backfill=full_backfill, max_pages=max_pages, pages=drain(feed))
-                    for (c, st), feed in zip(items, feeds, strict=True)]
+            reports = []
+            for (c, st), feed in zip(items, feeds, strict=True):
+                reports.append(self.sync(c, st, full_backfill=full_backfill, max_pages=max_pages, pages=drain(feed)))
+                discard(feed)
+            return reports
         finally:
+            for feed in feeds:                  # an unexpected error above: unblock every download before waiting
+                discard(feed)
             pool.shutdown(wait=True)
 
 

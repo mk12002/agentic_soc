@@ -11,7 +11,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import ApiKeyQuery, HttpTransport
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
+from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, need, ok_lookup, parse_ts
 from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -39,7 +39,7 @@ class CanaryConnector(ToolConnector):
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         if stream == "devices":
-            return [NormalizedRecord(kind="asset", tool=self.tool, source_type="canary_device", source_id=raw["id"],
+            return [NormalizedRecord(kind="asset", tool=self.tool, source_type="canary_device", source_id=need(raw, "id"),
                                      keys={"canary_device_id": raw["id"]}, dimension="deception",
                                      attributes={"hostname": raw.get("name"), "ip": raw.get("ip_address"),
                                                  "deception": True, "location": raw.get("location")})]

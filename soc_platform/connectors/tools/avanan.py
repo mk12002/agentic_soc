@@ -21,7 +21,7 @@ import httpx
 from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.http import Auth, HttpTransport
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts, sev_name
+from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, need, ok_lookup, parse_ts, sev_name
 from soc_platform.core.models import utcnow
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -107,7 +107,7 @@ class AvananConnector(ToolConnector):
         for r in p.get("recipients") or []:
             refs.append(EntityRef(kind="identity", role="recipient", keys={"upn": r.lower()}))
         return [NormalizedRecord(
-            kind="mail_event", tool=self.tool, source_type="security_event", source_id=e["eventId"],
+            kind="mail_event", tool=self.tool, source_type="security_event", source_id=need(e, "eventId"),
             observed_at=parse_ts(e.get("eventCreated")), title=e.get("description") or f"Avanan {e.get('type')}",
             severity=HEC_SEVERITY.get(str(e.get("severity")), sev_name(e.get("severity"))), dimension="email",
             refs=refs,
@@ -181,10 +181,13 @@ MANIFEST = ConnectorManifest(
     name="avanan", tool="Avanan (Check Point Harmony Email)", vendor="Check Point", category="email", dimension="email",
     description="Security events, per-message verdicts and actions for reconciliation; quarantine/restore.",
     factory=lambda s, t: AvananConnector(s, t, rate_per_sec=2, burst=4), live_transport=_live,
-    config=[ConfigField("api_url", "Smart API gateway URL (region specific)", required=False),
+    config=[ConfigField("api_url", "Smart API gateway URL (region specific)", required=False, kind="url"),
             ConfigField("client_id", "Infinity Portal API client id", secret=True),
             ConfigField("access_key", "API access key", secret=True),
-            ConfigField("fallback", "shared_mailbox | export if the API is not licensed", required=False)],
+            ConfigField("fallback", "shared_mailbox | export if the API is not licensed", required=False,
+                        kind="choice", choices=("shared_mailbox", "export")),
+            ConfigField("sync_from", "First sync starts here (ISO time; default 2026-01-01T00:00:00Z)",
+                        required=False)],
     actions=_actions, confidence="Low-Medium",
     to_confirm="API availability and scope under current licence (fallbacks: journaling, shared mailbox, export)",
     focus_areas=("phishing",),

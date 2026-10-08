@@ -101,7 +101,8 @@ class PhishingService:
         ti = registry.get("threat_intel") if "threat_intel" in registry.enabled_names() else None
         from soc_platform.domains.phishing.supplier import load_suppliers
 
-        partners = [d for sup in load_suppliers() for d in sup.domains]
+        partners = [d for sup in load_suppliers(override=(getattr(registry, "lists", None) or {}).get("suppliers"))
+                    for d in sup.domains]
         heuristic = HeuristicAnalyzer(org_domains=self.org_domains, threat_intel=ti, partner_domains=partners)
         self.analyzer = CompositeAnalyzer(heuristic, EngineAnalyzer() if use_engine else None)
         self.auto_close = auto_close or AutoClosePolicy()
@@ -135,25 +136,57 @@ class PhishingService:
         return sub
 
     def ingest_reported(self) -> list[Submission]:
-        """Pull user-reported messages from the SOC reporting mailbox (Defender user-reported settings)."""
+        """Pull user-reported messages from the SOC reporting mailbox (Defender user-reported settings).
+
+        Resumes from where the last run stopped (the stream's checkpoint: the newest message seen, minus the
+        overlap for late delivery) - it used to read the inbox from its oldest message every run, at most 5,000, so
+        once the mailbox held more, new reports were never reached. A mailbox outage is recorded on the checkpoint
+        (Integrations screen) and the run returns no new reports instead of failing the job; one message that cannot
+        be fetched (deleted or moved meanwhile) is skipped and tried again next run, without blocking the others."""
+        from soc_platform.connectors.base import ConnectorError
+        from soc_platform.core.models import ConnectorCheckpoint
+
         mdo = self.registry.get("defender_office365") if "defender_office365" in self.registry.enabled_names() else None
         if mdo is None:
             return []
-        subs, cursor = [], None
-        for _ in range(100):
-            page = mdo.fetch_page("reported_messages", cursor)
-            for rep in page.records:
-                if self.s.execute(select(Submission.id).where(Submission.source_ref == f"mdo:{rep['id']}")).first():
-                    continue            # already ingested: don't re-download the message, don't return it again
-                raw, _att = mdo.original_mime(rep["id"])
-                if not raw:
-                    continue
-                reporter = ((rep.get("from") or {}).get("emailAddress") or {}).get("address")
-                subs.append(self.submit_raw(raw, source="defender_office365", source_ref=f"mdo:{rep['id']}",
-                                            reporter=reporter))
-            if not page.more:
-                break
-            cursor = page.next_cursor
+        key = ("defender_office365", "reported_messages")
+        cp = self.s.get(ConnectorCheckpoint, key)
+        if cp is None:
+            cp = ConnectorCheckpoint(connector=key[0], stream=key[1])
+            self.s.add(cp)
+            self.s.flush()
+        cp.last_attempt_at = utcnow()
+        subs: list[Submission] = []
+        cursor, skipped = cp.cursor, 0
+        try:
+            for _ in range(100):
+                page = mdo.fetch_page("reported_messages", cursor)
+                for rep in page.records:
+                    rid = rep.get("id")
+                    if not rid or self.s.execute(select(Submission.id).where(Submission.source_ref == f"mdo:{rid}")).first():
+                        continue        # already ingested: don't re-download the message, don't return it again
+                    try:
+                        raw, _att = mdo.original_mime(rid)
+                    except ConnectorError as exc:
+                        skipped += 1
+                        logging.getLogger(__name__).warning("reporting mailbox: message %s not readable now (%s); retried next run", rid, exc)
+                        continue
+                    if not raw:
+                        continue
+                    reporter = ((rep.get("from") or {}).get("emailAddress") or {}).get("address")
+                    subs.append(self.submit_raw(raw, source="defender_office365", source_ref=f"mdo:{rid}",
+                                                reporter=reporter))
+                cursor = page.next_cursor if page.reset else (page.next_cursor or cursor)
+                if not page.more:
+                    break
+            # a skipped message must be met again: keep the old position until every message of the run was read
+            if not skipped:
+                cp.cursor = cursor
+            cp.last_success_at, cp.last_error = utcnow(), None
+        except ConnectorError as exc:
+            cp.last_error = f"{type(exc).__name__}: {exc}"[:1000]
+            logging.getLogger(__name__).warning("reporting mailbox unavailable (%s); no new reports this run", exc)
+        self.s.flush()
         return subs
 
     # ------------------------------------------------------------------ full pipeline

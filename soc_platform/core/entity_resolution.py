@@ -16,6 +16,7 @@ than duplicates); likely matches are queued for an analyst.
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -23,7 +24,7 @@ from typing import Any
 
 from rapidfuzz import fuzz
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.auth import Perm, Principal
@@ -128,6 +129,8 @@ def hints_for(kind: str, attrs: dict[str, Any]) -> dict[str, list[str]]:
         if attrs.get("fqdn"):
             h["fqdn"] = [norm_fqdn(attrs["fqdn"])]
             h.setdefault("hostname", []).append(norm_hostname(attrs["fqdn"]))
+        # the name without separators: "web-01", "web01" and "WEB_01" meet on one indexed, exact (collation-proof) value
+        h["hostname_sq"] = [re.sub(r"[^a-z0-9]", "", n) for n in h.get("hostname", []) if not _is_ip(n)]
         ips = attrs.get("ips") or ([attrs["ip"]] if attrs.get("ip") else [])
         h["ip"] = [str(i) for i in ips if i and _is_ip(str(i))]
     elif kind == "identity":
@@ -224,11 +227,22 @@ class ResolutionResult:
 AUTHORITATIVE_KEYS = {"entra_object_id", "serial_number", "cloud_resource_id", "crowdstrike_aid", "mde_device_id"}
 
 
+def auto_threshold_setting(default: float = 0.85) -> float:
+    """SOC_RESOLUTION_AUTO_THRESHOLD: the score at which a weak-hint match merges without review. Lowering it to 0.75
+    lets "same unique hostname and OS, nothing else" merge (fewer review items in a large estate, more risk of joining
+    two machines that share a name): decide it on the shadow-mode review results, never below the review threshold."""
+    try:
+        v = float(os.environ.get("SOC_RESOLUTION_AUTO_THRESHOLD", default))
+    except ValueError:
+        return default
+    return min(1.0, max(0.6, v))
+
+
 class EntityResolver:
-    def __init__(self, session: Session, *, auto_threshold: float = 0.85, review_threshold: float = 0.55,
+    def __init__(self, session: Session, *, auto_threshold: float | None = None, review_threshold: float = 0.55,
                  margin: float = 0.1, ip_window: timedelta = timedelta(days=3)) -> None:
         self.s = session
-        self.auto_threshold = auto_threshold
+        self.auto_threshold = auto_threshold if auto_threshold is not None else auto_threshold_setting()
         self.review_threshold = review_threshold
         self.margin = margin
         self.ip_window = ip_window
@@ -306,6 +320,11 @@ class EntityResolver:
             exact = [c for c in cands if c.exact]
             if reference and len(exact) == 1 and exact[0].score >= 0.45 and                     (len(cands) == 1 or exact[0].score - cands[1].score >= self.margin or cands[0] is exact[0]):
                 return ResolutionResult("matched", exact[0].entity_id, "reference_link", exact[0].score, cands[:5])
+            # Two machines may carry one name (it happens in real fleets); an event that names one of them AND comes
+            # from its current IP is attached to that one - it links an event, it never merges entities. Without this
+            # every DNS query from such a host became an analyst review item.
+            if reference and best.exact and best.score >= 0.45 and "ip match within window" in best.reasons                     and best.score - second >= self.margin:
+                return ResolutionResult("matched", best.entity_id, "reference_link", best.score, cands[:5])
             if best.score >= self.review_threshold:
                 return ResolutionResult("unresolved", None, "ambiguous", best.score, cands[:5])
         return ResolutionResult("created", None, "new", 1.0 if nkeys else 0.7)
@@ -349,35 +368,79 @@ class EntityResolver:
                 return True
         return False
 
+    NEAR_NAMES = 100        # lexicographic neighbours read on each side of a hostname (near-miss search)
+    IP_CANDIDATES = 50      # entities sharing an IP that are considered (most recently seen first)
+
     def _fuzzy_candidates(self, kind: str, obs_hints: dict[str, list[str]], attrs: dict[str, Any],
                           observed_at: datetime, nkeys: dict[str, str]) -> list[Candidate]:
+        """Candidates for a weak-hint match, retrieved so the cost per record stays flat as the estate grows.
+
+        Only candidates that can score are loaded: an IP counts only within the IP window, so IP candidates are the
+        entities seen in that window (a NAT / VPN / DHCP address shared by thousands of records no longer loads all
+        of them); a near-miss hostname counts only at similarity >= 0.9, so the lexicographic neighbours under the
+        same prefix and length are screened by name before any entity is loaded (a fleet sharing a naming prefix,
+        "LAPTOP-..." or a site code, used to load 50 arbitrary hosts - in no fixed order - for every record). The
+        survivors' keys, hints and entities are read in three queries, not three per candidate."""
         if not obs_hints:
             return []
-        pairs = [(n, v) for n, vals in obs_hints.items() for v in vals]
-        rows = self.s.execute(
-            select(EntityHint.entity_id).where(
-                EntityHint.kind == kind,
-                or_(*[and_(EntityHint.hint_name == n, EntityHint.hint_value == v) for n, v in pairs]),
-            ).distinct()
-        ).scalars().all()
-        # Near-miss hostnames (e.g. "web01" vs "web-01") via prefix scan on the short name.
+        ids: list[str] = []
+        pairs = [(n, v) for n, vals in obs_hints.items() for v in vals if not (kind == "asset" and n == "ip")]
+        if pairs:
+            ids += self.s.execute(
+                select(EntityHint.entity_id).where(
+                    EntityHint.kind == kind,
+                    or_(*[and_(EntityHint.hint_name == n, EntityHint.hint_value == v) for n, v in pairs]),
+                ).distinct().order_by(EntityHint.entity_id)
+            ).scalars().all()
+        if kind == "asset" and obs_hints.get("ip"):
+            # last_seen is selected too: PostgreSQL requires DISTINCT ... ORDER BY columns in the select list
+            q = select(EntityHint.entity_id, Entity.last_seen).join(Entity, Entity.id == EntityHint.entity_id).where(
+                EntityHint.kind == kind, EntityHint.hint_name == "ip", EntityHint.hint_value.in_(obs_hints["ip"]))
+            if obs_hints.get("hostname") or obs_hints.get("fqdn") or set(nkeys) & CROSS_TOOL_KEYS:
+                # with a name, an IP only scores inside the window: older holders of the address cannot matter
+                at = _aware(observed_at)
+                q = q.where(Entity.last_seen >= at - self.ip_window, Entity.last_seen <= at + self.ip_window)
+            # (an IP-only record goes to review if anyone ever held the address, so then every holder counts)
+            ids += [eid for eid, _ in self.s.execute(q.distinct().order_by(Entity.last_seen.desc(), EntityHint.entity_id)
+                                                     .limit(self.IP_CANDIDATES)).all()]
         for h in obs_hints.get("hostname", [])[:3]:
-            if len(h) >= 4:
-                rows += self.s.execute(
-                    select(EntityHint.entity_id).where(EntityHint.kind == kind, EntityHint.hint_name == "hostname",
-                                                       EntityHint.hint_value.like(f"{h[:4]}%")).distinct().limit(50)
-                ).scalars().all()
-        out: list[Candidate] = []
-        for eid in dict.fromkeys(rows):
-            if nkeys and self._conflicts(eid, nkeys):
+            if len(h) < 4:
                 continue
-            ent = self.s.get(Entity, eid)
+            # a bounded range on the indexed value (names sharing the 4-character prefix), read outwards from h: a LIKE
+            # filter cannot use the index, and once walked to the end of the whole hint table for every record
+            lo, hi = h[:4], h[:3] + chr(ord(h[3]) + 1)
+            near = and_(EntityHint.kind == kind, EntityHint.hint_name == "hostname",
+                        func.length(EntityHint.hint_value).between(int(len(h) * 0.8), int(len(h) * 1.25) + 1))
+            rows = [*self.s.execute(select(EntityHint.entity_id, EntityHint.hint_value).where(
+                        near, EntityHint.hint_value >= h, EntityHint.hint_value < hi)
+                        .order_by(EntityHint.hint_value).limit(self.NEAR_NAMES)).all(),
+                    *self.s.execute(select(EntityHint.entity_id, EntityHint.hint_value).where(
+                        near, EntityHint.hint_value >= lo, EntityHint.hint_value < h)
+                        .order_by(EntityHint.hint_value.desc()).limit(self.NEAR_NAMES)).all()]
+            ids += [eid for eid, v in rows if fuzz.ratio(h, v) / 100.0 >= 0.9]
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return []
+        keys_of: dict[str, dict[str, set[str]]] = {}
+        hints_of: dict[str, dict[str, set[str]]] = {}
+        for chunk in (ids[i:i + 500] for i in range(0, len(ids), 500)):
+            for eid, k, v in self.s.execute(select(EntityKey.entity_id, EntityKey.key_name, EntityKey.key_value)
+                                            .where(EntityKey.entity_id.in_(chunk))).all():
+                keys_of.setdefault(eid, {}).setdefault(k, set()).add(v)
+            for eid, n, v in self.s.execute(select(EntityHint.entity_id, EntityHint.hint_name, EntityHint.hint_value)
+                                            .where(EntityHint.entity_id.in_(chunk))).all():
+                hints_of.setdefault(eid, {}).setdefault(n, set()).add(v)
+        entities = {e.id: e for chunk in (ids[i:i + 500] for i in range(0, len(ids), 500))
+                    for e in self.s.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()}
+        out: list[Candidate] = []
+        for eid in ids:
+            have = keys_of.get(eid, {})
+            if nkeys and any(k in nkeys and k in have and nkeys[k] not in have[k] for k in CONFLICT_KEYS):
+                continue
+            ent = entities.get(eid)
             if ent is None:
                 continue
-            ch: dict[str, set[str]] = {}
-            for n, v in self.s.execute(select(EntityHint.hint_name, EntityHint.hint_value)
-                                       .where(EntityHint.entity_id == eid)).all():
-                ch.setdefault(n, set()).add(v)
+            ch = hints_of.get(eid, {})
             if kind == "asset":
                 c = score_asset(obs_hints, attrs, observed_at, ent, ch, self.ip_window)
                 provisional = not ch.get("hostname") and not ch.get("fqdn")
@@ -437,20 +500,21 @@ class EntityResolver:
         ips = hints_for("asset", attrs).get("ip", [])
         if not ips or not (hints_for("asset", attrs).get("hostname") or hints_for("asset", attrs).get("fqdn")):
             return []
-        cands = set(self.s.execute(select(EntityHint.entity_id).where(
-            EntityHint.kind == "asset", EntityHint.hint_name == "ip", EntityHint.hint_value.in_(ips),
-            EntityHint.entity_id != entity.id)).scalars().all())
-        prov = []
-        for eid in cands:
-            names = self.s.execute(select(EntityHint.id).where(EntityHint.entity_id == eid, EntityHint.hint_name.in_(
-                ("hostname", "fqdn")))).first()
-            other = self.s.get(Entity, eid)
-            if names or other is None or abs(_aware(other.last_seen) - _aware(observed_at)) > self.ip_window:
-                continue
-            ok = self.s.execute(select(EntityKey.key_name).where(EntityKey.entity_id == eid,
-                                                                 EntityKey.key_name.in_(CROSS_TOOL_KEYS))).first()
-            if ok is None and not self._conflicts(entity.id, {k: v for k, v in self._keys(eid).items()}):
-                prov.append(eid)
+        # Only nameless records seen within the window, without a cross-tool key, can be absorbed: select exactly those
+        # (a NAT egress address is shared by the whole fleet, and checking every named host behind it one by one made
+        # each new host cost a query per host already known)
+        at = _aware(observed_at)
+        name_hint = aliased(EntityHint)
+        named = select(name_hint.id).where(name_hint.entity_id == Entity.id,
+                                           name_hint.hint_name.in_(("hostname", "fqdn"))).correlate(Entity)
+        keyed = select(EntityKey.id).where(EntityKey.entity_id == Entity.id,
+                                           EntityKey.key_name.in_(CROSS_TOOL_KEYS)).correlate(Entity)
+        cands = self.s.execute(
+            select(Entity.id).join(EntityHint, EntityHint.entity_id == Entity.id).where(
+                EntityHint.kind == "asset", EntityHint.hint_name == "ip", EntityHint.hint_value.in_(ips),
+                Entity.id != entity.id, Entity.last_seen >= at - self.ip_window, Entity.last_seen <= at + self.ip_window,
+                ~named.exists(), ~keyed.exists()).distinct().order_by(Entity.id)).scalars().all()
+        prov = [eid for eid in cands if not self._conflicts(entity.id, dict(self._keys(eid).items()))]
         if len(prov) != 1:
             return []
         merge_entities(self.s, prov[0], entity.id, reason="named record at same IP upgraded a nameless record")

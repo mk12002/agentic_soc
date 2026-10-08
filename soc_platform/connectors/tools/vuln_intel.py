@@ -30,7 +30,9 @@ class NvdConnector(ToolConnector):
         vulns = body.get("vulnerabilities") or []
         total = int(body.get("totalResults", len(vulns)))
         nxt = start + len(vulns)
-        return Page(vulns, str(nxt), source_total=total, has_more=nxt < total)
+        if vulns and nxt < total:
+            return Page(vulns, str(nxt), source_total=total, has_more=True)
+        return Page(vulns, None, source_total=total, has_more=False, reset=True)
 
     def normalize(self, stream, raw):  # feed data is consumed via cve_detail(); nothing to store as entities
         return []
@@ -135,7 +137,9 @@ MANIFESTS = [
         factory=lambda s, t: NvdConnector(s, t, rate_per_sec=0.15 if not s.get("api_key") else 1.5, burst=5),
         live_transport=lambda s: HttpTransport("https://services.nvd.nist.gov",
                                                ApiKeyHeader("apiKey", s["api_key"]) if s.get("api_key") else NoAuth()),
-        config=[ConfigField("api_key", "Optional NVD API key (raises rate limit)", secret=True, required=False)],
+        config=[ConfigField("api_key", "Optional NVD API key (raises rate limit)", secret=True, required=False),
+                ConfigField("since", "Read CVEs modified since this ISO time (default: full catalogue pages)",
+                            required=False)],
         confidence="High", focus_areas=("vulnerability",)),
     ConnectorManifest(
         name="epss", tool="FIRST EPSS", vendor="FIRST", category="intel", dimension="threat_intel",

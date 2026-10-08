@@ -20,7 +20,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ok_lookup, parse_ts, sev_name
+from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, sev_name
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport, kql_list, kql_str
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -48,10 +48,12 @@ class DefenderOffice365Connector(MicrosoftConnector):
         if stream == "reported_messages":
             return self.odata_page(f"/v1.0/users/{self.mailbox}/mailFolders/inbox/messages", cursor,
                                    {"$top": 50, "$orderby": "receivedDateTime asc",
-                                    "$select": "id,subject,from,receivedDateTime,hasAttachments,internetMessageId"})
+                                    "$select": "id,subject,from,receivedDateTime,hasAttachments,internetMessageId"},
+                                   watermark="receivedDateTime")
         if stream == "email_alerts":
             return self.odata_page("/v1.0/security/alerts_v2", cursor,
-                                   {"$filter": "serviceSource eq 'microsoftDefenderForOffice365'", "$top": 100})
+                                   {"$filter": "serviceSource eq 'microsoftDefenderForOffice365'", "$top": 100},
+                                   watermark="lastUpdateDateTime")
         raise ValueError(stream)
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
@@ -77,7 +79,7 @@ class DefenderOffice365Connector(MicrosoftConnector):
     def _reported(self, m: dict[str, Any]) -> NormalizedRecord:
         reporter = ((m.get("from") or {}).get("emailAddress") or {}).get("address")
         return NormalizedRecord(
-            kind="email", tool=self.tool, source_type="user_reported", source_id=m["id"],
+            kind="email", tool=self.tool, source_type="user_reported", source_id=need(m, "id"),
             observed_at=parse_ts(m.get("receivedDateTime")), title=m.get("subject") or "(reported message)",
             dimension="email",
             refs=[EntityRef(kind="identity", role="reporter", keys={"upn": reporter})] if reporter else [],
@@ -112,7 +114,7 @@ class DefenderOffice365Connector(MicrosoftConnector):
                     refs.append(EntityRef(kind="identity", role="recipient",
                                           keys={"upn": ev["recipientEmailAddress"].lower()}))
         return NormalizedRecord(
-            kind="alert", tool=self.tool, source_type="alert_v2", source_id=a["id"],
+            kind="alert", tool=self.tool, source_type="alert_v2", source_id=need(a, "id"),
             observed_at=parse_ts(a.get("createdDateTime")), title=a.get("title", "Defender for Office 365 alert"),
             severity=sev_name(a.get("severity")), refs=refs, dimension="email",
             attributes={"category": a.get("category"), "status": a.get("status"),
@@ -325,7 +327,10 @@ MANIFEST = ConnectorManifest(
     description="User-reported mail, email alerts, message trace & campaign hunting, click telemetry, remediation.",
     factory=lambda s, t: DefenderOffice365Connector(s, t, rate_per_sec=2, burst=5),
     live_transport=_live,
-    config=APP_FIELDS + [ConfigField("reporting_mailbox", "Mailbox receiving user-reported messages / SOC mailbox")],
+    config=APP_FIELDS + [ConfigField("reporting_mailbox", "Mailbox receiving user-reported messages / SOC mailbox",
+                                     kind="email"),
+                         ConfigField("graph_base", "Microsoft Graph base (national clouds only)", required=False,
+                                     kind="url")],
     actions=_actions, confidence="High",
     to_confirm="Licence tier for advanced hunting and Safe Links click telemetry; Graph app permissions; "
                "Exchange app-access policy scoping the SOC mailbox",

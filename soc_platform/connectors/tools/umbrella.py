@@ -7,16 +7,18 @@ destination list via the Policies API.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from soc_platform.connectors.base import LookupResult, Page
+from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, ok_lookup, parse_ts
+from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, Watermark, ok_lookup, parse_ts
 from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 API = "https://api.umbrella.com"
+log = logging.getLogger(__name__)
 
 
 class UmbrellaConnector(ToolConnector):
@@ -29,11 +31,43 @@ class UmbrellaConnector(ToolConnector):
     write_scopes = ("policies.destinations:write",)
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
-        offset = int(cursor or 0)
-        body = self.get("/reports/v2/activity/dns", params={"from": self.settings.get("sync_from", "-1days"), "to": "now",
-                                                            "limit": 1000, "offset": offset})
+        # DNS activity is a moving window: resume from the newest event seen ("since:<time>", sent as epoch ms), not
+        # from an offset into yesterday's window. Within one sync the cursor is "<offset>|<from>".
+        off_s, _, frm = (cursor or "").partition("|")
+        wm = Watermark.of(self, "dns")
+        if not off_s.isdigit():
+            since = wm.start(cursor)
+            frm = str(int(parse_ts(since).timestamp() * 1000)) if since else str(self.settings.get("sync_from", "-1days"))
+            off_s = "0"
+        offset = int(off_s)
+        body = self.get("/reports/v2/activity/dns", params={"from": frm, "to": "now", "limit": 1000, "offset": offset,
+                                                            **self._sync_scope()})
         rows = body.get("data") or []
-        return Page(rows, str(offset + len(rows)), has_more=len(rows) == 1000)
+        wm.see(rows, "timestamp")
+        if len(rows) == 1000:
+            return Page(rows, f"{offset + len(rows)}|{frm}", has_more=True)
+        return Page(rows, wm.finish(), has_more=False, reset=True)
+
+    def _sync_scope(self) -> dict[str, str]:
+        """Which DNS activity the stream stores (setting ``dns_sync``).
+
+        ``security`` (default): only queries in Umbrella's security categories (malware, phishing, command and
+        control...), allowed or blocked - the only DNS events any analysis uses (control gaps, the risk signal). A
+        tenant makes tens of millions of DNS queries a day; storing each one would swamp ingestion and storage for
+        nothing, and "did anyone reach this site?" / shadow IT ask Umbrella live instead. ``all``: every query (small
+        tenants, demos). If the category list cannot be read, blocked queries only - never silently everything."""
+        if str(self.settings.get("dns_sync") or "security").lower() == "all":
+            return {}
+        if "_security_categories" not in self.__dict__:
+            try:
+                cats = self.get("/reports/v2/categories").get("data") or []
+                ids = sorted({str(c["id"]) for c in cats if c.get("type") == "security" and c.get("id") is not None},
+                             key=lambda x: (len(x), x))
+                self._security_categories = ",".join(ids) or None
+            except ConnectorError as exc:
+                log.warning("umbrella: category list not readable (%s); syncing blocked queries only", exc)
+                self._security_categories = None
+        return {"categories": self._security_categories} if self._security_categories else {"verdict": "blocked"}
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         ident = next((i for i in raw.get("identities") or [] if (i.get("type") or {}).get("type") in {"roaming", "anyconnect",
@@ -145,7 +179,10 @@ MANIFEST = ConnectorManifest(
     description="DNS/proxy activity (did the user reach the site?), categories, domain blocking via destination lists.",
     factory=lambda s, t: UmbrellaConnector(s, t, rate_per_sec=3, burst=6), live_transport=_live,
     config=[ConfigField("api_key", "Umbrella API key", secret=True), ConfigField("api_secret", "API secret", secret=True),
-            ConfigField("block_list_id", "Destination list id used for blocks", required=False)],
+            ConfigField("block_list_id", "Destination list id used for blocks", required=False),
+            ConfigField("dns_sync", "DNS activity stored: security (security categories only) or all",
+                        required=False, default="security", kind="choice", choices=("security", "all")),
+            ConfigField("sync_from", "First sync starts here (default -1days)", required=False)],
     actions=_actions, confidence="Medium-High", to_confirm="API key provisioning; reporting retention window",
     fake_settings={"block_list_id": "blk-soc-001"},
     focus_areas=("phishing", "incident"),
