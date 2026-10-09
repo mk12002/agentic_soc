@@ -330,6 +330,9 @@ class AuditRecord(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     prev_hash: Mapped[str] = mapped_column(String(64))
     hash: Mapped[str] = mapped_column(String(64), unique=True)
+    # the request or job run that caused it (core/observability.py). A navigation aid, outside the hash, so records
+    # written before it existed still verify.
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
 @event.listens_for(AuditRecord, "before_update")
@@ -363,6 +366,9 @@ class LLMCall(Base):
     actor: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)   # the person who asked; None = scheduled
     claims_kept: Mapped[int | None] = mapped_column(Integer, nullable=True)   # grounded answers: statements kept ...
     claims_dropped: Mapped[int | None] = mapped_column(Integer, nullable=True)  # ... and removed by the evidence check
+    guardrail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)   # what was removed, and why
+    max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)      # the answer cap sent with the call
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
 # --------------------------------------------------------------------------- connectors
@@ -487,6 +493,7 @@ class AccessLogRecord(Base):
     client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(BoundedText(256), nullable=True)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
 @event.listens_for(AccessLogRecord, "before_update")
@@ -527,3 +534,4 @@ class JobRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)   # every record the run caused

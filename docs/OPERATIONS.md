@@ -10,7 +10,7 @@
 | Create schema | `python -m soc_platform init-db` |
 | Demo on fixtures | `python -m soc_platform demo` |
 | Start a demo again from nothing | `python -m soc_platform reset-demo [--yes]` (server stopped; refuses in prod; demo databases only - the audit log goes too) |
-| Check the connector configuration | `python -m soc_platform config check [FILE] [--no-env]` - every problem with how to fix it; exit 1 on errors |
+| Check the settings and the connector configuration | `python -m soc_platform config check [FILE] [--no-env]` - every problem in the `SOC_*` settings and in the connector configuration, each with how to fix it; exit 1 on errors |
 | Check a tool before it goes live | `python -m soc_platform preflight NAME ... \| --all` (also the *Preflight* button on Integrations) |
 | Export / compare / import the configuration | `python -m soc_platform config export [--out F]`, `config diff F`, `config import F --by EMAIL` (import = a proposal approved in the console) |
 | Add a tool | `python -m soc_platform connector new NAME --category CAT --tool "Vendor Product"`, then `connector check NAME` |
@@ -18,6 +18,13 @@
 `serve` and `scheduler` refuse to start when `config/connectors.yaml` has errors (a misspelled tool, key or stage,
 broken YAML): those used to be ignored silently. A live tool whose secret is missing does *not* stop a start - it is
 isolated and shown on Integrations, and every other tool works.
+
+They also refuse to start when a `SOC_*` setting cannot be read - a word where a number belongs (`SOC_API_WORKERS=four`),
+a value out of range, an unknown choice (`SOC_ENVIRONMENT=production`), a malformed URL, JSON, CIDR, domain or key -
+and in production when sign-in is not Entra, step-up MFA is off or there is no encryption key. The message lists every
+problem with its fix; before, the first bad value stopped the start with a bare conversion error, and some were read
+only later, mid-request. A setting name the platform does not know is reported with the nearest real one
+(`SOC_RAW_RETENTON_DAYS` - did you mean `SOC_RAW_RETENTION_DAYS`?) instead of being ignored silently.
 
 Environment: see `.env.example`. Secrets are read from `<NAME>_FILE` (vault mount) or `<NAME>`.
 
@@ -192,6 +199,8 @@ PostgreSQL in production.
 | `SOC_DB_POOL_SIZE` / `SOC_DB_MAX_OVERFLOW` | 20 / 20 | Database connections per process (request threads, scheduler, access-log writer). PostgreSQL: keep `workers x (size + overflow)` under its `max_connections` |
 | `SOC_DB_POOL_TIMEOUT` | 10 | Seconds a request waits for a connection; then it answers **503** with `Retry-After` (not a hang, not a 500). A locked SQLite database or an unreachable database also answers 503 |
 | `SOC_DB_POOL_RECYCLE` | 1800 | Seconds before a connection is replaced. Connections are also checked before use, so a database restart or failover, or a firewall dropping idle connections, does not surface as errors |
+| `SOC_DB_STATEMENT_TIMEOUT_SECONDS` | 0 (no limit) | PostgreSQL: the longest one SQL statement may run before the database cancels it, so a runaway query releases its connection and locks instead of holding them. 120 is a sensible production value; keep 0 for a first backfill of a very large tenant |
+| `SOC_SHUTDOWN_GRACE_SECONDS` | 20 | On SIGTERM (a deploy, `docker stop`) requests in flight get this long to finish; the scheduler service finishes the job in hand. The server then writes its last access-log rows and stops. Keep it below the orchestrator's grace period (compose: `stop_grace_period: 30s`) |
 | `SOC_RISK_CACHE_SECONDS` | 300 | The user / host risk ranking (brief, Intelligence screen) is reused while the data it reads is unchanged - exact within a process, and this is the age limit for changes made by other processes. Ranking 22,000 entities took 9.4 s per request before; now 4.7 s once, then 20 ms |
 
 ## Connector sync and volume
@@ -201,12 +210,24 @@ PostgreSQL in production.
 | `SOC_WATERMARK_OVERLAP_MINUTES` (or a connector's `watermark_overlap_minutes` setting) | 30 | Event streams (sign-ins, audits, alerts, DNS, Sentinel incidents) resume from the newest change time seen, minus this overlap: logs are indexed minutes late, and asking exactly from the mark would lose them. Re-read records are de-duplicated. A time more than an hour in the future (a device with a wrong clock) never moves the mark |
 | `SOC_SYNC_MAX_PAGES` | 1000 | Pages one stream reads per sync. A larger backlog is not dropped: the stream keeps its place and the next sync continues (the sync report says `truncated`) |
 | `SOC_RESOLUTION_AUTO_THRESHOLD` | 0.85 | Score at which a weak-hint host match merges without analyst review. 0.75 lets "same unique hostname and OS, nothing else" merge: on the 400-host stress estate the unresolved share fell from 5.4 % to 2.2 % with no false merge. Decide on the client's shadow-mode review queue; 0.6 is the floor |
+| `SOC_CONNECTOR_RATE_SHARE` | 1 (5 in the compose file) | How many processes call the tools at once (API workers + a separate scheduler service). Each process holds its own request budget per tool, so each takes 1/N of it and together they stay within the rate the vendor allows |
 | Umbrella `dns_sync` | security | `security`: only DNS queries in Umbrella's security categories (allowed or blocked) are stored - the only DNS events any analysis uses; a tenant makes tens of millions of queries a day. `all`: every query (small tenants). "Did anyone reach this site?" and shadow IT always ask Umbrella live |
 
 Each page of a sync is committed as it is stored: an interrupted backfill resumes after its last page, and a long
 sync never holds one database transaction open (on PostgreSQL a sync of tens of thousands of records once ran the lock
 table out; on SQLite it blocked every other writer). One page is one savepoint; if it fails, the page is stored record
 by record so one bad record is isolated, and 20 identical failures in a row stop the retries (a systematic fault).
+
+**Records that do not match the vendor's documented shape** - a field as an object where text belongs, a single
+object where a list belongs, a number as text, `"N/A"` for a list - are brought to that shape before they are parsed
+(the shape is learned from the connector's own fixtures). The record is kept; only the unreadable field is emptied.
+Each sync then logs one `connector.data_quality` warning naming the fields and how often (never their values), so a
+vendor API change shows up instead of being absorbed. A record whose identifier is unusable is still refused with
+the reason. Vendor times are read in every form vendors send (ISO 8601 with any fraction, offsets with or without a
+colon, epoch seconds or milliseconds as a number or text); placeholder dates (`0001-01-01`, epoch 0) count as no
+time, and a time more than 24 hours in the future (a device with a wrong clock, `9999-12-31`) is stored as seen now
+with the vendor's value kept as `reported_time` - it would otherwise become the "latest observation" that every
+risk figure decays from.
 
 `scripts/measure_scale.py --scales 1,20,40 [--db postgresql://...]` builds messy estates of growing size (see Sample
 estates) and reports, per stage, time and SQL statements, statements per synced record and the open review queue.
@@ -231,6 +252,44 @@ vocabulary (severities, categories, states), timestamps, counts, file hashes and
 kept: they are what tests need. `_scan.json` lists anything still looking like an e-mail address or IP - review it,
 and the files, before a recording leaves the client. `SOC_RECORD_MAX_CALLS` (default 200) caps each file. Unset the
 folder when done.
+
+## Logs, traces and diagnostics
+
+**What is recorded, and where**
+
+| Record | Where | What it holds | Kept |
+|---|---|---|---|
+| Audit log | database, hash-chained | every change and decision: actions, approvals, policy and configuration changes, access grants, case work, agent recommendations, model use, exports. **Every successful write request leaves at least one event** - where a route's own code wrote none, a generic `api.<method>` event (who, which route, which ids) is added in the same transaction. | never pruned by the platform |
+| Access log | database | every API request: who, method, path, status, latency, client address | `SOC_ACCESS_LOG_RETENTION_DAYS` (400) |
+| Model calls | database (`llm_calls`) | every model call or refusal: feature, tier, who asked (or scheduled), prompt as sent (identities pseudonymised), answer, tokens, time, status, answer cap, statements the evidence check kept and removed **with the reason for each removal** | text `SOC_LLM_LOG_RETENTION_DAYS` (180), figures kept |
+| Job runs | database | every scheduled or replayed run: outcome, attempts, error, summary | |
+| Application log | stdout (and `SOC_LOG_FILE`) | one structured line per request, audit event, model call, outbound call to a tool (host and path - never the query string, headers or body), job start and end, CLI command, warning and error | your log collector's retention |
+
+**One trace id ties them together.** Every API request gets one - the caller's `X-Request-ID` if it is a safe value
+(8-64 letters, digits, `._:-`), else a new `req-...` - and every job run gets `job-<name>-...`, every CLI command
+`cli-<command>-...`. It is returned in the `X-Request-ID` response header and stored on the access-log row, every
+audit event, every model call and the job run, and printed on every log line.
+
+**Diagnosing**: *Audit log* -> a row's *Trace* link, or `GET /api/v1/admin/trace/{id}`, shows everything that request
+or job did in order: the request, its audit events, each model call with the prompt, the answer and what the evidence
+check removed and why, and the job run. *AI usage -> Recent model calls* lists calls by feature and outcome
+(`GET /api/v1/admin/llm/calls`, detail `/calls/{id}`). Both need `read_audit` with all-domain access. A user can quote
+the `X-Request-ID` of a failing screen (browser developer tools) and the support engineer opens that trace.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `SOC_LOG_LEVEL` | INFO | DEBUG, INFO, WARNING, ERROR |
+| `SOC_LOG_FORMAT` | `json` in prod, `text` otherwise | JSON lines for a collector / SIEM; text for a console |
+| `SOC_LOG_FILE` | unset | also write to this file, rotated at `SOC_LOG_FILE_MAX_MB` (50) keeping `SOC_LOG_FILE_BACKUPS` (10) |
+| `SOC_LOG_CONFIGURE` | 1 | 0 = leave Python logging to the host (the test suite sets it) |
+
+Log lines never carry secrets: values under keys that look like one (token, secret, password, key, authorization,
+cookie, credential) are masked, long values are cut, and outbound calls are logged without their query string.
+Forward stdout to the SIEM; alert on `level` WARNING / ERROR, `job.end` with status other than ok, `llm.call` with
+status `error`, `connector.http` errors, `connector.data_quality` (a tool sent fields in an unexpected shape) and
+`ingest.rejected` (alerts pushed by a SIEM were refused - the reasons are in the line and in the push response).
+`server.start` / `server.stop` mark each process's life; `server.stop` reports `access_log_dropped` if any access-log
+rows could not be written.
 
 ## Monitoring
 

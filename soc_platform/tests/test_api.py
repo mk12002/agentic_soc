@@ -121,6 +121,17 @@ def test_siem_push_and_ui(client):
     assert "<title>Agentic SOC</title>" in client.get("/").text
 
 
+def test_one_malformed_pushed_alert_is_refused_and_the_rest_of_the_batch_lands(client):
+    a = tok(client, "alice", "analyst")
+    r = client.post("/api/v1/ingest/alerts", headers=a, json={"alerts": [
+        {"id": "siem-ok-1", "title": "Suspicious PowerShell download", "severity": "high"},
+        {"title": "no id at all"},
+        {"id": "siem-ok-2", "title": {"odd": "object"}, "severity": ["high"], "timestamp": "not-a-date", "user": 42}]})
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["ingested"], body["rejected"]) == (2, 1) and "identifier" in body["reasons"][0]
+
+
 def test_security_headers_csp_and_limits(client):
     r = client.get("/")
     assert "script-src 'self'" in r.headers["content-security-policy"] and r.headers["x-frame-options"] == "DENY"
@@ -129,6 +140,24 @@ def test_security_headers_csp_and_limits(client):
     assert "onclick" not in js and "eval(" not in js and "safeUrl" in js
     big = client.post("/api/v1/ingest/alerts", headers={"content-length": str(40 * 1024 * 1024)}, content=b"{}")
     assert big.status_code == 413
+
+
+def test_case_and_action_lists_page_without_overlap(client, seeded, monkeypatch):
+    from soc_platform.api import app as appmod
+
+    monkeypatch.setattr(appmod, "LIST_LIMIT", 2)
+    lead = tok(client, "lena", "lead")
+    for url, total in (("/api/v1/cases", client.get("/api/v1/cases/summary", headers=lead).json()["total"]),
+                       ("/api/v1/actions?status=recommended,pending_approval",
+                        client.get("/api/v1/actions/summary?status=recommended,pending_approval", headers=lead).json()["total"])):
+        sep = "&" if "?" in url else "?"
+        ids, offset = [], 0
+        while offset <= total:
+            page = client.get(f"{url}{sep}offset={offset}", headers=lead).json()
+            ids += [x["id"] for x in page]
+            offset += 2
+        assert len(ids) == len(set(ids)) == total, url
+    assert client.get("/api/v1/cases?offset=-1", headers=lead).status_code == 422
 
 
 def test_intelligence_endpoints(client, seeded):

@@ -8,6 +8,8 @@ x-platform-env: &platform-env
   SOC_ENVIRONMENT: ${SOC_ENVIRONMENT:-dev}
   SOC_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-soc}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-soc_platform}
   SOC_AUTH_MODE: ${SOC_AUTH_MODE:-dev}
+  # processes calling the tools at once (API workers + the scheduler service): each gets 1/N of a tool's rate budget
+  SOC_CONNECTOR_RATE_SHARE: "${SOC_CONNECTOR_RATE_SHARE:-5}"
   SOC_DEV_JWT_SECRET: ${SOC_DEV_JWT_SECRET:-}
   SOC_ENTRA_TENANT_ID: ${SOC_ENTRA_TENANT_ID:-}
   SOC_ENTRA_AUDIENCE: ${SOC_ENTRA_AUDIENCE:-}
@@ -44,6 +46,8 @@ x-platform-env: &platform-env
   SOC_ACCESS_LOG_RETENTION_DAYS: ${SOC_ACCESS_LOG_RETENTION_DAYS:-400}
   SOC_LLM_LOG_RETENTION_DAYS: ${SOC_LLM_LOG_RETENTION_DAYS:-180}
   SOC_EVENT_RETENTION_DAYS: ${SOC_EVENT_RETENTION_DAYS:-400}
+  SOC_LOG_LEVEL: ${SOC_LOG_LEVEL:-INFO}
+  SOC_LOG_FORMAT: ${SOC_LOG_FORMAT:-json}          # one JSON object per line on stdout, for the log collector / SIEM
   SOC_SUPPLIER_DOMAINS: ${SOC_SUPPLIER_DOMAINS:-}
 
 x-engine-env: &engine-env
@@ -98,6 +102,7 @@ services:
     volumes: [platform_data:/app/data]
     depends_on: {postgres: {condition: service_healthy}}
     restart: unless-stopped
+    stop_grace_period: 30s               # longer than SOC_SHUTDOWN_GRACE_SECONDS (20): requests in flight finish
 
   platform-scheduler:
     image: soc-platform:${SOC_IMAGE_TAG:-latest}
@@ -106,6 +111,7 @@ services:
     volumes: [platform_data:/app/data]
     depends_on: {platform-api: {condition: service_healthy}}
     restart: unless-stopped
+    stop_grace_period: 30s               # the job in hand finishes (SIGTERM stops the scheduler between jobs)
 
   # ---------------------------------------------------------------- phishing ML engine (profile: engine)
   rabbitmq:

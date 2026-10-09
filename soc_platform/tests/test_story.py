@@ -259,3 +259,51 @@ def test_story_over_http_bundle_approval_keeps_governance(tmp_path, monkeypatch)
     os.environ.pop("SOC_ORG_DOMAINS", None)
     get_settings.cache_clear()
     dbm._default = None
+
+
+MODEL_ODD = [None, "x", "", -1, 10**30, 1.5, float("nan"), True, [], ["x"], [1, 2], {}, {"a": 1}, [["nested"]]]
+
+
+def _odd_documents(base: dict):
+    """The model's answer with each field - and each field of the first item of each list - given an odd value."""
+    for k, v in base.items():
+        for odd in MODEL_ODD:
+            yield {**base, k: odd}
+        items = v if isinstance(v, list) else [v] if isinstance(v, dict) else []
+        if items and isinstance(items[0], dict):
+            for kk in items[0]:
+                for odd in MODEL_ODD:
+                    first = {**items[0], kk: odd}
+                    yield {**base, k: [first, *items[1:]] if isinstance(v, list) else first}
+
+
+def test_deep_analysis_survives_any_shape_of_model_answer(session, estate):
+    """Model output is untrusted input: a field of the wrong type costs that statement, never the analysis."""
+    from soc_platform.intelligence.deep_analysis import run_deep_analysis
+
+    reg, _ = estate
+    st = story_for_case(session, _case(session, "phishing").id, reg)
+    base = json.loads(ReviewLLM().complete("", "", tier="large").text)
+    docs = list(_odd_documents(base)) + ["not json at all", "[1, 2, 3]", "{\"truncated\": "]
+
+    class Odd(Provider):
+        name = "scripted"
+
+        def complete(self, system, user, *, tier):
+            d = docs[self.i]
+            return Completion(d if isinstance(d, str) else json.dumps(d), 10, 10, "odd-1")
+
+    prov = Odd()
+    gw = LLMGateway(session, Settings(llm_monthly_token_budget=10**9), provider=prov)
+    crashes = []
+    for i in range(len(docs)):
+        prov.i = i
+        try:
+            r = run_deep_analysis(session, {**st, "fingerprint": f"odd-{i}"}, gw, actor="x", force=True)
+            assert isinstance(r["ok"], bool)
+            if r["ok"]:
+                assert r["confidence"] in {"high", "medium", "low"}
+                assert all(f["evidence_ids"] for f in r["key_findings"])
+        except Exception as exc:  # noqa: BLE001 - any exception is the defect under test
+            crashes.append(f"{str(docs[i])[:120]}: {type(exc).__name__}: {exc}")
+    assert not crashes, crashes[:8]

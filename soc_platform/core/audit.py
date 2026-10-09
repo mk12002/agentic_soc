@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from soc_platform.core.models import AuditRecord, utcnow
+from soc_platform.core.observability import current_trace, event
 
 GENESIS = "0" * 64
 CHAIN_LOCK = "audit_chain_head"
@@ -99,9 +100,14 @@ class AuditLog:
             payload=payload,
             prev_hash=prev,
             hash=compute_hash(prev, ts, actor_type, actor_id, event_type, subject_type, str(subject_id), payload),
+            trace_id=current_trace(),
         )
         self.s.add(rec)
         self.s.flush()
+        # the request that wrote it has been audited (api.app.db_session adds a generic record otherwise)
+        self.s.info["soc_audited"] = self.s.info.get("soc_audited", 0) + 1
+        event("audit", event_type=event_type, actor_type=actor_type, actor_id=actor_id, subject_type=subject_type,
+              subject_id=str(subject_id), seq=rec.seq)
         return rec
 
     def verify(self) -> dict[str, Any]:
@@ -148,6 +154,7 @@ class AuditLog:
                 "payload": r.payload,
                 "prev_hash": r.prev_hash,
                 "hash": r.hash,
+                "trace_id": r.trace_id,
             }
             for r in records
         ]

@@ -98,7 +98,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 103 features
+python scripts/verify_features.py                                 # tests mapped to 108 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -170,6 +170,8 @@ soc_platform/
   core/retention.py      retention + legal hold;  core/selfcheck.py  cross-surface consistency proof
   core/connector_config.py  ConfigStore: console connector config + supplier / sanctioned lists over the files;
                          propose / approve (four-eyes) / reject / pause / restore / export / import; preflight gate
+  core/observability.py  trace ids (TRACE contextvar, traced(), accept_trace), structured logging (configure_logging,
+                         event(), secrets masked) - every request, audit event, model call, outbound call, job, CLI
   core/notify.py         Notification table + Teams/Slack/JSON webhook delivery (notify job); HTTPS-only config
   domains/phishing/      service.py (pipeline), models.py, supplier.py, agents/{decompose,analyzer,investigation}.py, engine/
   domains/incident/service.py
@@ -248,7 +250,11 @@ fingerprints hash the evidence.
   time to ask from, `see(records, field)`, `finish()`) for event streams, or `None` to read an inventory in full. Never
   leave a continuation token (next link, page token, offset, page number) as the resume point.
 - Normalisers tolerate any missing or null optional field; a record without its identifier raises `ValueError` via
-  `need(rec, "id")` (not a KeyError).
+  `need(rec, "id")` (not a KeyError) - the message must say "identifier".
+- Fields of the wrong type are handled before your parser runs: `BaseConnector.__init_subclass__` wraps `normalize`
+  so each record is first conformed to the stream's shape learned from the connector's fixtures
+  (`connectors/conform.py`), and coercions are reported per sync (`connector.data_quality`). So the fixtures must show
+  each stream's real shape. `parse_ts` never raises (placeholder dates and odd epochs read as None).
 - Add the stream to the paging table in `test_connector_conformance.py` (or `NO_PAGING` with the reason), or put
   `PAGING_TESTED = {(name, stream)}` in its own `test_connector_<name>.py` (what `connector new` generates).
 - Declare **every** setting a connector reads as a `ConfigField` with its `kind` (url, bool, int, choice, map, list,
@@ -271,11 +277,22 @@ fingerprints hash the evidence.
   guardrail). Internal identities are pseudonymised by `Redactor` and restored.
 - Always provide a deterministic fallback path - the platform must behave identically (figures, verdicts, actions)
   with the LLM off. Catch `BudgetExceeded` around `complete_json` (the usage policy raises it for every refusal).
+- Model JSON is untrusted input: read lists with `model_list`, enumerated words with `model_choice`, citations with
+  `model_ids` (`llm/gateway.py`). `x in {..}` on a model value raises when the model sends a list.
 - A route that calls the model on a person's behalf builds its gateway with `llm(s, p)` (their limits apply) and
   returns `_with_notice(out, gw)`; scheduled work uses `llm(s)`. A new feature name goes into
   `usage_policy.KNOWN_WORKFLOWS` (tier, who triggers it, description) or it cannot be configured.
 - Providers implement `complete(system, user, *, tier, max_tokens=None)`; the gateway passes the cap only to providers
   whose signature accepts it. Small tier for routine narrative, large for summaries/deep analysis/reports.
+
+**Diagnostics and audit**
+- Every request / job run / CLI command runs under a trace id (`core/observability.TRACE`); audit events, access-log
+  rows, model calls and job runs store it. Code that starts work outside a request (a new background thread, a new
+  job type) wraps it in `traced(new_trace("..."))`.
+- Log through `observability.event("name", **fields)` (structured, trace-stamped, secrets masked) for anything an
+  operator would want to see; never log a secret, a query string or a request body.
+- Every successful write request is audited: `db_session` appends a generic `api.<method>` event when the route's code
+  wrote none (it counts `session.info["soc_audited"]`). Prefer a specific `AuditLog.append` in the service anyway.
 
 **Security**
 - Routes declare `Depends(need(Perm.X, "domain"))`; record-level scope checks in handlers (`_case_in_scope`).
@@ -318,17 +335,19 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   page; interrupted backfill resumes), `test_traffic.py` (pool, 503 under saturation, a real multi-process server
   under concurrent analysts), `test_recording.py` (record-and-sanitise leaves no identity and replays),
   `test_real_world.py` (an empty tenant; every tool down at once - every pipeline, screen, report still works),
+  `test_observability.py` (trace ids, write-audit guarantee, model-call diagnosis, job traces, log lines, masking),
   `test_llm_usage.py` (budgets, per-person limits, tier routing, answer caps, tier advice, the admin API),
   `test_connector_admin.py` (isolation, strict config, stages, preflight, propose / approve / pause / restore /
   export / import through the store and the API, hot reload, supplier / sanctioned lists, the scaffold),
+  `test_data_tolerance.py` (malformed vendor fields and times, SIEM batches, ownership CSVs, unreadable e-mail, settings, policy documents),
   `test_commit_before_response.py` (commit before reply, real server),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 553 platform tests passing on SQLite and on PostgreSQL (568 collected, 15 skips: 12 opt-in live tests, 2 per-estate repeats of input fuzzing, 1 database-specific check), 205
-  engine tests, 103/103 features verified.
+- Current counts (keep docs in sync when they change): 645 platform tests passing on SQLite and on PostgreSQL (660 collected, 15 skips: 12 opt-in live tests, 2 per-estate repeats of input fuzzing, 1 database-specific check), 205
+  engine tests, 108/108 features verified.
 
 ---
 
@@ -490,6 +509,10 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   scans at the next tag (`<[^<>]*>`), anchor with a look-behind; `test_hostile_email_content_costs_linear_time` guards it.
 - **`X-Forwarded-For`**: proxies append, so only the right-most untrusted hop is the client (`_client_ip`). uvicorn's
   own proxy-header handling is off (`serve` passes `proxy_headers=False`) so only the app's tested rule applies.
+- **Settings are validated as a whole** (`settings_check.py` SPEC): a new `SOC_*` setting must be added there, or
+  `config check` reports it as unknown and a typo in it is never caught.
+- **One malformed item must not fail a batch**: the SIEM push once refused a whole batch for one alert without an id
+  (the sender would retry forever). Route pushed records through `SyncRunner.ingest_records`.
 - **Vendor paging caps**: Falcon's query APIs refuse offset + limit past 10,000 (hosts use the scroll query, alerts
   restart from their watermark). Check a new vendor's documented maximum offset before using offset paging.
 - **An outage must degrade, not fail**: a job, screen or report that reads a tool live catches `ConnectorError`
@@ -497,6 +520,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   every KEV flag). `test_real_world.py` runs everything with every tool down.
 - **A test that runs `python -m soc_platform serve` must fail before uvicorn starts** (the config refusal does): never
   start a real server from a test without the `load_test` / commit-before-response pattern of stopping it by PID.
+- **The trace id is stamped by `event()` itself**, not only by the platform's log handler: a host's or a test's
+  handler (caplog) sees it too. Tests run with `SOC_LOG_CONFIGURE=0` so the app does not reconfigure Python logging.
 - **Event retention** (`SOC_EVENT_RETENTION_DAYS`, 400) deletes old telemetry entities with their keys, hints,
   relations and source records. A new table that points at entities must be added to its "held" set in
   `core/retention.py`, or pruning leaves a dangling reference.

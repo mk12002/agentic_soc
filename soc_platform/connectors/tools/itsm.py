@@ -15,6 +15,10 @@ and the action types ``ticket.create`` / ``ticket.update``; every CMDB connector
 from __future__ import annotations
 
 import csv
+import io
+import logging
+import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +27,53 @@ from soc_platform.connectors.http import BasicAuth, HttpTransport, NoAuth, OAuth
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, need, ok_lookup, parse_ts
 from soc_platform.core.schema import NormalizedRecord
+
+log = logging.getLogger(__name__)
+_CSV_CACHE: dict[str, tuple[tuple[int, int], list[dict[str, str]]]] = {}
+_CSV_LOCK = threading.Lock()
+# header spellings people actually use for the columns the platform reads
+_HEADER_ALIASES = {"host": "hostname", "host_name": "hostname", "computer_name": "hostname", "server": "hostname",
+                   "device_name": "hostname", "owner_email": "owner", "owner_upn": "owner", "team": "platform_team",
+                   "env": "environment", "serial": "serial_number", "serialnumber": "serial_number",
+                   "subscription_id": "subscription", "account": "subscription"}
+
+
+def read_ownership_csv(path: str | Path) -> list[dict[str, str]]:
+    """The ownership spreadsheet, read the way people really save it: UTF-8 with or without the BOM Excel adds, or
+    Windows-1252; comma, semicolon (European Excel), tab or pipe separated; headers in any case, spacing or common
+    alias (``Host Name``, ``Owner Email``); values trimmed. Re-read only when the file changes. A file without a
+    hostname or subscription column is reported once and yields nothing, rather than silently assigning no owners."""
+    p = Path(path)
+    st = p.stat()
+    key, stamp = str(p.resolve()), (st.st_mtime_ns, st.st_size)
+    with _CSV_LOCK:
+        hit = _CSV_CACHE.get(key)
+        if hit and hit[0] == stamp:
+            return hit[1]
+    data = p.read_bytes()
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("cp1252", errors="replace")
+        log.warning("ownership file %s is not UTF-8; read as Windows-1252", p.name)
+    first = text.split("\n", 1)[0]               # the header line names the separator (never a guess from values)
+    sep = max(",;\t|", key=lambda ch: (first.count(ch), ch == ","))
+    reader = csv.reader(io.StringIO(text), delimiter=sep)
+    header = next(reader, [])
+    names = [_HEADER_ALIASES.get(h, h) for h in (re.sub(r"[\s\-]+", "_", (c or "").strip().lower()) for c in header)]
+    rows = []
+    for cells in reader:
+        if not any((c or "").strip() for c in cells):
+            continue                                   # blank line
+        rows.append({n: (cells[i] if i < len(cells) else "").strip() for i, n in enumerate(names) if n})
+    if rows and not {"hostname", "subscription"} & set(names):
+        log.warning("ownership file %s has no hostname or subscription column (columns: %s); no owners read",
+                    p.name, ", ".join(names[:12]))
+        rows = []
+    with _CSV_LOCK:
+        _CSV_CACHE[key] = (stamp, rows)
+    return rows
+
 
 # Every Table API read asks for sysparm_display_value=all: each field is {"value", "display_value"}. Values give
 # codes and UTC timestamps (display values are in the API user's own timezone); display values give readable names.
@@ -183,7 +234,7 @@ class CsvCmdbConnector(ToolConnector):
     def rows(self) -> list[dict[str, str]]:
         p = self.settings.get("path")
         if p and Path(p).exists():
-            return list(csv.DictReader(Path(p).open(encoding="utf-8")))
+            return read_ownership_csv(p)
         return (self.http.request("GET", "/ownership").body or {}).get("rows", []) if self.http else []
 
     def fetch_page(self, stream, cursor):
@@ -193,9 +244,9 @@ class CsvCmdbConnector(ToolConnector):
         host = str(r.get("hostname") or "").strip()
         if not host or any(ch in host for ch in "*?[]"):
             return []  # ownership *rules* (patterns / subscriptions) are used by owner_for, they are not assets
-        return [NormalizedRecord(kind="asset", tool=self.tool, source_type="ownership", source_id=r["hostname"],
+        return [NormalizedRecord(kind="asset", tool=self.tool, source_type="ownership", source_id=host,
                                  keys={"serial_number": r.get("serial_number")}, dimension="ticketing",
-                                 attributes={"hostname": r["hostname"], "owner": r.get("owner"),
+                                 attributes={"hostname": host, "owner": r.get("owner"),
                                              "platform_team": r.get("platform_team"), "environment": r.get("environment"),
                                              "criticality": r.get("criticality")})]
 
@@ -204,11 +255,12 @@ class CsvCmdbConnector(ToolConnector):
 
         host = str(attrs.get("hostname") or attrs.get("fqdn") or "").lower().split(".")[0]
         sub = str(attrs.get("subscription") or "").lower()
-        for r in self.rows():
-            if host and r.get("hostname") and fnmatch.fnmatch(host, r["hostname"].lower()):
+        rows = self.rows()
+        for r in rows:
+            if host and r.get("hostname") and fnmatch.fnmatch(host, str(r["hostname"]).lower()):
                 return {"owner": r.get("owner"), "platform_team": r.get("platform_team"),
                         "environment": r.get("environment"), "criticality": r.get("criticality"), "source": "cmdb_csv"}
-        for r in self.rows():  # cloud resources without a CI: owner of the subscription / account
+        for r in rows:  # cloud resources without a CI: owner of the subscription / account
             if sub and r.get("subscription") and fnmatch.fnmatch(sub, str(r["subscription"]).lower()):
                 return {"owner": r.get("owner"), "platform_team": r.get("platform_team"),
                         "environment": r.get("environment"), "criticality": r.get("criticality"), "source": "cmdb_csv"}

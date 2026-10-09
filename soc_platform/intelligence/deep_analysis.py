@@ -25,7 +25,15 @@ from sqlalchemy.orm import Session
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.models import Case, LLMCall, utcnow
 from soc_platform.intelligence.story import evidence_for_llm
-from soc_platform.llm.gateway import BudgetExceeded, LLMGateway, supported_summary, unsupported_numbers
+from soc_platform.llm.gateway import (
+    BudgetExceeded,
+    LLMGateway,
+    model_choice,
+    model_ids,
+    model_list,
+    supported_summary,
+    unsupported_numbers,
+)
 from soc_platform.llm.redaction import Redactor
 
 SYSTEM = (
@@ -51,7 +59,7 @@ VERDICT_CONF = {"confirmed_compromise": "high", "likely_compromise": "medium", "
 
 
 def _cited(item: dict[str, Any], valid: set[str]) -> list[str]:
-    return [str(i) for i in (item.get("evidence_ids") or []) if str(i) in valid]
+    return model_ids(item, valid)
 
 
 def _figures_ok(item: dict[str, Any], fields: tuple[str, ...], ids: list[str], text_by_id: dict[str, str], context: str) -> bool:
@@ -91,25 +99,25 @@ def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway |
     context = f"{story['title']} {story['assessment']['label']} {story['assessment']['reason']}"
     dropped = 0
     findings = []
-    for f in data.get("key_findings") or []:
+    for f in model_list(data.get("key_findings")):
         ids = _cited(f, valid) if isinstance(f, dict) else []
         if not ids or not str(f.get("text", "")).strip() or not _figures_ok(f, ("text",), ids, text_by_id, context):
             dropped += 1
             continue
-        findings.append({"text": str(f["text"]).strip(), "kind": f.get("kind") if f.get("kind") in {"fact", "inference"} else "inference",
+        findings.append({"text": str(f["text"]).strip(), "kind": model_choice(f.get("kind"), {"fact", "inference"}, "inference"),
                          "evidence_ids": ids})
     alts = []
-    for h in data.get("alternative_explanations") or []:
+    for h in model_list(data.get("alternative_explanations")):
         ids = _cited(h, valid) if isinstance(h, dict) else []
-        if not ids or h.get("status") not in STATUSES or not _figures_ok(h, ("hypothesis", "reasoning"), ids, text_by_id, context):
+        if not ids or model_choice(h.get("status"), STATUSES, None) is None or not _figures_ok(h, ("hypothesis", "reasoning"), ids, text_by_id, context):
             dropped += 1
             continue
         alts.append({"hypothesis": str(h.get("hypothesis", ""))[:300], "status": h["status"],
                      "reasoning": str(h.get("reasoning", ""))[:600], "evidence_ids": ids})
     questions = [{"question": str(q.get("question", ""))[:300], "why": str(q.get("why", ""))[:400], "evidence_ids": _cited(q, valid)}
-                 for q in (data.get("open_questions") or [])[:8] if isinstance(q, dict) and str(q.get("question", "")).strip()]
+                 for q in model_list(data.get("open_questions"))[:8] if isinstance(q, dict) and str(q.get("question", "")).strip()]
     priorities = []
-    for p in data.get("priorities") or []:
+    for p in model_list(data.get("priorities")):
         if not isinstance(p, dict):
             dropped += 1
             continue
@@ -127,14 +135,14 @@ def run_deep_analysis(session: Session, story: dict[str, Any], llm: LLMGateway |
     objective = {"text": str(obj.get("text", ""))[:400], "evidence_ids": _cited(obj, valid)} if _cited(obj, valid) else None
     if obj and objective is None:
         dropped += 1
-    conf = data.get("confidence") if data.get("confidence") in CONF else "low"
+    conf = model_choice(data.get("confidence"), CONF, "low")
     expected = VERDICT_CONF.get(story["assessment"]["verdict"], "medium")
     rank = {"low": 0, "medium": 1, "high": 2}
     disagreement = None
     if abs(rank[conf] - rank[expected]) >= 2 or (story["assessment"]["verdict"] == "no_attack_activity" and findings):
         disagreement = (f"The model's confidence ({conf}) differs markedly from the deterministic assessment "
                         f"({story['assessment']['label']}, {story['assessment']['confidence']}). Review the cited evidence.")
-    assessment, removed = supported_summary(str(data.get("assessment", "")), context + " " + " ".join(text_by_id.values()))
+    assessment, removed = supported_summary(data["assessment"] if isinstance(data.get("assessment"), str) else "", context + " " + " ".join(text_by_id.values()))
     dropped += removed
     call = session.query(LLMCall).filter(LLMCall.workflow == "intelligence.deep_analysis").order_by(LLMCall.ts.desc()).first()
     result = {"available": True, "ok": True, "assessment": assessment[:1200], "confidence": conf,

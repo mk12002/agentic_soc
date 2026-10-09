@@ -81,7 +81,7 @@ async function audit(page, label) {
 }
 async function shot(page, name, full = true) {
   await audit(page, name);
-  const junk = await page.evaluate(() => (document.body.innerText.match(/\[native code\]|undefined|NaN|\[object Object\]/) || [''])[0]);
+  const junk = await page.evaluate(() => (document.body.innerText.match(/\[native code\]|\bundefined\b|\bNaN\b|\[object Object\]/) || [''])[0]);
   if (junk) problems.push(`${name}: page shows "${junk}"`);                // a template bug leaking into the screen
   if (await page.evaluate(() => { const b = document.getElementById('sched-status'); return !!b && !b.hidden; }))
     problems.push(`${name}: scheduler banner shown although the scheduler is running`);
@@ -204,6 +204,14 @@ async function visit(page, hash, name, full = true) {
   await page.waitForTimeout(300);
   await shot(page, '26-report-generated', false);
   await visit(page, 'audit', '17-audit', false);
+  { // diagnostics: the trace of the analyst question asked above (request, audit event, model calls)
+    const withTrace = (await call(lead, 'GET', '/api/v1/audit?event_type=intelligence.ask&limit=5') || []).find(x => x.trace_id);
+    if (!withTrace) problems.push('no audit event carries a trace id');
+    else {
+      await visit(page, `trace/${withTrace.trace_id}`, '17b-trace', false);
+      if (!(await page.textContent('#main')).includes('intelligence.ask')) problems.push('trace view does not show its audit event');
+    }
+  }
 
   // ---------- what the screens show must equal what the API computes (every KPI, badge and tab count)
   const kpis = async (hash) => { await page.goto(`${BASE}/#/${hash}`); await settle(page);

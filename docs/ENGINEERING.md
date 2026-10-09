@@ -256,11 +256,25 @@ A connector subclasses `BaseConnector` (via `ToolConnector` in `tools/_common.py
 | actions (`ConnectorAction`) | Write operations with optional pre-conditions and a `reverse_type` |
 | `health()` | One page of the health stream (`POST /connectors/{name}/test`); the full check is the preflight (§5.5) |
 
+**Malformed records** (`connectors/conform.py`). Every subclass's `normalize` is wrapped (`__init_subclass__`) so the
+raw record is first brought to the stream's documented shape: the shape is learned once per stream from the
+connector's own fake-mode fixtures (live mode included), and a field of the wrong type is coerced (object expected
+-> `{}`, list expected -> `[obj]` or `[]`, text expected -> a number as text, number / boolean expected -> parsed text
+or empty). The vendor's record is copied on first change, never modified; a record that already conforms is returned
+as is. Coercions are counted per field path (never with values) and returned by `take_quality(stream)`;
+`SyncRunner.sync` puts them on the `SyncReport` (`coerced`) and logs one `connector.data_quality` line. The canonical
+schema also accepts a numeric `source_id` as text and empties an odd `title`, `severity`, `deep_link` or
+`attributes`. `parse_ts` (`tools/_common.py`) never raises: placeholder dates before 1990 and out-of-range epochs are
+no time; `ContextStore.ingest` stores a time more than 24 h ahead as now (vendor value kept as `reported_time`).
+`SyncRunner.ingest_records` gives records that arrive without a sync (the SIEM push) the same per-record isolation.
+
 ### 5.2 Rate limits and retries
 
 - **`TokenBucket(rate_per_sec, burst)`** per connector (default 5/s, burst 10; tuned per tool under each vendor's
   documented limits, for example 50/s for threat-intel fusion). Every outbound call is wrapped by
-  `connector.call()`, which acquires a token.
+  `connector.call()`, which acquires a token. The bucket lives in the process, so each of N processes calling the
+  tools takes 1/N of it (`SOC_CONNECTOR_RATE_SHARE`); a limiter shared across processes would need Redis or the
+  database on every call.
 - **`with_backoff`** retries up to 5 times:
   - on `TransientError` (network errors and 5xx): exponential backoff (0.5 s × 2ⁿ, capped at 30 s) with jitter
   - on `RateLimited` (429): the vendor's `Retry-After` is honoured, capped at `MAX_RETRY_AFTER` = 120 s, so one
@@ -873,7 +887,10 @@ model)`).
 8. **Circuit breaker** (`_Breaker`): after 3 consecutive failures, calls are skipped for 60 s (logged as
    `circuit_open`) and callers use the deterministic path instantly. The next success closes it. Before this, a hung
    endpoint could make an 8-section report take about 16 minutes.
-9. **Usage policy** (`llm/usage_policy.py`, set by administrators on the AI usage screen, versioned and audited,
+9. **Diagnostics**: each call stores its trace id (the request or job that caused it), the answer cap, and for
+   grounded answers every statement the evidence check removed with the reason (`guardrail`); each call is also a
+   structured log line (`llm.call`). See OPERATIONS.md "Logs, traces and diagnostics".
+9b. **Usage policy** (`llm/usage_policy.py`, set by administrators on the AI usage screen, versioned and audited,
    read once per gateway - one request or job run): monthly and daily token budgets; per-person hourly / daily limits
    (person override > most generous role override > default; 0 = no model text) for calls made on a person's behalf
    (`LLMGateway(actor=)`, set by `api/app.py:llm(s, p)` for questions, deep analysis and reports); per feature the
@@ -1604,6 +1621,14 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 56 | Connector development kit (scaffold + one-command conformance) | A written guide only | A new connector starts compliant and cannot pass `check` until paging, faults and missing fields behave | The template is a starting point: endpoints and fields must be adapted to the vendor |
 | 57 | AI budgets, per-person limits and per-feature tier / answer cap set by administrators in the console (versioned, audited, no restart) | Environment settings only; one monthly cap | A burst could spend the month in a day; one person could starve scheduled work; answer length was bounded only by the prompt | Limits are checked before a call against what was already used, so the call that crosses a limit still completes |
 | 58 | Tier advice computed from the call log (usable rate, statements the guardrail removed, answer length), never by a model | Fixed tiers in code; ask a model to judge quality | The guardrail already measures whether a model keeps to the evidence; the same figure on both tiers is a fair comparison | Advice needs 20 calls in the period; it is a recommendation, the administrator decides |
+| 59 | One trace id per request / job / CLI command, stored on access-log rows, audit events, model calls and job runs, printed on every log line; a trace view joins them | A tracing system (OpenTelemetry) from day one | Answers "what did this request or job do, and why" from the platform's own records, with no extra infrastructure; the id is compatible with a proxy's `X-Request-ID` | No spans or timings below the request level; the outbound-call log lines give per-call timing |
+| 60 | Every successful write request leaves an audit event: a generic `api.<method>` event, in the same transaction, when the route's own code wrote none | Rely on each route remembering | A pushed-alert route had no audit; a route added later cannot forget | The generic event records who, the route and the ids, not a domain-specific description |
+| 61 | The evidence check's removals stored per model call, each with its reason | Counts only | "Why is this explanation thin?" is answered by the call itself | Stored with the prompt and answer, so purged with them after `SOC_LLM_LOG_RETENTION_DAYS` |
+| 62 | Malformed vendor records are conformed to the stream's documented shape, learned from the connector's fixtures, before parsing; coercions are reported per sync | Fix each parser by hand; reject the record; a hand-written schema per stream | A wrong-type fuzz crashed 715 ways in 26 of 27 streams; one generic layer fixes every connector, including future ones, and the fixtures already are the documented shape | A field the fixtures never contained is passed through unchecked: record-and-sanitise during deployment keeps the fixtures - and so the shapes - true to the tenant |
+| 63 | A reported e-mail the parser cannot read reliably is held as suspicious, never safe | Trust the recovered parse | UTF-16 and NUL bytes are filter-evasion tricks; damaged MIME hides parts from the analysis; "safe" on a partial read is the costly error | A few damaged but benign messages reach an analyst |
+| 64 | Settings are validated as a whole before start (`settings_check.py`), with a fix per problem and unknown names reported | Read lazily, fail on first use | A typo surfaced as a traceback at start or a crash mid-request, or was silently ignored | The specification lists every setting; a new setting must be added to it (or `config check` warns that it is unknown) |
+| 65 | Model JSON read with `model_list` / `model_choice` / `model_ids`; any malformed item is dropped and counted | Validate with a strict schema and reject the whole answer | One odd field should cost that statement, not the answer; the deterministic fallback covers an answer with nothing usable | Statements are dropped silently from the answer, but each removal is counted and stored on the call |
+| 66 | Paging by offset (newest first, id tiebreak) for the case and approval lists | Keyset cursors | Lists are browsed a page at a time by people; offset is simple and correct with a total order | Deep offsets are slower; search and filters remain the way to a specific old case |
 
 ---
 
@@ -1640,6 +1665,16 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 - **The detonation host** is not run in the demo; its hardening is unit-tested.
 - **The optional ML engine** is an earlier code base: tested and lint-clean, but not reviewed line by line like the
   platform core.
+- **No per-person erasure.** Retention and legal hold exist, but a data-subject erasure request (remove one person's
+  data everywhere) has no tool. The audit log is append-only and hash-chained, so erasure there needs a design - for
+  example pseudonymising the person in place with a recorded, chained event - agreed with the client's data-protection
+  officer.
+- **Request rate limits and tool budgets are per process.** The API's per-client limit (20/s, burst 120) is held in
+  each server process, so with N workers a client may reach N times it; tool budgets are divided by
+  `SOC_CONNECTOR_RATE_SHARE`. A shared limiter (Redis, or the database) would make both exact; put the API's
+  limit on the reverse proxy for a hard ceiling (OPERATIONS.md, "Network edge").
+- **Backup and restore have not been rehearsed.** The procedure is documented (OPERATIONS.md); a restore drill on the
+  target environment, with the audit chain verified afterwards, belongs in the go-live checklist.
 
 ---
 

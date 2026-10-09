@@ -316,3 +316,17 @@ def test_a_stale_writer_cannot_win_a_swap_even_when_the_clock_does_not_move(tmp_
     assert jobs._lease(db, "vuln_refresh", release=True) and jobs._lease(db, "vuln_refresh")
     with db.session() as x:
         assert x.get(SystemFlag, "job_lease:vuln_refresh").updated_at > seen
+
+
+def test_the_scheduler_service_stops_cleanly_on_sigterm(monkeypatch):
+    """``docker stop`` sends SIGTERM: the service stops between jobs and shuts its threads down, not killed mid-run."""
+    import signal
+
+    handlers, stopped = {}, []
+    monkeypatch.setattr(signal, "signal", lambda sig, fn: handlers.__setitem__(sig, fn))
+    monkeypatch.setattr(sched.Scheduler, "start", lambda self, **kw: threading.Timer(
+        0.2, lambda: handlers[signal.SIGTERM](signal.SIGTERM, None)).start())
+    monkeypatch.setattr(sched.Scheduler, "shutdown", lambda self, timeout=5.0: stopped.append(timeout))
+    monkeypatch.setenv("SOC_SHUTDOWN_GRACE_SECONDS", "7")
+    sched.run_forever()                                       # returns only once SIGTERM has stopped it
+    assert stopped == [7.0]

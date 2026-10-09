@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from soc_platform.connectors.base import ConnectorError
 from soc_platform.core.models import Case, utcnow
-from soc_platform.llm.gateway import BudgetExceeded, LLMGateway
+from soc_platform.llm.gateway import BudgetExceeded, LLMGateway, model_choice, model_list
 from soc_platform.reporting import charts
 
 Facts = list[tuple[str, Any]]
@@ -411,6 +411,17 @@ PLAN_SYSTEM = ("You design security reports. Choose sections ONLY from the catal
                "proportional to the request (one-page = 2-3 sections). Respond with JSON only.")
 
 
+def _plan_days(v: Any, default: int) -> int:
+    """The period a planned report covers: a whole number of days within what a report supports (1-730)."""
+    if isinstance(v, bool):
+        return default
+    try:
+        n = int(v) if isinstance(v, int) or (isinstance(v, str) and v.strip().isascii() and v.strip().isdigit()) else None
+    except ValueError:
+        n = None
+    return min(730, max(1, n)) if n else default
+
+
 def plan_report(request: str, llm: LLMGateway | None) -> dict[str, Any]:
     """Turn a plain-language request into a spec using catalogue sources only."""
     req = request.strip()[:1500]
@@ -429,11 +440,13 @@ def plan_report(request: str, llm: LLMGateway | None) -> dict[str, Any]:
         if data:
             secs = [{"source": s.get("source"), "title": str(s.get("title") or SOURCES[s["source"]][0])[:120],
                      "instruction": str(s.get("instruction") or "")[:500]}
-                    for s in data.get("sections") or [] if isinstance(s, dict) and s.get("source") in SOURCES and s.get("source") != "case_story"]
+                    for s in model_list(data.get("sections")) if isinstance(s, dict)
+                    and model_choice(s.get("source"), SOURCES, None) not in (None, "case_story")]
             if secs:
-                return {"title": str(data.get("title") or req[:80])[:160], "audience": str(data.get("audience") or "security leadership")[:80],
-                        "format": data.get("format") if data.get("format") in {"docx", "pptx"} else fmt,
-                        "days": int(data.get("days") or days) if str(data.get("days") or "").isdigit() else days,
+                text = lambda k, d: data[k] if isinstance(data.get(k), str) and data[k].strip() else d
+                return {"title": text("title", req[:80])[:160], "audience": text("audience", "security leadership")[:80],
+                        "format": model_choice(data.get("format"), {"docx", "pptx"}, fmt),
+                        "days": _plan_days(data.get("days"), days),
                         "sections": secs[:8], "planner": "llm", "request": req}
     low = req.lower()
     chosen: list[str] = []

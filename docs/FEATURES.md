@@ -143,6 +143,11 @@ and a unified cross-tool timeline.
   self-approval of four-eyes actions, policies, exceptions or access grants). Service accounts can never approve.
 * **Session control:** per-token revocation (log out) and revoke-all-sessions per user.
 * **Platform grants:** time-bound, justified, domain-scoped role assignments on top of Entra roles.
+* **Diagnostics**: every request and job run has a trace id (returned as `X-Request-ID`); the *Audit log* links each
+  event to its **trace** - the request, all its audit events, each model call with its prompt, answer and the
+  statements the evidence check removed (and why), and the job run. *AI usage -> Recent model calls* filters calls by
+  feature and outcome. Structured JSON log lines (requests, audit events, model calls, outbound calls to tools, jobs,
+  CLI commands) carry the same id, secrets masked, for the SIEM.
 * **AI usage & limits** (*Govern -> AI usage*): administrators set the monthly and daily token budgets, per-person
   hourly / daily limits (overrides per role and per person; 0 = no model text), and per feature the model tier, the
   longest answer and on/off - versioned and audited, in force for the next call. The screen shows use and cost per
@@ -161,6 +166,10 @@ and a unified cross-tool timeline.
 | Access management | Audit log |
 |---|---|
 | ![](screenshots/18-access.png) | ![](screenshots/17-audit.png) |
+
+| Trace - everything one request did | AI usage & limits |
+|---|---|
+| ![](screenshots/17b-trace.png) | ![](screenshots/33-ai-usage.png) |
 
 ---
 
@@ -331,6 +340,10 @@ version (restore any), exports and imports the configuration as one file, and ed
 sanctioned-service lists. One misconfigured tool is isolated with the reason; the others keep working. Setup and permissions per tool: [CONNECTORS.md](CONNECTORS.md).
 
 ![](screenshots/14-integrations.png)
+
+| Preflight checklist | Configure a tool | Change awaiting a second approver |
+|---|---|---|
+| ![](screenshots/30-preflight.png) | ![](screenshots/31-configure-connector.png) | ![](screenshots/32-change-awaiting-approval.png) |
 
 ---
 

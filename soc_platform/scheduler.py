@@ -257,9 +257,15 @@ def run_forever(*, once: bool = False) -> None:
         for r in sch.run_due():
             print(r, flush=True)
         return
+    import signal
+
     sch.start(start_delay=0)
+    # SIGTERM is how a container is stopped: finish the job in hand, then exit (the default would kill it mid-run)
+    signal.signal(signal.SIGTERM, lambda *_: sch.stop.set())
     try:
-        while True:
-            time.sleep(3600)
+        while not sch.stop.wait(1.0):
+            pass
     except KeyboardInterrupt:
-        sch.shutdown()
+        pass
+    finally:
+        sch.shutdown(timeout=float(os.environ.get("SOC_SHUTDOWN_GRACE_SECONDS", "20") or 20))

@@ -24,7 +24,7 @@ from soc_platform.core.models import ActionRequest, Case, Entity
 from soc_platform.intelligence.correlation import CorrelationEngine
 from soc_platform.intelligence.models import Insight
 from soc_platform.intelligence.risk import RiskEngine
-from soc_platform.llm.gateway import BudgetExceeded, LLMGateway
+from soc_platform.llm.gateway import BudgetExceeded, LLMGateway, model_list
 
 
 class Page(list):
@@ -111,7 +111,7 @@ class IntelligenceAnalyst:
 
     def _top_risky(self, kind: str | None = None, limit: int = 5) -> Any:
         return [{"entity_id": p.entity_id, "name": p.name, "kind": p.kind, "score": p.score, "band": p.band,
-                 "dimensions": p.dimensions} for p in self.risk.top(kind or None, int(limit or 5))]
+                 "dimensions": p.dimensions} for p in self.risk.top(kind or None, max(1, min(50, int(limit or 5))))]
 
     def _list_insights(self, severity: str | None = None, rule: str | None = None) -> Any:
         # open findings only (as every other surface counts them): a resolved one - a budget alert that cleared, an
@@ -231,7 +231,8 @@ class IntelligenceAnalyst:
                                               f"TOOLS:\n{self._catalogue()}\n\nQUESTION: {q}", tier="small")
             except BudgetExceeded:
                 data = None
-            calls = [c for c in (data or {}).get("calls", []) if isinstance(c, dict) and c.get("tool") in self.tools]
+            calls = [c for c in model_list((data or {}).get("calls"))
+                     if isinstance(c, dict) and isinstance(c.get("tool"), str) and c["tool"] in self.tools]
             if calls:
                 return calls[:5], "llm"
         return self._deterministic_plan(q), "deterministic"
@@ -242,7 +243,11 @@ class IntelligenceAnalyst:
             spec = self.tools[c["tool"]]
             args = c.get("args") if isinstance(c.get("args"), dict) else {}
             try:
-                out = spec.fn(**{k: v for k, v in args.items() if isinstance(v, (str, int, float)) or v is None})
+                # a savepoint per tool: a value the database refuses (PostgreSQL then aborts the whole transaction)
+                # fails that tool only - the rest of the answer and the request's own writes are unaffected
+                with self.s.begin_nested():
+                    out = spec.fn(**{str(k): v for k, v in args.items()
+                                     if isinstance(v, (str, int, float)) and not isinstance(v, bool) or v is None})
             except TypeError as exc:
                 out = {"error": f"bad arguments: {exc}"}
             except Exception as exc:  # noqa: BLE001 - a failing tool is reported in the answer, never breaks it

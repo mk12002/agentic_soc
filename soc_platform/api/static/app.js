@@ -215,8 +215,8 @@ async function render() {
   document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === name));
   const q = $('#global-q'); if (q && name !== 'search') q.value = '';        // the box shows a query only on its results
   const title = TITLES[name] || cap(name);
-  const parent = {story: 'cases', entity: 'cases'}[name] || name;
-  $('#crumbs').innerHTML = name === 'search' ? '<b>Search</b>' : params.length ? `<a href="#/${esc(parent)}">${esc(TITLES[parent] || title)}</a> <span class="muted">/</span> <b>${esc(name === 'story' ? 'Attack story' : name === 'entity' ? 'Entity 360' : 'Detail')}</b>` : `<b>${esc(title)}</b>`;
+  const parent = {story: 'cases', entity: 'cases', trace: 'audit'}[name] || name;
+  $('#crumbs').innerHTML = name === 'search' ? '<b>Search</b>' : params.length ? `<a href="#/${esc(parent)}">${esc(TITLES[parent] || title)}</a> <span class="muted">/</span> <b>${esc(name === 'story' ? 'Attack story' : name === 'entity' ? 'Entity 360' : name === 'trace' ? 'Trace' : 'Detail')}</b>` : `<b>${esc(title)}</b>`;
   document.title = title + ' · Agentic SOC';
   const view = (window.VIEWS || {})[name];
   const main = $('#main');

@@ -207,6 +207,10 @@ class PhishingService:
         em = decompose(raw)
         result = (self.analyzer.analyze(em, raw, {"behavior": self._behavior_context(em, sub.reporter)})
                   if self.analyzer.engine is not None else self.analyzer.analyze(em, raw))
+        if em.anomalies and result.verdict in {"safe", "spam"}:
+            # fail closed: a message the platform could not read reliably is never judged harmless (or auto-closed);
+            # obfuscation such as NUL bytes or UTF-16 is itself a phishing technique
+            result.verdict, result.confidence = "suspicious", min(result.confidence, 0.5)
         case = self.cases.create("phishing", f"Reported: {em.subject or '(no subject)'}", severity=SEVERITY[result.verdict],
                                  attributes={"submission_id": sub.id, "reporter": sub.reporter, "sender": em.sender,
                                              "internet_message_id": em.message_id,
@@ -220,6 +224,10 @@ class PhishingService:
         for w in em.warnings:
             self.cases.add_evidence(case.id, summary=f"Decomposition warning: {w}", source="phishing.decompose",
                                     dimension="email", is_inference=True)
+        for a in em.anomalies:
+            self.cases.add_evidence(case.id, summary=f"Could not be read reliably: {a}. Held for an analyst - an "
+                                                     "unreadable message is never judged safe.",
+                                    source="phishing.decompose", dimension="email", is_inference=False)
         unavailable: list[str] = []
         # reconciliation (the other e-mail control) runs alongside campaign scope and user impact
         pool = ThreadPoolExecutor(max_workers=1)

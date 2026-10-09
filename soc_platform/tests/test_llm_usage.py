@@ -308,3 +308,15 @@ def test_a_resolved_finding_is_not_presented_as_a_current_one(session):
     session.flush()
     page = IntelligenceAnalyst(session, None)._list_insights()
     assert [i["title"] for i in page] == ["current"] and page.total == 1
+
+
+def test_an_endpoint_outage_is_not_mistaken_for_a_weak_model(session):
+    pol = defaults(settings())
+    for i in range(30):        # 25 clean short answers on large, then 5 calls while the endpoint was down
+        session.add(LLMCall(workflow="incident.summary", provider="f", model="m", prompt_redacted="",
+                            status="ok" if i < 25 else ("error" if i % 2 else "circuit_open"),
+                            prompt_tokens=800 if i < 25 else 0, completion_tokens=300 if i < 25 else 0, tier="large",
+                            claims_kept=3 if i < 25 else None, claims_dropped=0 if i < 25 else None))
+    session.flush()
+    f = {x["workflow"]: x for x in usage_report(session, pol)["features"]}["incident.summary"]
+    assert f["failed"] == 5 and f["usable_rate"] == 1.0 and f["advice"] == "try small"

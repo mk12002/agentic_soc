@@ -72,6 +72,10 @@ class Database:
             kwargs["poolclass"] = StaticPool
         else:
             kwargs.update(pool_settings())
+        timeout = statement_timeout_ms()
+        if timeout and url.startswith("postgresql"):
+            # a runaway query releases its connection and locks instead of holding them until someone notices
+            kwargs["connect_args"] = {**kwargs.get("connect_args", {}), "options": f"-c statement_timeout={timeout}"}
         self.engine: Engine = create_engine(url, **kwargs)
         if url.startswith("sqlite"):
             event.listen(self.engine, "connect", _sqlite_pragmas)
@@ -182,6 +186,17 @@ def _strip_nul(session: Session, _ctx: Any, _instances: Any) -> None:
             v = state.dict.get(attr.key)
             if isinstance(v, str) and "\x00" in v:
                 setattr(obj, attr.key, v.replace("\x00", ""))
+
+
+def statement_timeout_ms() -> int:
+    """SOC_DB_STATEMENT_TIMEOUT_SECONDS (PostgreSQL): the longest one SQL statement may run; 0 = no limit (default,
+    so a first backfill of a very large tenant is never cut short). 120 is a sensible production value."""
+    import os
+
+    try:
+        return max(0, int(float(os.environ.get("SOC_DB_STATEMENT_TIMEOUT_SECONDS", "0") or 0) * 1000))
+    except ValueError:
+        return 0
 
 
 def pool_settings() -> dict[str, Any]:

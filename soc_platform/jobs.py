@@ -194,8 +194,18 @@ def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Call
     if still_due is not None and not still_due():
         _lease(db, name, release=True)                       # someone else ran it between our check and the lease
         return None
+    from soc_platform.core.observability import event, new_trace, traced
+
+    with traced(new_trace(f"job-{name}")) as trace:
+        return _run_traced(name, db, trigger, sleep, body, trace, event)
+
+
+def _run_traced(name: str, db: Any, trigger: str, sleep: Callable[[float], None],
+                body: Callable[[str, Session], dict[str, Any]] | None, trace: str, event: Callable[..., None]) -> JobRun:
+    """The run itself, under its trace id: every audit event, model call and log line it causes carries it."""
     fn = body or _body
     started = utcnow()
+    event("job.start", job=name, trigger=trigger)
     err, summary, attempts = None, {}, 0
     try:
         for attempts in range(1, RETRIES + 1):
@@ -217,7 +227,7 @@ def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Call
             status = "ok" if err is None else ("dead_letter" if failures_in_row >= DEAD_LETTER_AFTER else "error")
             run = JobRun(job=name, trigger=trigger, ordinal=_next_ordinal(s), started_at=started, finished_at=utcnow(),
                          attempts=attempts, status=status, error=err, summary=_jsonable(summary),
-                         consecutive_failures=failures_in_row)
+                         consecutive_failures=failures_in_row, trace_id=trace)
             s.add(run)
             s.flush()
             if status == "dead_letter":
@@ -225,6 +235,9 @@ def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Call
             s.expunge(run)
     finally:
         _lease(db, name, release=True)
+    event("job.end", 20 if run.status == "ok" else 40, job=name, status=run.status, attempts=attempts,
+          duration_s=round((run.finished_at - started).total_seconds(), 2) if run.finished_at else None,
+          error=(err or "")[:300] or None)
     return run
 
 
@@ -278,4 +291,4 @@ def history(s: Session, *, job: str | None = None, limit: int = 100) -> list[dic
              "started_at": r.started_at.isoformat(), "finished_at": r.finished_at.isoformat() if r.finished_at else None,
              "duration_s": round((_aware(r.finished_at) - _aware(r.started_at)).total_seconds(), 2) if r.finished_at else None,
              "error": (r.error or "").split("\n")[0] or None, "summary": r.summary,
-             "consecutive_failures": r.consecutive_failures} for r in s.execute(q).scalars()]
+             "consecutive_failures": r.consecutive_failures, "trace_id": r.trace_id} for r in s.execute(q).scalars()]

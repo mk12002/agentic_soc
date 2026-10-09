@@ -611,7 +611,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 553 passed on SQLite (with PostgreSQL's rules enforced) and 553 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 645 passed on SQLite (with PostgreSQL's rules enforced) and 645 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -717,6 +717,8 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Could we run the model inside our tenant? | Yes: Azure AI Foundry in the client's subscription, or an OpenAI-compatible self-hosted model (vLLM, Ollama). |
 | We have our own LLM platform (Claude, Gemini and OpenAI models behind one endpoint). Can you use it instead of your Azure? | Yes - it is configuration, not code: point `SOC_LLM_PROVIDER=openai_compatible` (or `anthropic`) at the gateway, name a model per tier, and set its auth header, extra headers and CA if it needs them. Redaction, citations, the numeric guardrail, the budget and the fallback all still apply, and every verdict, score and action stays identical because the model never produces them. Walkthrough: CLIENT_DEPLOYMENT_GUIDE.md section 5. |
 | Our model is trained on company data - does that matter? | It writes better prose about your environment, but it only ever sees the evidence the platform sends for that task, and it still cannot change a figure or a decision. |
+| Can we see exactly what the AI did, and why? | Yes. Every request and job run has a trace id. From any audit event, the trace shows everything it caused: the request, every audit event and each model call - the prompt as sent (names pseudonymised), the answer, and every statement the evidence check removed with the reason ("cites no evidence", "states a figure its evidence doesn't contain"). The same id is on every log line sent to your SIEM. |
+| Is every action logged? | Every change and decision is in the hash-chained audit log, and every successful write request is guaranteed at least one audit event - even from a route whose code forgot. Every request is in the access log; every model call, outbound tool call, job and CLI command is a structured log line. |
 | Can one person or a script run up the AI bill? | No. Administrators set, on the AI usage screen, a monthly and a daily token budget, per-person hourly and daily limits (by role or by person; 0 switches the model off for someone) and a hard cap on every answer's length. Over a limit the call isn't sent: the person gets the platform's own cited answer and a note saying why. Scheduled work counts only against the platform budgets, so one person can't starve it. |
 | How do we know which features need the big model? | The AI usage screen measures it per feature: cost on each tier, how often answers were usable and how many statements the evidence check removed. From those figures - computed, not judged by a model - it advises "try small", "use large" or "keep". Switch one feature, compare a week later. |
 | What does it cost? | Measured: about $5 / month for a small SOC, $26 mid-size, $150 large at gpt-4.1-mini (LLM_TOKENS_AND_COST.md). A cheaper small-tier model cuts another ~25 %. A monthly token budget with findings at 80 % and 100 % caps spend; beyond it the platform falls back to deterministic output. |
@@ -759,7 +761,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 553 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 645 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -840,9 +842,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 553 SQLite, 553 PostgreSQL / 205 |
+| Platform tests / engine tests | 645 SQLite, 645 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
-| Features verified | 103 of 103 |
+| Features verified | 108 of 108 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
 | Risk half-life / bands | 7 days / critical ≥ 80, high ≥ 60, medium ≥ 30 |
@@ -1186,7 +1188,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 553 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 645 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |
@@ -1198,7 +1200,7 @@ browser."
 | **Layout** | Every screen at 1440, 1280, 1024 and 768 px, light and dark: nothing clipped, overflowing or squeezed | 0 problems |
 | **Live** | The real LLM (Azure AI Foundry), NVD, EPSS and CISA KEV | Green |
 | **Stress** | 400 hosts and 300 people with messy naming: no false merges; 20,000-entity scale benchmarks | 0 false merges |
-| **Connector conformance** | Every connector and stream: paging to the end and resuming correctly, throttling, an expired token, a missing permission, every field removed or null, an HTML page instead of JSON, late logs | Green; found 9 resume bugs and 14 connectors crashing on a missing field, all fixed |
+| **Connector conformance** | Every connector and stream: paging to the end and resuming correctly, throttling, an expired token, a missing permission, every field removed, null or of the wrong type, an HTML page instead of JSON, late logs | Green; found 9 resume bugs, 14 connectors crashing on a missing field and 715 crashes on wrong-typed fields in 26 of 27 streams, all fixed |
 | **Volume and traffic** | Messy estates up to 40 times the demo on SQLite and PostgreSQL; a real multi-process server under 100 concurrent users; a saturated database answers "busy, retry" | 0 failed records; 150 requests/s, 0 errors |
 | **Real-world situations** | An empty tenant; every tool down at once | Everything keeps working; found 4 outage crashes (incl. a KEV wipe), all fixed |
 | **Static analysis** | ruff (whole repository), bandit, pip-audit, npm audit, type checking of the platform core | 0 findings / 0 medium-high / no known vulnerabilities |

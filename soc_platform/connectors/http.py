@@ -138,6 +138,19 @@ def entra_app_auth(tenant_id: str, client_id: str, client_secret: str, scope: st
 # ----------------------------------------------------------------------------- transports
 
 
+def _log_call(method: str, url: str, status: int | None, started: float, error: str | None = None) -> None:
+    """One log line per outbound call to a tool: host and path only - never the query string (it can carry keys) or
+    any header or body."""
+    from urllib.parse import urlsplit
+
+    from soc_platform.core.observability import event
+
+    u = urlsplit(url)
+    bad = status is None or status >= 400
+    event("connector.http", 30 if bad and status not in (401, 404, 429) else 20, method=method, host=u.hostname,
+          path=u.path[:200], status=status, latency_ms=round((time.perf_counter() - started) * 1000, 1), error=error)
+
+
 class HttpTransport:
     def __init__(self, base_url: str, auth: Auth | None = None, *, timeout: float = 30.0, verify: bool = True,
                  default_headers: dict[str, str] | None = None) -> None:
@@ -151,10 +164,13 @@ class HttpTransport:
         hdrs = {**self.default_headers, **(headers or {})}
         prm = dict(params or {})
         self.auth.apply(hdrs, prm)
+        started = time.perf_counter()
         try:
             r = self.client.request(method, url, params=prm, json=json, data=data, headers=hdrs)
         except httpx.TransportError as exc:
+            _log_call(method, url, None, started, type(exc).__name__)
             raise TransientError(str(exc)) from exc
+        _log_call(method, url, r.status_code, started)
         raise_for_status(r.status_code, dict(r.headers), f"{method} {path}", r.text[:300])
         ctype = r.headers.get("content-type", "")
         if "json" in ctype and r.content:

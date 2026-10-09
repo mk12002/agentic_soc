@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,9 @@ from sqlalchemy.orm import Session
 from soc_platform.core.entity_resolution import EntityResolver, ResolutionResult, _display, norm_indicator
 from soc_platform.core.models import Entity, EntityKey, Relation, SourceRecord, UnresolvedItem, utcnow
 from soc_platform.core.schema import EntityRef, NormalizedRecord
+
+# how far ahead of our clock a vendor time may be before it is treated as skew or a placeholder
+FUTURE_TOLERANCE = timedelta(hours=24)
 
 
 class RawStore:
@@ -65,7 +68,15 @@ class ContextStore:
     # ------------------------------------------------------------------ ingest
 
     def ingest(self, rec: NormalizedRecord) -> SourceRecord:
-        observed = rec.observed_at or utcnow()
+        now = utcnow()
+        observed = rec.observed_at or now
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=UTC)
+        if observed > now + FUTURE_TOLERANCE:
+            # a vendor clock ahead of ours, or a placeholder such as 9999-12-31: stored as seen now (the vendor's
+            # value kept), or it would become "the latest observation" that every risk figure decays from
+            rec.attributes = {**rec.attributes, "reported_time": observed.isoformat()}
+            observed = now
         src = self.s.execute(select(SourceRecord).where(
             SourceRecord.tool == rec.tool, SourceRecord.source_type == rec.source_type,
             SourceRecord.source_id == rec.source_id)).scalars().first()

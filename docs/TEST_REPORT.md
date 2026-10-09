@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-08 (rounds 15-18; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-09 (rounds 15-20; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,98 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 18 (2026-10-08) - latest results: AI budgets, per-person limits and model choice
+## 0. Round 20 (2026-10-09) - latest results: bad data and bad input degrade one item, never the platform
+
+Aim: a critical review for production - find every way discrepancies in data or inputs (vendor records, times,
+pushed alerts, spreadsheets, e-mail, settings, policy documents, model output, API parameters) or an operational
+event (a deploy, a runaway query, several processes) could break the platform, fix each with a regression test,
+and list what cannot be fixed in code. Method: fuzzers written for each input surface, then the findings turned into
+tests. Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **645 passed**, 0 failed, 15 skipped (660 collected; the same opt-in / single-database skips) |
+| Platform suite on PostgreSQL 16 | **645 passed**, 0 failed, 15 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **108 of 108 features verified**; 240 mapped tests run, 0 failed; ML engine 205 passed; browser tour with the live LLM 0 problems (35 screenshots) |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / **0 known vulnerabilities** / clean |
+
+Probes run (and how much they found before the fixes):
+
+| Probe | Before | After |
+|---|---|---|
+| Every connector normaliser, every field of the first records of every stream given 11 wrong-typed or odd values | **715** crashing mutations in **26 of 27** streams | 0 (only refusals of records whose identifier is unusable, with the reason) |
+| 17 corrupted reported e-mails (empty, binary, UTF-16, NUL bytes, broken MIME, invalid base64, bit flips...) | none crashed, but unreadable content could be analysed as if complete | all 17 processed; none called safe |
+| Every request body field (12 odd values) and query parameter (8) of every API route, from the OpenAPI schema, as lead and admin | 4 server errors (2 routes) | 0 |
+| Every node of the autonomy policy, AI usage policy and connector configuration given 13 odd values | validator crashes; wrong types accepted by the autonomy policy | each rejected with a reason |
+| Every field of the model's JSON for grounded answers, the analyst planner, the report planner and deep analysis | crashes on lists / numbers in place of words / lists | 0 |
+| 14 mistyped settings | tracebacks at start, crashes later, or silently ignored | start refused with every problem and its fix |
+
+Found and fixed (details in FAILURE_MODES.md):
+
+| What was wrong | Effect | Fix |
+|---|---|---|
+| Vendor fields of the wrong type crashed the parsers | a whole record (sign-in, host, alert) set aside for one field | records conformed to the stream's documented shape, learned from the fixtures; coercions reported per sync (`connector.data_quality`) |
+| A numeric id or an odd title failed the canonical schema | record lost | numeric ids accepted as text; odd title / severity / link / attributes emptied |
+| Future vendor times (`9999-12-31`, a device clock years ahead) became the latest observation | every risk score would decay as if decades old | times more than 24 h ahead stored as now, vendor value kept |
+| `.NET` `0001-01-01`, epoch 0, out-of-range or negative epochs, epoch as text | year-1 dates stored; exceptions; times lost | read as no time, or read |
+| One alert without an id in a SIEM batch | whole batch refused (and resent forever) | per-alert isolation; response lists rejected alerts and reasons |
+| Ownership CSV saved by Excel (BOM, Windows-1252, semicolons, `Host Name` headers) | silently no owners, or an error | read in every one of those forms; re-read only when it changes; file handle closed |
+| UTF-16 / NUL-byte / damaged-MIME e-mail | parts of the message unseen by the analysis | decoded and cleaned; never called safe - held for an analyst with the reason |
+| Mistyped settings | traceback, crash mid-request, or ignored | validated as a whole at start, with fixes and "did you mean" |
+| Autonomy policy accepted wrong types | an approved policy could stop every action decision | validated field by field; an unreadable stored entry decides at L2 with four-eyes; VIP names never matched letter by letter |
+| AI usage policy validator crashed on a list for a map; accepted infinite prices | a 500 on save; meaningless cost figures | type checks; finite numbers only |
+| Model JSON with a list for a word, a number for a list, `"false"` as text | answers, deep analysis and report plans crashed; insufficient evidence misread; a 99,999,999-day report possible | defensive readers; period kept within 1-730 days |
+| An analyst tool the database refused | on PostgreSQL the rest of the request failed (aborted transaction) | one savepoint per tool |
+| Oversized numbers in two query parameters | integer overflow, 500 | bounded, 422 |
+| Case and approval lists stopped at 500 | older cases reachable only by search | paged (`?offset=`, Older / Newer), id tiebreak |
+| SIGTERM | scheduler killed mid-job; last access-log rows lost; shutdown unbounded | clean stop between jobs, access log flushed, 20 s grace inside compose's 30 s |
+| No bound on one SQL statement | a runaway query could hold connections and locks | `SOC_DB_STATEMENT_TIMEOUT_SECONDS` (PostgreSQL) |
+| Each process held a full tool request budget | vendors could see 5x the configured rate | `SOC_CONNECTOR_RATE_SHARE` |
+| Duck-typed connectors (found by the suite) | the new data-quality report crashed syncs of connectors not derived from `BaseConnector` | reported only where the connector offers it |
+
+New: `connectors/conform.py`, `settings_check.py`, `test_data_tolerance.py` (42 test cases), a wrong-type fuzz per stream
+in the conformance suite, model-output fuzzes in `test_intelligence.py` / `test_story.py`; ENGINEERING.md decisions
+62-66 and three new known limitations.
+
+Not fixable in code alone (also in ENGINEERING.md §26 and FAILURE_MODES.md):
+
+- **Live tenants**: every connector is proven against documented shapes; record and sanitise real responses during
+  deployment so the fixtures, and therefore the conformed shapes, match the client's tenants.
+- **Schema migrations**: additive changes are automatic; the first NOT NULL column, rename or drop needs Alembic.
+- **Per-person erasure** (GDPR): no tool yet; the hash-chained audit log needs an agreed design.
+- **Limits shared across processes**: the API's per-client limit is per process; put a hard limit on the proxy.
+- **Restore drill, independent penetration test, manual accessibility review, load at the client's volume**.
+
+## Round 19 (2026-10-08): every agent call diagnosable, every action auditable, ample logs
+
+Aim: for any request, job or model call, answer "what happened and why" from the platform's own records; leave no
+change on the platform unaudited; produce structured logs an operations team and a SIEM can use. Results on the
+final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **564 passed**, 0 failed, 15 skipped (579 collected; the same opt-in / single-database skips) |
+| Platform suite on PostgreSQL 16 | **564 passed**, 0 failed, 15 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **103 of 103 features verified**; 221 mapped tests run, 0 failed; ML engine 205 passed; browser tour with the live LLM 0 problems (35 screenshots, incl. the trace view; `docs/screenshots` refreshed from this run) |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / **0 known vulnerabilities** / clean |
+
+New: `core/observability.py` (trace ids, structured logs), the trace view (`GET /api/v1/admin/trace/{id}`, *Audit
+log -> Trace*), model-call diagnostics (`/api/v1/admin/llm/calls`, *AI usage -> Recent model calls*), the write-audit
+guarantee; OPERATIONS.md "Logs, traces and diagnostics"; ENGINEERING.md decisions 59-61; `test_observability.py`
+(10 tests).
+
+Found and fixed:
+
+| What was wrong | Effect | Fix |
+|---|---|---|
+| No logging configuration at all | only Python's default warnings, unstructured, reached the container log; no line for requests, model calls, outbound calls or jobs | structured JSON (prod) / text lines for requests, audit events, model calls, outbound calls to tools, job start and end, CLI commands; optional rotating file |
+| Nothing linked the access log, audit events, model calls and job runs | "what did this request / job do?" could not be answered | one trace id per request / job / CLI command on every record and log line; trace view |
+| The evidence check's removals were only counted | "why is this explanation thin?" had no answer | each removed statement stored with its reason on the model call |
+| Some successful writes left no audit event (pushed SIEM alerts) | a change on the platform with only an access-log row | generic `api.<method>` audit event in the same transaction when a route wrote none |
+| Tier advice counted calls the endpoint failed to answer (down, slow, circuit open) as poor answers - seen as "33 % usable" for incident summaries on the AI usage screen during a tour run on a heavily loaded machine (with the same live model the summaries all succeeded) | an outage would have pushed features towards "use large" for no quality reason | quality counts only calls the model answered; failures to answer shown separately as *not answered* |
+| The trace id was added only by the platform's log handler (found by the tests) | a host's own log handler would have seen lines without it | stamped on each event when it is created |
+
+## Round 18 (2026-10-08): AI budgets, per-person limits and model choice
 
 Aim: no person, script or burst of work can run up the AI bill or starve scheduled work; administrators decide the
 limits and each feature's model; the choice between the small and the large model is made from measured figures.

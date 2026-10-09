@@ -20,6 +20,8 @@ Policy changes follow propose -> approve (different person) -> activate.
 from __future__ import annotations
 
 import copy
+import logging
+import re
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any
@@ -38,6 +40,14 @@ class Level(IntEnum):
     L2_RECOMMEND = 2
     L3_APPROVE = 3
     L4_AUTONOMOUS = 4
+
+
+log = logging.getLogger(__name__)
+
+
+def _yes(v: Any) -> bool:
+    """four_eyes as stored; anything other than a clear 'no' keeps the second approver (fail safe)."""
+    return v if isinstance(v, bool) else str(v).strip().lower() not in {"false", "0", "no", "off", "", "none"}
 
 
 # Go-live posture recommended in section 5.2: L1-L2 everywhere; promote per action on evidence.
@@ -104,16 +114,22 @@ class PolicyDecision:
 def is_vip_target(target: dict[str, Any], vip: dict[str, Any]) -> bool:
     if target.get("vip") or target.get("criticality") in {"critical", "vip"}:
         return True
+    vip = vip if isinstance(vip, dict) else {}
     ident = str(target.get("id") or target.get("upn") or "").lower()
-    if target.get("type") == "identity" and ident in {i.lower() for i in vip.get("identities", [])}:
+    if target.get("type") == "identity" and ident in _names(vip.get("identities")):
         return True
     if target.get("type") == "asset":
-        if ident in {a.lower() for a in vip.get("assets", [])}:
+        if ident in _names(vip.get("assets")):
             return True
-        tags = {str(t).lower() for t in target.get("tags", [])}
-        if tags & {t.lower() for t in vip.get("asset_tags", [])}:
+        if _names(target.get("tags")) & _names(vip.get("asset_tags")):
             return True
     return False
+
+
+def _names(v: Any) -> set[str]:
+    """A list of names, lower-cased; a single name counts as one (never as its letters)."""
+    items = [v] if isinstance(v, str) else v if isinstance(v, (list, tuple, set)) else []
+    return {str(x).strip().lower() for x in items if str(x).strip()}
 
 
 class PolicyEngine:
@@ -131,13 +147,21 @@ class PolicyEngine:
 
     def view(self, action_type: str) -> ActionPolicyView:
         doc = self.document
-        cfg = doc.get("actions", {}).get(action_type, {})
-        return ActionPolicyView(
-            level=Level(int(cfg.get("level", doc.get("default_level", 2)))),
-            max_targets=int(cfg.get("max_targets", doc.get("default_max_targets", 25))),
-            hard_limit=int(cfg.get("hard_limit", doc.get("default_hard_limit", 5000))),
-            four_eyes=bool(cfg.get("four_eyes", False)),
-        )
+        actions = doc.get("actions") if isinstance(doc.get("actions"), dict) else {}
+        cfg = actions.get(action_type) if isinstance(actions.get(action_type), dict) else {}
+        try:
+            return ActionPolicyView(
+                level=Level(int(cfg.get("level", doc.get("default_level", 2)))),
+                max_targets=int(cfg.get("max_targets", doc.get("default_max_targets", 25))),
+                hard_limit=int(cfg.get("hard_limit", doc.get("default_hard_limit", 5000))),
+                four_eyes=_yes(cfg.get("four_eyes", False)),
+            )
+        except (TypeError, ValueError):
+            # a stored policy written before validation existed: fail safe (recommend only, small blast radius,
+            # four-eyes) rather than stop every decision
+            log.error("autonomy policy entry for %s is unreadable; deciding at L2 (recommend) until it is fixed",
+                      action_type)
+            return ActionPolicyView(level=Level.L2_RECOMMEND, max_targets=1, hard_limit=5000, four_eyes=True)
 
     def decide(self, action_type: str, targets: list[dict[str, Any]], *, destructive: bool,
                precondition_failures: list[str] | None = None,
@@ -236,11 +260,59 @@ class PolicyStore:
         return row
 
 
+_POLICY_KEYS = {"default_level", "default_max_targets", "default_hard_limit", "actions", "vip"}
+_ACTION_KEYS = {"level", "max_targets", "hard_limit", "four_eyes"}
+_VIP_KEYS = {"identities", "assets", "asset_tags"}
+
+
+def _whole(v: Any, lo: int, hi: int) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+def policy_problems(doc: Any) -> list[str]:
+    """Every problem with an autonomy policy document, each saying what to fix (empty = valid). Checked before a
+    proposal is stored: a policy that passes four-eyes approval is read by every action decision, so a wrong type
+    here (a level as text, a list where the actions map belongs) would otherwise stop all of them at once."""
+    if not isinstance(doc, dict):
+        return ["the policy must be an object"]
+    out = [f"unknown setting '{k}' ({', '.join(sorted(_POLICY_KEYS))})" for k in doc if k not in _POLICY_KEYS]
+    if "default_level" in doc and not _whole(doc["default_level"], 0, 4):
+        out.append("default_level must be a whole number 0-4")
+    for k in ("default_max_targets", "default_hard_limit"):
+        if k in doc and not _whole(doc[k], 1, 1_000_000):
+            out.append(f"{k} must be a whole number between 1 and 1000000")
+    actions = doc.get("actions", {})
+    if not isinstance(actions, dict):
+        out.append("actions must map each action type to its settings")
+        actions = {}
+    for name, cfg in actions.items():
+        if not re.fullmatch(r"[a-z0-9_]{1,40}\.[a-z0-9_]{1,60}", str(name)):
+            out.append(f"actions.{name}: an action type looks like 'endpoint.isolate'")
+        if not isinstance(cfg, dict):
+            out.append(f"actions.{name}: expected level / max_targets / hard_limit / four_eyes")
+            continue
+        out += [f"actions.{name}.{k}: unknown ({', '.join(sorted(_ACTION_KEYS))})" for k in cfg if k not in _ACTION_KEYS]
+        if "level" in cfg and not _whole(cfg["level"], 0, 4):
+            out.append(f"actions.{name}.level must be a whole number 0-4")
+        for k in ("max_targets", "hard_limit"):
+            if k in cfg and not _whole(cfg[k], 1, 1_000_000):
+                out.append(f"actions.{name}.{k} must be a whole number between 1 and 1000000")
+        if "four_eyes" in cfg and not isinstance(cfg["four_eyes"], bool):
+            out.append(f"actions.{name}.four_eyes must be true or false")
+    vip = doc.get("vip", {})
+    if not isinstance(vip, dict):
+        out.append("vip must hold identities / assets / asset_tags lists")
+    else:
+        out += [f"vip.{k}: unknown ({', '.join(sorted(_VIP_KEYS))})" for k in vip if k not in _VIP_KEYS]
+        for k in _VIP_KEYS & set(vip):
+            if not (isinstance(vip[k], list) and all(isinstance(x, str) and x.strip() for x in vip[k])):
+                out.append(f"vip.{k} must be a list of names")
+    return out
+
+
 def _validate_policy(doc: dict[str, Any]) -> None:
-    for name, cfg in (doc.get("actions") or {}).items():
-        lvl = int(cfg.get("level", doc.get("default_level", 2)))
-        if lvl not in range(5):
-            raise ValueError(f"{name}: level must be 0-4")
+    if problems := policy_problems(doc):
+        raise ValueError("the policy was not saved: " + "; ".join(problems[:20]))
 
 
 def _diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:

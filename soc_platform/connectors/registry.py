@@ -390,7 +390,9 @@ class ConnectorRegistry:
                                                       out_dir=recordings_dir() if stage == "record" else None)
         else:
             transport = m.fixture_transport()
-        return ConnectorInstance(m, m.factory(settings, transport), mode, transport, stage)
+        conn = m.factory(settings, transport)
+        conn._manifest = m              # where its documented record shapes come from (connectors/conform.py)
+        return ConnectorInstance(m, conn, mode, transport, stage)
 
     def _usable(self) -> list[tuple[str, BaseConnector]]:
         out = []

@@ -97,12 +97,21 @@ function intelAll() { INTEL_ALL = true; Intelligence(); }
 // ================================================================= Cases
 let CASE_FILTER = 'all';
 let OWNER_FILTER = 'all';
+let CASE_OFFSET = 0;
+// "Showing 1-500 of 1,240" with Newer / Older when a list is longer than one page
+function pager(offset, count, total, fn, noun) {
+  if (offset === 0 && count >= total) return '';
+  const size = Math.max(count, 1);
+  return `<div class="inline small muted" style="padding:10px 14px;gap:10px">Showing ${nf(count ? offset + 1 : 0)}-${nf(offset + count)} of ${nf(total)} ${noun}.
+    ${offset > 0 ? btn('Newer', fn, [Math.max(0, offset - size)], 'sm') : ''}${offset + count < total ? btn('Older', fn, [offset + count], 'sm') : ''}</div>`;
+}
 async function Cases(id) {
   const __g = GEN;
   if (id) return CaseDetail(id);
   const qs = new URLSearchParams();
   if (CASE_FILTER !== 'all') qs.set('domain', CASE_FILTER);
   if (OWNER_FILTER !== 'all') qs.set('assignee', OWNER_FILTER);
+  if (CASE_OFFSET) qs.set('offset', CASE_OFFSET);
   const [cs, csum] = await Promise.all([api('/api/v1/cases' + (qs.toString() ? '?' + qs : '')), api('/api/v1/cases/summary')]);
   const shown = OWNER_FILTER !== 'all' ? csum[OWNER_FILTER === 'me' ? 'mine' : 'unassigned']
     : CASE_FILTER === 'all' ? csum.total : (csum.by_domain[CASE_FILTER] || 0);
@@ -119,10 +128,11 @@ async function Cases(id) {
       <div class="seg" style="margin-left:10px" role="group" aria-label="Owner">${[['all', 'Everyone', csum.total], ['me', 'Mine', csum.mine], ['unassigned', 'Unassigned', csum.unassigned]].map(([f, label, n]) =>
       `<button class="${f === OWNER_FILTER ? 'on' : ''}" data-fn="ownerFilter" data-args="${arg(f)}">${label} <span class="muted">${n}</span></button>`).join('')}</div></div>` +
       table([{h: 'Severity'}, {h: 'Case'}, {h: 'Verdict'}, {h: 'Confidence', num: 1}, {h: 'Status'}, {h: 'Owner'}, {h: 'Opened'}], rows, {empty: OWNER_FILTER === 'me' ? 'No cases assigned to you.' : 'No cases yet - run a pipeline to ingest alerts and reported email.'}) +
-      (cs.length < shown ? `<div class="small muted" style="padding:10px 14px">Showing the ${cs.length} most recent of ${shown} cases.</div>` : ''), {flush: true})));
+      pager(CASE_OFFSET, cs.length, shown, 'casePage', 'cases'), {flush: true})));
 }
-function caseFilter(f) { CASE_FILTER = f; Cases(); }
-function ownerFilter(f) { OWNER_FILTER = f; Cases(); }
+function caseFilter(f) { CASE_FILTER = f; CASE_OFFSET = 0; Cases(); }
+function casePage(o) { CASE_OFFSET = Math.max(0, Number(o) || 0); Cases(); }
+function ownerFilter(f) { OWNER_FILTER = f; CASE_OFFSET = 0; Cases(); }
 async function runInc() { toast('Running incident pipeline…'); const r = await post('/api/v1/incidents/run'); toast(`${r.new_incidents} new incident(s), ${r.investigated.length} investigated`); render(); }
 async function runPh() { toast('Pulling reported email…'); const r = await post('/api/v1/phishing/ingest'); toast(`${(r.processed || []).length} message(s) analysed`); render(); }
 
@@ -245,9 +255,10 @@ async function Entity(id) {
 
 // ================================================================= Approvals
 let APPROVAL_FILTER = 'all';
+let APPROVAL_OFFSET = 0;
 async function Approvals() {
   const __g = GEN;
-  const [xs, sm] = await Promise.all([api('/api/v1/actions?status=recommended,pending_approval' + (APPROVAL_FILTER === 'all' ? '' : '&domain=' + encodeURIComponent(APPROVAL_FILTER))),
+  const [xs, sm] = await Promise.all([api('/api/v1/actions?status=recommended,pending_approval' + (APPROVAL_FILTER === 'all' ? '' : '&domain=' + encodeURIComponent(APPROVAL_FILTER)) + (APPROVAL_OFFSET ? '&offset=' + APPROVAL_OFFSET : '')),
     api('/api/v1/actions/summary?status=recommended,pending_approval')]);
   const doms = Object.keys(sm.by_domain).sort();
   const total = APPROVAL_FILTER === 'all' ? sm.total : (sm.by_domain[APPROVAL_FILTER] || 0);
@@ -260,9 +271,10 @@ async function Approvals() {
       <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}</td>
       <td><div class="inline" style="flex-wrap:wrap;gap:6px">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}${x.case_id ? `<a class="btn sm ghost" href="#/cases/${encodeURIComponent(x.case_id)}">Case</a>` : ''}</div></td></tr>`),
       {empty: 'Nothing is waiting for approval.'}) +
-      (xs.length < total ? `<div class="small muted" style="padding:10px 14px">Showing the ${xs.length} most recent of ${total} actions.</div>` : ''), {flush: true})));
+      pager(APPROVAL_OFFSET, xs.length, total, 'approvalPage', 'actions'), {flush: true})));
 }
-function approvalFilter(f) { APPROVAL_FILTER = f; Approvals(); }
+function approvalFilter(f) { APPROVAL_FILTER = f; APPROVAL_OFFSET = 0; Approvals(); }
+function approvalPage(o) { APPROVAL_OFFSET = Math.max(0, Number(o) || 0); Approvals(); }
 
 // ================================================================= Phishing
 async function Phishing() {
@@ -575,7 +587,7 @@ async function AiUsage() {
   const bar = (used, cap) => cap ? `${meter(Math.min(100, 100 * used / cap))}<div class="small muted">${tok(used)} of ${tok(cap)} tokens (${Math.round(100 * used / cap)} %)</div>` : `<div class="small muted">${tok(used)} tokens · no cap</div>`;
   const wf = f => { const r = (P.workflows || {})[f.workflow] || {};
     return `<tr><td><div class="t-title mono small">${esc(f.workflow)}</div><div class="t-sub">${esc(f.description)} · ${esc(f.triggered_by === 'person' ? 'asked by a person' : 'scheduled')}</div></td>
-      <td class="num small">${nf(f.calls)}${f.refused ? `<div class="t-sub">${nf(f.refused)} refused</div>` : ''}</td><td class="num small">${tok(f.mean_in)} / ${tok(f.mean_out)}</td>
+      <td class="num small">${nf(f.calls)}${f.refused ? `<div class="t-sub">${nf(f.refused)} refused by limits</div>` : ''}${f.failed ? `<div class="t-sub" style="color:var(--high)">${nf(f.failed)} not answered (endpoint down / slow)</div>` : ''}</td><td class="num small">${tok(f.mean_in)} / ${tok(f.mean_out)}</td>
       <td class="num small">${usd(f.cost)}<div class="t-sub">${usd(f.cost_on_other_tier)} on ${esc(f.other_tier)}</div></td>
       <td class="num small">${f.usable_rate == null ? '–' : pct(f.usable_rate)}${f.claims_dropped_rate == null ? '' : `<div class="t-sub">${pct(f.claims_dropped_rate)} statements dropped</div>`}</td>
       <td class="num small">${f.p95_ms == null ? '–' : (f.p95_ms / 1000).toFixed(1) + ' s'}</td>
@@ -612,8 +624,17 @@ async function AiUsage() {
     ${edit ? `<div class="form-row mt"><input class="input" id="lp-note" aria-label="Why" placeholder="Why (kept in the history and the audit log)">${btn('Save limits and model choices', 'saveLlmPolicy', [], 'primary')}</div><div id="lpout"></div>` : `<div class="small muted mt">Only an administrator changes these.</div>`}
     <div class="grid g-2e mt">
       ${card('Who used it (last 30 days)', table(['Person', {h: 'Last hour', num: 1}, {h: 'Today', num: 1}, {h: '30 days', num: 1}, {h: 'Calls', num: 1}], u.users.map(x => `<tr><td class="small">${esc(x.user)}</td><td class="num small">${tok(x.hour)}</td><td class="num small">${tok(x.today)}</td><td class="num small">${tok(x.period)}</td><td class="num small">${nf(x.calls)}</td></tr>`), {flush: true, empty: 'No one has asked the model for anything yet.'}))}
+      ${card('Recent model calls', `<div class="form-row" style="margin-bottom:8px"><select id="lc-wf" aria-label="Feature"><option value="">Every feature</option>${Object.keys(pol.workflows).map(w => `<option>${esc(w)}</option>`).join('')}</select>
+        <select id="lc-st" aria-label="Outcome"><option value="">Every outcome</option>${['ok', 'error', 'unparseable', 'user_limit', 'daily_budget_exceeded', 'budget_exceeded', 'disabled_by_policy', 'circuit_open'].map(s => `<option>${s}</option>`).join('')}</select>${btn('Show', 'loadCalls', [], 'sm')}</div><div id="lcalls"></div>`, {sub: 'open one to see its prompt, answer and what the evidence check removed'})}
       ${card('History', table(['Version', 'By', 'When', 'Why'], pol.history.map(h => `<tr><td class="mono">#${esc(h.id)}</td><td class="small">${esc(h.set_by)}</td><td class="mono small muted">${dt(h.created_at)}</td><td class="small">${esc(h.note || '')}</td></tr>`), {flush: true, empty: 'Defaults in force - nothing changed yet.'}))}
     </div>`));
+}
+async function loadCalls() {
+  const q = new URLSearchParams({limit: '50'}); if ($('#lc-wf').value) q.set('workflow', $('#lc-wf').value); if ($('#lc-st').value) q.set('status', $('#lc-st').value);
+  const xs = await api('/api/v1/admin/llm/calls?' + q.toString());
+  $('#lcalls').innerHTML = table(['When', 'Feature', 'Outcome', {h: 'Tokens', num: 1}, ''], xs.map(c => `<tr><td class="mono small">${dt(c.ts)}</td><td class="mono small">${esc(c.workflow)}<div class="t-sub">${esc(c.actor || 'scheduled')} · ${esc(c.tier || '')}</div></td>
+    <td>${status(c.status === 'ok' ? 'ok' : 'medium', c.status)}${c.claims_dropped ? `<div class="t-sub">${nf(c.claims_dropped)} removed</div>` : ''}</td><td class="num small">${nf((c.prompt_tokens || 0) + (c.completion_tokens || 0))}</td>
+    <td>${c.trace_id ? `<a href="#/trace/${encodeURIComponent(c.trace_id)}">Trace</a>` : ''}</td></tr>`), {flush: true, empty: 'No model calls match'});
 }
 async function saveLlmPolicy() {
   const pol = window.__llmpol, P = JSON.parse(JSON.stringify(pol.policy));
@@ -760,8 +781,26 @@ async function Audit() {
   const [v, xs] = await Promise.all([api('/api/v1/audit/verify'), api('/api/v1/audit?limit=300')]);
   setMainG(__g, page('Audit log', 'Append-only and hash-chained: every retrieval, inference, recommendation, approval and action, attributed to an agent or a person.',
     v.ok ? `<span class="status-pill"><span class="dot"></span>Chain verified · ${nf(v.records)} records in the full log${window.ME.domains.includes('*') ? '' : ' (you see those about your domains)'}</span>` : `<span class="status-pill halt"><span class="dot"></span>Chain broken at #${esc(v.first_bad_seq)}</span>`,
-    card(null, table([{h: '#', num: 1}, 'Time', 'Actor', 'Event', 'Subject'], xs.map(x => `<tr><td class="num mono small muted">${x.seq}</td><td class="mono small">${dt(x.ts)}</td>
-      <td class="small">${esc(x.actor_type)} · ${esc(x.actor_id)}</td><td class="mono small">${esc(x.event_type)}</td><td class="small muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td></tr>`)), {flush: true})));
+    card(null, table([{h: '#', num: 1}, 'Time', 'Actor', 'Event', 'Subject', 'Trace'], xs.map(x => `<tr><td class="num mono small muted">${x.seq}</td><td class="mono small">${dt(x.ts)}</td>
+      <td class="small">${esc(x.actor_type)} · ${esc(x.actor_id)}</td><td class="mono small">${esc(x.event_type)}</td><td class="small muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td>
+      <td class="mono small">${x.trace_id && window.ME.domains.includes('*') ? `<a href="#/trace/${encodeURIComponent(x.trace_id)}" title="Everything this request or job did">${esc(x.trace_id.slice(0, 14))}…</a>` : ''}</td></tr>`)), {flush: true, sub: 'a trace links every record one request or job run caused'})));
+}
+
+// ================================================================= Trace (diagnostics)
+async function Trace(id) {
+  const __g = GEN;
+  const t = await api('/api/v1/admin/trace/' + encodeURIComponent(id));
+  const call = c => `<div class="list-row" style="display:block"><div class="inline" style="flex-wrap:wrap;gap:8px">${status(c.status === 'ok' ? 'ok' : ['user_limit', 'budget_exceeded', 'daily_budget_exceeded', 'disabled_by_policy'].includes(c.status) ? 'medium' : 'high', c.status)}
+      <span class="mono small">${esc(c.workflow)}</span><span class="tag">${esc(c.tier || '')}</span><span class="small muted">${nf(c.prompt_tokens)} in · ${nf(c.completion_tokens)} out · ${c.latency_ms == null ? '–' : c.latency_ms + ' ms'} · ${esc(c.model)}</span>
+      ${c.claims_kept != null ? `<span class="small">${nf(c.claims_kept)} statement(s) kept, ${nf(c.claims_dropped)} removed by the evidence check</span>` : ''}</div>
+    ${(c.guardrail && c.guardrail.dropped || []).map(d => `<div class="t-sub" style="color:var(--high)">Removed: “${esc(d.text)}” - ${esc(d.reason)}</div>`).join('')}
+    <details class="mt"><summary class="small">Prompt as sent (identities pseudonymised) and answer</summary><pre class="mono small wrap" style="white-space:pre-wrap;max-height:320px;overflow:auto">${esc(c.prompt)}</pre><pre class="mono small wrap" style="white-space:pre-wrap;max-height:320px;overflow:auto">${esc(c.response)}</pre></details></div>`;
+  setMainG(__g, page('Trace', `Everything request or job <span class="mono">${esc(t.trace_id)}</span> did - in order.`, '',
+    `${t.job_run ? `<div class="mb">${card('Job run', `<dl class="kv"><dt>Job</dt><dd>${esc(t.job_run.job)}</dd><dt>Outcome</dt><dd>${status(t.job_run.status === 'ok' ? 'ok' : 'high', cap(t.job_run.status))} after ${esc(t.job_run.attempts)} attempt(s)</dd><dt>Started</dt><dd class="mono">${dt(t.job_run.started_at)}</dd><dt>Trigger</dt><dd>${esc(t.job_run.trigger)}</dd>${t.job_run.error ? `<dt>Error</dt><dd class="mono small wrap">${esc(t.job_run.error.slice(0, 600))}</dd>` : ''}</dl>`)}</div>` : ''}
+    ${t.requests.length ? `<div class="mb">${card('Request', table(['Time', 'Who', 'Request', 'Status', {h: 'ms', num: 1}], t.requests.map(r => `<tr><td class="mono small">${dt(r.ts)}</td><td class="small">${esc(r.principal || 'anonymous')}</td><td class="mono small" style="white-space:normal;overflow-wrap:anywhere">${esc(r.method)} ${esc(r.path)}</td><td>${status(r.status < 400 ? 'ok' : 'high', String(r.status))}</td><td class="num small">${nf(r.latency_ms)}</td></tr>`)), {flush: true})}</div>` : ''}
+    <div class="mb">${card(`Audit events <span class="muted">(${t.audit.length})</span>`, table([{h: '#', num: 1}, 'Time', 'Actor', 'Event', 'Subject', 'Detail'], t.audit.map(x => `<tr><td class="num mono small muted">${x.seq}</td><td class="mono small">${dt(x.ts)}</td><td class="small">${esc(x.actor_type)} · ${esc(x.actor_id)}</td>
+      <td class="mono small">${esc(x.event_type)}</td><td class="small muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td><td class="mono small muted" style="white-space:normal;overflow-wrap:anywhere;min-width:180px">${esc(JSON.stringify(x.payload).slice(0, 220))}</td></tr>`), {empty: 'No audit events'}), {flush: true, sub: 'hash-chained'})}</div>
+    ${card(`Model calls <span class="muted">(${t.llm_calls.length})</span>`, t.llm_calls.map(call).join('') || empty('No model calls'), {sub: 'what each agent asked the model, what it answered, what the evidence check removed'})}`));
 }
 
 
@@ -884,9 +923,9 @@ async function approveBundle(id) {
 }
 
 // ================================================================= registry
-window.VIEWS = {search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
+window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
-Object.assign(ALLOWED, {notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {casePage, approvalPage, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
-  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});
+  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, loadCalls, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});

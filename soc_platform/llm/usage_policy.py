@@ -24,6 +24,7 @@ recommendation computed from those figures (never by a model).
 from __future__ import annotations
 
 import copy
+import math
 from datetime import timedelta
 from typing import Any
 
@@ -83,7 +84,12 @@ def defaults(settings: Any) -> dict[str, Any]:
 
 
 def _nonneg_int(v: Any) -> bool:
-    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+    return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 10**15
+
+
+def _number(v: Any) -> bool:
+    """A real, finite number (JSON lets NaN and Infinity through; neither is a budget or a price)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 def validate(doc: Any) -> list[str]:
@@ -97,9 +103,10 @@ def validate(doc: Any) -> list[str]:
     for k in ("monthly_tokens", "daily_tokens"):
         if k in doc and not _nonneg_int(doc[k]):
             out.append(f"{k} must be a whole number of tokens, 0 or more (0 = no cap)")
-    if doc.get("monthly_tokens") and doc.get("daily_tokens") and doc["daily_tokens"] > doc["monthly_tokens"]:
+    if (_nonneg_int(doc.get("monthly_tokens")) and _nonneg_int(doc.get("daily_tokens")) and doc["monthly_tokens"]
+            and doc["daily_tokens"] > doc["monthly_tokens"]):
         out.append("daily_tokens cannot be more than monthly_tokens")
-    if "alert_at" in doc and not (isinstance(doc["alert_at"], (int, float)) and 0 < doc["alert_at"] <= 1):
+    if "alert_at" in doc and not (_number(doc["alert_at"]) and 0 < doc["alert_at"] <= 1):
         out.append("alert_at is a fraction between 0 and 1 (0.8 = warn at 80 %)")
 
     def limits(where: str, v: Any) -> None:
@@ -114,15 +121,20 @@ def validate(doc: Any) -> list[str]:
 
     if "user_default" in doc:
         limits("user_default", doc["user_default"])
-    for r, v in (doc.get("roles") or {}).items():
+    for k in ("roles", "users", "workflows", "max_output_tokens", "prices"):
+        if k in doc and not isinstance(doc[k], dict):
+            out.append(f"{k} must be an object (name -> settings)")
+    maps = {k: doc[k] if isinstance(doc.get(k), dict) else {} for k in ("roles", "users", "workflows",
+                                                                         "max_output_tokens", "prices")}
+    for r, v in maps["roles"].items():
         if r not in ROLES:
             out.append(f"roles.{r}: unknown role ({', '.join(ROLES)})")
         limits(f"roles.{r}", v)
-    for u, v in (doc.get("users") or {}).items():
+    for u, v in maps["users"].items():
         if "@" not in str(u) and not str(u).startswith(("cli:", "svc")):
             out.append(f"users.{u}: expected the person's sign-in name (e-mail)")
         limits(f"users.{u}", v)
-    for wf, rule in (doc.get("workflows") or {}).items():
+    for wf, rule in maps["workflows"].items():
         if wf not in KNOWN_WORKFLOWS:
             out.append(f"workflows.{wf}: unknown feature ({', '.join(sorted(KNOWN_WORKFLOWS))})")
             continue
@@ -138,12 +150,12 @@ def validate(doc: Any) -> list[str]:
                 out.append(f"workflows.{wf}.max_output_tokens must be between 200 and 16000")
             elif k not in ("tier", "enabled", "max_output_tokens"):
                 out.append(f"workflows.{wf}.{k}: unknown (tier, max_output_tokens, enabled)")
-    for t, x in (doc.get("max_output_tokens") or {}).items():
+    for t, x in maps["max_output_tokens"].items():
         if t not in TIERS or not (_nonneg_int(x) and 200 <= x <= 16_000):
             out.append(f"max_output_tokens.{t}: a tier (small / large) and a number between 200 and 16000")
-    for t, p in (doc.get("prices") or {}).items():
+    for t, p in maps["prices"].items():
         if t not in TIERS or not isinstance(p, dict) or not all(
-                isinstance(p.get(k), (int, float)) and p.get(k) >= 0 for k in ("input", "output")):
+                _number(p.get(k)) and 0 <= p.get(k) <= 10_000 for k in ("input", "output")):
             out.append(f"prices.{t}: a tier with input and output prices per million tokens, 0 or more")
     return out
 
@@ -270,13 +282,16 @@ def usage_report(session: Session, policy: dict[str, Any], *, days: int = 30) ->
     users: dict[str, dict[str, int]] = {}
     hour_ago, today = now - timedelta(hours=1), day_start(now)
     for wf, tier, status, pt, ct, ms, kept, dropped, actor, ts in rows:
-        a = per.setdefault(workflow_key(wf), {"calls": 0, "answered": 0, "refused": 0, "tiers": {}, "lat": [],
-                                              "kept": 0, "dropped": 0})
+        a = per.setdefault(workflow_key(wf), {"calls": 0, "answered": 0, "refused": 0, "failed": 0, "unparseable": 0,
+                                              "tiers": {}, "lat": [], "kept": 0, "dropped": 0})
         if status in REFUSED:
             a["refused"] += 1
             continue
         a["calls"] += 1
         a["answered"] += status in ("ok", "model_version_mismatch")
+        a["unparseable"] += status == "unparseable"
+        # the endpoint down or slow is availability, not the model tier's quality: counted, kept out of the advice
+        a["failed"] += status in ("error", "circuit_open")
         tt = a["tiers"].setdefault(tier or "large", [0, 0])
         tt[0] += int(pt or 0)
         tt[1] += int(ct or 0)
@@ -297,25 +312,27 @@ def usage_report(session: Session, policy: dict[str, Any], *, days: int = 30) ->
     for key in sorted(set(KNOWN_WORKFLOWS) | set(per)):
         default_tier, who, what = KNOWN_WORKFLOWS.get(key, ("large", "scheduled", key))
         rule = rule_for(policy, key, default_tier)
-        a = per.get(key) or {"calls": 0, "answered": 0, "refused": 0, "tiers": {}, "lat": [], "kept": 0, "dropped": 0}
+        a = per.get(key) or {"calls": 0, "answered": 0, "refused": 0, "failed": 0, "unparseable": 0, "tiers": {},
+                             "lat": [], "kept": 0, "dropped": 0}
         n = a["calls"]
         tin = sum(v[0] for v in a["tiers"].values())
         tout = sum(v[1] for v in a["tiers"].values())
-        fallback = (n - a["answered"]) / n if n else 0.0
+        replied = a["answered"] + a["unparseable"]           # calls the model actually answered
+        fallback = a["unparseable"] / replied if replied else 0.0
         claims = a["kept"] + a["dropped"]
         dropped = a["dropped"] / claims if claims else None
         mean_out = tout / n if n else 0.0
         other = "small" if rule["tier"] == "large" else "large"
-        verdict, why = _advice(rule["tier"], n, fallback, dropped, mean_out)
+        verdict, why = _advice(rule["tier"], replied, fallback, dropped, mean_out)
         lat = sorted(a["lat"])
         features.append({
             "workflow": key, "description": what, "triggered_by": who, "code_default_tier": default_tier,
             "tier": rule["tier"], "max_output_tokens": rule["max_output_tokens"], "enabled": rule["enabled"],
-            "calls": n, "refused": a["refused"], "tokens_in": tin, "tokens_out": tout,
+            "calls": n, "refused": a["refused"], "failed": a["failed"], "tokens_in": tin, "tokens_out": tout,
             "mean_in": round(tin / n) if n else 0, "mean_out": round(mean_out),
             "cost": round(sum(_cost(policy, t, v[0], v[1]) for t, v in a["tiers"].items()), 4),
             "cost_on_other_tier": round(_cost(policy, other, tin, tout), 4), "other_tier": other,
-            "usable_rate": round(1 - fallback, 3) if n else None,
+            "usable_rate": round(1 - fallback, 3) if replied else None,
             "claims_dropped_rate": round(dropped, 3) if dropped is not None else None,
             "median_ms": lat[len(lat) // 2] if lat else None,
             "p95_ms": lat[min(len(lat) - 1, round(0.95 * (len(lat) - 1)))] if lat else None,

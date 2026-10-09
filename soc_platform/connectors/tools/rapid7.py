@@ -104,7 +104,7 @@ class Rapid7Connector(ToolConnector):
             return [self._asset(raw)]
         a, f, d = raw.get("asset") or {}, raw.get("finding") or {}, raw.get("definition") or {}
         if not a.get("id") or not f.get("id"):
-            raise ValueError("Rapid7 finding without its asset id or vulnerability id")
+            raise ValueError("Rapid7 finding without its identifier (asset id or vulnerability id)")
         cves = d.get("cves") or []
         cvss = ((d.get("cvss") or {}).get("v3") or {}).get("score") or ((d.get("cvss") or {}).get("v2") or {}).get("score")
         out = []

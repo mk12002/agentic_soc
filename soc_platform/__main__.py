@@ -180,7 +180,14 @@ def _refuse_bad_config() -> None:
     silently ignored). A live tool whose secret is missing does not: it is isolated and shown, the rest start."""
     from soc_platform.connectors.config_schema import errors
     from soc_platform.core.connector_config import startup_problems
+    from soc_platform.settings_check import check_environment
 
+    settings = check_environment()
+    for pr in settings:
+        print(pr, file=sys.stderr)
+    if any(p.level == "error" for p in settings):
+        sys.exit("settings have errors (listed above). Fix them and start again; "
+                 "`python -m soc_platform config check` lists every problem with how to fix it.")
     problems = startup_problems()
     for pr in problems:
         print(pr, file=sys.stderr)
@@ -200,7 +207,10 @@ def cmd_serve() -> None:
     workers = max(1, int(os.environ.get("SOC_API_WORKERS", "1") or 1))
     uvicorn.run("soc_platform.api.app:app", host=os.environ.get("SOC_HOST", "127.0.0.1"),
                 port=int(os.environ.get("SOC_PORT", "8080")), workers=workers,
-                proxy_headers=False)   # X-Forwarded-For is handled by the app (SOC_TRUSTED_PROXIES, right-most hop)
+                proxy_headers=False,   # X-Forwarded-For is handled by the app (SOC_TRUSTED_PROXIES, right-most hop)
+                # on SIGTERM (a deploy, `docker stop`) requests in flight get this long to finish, then the server stops
+                # - inside the orchestrator's own grace period, so the scheduler and access log shut down cleanly
+                timeout_graceful_shutdown=max(1, int(os.environ.get("SOC_SHUTDOWN_GRACE_SECONDS", "20") or 20)))
 
 
 def cmd_token(user: str = "analyst@acme-demo.com", roles: str = "analyst") -> None:
@@ -268,6 +278,14 @@ def cmd_config(*args: str) -> None:
         manifests,
     )
 
+    if a.action == "check":
+        from soc_platform.settings_check import check_environment
+
+        env_problems = check_environment()
+        for pr in env_problems:
+            print(pr)
+        print(f"{sum(p.level == 'error' for p in env_problems)} error(s), "
+              f"{sum(p.level == 'warning' for p in env_problems)} warning(s) in the settings (environment)")
     ctx = _store_session()
     if a.action == "check":
         doc, problems = load_file(a.file)
@@ -282,7 +300,7 @@ def cmd_config(*args: str) -> None:
         n_err = len(errors(problems))
         print(f"{n_err} error(s), {len(problems) - n_err} warning(s) in the configuration"
               + (f" (file + console version {version})" if version else ""))
-        sys.exit(1 if n_err else 0)
+        sys.exit(1 if n_err or any(p.level == "error" for p in env_problems) else 0)
     if ctx is None:
         sys.exit("export, diff and import need the database (SOC_DATABASE_URL)")
     with ctx as s:
@@ -397,7 +415,14 @@ def main(argv: list[str]) -> None:
     fn = globals().get(f"cmd_{cmd}")
     if fn is None:
         sys.exit(f"unknown command {argv[0]}\n{__doc__}")
-    fn(*args) if cmd != "scheduler" else fn(once="--once" in args)
+    from soc_platform.core.observability import configure_logging, event, new_trace, traced
+
+    configure_logging()
+    with traced(new_trace(f"cli-{cmd}")):
+        # values are not logged (an argument can hold a name or a note); the command's own audit events carry details
+        event("cli.command", command=argv[0], args=[a if a.startswith("-") else "<value>" for a in args][:20],
+              os_user=os.environ.get("USERNAME") or os.environ.get("USER") or "operator")
+        fn(*args) if cmd != "scheduler" else fn(once="--once" in args)
 
 
 if __name__ == "__main__":

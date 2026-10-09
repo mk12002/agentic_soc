@@ -15,13 +15,25 @@ from soc_platform.core.actions import ActionSpec
 from soc_platform.core.models import utcnow
 from soc_platform.core.schema import NormalizedRecord
 
+# Before this, a vendor time is a placeholder for "no value" (.NET's 0001-01-01, an epoch of 0), not an observation.
+EARLIEST_TIME = datetime(1990, 1, 1, tzinfo=UTC)
+
 
 def parse_ts(v: Any) -> datetime | None:
-    if v in (None, ""):
+    """A vendor time as an aware UTC datetime, or None when there is none or it cannot be read - never an exception.
+    Accepts ISO 8601 (any fraction length, offsets with or without a colon), "YYYY-MM-DD HH:MM:SS", and epoch seconds or
+    milliseconds as a number or as text. Placeholder dates before 1990 are no value."""
+    if v in (None, "") or isinstance(v, bool):
         return None
+    if isinstance(v, str) and re.fullmatch(r"\d{9,13}(?:\.\d{1,6})?", v.strip()):
+        v = float(v)
     if isinstance(v, (int, float)):
-        return datetime.fromtimestamp(v / 1000 if v > 1e11 else v, tz=UTC)
-    s = str(v).strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.fromtimestamp(v / 1000 if v > 1e11 else v, tz=UTC)
+        except (OverflowError, OSError, ValueError):     # out of range (or negative, on Windows)
+            return None
+        return dt if dt >= EARLIEST_TIME else None
+    s = str(v).strip()[:64].replace("Z", "+00:00")
     if "." in s:  # trim >6 fractional digits (Graph returns 7)
         head, _, rest = s.partition(".")
         # only the digits right after the dot are the fraction: the offset that may follow (Jira "+0530") was once
@@ -42,7 +54,11 @@ def parse_ts(v: Any) -> datetime | None:
                 continue
         else:
             return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    dt = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    try:
+        return dt if dt >= EARLIEST_TIME else None
+    except (OverflowError, ValueError):
+        return None
 
 
 def need(rec: Any, key: str) -> Any:

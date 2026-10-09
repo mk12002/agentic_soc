@@ -528,7 +528,11 @@ Uses the current `/rest/api/3/search/jql` endpoint. Egress: the site host.
 ### 4.14 Ownership CSV (`cmdb_csv`) - fallback CMDB
 
 If there is no usable CMDB: a maintained CSV `hostname,owner,platform_team,environment,criticality,serial_number`
-(hostname may be a pattern), path in `CMDB_CSV_PATH`. Can run alongside ServiceNow as a gap-filler.
+(hostname may be a pattern), path in `CMDB_CSV_PATH`. Can run alongside ServiceNow as a gap-filler. Save it from
+Excel as it comes: UTF-8 (with or without the byte-order mark) or Windows-1252, separated by commas, semicolons, tabs
+or pipes; headers in any case or spacing, and the usual aliases (`Host Name`, `Server`, `Owner Email`, `Team`, `Env`,
+`Serial`, `Subscription ID`) are recognised. A file with neither a hostname nor a subscription column is reported in
+the log and assigns no owners. The file is re-read when it changes; no restart is needed.
 
 ### 4.15 Microsoft Sentinel (`sentinel`) and generic SIEM push (`generic_siem`)
 
@@ -545,7 +549,9 @@ dst_ip, domain, url, sha256, source`), set `GENERIC_SIEM_FIELD_MAP` to a JSON ob
 `{"id": "alert_id", "title": "rule_name", "time": "event_time"}`. Nested payloads are mapped with dotted paths
 (Elastic Security: `{"id": "kibana.alert.uuid", "title": "kibana.alert.rule.name", "host": "host.name",
 "user": "user.name"}`); `soc_platform/fixtures/generic_siem.json` has worked samples for a flat payload, a Splunk ES
-notable and an Elastic Security alert. An alert without its id is refused with a reason.
+notable and an Elastic Security alert. The response is `{"ingested": n, "rejected": n, "reasons": [...]}`: an alert
+without its id is refused with the reason while the rest of the batch lands, so the SIEM should not resend the batch
+on a partial rejection (an `ingest.rejected` line is also logged).
 
 ### 4.16 Public intelligence (`nvd`, `epss`, `cisa_kev`) and threat-intel fusion (`threat_intel`)
 
@@ -775,6 +781,9 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 - [ ] Outbound allow-list (4.17) enforced at the firewall/proxy.
 - [ ] LLM: approved endpoint set, budget set, redaction on, demo keys absent.
 - [ ] Monitoring: `/metrics` scraped with an auditor API key; alerts from `docs/OPERATIONS.md` - Monitoring.
+- [ ] Logs: stdout of every container collected (`SOC_LOG_FORMAT=json`) into the client's log platform / SIEM;
+  alerts on WARNING / ERROR lines, failed jobs and model-call errors (`docs/OPERATIONS.md` - Logs, traces and
+  diagnostics). If the reverse proxy sets `X-Request-ID`, the same id appears in its logs and the platform's.
 - [ ] Retention periods and legal-hold process agreed with the client.
 - [ ] Banned-data check: no demo data loaded (`demo` never run), no tool the client owns left in the Fixtures stage.
 - [ ] `python -m soc_platform config check` clean; `python -m soc_platform preflight --all` ready for every tool in use;
@@ -785,6 +794,10 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
   only where the client approved; the salt not stored with them.
 - [ ] Capacity: `SOC_API_WORKERS` one per core; `workers x (SOC_DB_POOL_SIZE + SOC_DB_MAX_OVERFLOW)` below PostgreSQL's
   `max_connections`; `scripts/load_test.py` run against the target environment with the expected number of analysts.
+- [ ] `SOC_CONNECTOR_RATE_SHARE` = API workers + 1 (the scheduler service), so together the processes stay within each
+  tool's rate budget; `SOC_DB_STATEMENT_TIMEOUT_SECONDS=120` once the first backfill has finished;
+  `SOC_SHUTDOWN_GRACE_SECONDS` below the orchestrator's stop grace period.
+- [ ] A restore drill done on the target environment, and `GET /api/v1/audit/verify` clean on the restored copy.
 
 ---
 

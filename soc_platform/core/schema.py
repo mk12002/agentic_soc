@@ -52,6 +52,14 @@ class NormalizedRecord(BaseModel):
     raw: dict[str, Any] | None = None  # persisted to object storage, not to the row
 
     _keys = field_validator("keys", mode="before")(lambda cls, v: _clean_keys(v))
+    # A vendor field in an unexpected type must not cost the record: a missing or odd title is shown empty, a
+    # numeric id is the same id as text. Booleans and objects are never ids (they fail loudly below).
+    _title = field_validator("title", mode="before")(
+        lambda cls, v: v if isinstance(v, str) else str(v) if isinstance(v, (int, float)) else "")
+    _sid = field_validator("source_id", mode="before")(
+        lambda cls, v: str(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v)
+    _sev = field_validator("severity", "deep_link", mode="before")(lambda cls, v: v if isinstance(v, str) else None)
+    _attrs = field_validator("attributes", mode="before")(lambda cls, v: v if isinstance(v, dict) else {})
 
     @property
     def is_entity(self) -> bool:

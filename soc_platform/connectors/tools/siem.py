@@ -138,7 +138,7 @@ class GenericSiemConnector(ToolConnector):
               "source": "source", **_field_map(self.settings.get("field_map"))}
         g = lambda k: _pick(a, fm[k])
         if g("id") in (None, ""):
-            raise ValueError(f"pushed alert without an id (field '{fm['id']}')")
+            raise ValueError(f"pushed alert without its identifier (field '{fm['id']}')")
         refs = []
         if g("host"):
             refs.append(EntityRef(kind="asset", role="host", attributes={"hostname": g("host")}))

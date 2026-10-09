@@ -1,10 +1,12 @@
 {
  "problems": [],
- "screenshots": 29,
+ "screenshots": 35,
  "audited_widths": [
   1440,
   1280,
-  1024
+  1024,
+  768
  ],
+ "a11y_notes": [],
  "llm": true
 }

@@ -165,8 +165,9 @@ must not use it.
 ## 4b. Choosing the small or the large model for each feature
 
 The **By feature** table on the AI usage screen shows, per feature, over the last 30 days: calls, mean tokens in and
-out, cost on its tier and what it would cost on the other, how often the answer was **usable** (it arrived, parsed,
-on the pinned model), how many of its **statements the evidence check removed** (the grounding guardrail drops any
+out, cost on its tier and what it would cost on the other, how often an answer the model gave was **usable** (it
+parsed; calls the endpoint failed to answer - down, slow, circuit open - are shown separately as *not answered* and
+kept out of the advice, because an outage says nothing about the tier), how many of its **statements the evidence check removed** (the grounding guardrail drops any
 statement that cites no evidence or states a figure its evidence does not contain), and the 95th-percentile response
 time. From those figures - computed in code, never by a model - it advises:
 

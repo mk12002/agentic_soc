@@ -69,6 +69,8 @@ class DecomposedEmail:
     headers: dict[str, str]
     raw_sha256: str
     warnings: list[str] = field(default_factory=list)
+    # damage or obfuscation that stops the message being read reliably: never judged safe on such a reading
+    anomalies: list[str] = field(default_factory=list)
 
     @property
     def qr_urls(self) -> list[str]:
@@ -156,7 +158,31 @@ def _part_meta(part: Any) -> tuple[str, str, str | None]:
     return ctype, disp, fname
 
 
+# MIME damage that hides content from the analysis (the parser recovers, but parts or text may be missing)
+STRUCTURAL_DEFECTS = {"StartBoundaryNotFoundDefect", "CloseBoundaryNotFoundDefect", "MultipartInvariantViolationDefect",
+                      "InvalidBase64CharactersDefect", "InvalidBase64PaddingDefect", "InvalidBase64LengthDefect",
+                      "MissingHeaderBodySeparatorDefect", "NoBoundaryInMultipartDefect"}
+
+
+def _normalise(raw: bytes) -> tuple[bytes, list[str]]:
+    """Undo encodings used to hide content from filters, and say so: a message in UTF-16 is decoded, NUL bytes (which
+    split words and links so a scanner misses them) are removed. The original bytes stay what is stored and hashed."""
+    anomalies: list[str] = []
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff") or (len(raw) > 64 and raw.count(b"\x00") > len(raw) // 4):
+        try:
+            raw = raw.decode("utf-16").encode("utf-8", "replace")
+            anomalies.append("the message is encoded as UTF-16, which e-mail never uses (a way to hide its content)")
+        except UnicodeError:
+            anomalies.append("the message is mostly NUL bytes and cannot be decoded")
+    if b"\x00" in raw:
+        raw = raw.replace(b"\x00", b"")
+        anomalies.append("NUL bytes inside the message (a known way to split words and links so filters miss them)")
+    return raw, anomalies
+
+
 def decompose(raw: bytes) -> DecomposedEmail:
+    original = raw
+    raw, anomalies = _normalise(raw)
     msg: EmailMessage = BytesParser(policy=policy.default).parsebytes(raw)  # type: ignore[assignment]
     warnings: list[str] = []
     display, sender = parseaddr(_hdr(msg, "From"))
@@ -203,6 +229,13 @@ def decompose(raw: bytes) -> DecomposedEmail:
             content = payload.decode("utf-8", "replace")
         (html_parts if ctype == "text/html" else text_parts).append(str(content))
 
+    # defects are known only once every part has been decoded (invalid base64 is found while decoding)
+    defects = sorted({type(d).__name__ for part in msg.walk() for d in getattr(part, "defects", [])}
+                     | {type(d).__name__ for d in getattr(msg, "defects", [])})
+    if structural := [d for d in defects if d in STRUCTURAL_DEFECTS]:
+        anomalies.append("the MIME structure is damaged (" + ", ".join(structural) + "): parts of it may be unread")
+    if other := [d for d in defects if d not in STRUCTURAL_DEFECTS]:
+        warnings.append("header or MIME irregularities: " + ", ".join(other[:5]))
     body_html = "\n".join(html_parts)
     body_text = "\n".join(text_parts) or TAG_RE.sub(" ", htmllib.unescape(body_html))
     hrefs = [htmllib.unescape(h) for h in HREF_RE.findall(body_html)]
@@ -216,6 +249,10 @@ def decompose(raw: bytes) -> DecomposedEmail:
         if shown and href.startswith("http") and _url_domain(href) not in text.lower():
             mismatch.append({"shown": shown.group(0), "href": href})
     all_urls = sorted(set(urls) | {u for a in attachments for u in a.qr_urls if u.startswith("http")})
+    if not sender:
+        anomalies.append("the message has no sender (From) header - it may be damaged, altered or not an e-mail")
+    if not (body_text.strip() or body_html.strip() or attachments):
+        anomalies.append("the message has no readable content")
     date = None
     try:
         date = parsedate_to_datetime(_hdr(msg, "Date")).isoformat() if _hdr(msg, "Date") else None
@@ -230,4 +267,4 @@ def decompose(raw: bytes) -> DecomposedEmail:
         received_path=received, origin_ip=origin_ip, body_text=body_text, body_html=body_html, urls=all_urls,
         url_domains=sorted({_url_domain(u) for u in all_urls}), hidden_link_mismatch=mismatch,
         attachments=attachments, headers=_headers(msg),
-        raw_sha256=hashlib.sha256(raw).hexdigest(), warnings=warnings)
+        raw_sha256=hashlib.sha256(original).hexdigest(), warnings=warnings, anomalies=anomalies)

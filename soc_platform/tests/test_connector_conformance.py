@@ -6,7 +6,9 @@
 * throttling - a 429 with Retry-After is waited out and the sync completes
 * tokens     - a refused (expired / rotated) token is renewed once and the sync completes
 * permission - a 403 stops the stream at once (no retry storm) and the health check names the permission to grant
-* fields     - removing any field of a record, or setting it to null, never crashes the normaliser
+* fields     - removing any field of a record, setting it to null, or giving it the wrong type (an object for text, a
+               word for a list, text for a number...) never crashes the normaliser: the record is kept, or refused
+               only for a missing identifier
 * coverage   - every (connector, stream) pair is in the paging table or listed with the reason it has no paging
 """
 
@@ -520,6 +522,41 @@ def test_missing_or_null_fields_never_crash_a_normaliser(name, stream):
                 crashes.append(f"{label}: {type(exc).__name__}: {exc}")
             except ValueError:
                 pass                     # deliberate: a record without its identifier is refused with a reason
+    assert not crashes, sorted(set(crashes))[:15]
+
+
+ODD = {"empty-str": "", "int": 7, "float": 1.5, "bool": True, "list": ["x"], "dict": {"a": 1}, "neg": -1,
+       "long-str": "x" * 20000, "control": "a\u202eb\u0000c", "date-junk": "not-a-date", "epoch": 1700000000}
+
+
+def _wrong_types(rec: dict):
+    for k, v in list(rec.items()):
+        for label, odd in ODD.items():
+            yield f"{k}={label}", {**rec, k: odd}
+        if isinstance(v, dict):
+            for kk in list(v):
+                for label, odd in ODD.items():
+                    yield f"{k}.{kk}={label}", {**rec, k: {**v, kk: odd}}
+
+
+@pytest.mark.parametrize("name,stream", FIELD_STREAMS, ids=[f"{a}.{b}" for a, b in FIELD_STREAMS])
+def test_wrong_typed_fields_never_crash_a_normaliser(name, stream):
+    """A vendor field in an unexpected type costs at most that field, never the record (connectors/conform.py).
+    The only refusal allowed is a record whose identifier is unusable."""
+    conn = fresh(name, demo_routes(name))
+    records = conn.fetch_page(stream, None).records
+    crashes = []
+    for rec in records[:2]:
+        for label, variant in _wrong_types(rec):
+            try:
+                for out in conn.normalize(stream, variant):
+                    out.model_dump()
+            except ValueError as exc:
+                if "identifier" not in str(exc):
+                    crashes.append(f"{label}: ValueError: {str(exc)[:120]}")
+            except Exception as exc:  # noqa: BLE001 - any other exception is the defect under test
+                crashes.append(f"{label}: {type(exc).__name__}: {str(exc)[:120]}")
+    conn.take_quality(stream)
     assert not crashes, sorted(set(crashes))[:15]
 
 

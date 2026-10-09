@@ -74,6 +74,24 @@ class PermissionDenied(ConnectorError):
     """403: authenticated, but the identity lacks a permission. Never retried; reported with the scopes needed."""
 
 
+def _quality(connector: Any, stream: str) -> dict[str, int]:
+    """Field coercions since the last sync (a connector not derived from BaseConnector has none to report)."""
+    take = getattr(connector, "take_quality", None)
+    return take(stream) if callable(take) else {}
+
+
+def rate_share() -> int:
+    """SOC_CONNECTOR_RATE_SHARE: how many processes call the tools at once (API workers + a separate scheduler).
+    Each takes 1/N of every tool's request budget, so together they stay within what the vendor allows - a budget
+    held in each process would otherwise be multiplied by the number of processes."""
+    import os
+
+    try:
+        return max(1, min(64, int(os.environ.get("SOC_CONNECTOR_RATE_SHARE", "1") or 1)))
+    except ValueError:
+        return 1
+
+
 class TokenBucket:
     """Per-tool request budget so enrichment traffic cannot degrade the source platform (IM-T04)."""
 
@@ -167,7 +185,41 @@ class BaseConnector(ABC):
     write_scopes: tuple[str, ...] = ()
 
     def __init__(self, *, rate_per_sec: float = 5.0, burst: int = 10) -> None:
-        self.budget = TokenBucket(rate_per_sec, burst)
+        share = rate_share()
+        self.budget = TokenBucket(rate_per_sec / share, max(1, burst // share))
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Every connector's ``normalize`` first brings the record to the stream's documented shape
+        (``connectors/conform.py``): one malformed field no longer costs the whole record."""
+        super().__init_subclass__(**kwargs)
+        own = cls.__dict__.get("normalize")
+        if own is None or getattr(own, "_soc_conformed", False):
+            return
+
+        def normalize(self, stream: str, raw: Any, _own=own):
+            return _own(self, stream, self.conform(stream, raw))
+
+        normalize._soc_conformed = True   # type: ignore[attr-defined]
+        normalize.__doc__ = own.__doc__
+        cls.normalize = normalize         # type: ignore[method-assign]
+
+    def conform(self, stream: str, raw: Any) -> Any:
+        from collections import Counter
+
+        from soc_platform.connectors.conform import conform, shape_for
+
+        if not isinstance(raw, dict):
+            return raw
+        shape = shape_for(self, stream)
+        if shape is None:
+            return raw
+        notes = self.__dict__.setdefault("_soc_quality", {}).setdefault(stream, Counter())
+        return conform(raw, shape, notes)
+
+    def take_quality(self, stream: str) -> dict[str, int]:
+        """Field coercions counted since the last call (path -> count), for the sync report."""
+        notes = self.__dict__.get("_soc_quality", {}).pop(stream, None)
+        return dict(notes.most_common(20)) if notes else {}
 
     # -- required ----------------------------------------------------------------------------
     @abstractmethod
@@ -215,6 +267,7 @@ class SyncReport:
     cursor: str | None = None
     source_total: int | None = None
     truncated: bool = False   # page limit reached with more to read: the next sync continues
+    coerced: dict[str, int] = field(default_factory=dict)   # malformed fields brought to the documented shape
 
     @property
     def reconciled(self) -> bool:
@@ -287,6 +340,20 @@ class SyncRunner:
         cp.ingested_count = (cp.ingested_count or 0) + report.ingested
         cp.failed_count = (cp.failed_count or 0) + report.failed
         report.cursor = cursor
+        report.coerced = _quality(connector, stream)
+        if report.coerced:          # the vendor sent fields in an unexpected shape: visible, not silently absorbed
+            from soc_platform.core.observability import event
+
+            event("connector.data_quality", 30, connector=connector.name, stream=stream,
+                  fields_coerced=sum(report.coerced.values()), by_field=report.coerced)
+        return report
+
+    def ingest_records(self, connector: BaseConnector, stream: str, records: list[dict[str, Any]]) -> SyncReport:
+        """Records that arrive without a sync (pushed by a SIEM): the same isolation as a sync page - a malformed or
+        unstorable record is refused with its reason, the rest land."""
+        report = SyncReport(connector.name, stream, pages=1, source_records=len(records))
+        self._ingest_page(connector, stream, Page(records, None, has_more=False), report)
+        report.coerced = _quality(connector, stream)
         return report
 
     def _ingest_page(self, connector: BaseConnector, stream: str, page: Page, report: SyncReport) -> None:

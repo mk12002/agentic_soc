@@ -17,7 +17,8 @@ verified live. Beyond the documented shapes, every connector passes a conformanc
 (`soc_platform/tests/test_connector_conformance.py`, round 16): reading across pages in its vendor's own paging style,
 resuming the next sync correctly (a time watermark with an overlap for late logs, or a fresh read - never an expired
 continuation token), throttling with `Retry-After`, a refused token renewed once, a missing permission reported at
-once, and every field of every record missing or null. The demo fixtures are one scripted scenario, far smaller and
+once, and every field of every record missing, null or of the wrong type (a malformed field is conformed to the
+stream's documented shape and reported, never fatal to the record). The demo fixtures are one scripted scenario, far smaller and
 tidier than a tenant; `scripts/build_estate_variant.py --messy --scale N` generates large, disorderly estates for
 volume tests, and record-and-sanitise (`SOC_RECORD_FIXTURES_DIR`) turns the first live responses into fixtures.
 The vendor connectors have **not yet been run against the client's tenants**: do that per connector with

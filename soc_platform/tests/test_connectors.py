@@ -295,3 +295,13 @@ def test_generic_siem_field_map_works_from_an_environment_variable():
     from soc_platform.connectors.tools.siem import _field_map
     assert _field_map('{"id": "alert_id", "title": "rule_name"}') == {"id": "alert_id", "title": "rule_name"}
     assert _field_map({"id": "alert_id"}) == {"id": "alert_id"} and _field_map("") == {} and _field_map(None) == {}
+
+
+def test_processes_calling_a_tool_split_its_request_budget(monkeypatch):
+    """Each process holds its own budget: with N of them, each takes 1/N so the vendor sees the configured rate."""
+    one = ConnectorRegistry.all_fake().get("crowdstrike").budget
+    monkeypatch.setenv("SOC_CONNECTOR_RATE_SHARE", "4")
+    four = ConnectorRegistry.all_fake().get("crowdstrike").budget
+    assert four.rate == pytest.approx(one.rate / 4) and four.capacity == max(1, one.capacity // 4)
+    monkeypatch.setenv("SOC_CONNECTOR_RATE_SHARE", "many")             # unreadable: no split (and config check says so)
+    assert ConnectorRegistry.all_fake().get("crowdstrike").budget.rate == pytest.approx(one.rate)

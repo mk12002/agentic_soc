@@ -357,7 +357,8 @@ class LLMGateway:
         except Exception as exc:  # noqa: BLE001 - logged; the caller falls back to the deterministic text
             _Breaker.record(False)
             self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error",
-                      latency_ms=round((time.perf_counter() - started) * 1000), tier=rule["tier"])
+                      latency_ms=round((time.perf_counter() - started) * 1000), tier=rule["tier"],
+                      max_tokens=kwargs.get("max_tokens"))
             return None, None
         latency = round((time.perf_counter() - started) * 1000)
         if out is None:
@@ -368,7 +369,7 @@ class LLMGateway:
         status = ("unparseable" if parsed is None else
                   "ok" if not pinned or pinned in out.model else "model_version_mismatch")
         row = self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status,
-                        latency_ms=latency, tier=rule["tier"])
+                        latency_ms=latency, tier=rule["tier"], max_tokens=kwargs.get("max_tokens"))
         if parsed is None:
             return None, row
         return json.loads(red.restore(json.dumps(parsed))), row
@@ -397,27 +398,46 @@ class LLMGateway:
             everything = question + " " + " ".join(by_id.values())
             checked = [c for c in claims
                        if not unsupported_numbers(c["text"], question + " " + " ".join(by_id[i] for i in c["evidence_ids"]))]
-            summary, removed = supported_summary(str(data.get("summary", "")), everything)
-            if row is not None:              # the quality signal the usage screen uses to advise a model tier
-                raw = data.get("claims") if isinstance(data.get("claims"), list) else []
+            summary, removed = supported_summary(data["summary"] if isinstance(data.get("summary"), str) else "",
+                                                 everything)
+            insufficient = data.get("insufficient_evidence") is True     # "false" as text is not true
+            if row is not None:              # quality signal for tier advice, and the diagnosis of this call
+                raw = model_list(data.get("claims"))
+                kept_cited = {c["text"] for c in claims}
+                kept = {c["text"] for c in checked}
+                dropped = [{"text": str(c.get("text", ""))[:300], "reason": "cites no evidence that was provided"}
+                           for c in raw if isinstance(c, dict) and str(c.get("text", "")).strip()
+                           and str(c.get("text", "")).strip() not in kept_cited]
+                dropped += [{"text": c["text"][:300], "reason": "states a figure its cited evidence does not contain"}
+                            for c in claims if c["text"] not in kept]
                 with self._lock:
-                    row.claims_kept, row.claims_dropped = len(checked), max(0, len(raw) - len(checked)) + removed
+                    row.claims_kept, row.claims_dropped = len(checked), len(dropped) + removed
+                    row.guardrail = {"kept": len(checked), "dropped": dropped[:50],
+                                     "summary_sentences_removed": removed}
                     self.s.flush()
-            if checked or data.get("insufficient_evidence"):
-                return {**data, "summary": summary, "claims": checked, "grounded": True,
-                        "insufficient_evidence": bool(data.get("insufficient_evidence")), "source": "llm",
+            if checked or insufficient:
+                missing = [str(m)[:300] for m in model_list(data.get("missing")) if isinstance(m, (str, int, float))]
+                return {**data, "summary": summary, "claims": checked, "grounded": True, "missing": missing[:20],
+                        "insufficient_evidence": insufficient, "source": "llm",
                         "dropped_unsupported_figures": len(claims) - len(checked) + removed}
         return deterministic_grounded(evidence)
 
     def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str,
-             latency_ms: int | None = None, tier: str | None = None) -> LLMCall:
+             latency_ms: int | None = None, tier: str | None = None, max_tokens: int | None = None) -> LLMCall:
+        from soc_platform.core.observability import current_trace, event
+
         actor = getattr(self.actor, "id", self.actor) if self.actor is not None else None
         with self._lock:
             row = LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
                           response=response, prompt_tokens=pt, completion_tokens=ct, status=status, grounded=True,
-                          latency_ms=latency_ms, tier=tier, actor=str(actor)[:256] if actor else None)
+                          latency_ms=latency_ms, tier=tier, actor=str(actor)[:256] if actor else None,
+                          max_tokens=max_tokens, trace_id=current_trace())
             self.s.add(row)
             self.s.flush()
+        event("llm.call", 30 if status in ("error", "unparseable", "model_version_mismatch") else 20,
+              call_id=row.id, workflow=workflow, tier=tier, status=status, model=model, prompt_tokens=pt,
+              completion_tokens=ct, latency_ms=latency_ms, actor=row.actor,
+              detail=response[:300] if status not in ("ok", "model_version_mismatch") else None)
         return row
 
 
@@ -464,16 +484,36 @@ def supported_summary(summary: str, support: str) -> tuple[str, int]:
     return " ".join(keep), removed
 
 
+# Model JSON is untrusted input: any field may arrive in any type (a list where a word belongs, a number for a list).
+# These read it defensively, so odd output costs that item - never the answer, which then falls back to the
+# deterministic one.
+def model_list(v: Any) -> list[Any]:
+    """A list the model returned, or [] (a string, number or object in its place is not a list of items)."""
+    return v if isinstance(v, list) else []
+
+
+def model_choice(v: Any, allowed: Any, default: Any) -> Any:
+    """One of ``allowed`` (a set or mapping of words), or ``default`` - also for unhashable values."""
+    return v if isinstance(v, str) and v in allowed else default
+
+
+def model_ids(item: dict[str, Any], valid_ids: set[str]) -> list[str]:
+    """The evidence ids an item cites that were actually provided (one id may come as a bare string)."""
+    raw = item.get("evidence_ids")
+    ids = [raw] if isinstance(raw, (str, int)) and not isinstance(raw, bool) else model_list(raw)
+    return [str(i) for i in ids if isinstance(i, (str, int)) and not isinstance(i, bool) and str(i) in valid_ids]
+
+
 def validate_claims(claims: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
     out = []
-    for c in claims or []:
-        if not isinstance(c, dict) or not str(c.get("text", "")).strip():
+    for c in model_list(claims):
+        if not isinstance(c, dict) or not isinstance(c.get("text"), str) or not c["text"].strip():
             continue
-        cited = [str(i) for i in (c.get("evidence_ids") or []) if str(i) in valid_ids]
+        cited = model_ids(c, valid_ids)
         if not cited:
             continue
-        kind = c.get("kind") if c.get("kind") in {"fact", "inference"} else "inference"
-        out.append({"text": str(c["text"]).strip(), "kind": kind, "evidence_ids": cited})
+        out.append({"text": c["text"].strip(), "kind": model_choice(c.get("kind"), {"fact", "inference"}, "inference"),
+                    "evidence_ids": cited})
     return out
 
 

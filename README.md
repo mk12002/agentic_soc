@@ -75,7 +75,7 @@ API - no Node build step, no external CDNs - and works in current Chrome, Edge, 
 | Operate | Overview · Intelligence (brief, cited Q&A, correlated findings, risk) · Cases (owner, Mine / Unassigned, notes, attack story, entity 360) · Approvals · global search in the top bar |
 | Domains | Phishing (+ supplier risk) · Vulnerabilities · Cloud posture |
 | Insight | ATT&CK coverage · Shadow IT · Supplier risk |
-| Govern | Integrations (connector health, freshness, notifications, jobs) · Automation policy (levels, kill switch, proposals) · Reports (standard reports, "describe a report", exports, compliance pack) · Access · Audit log |
+| Govern | Integrations (connector health, stages, preflight, configuration with approval, freshness, notifications, jobs) · Automation policy (levels, kill switch, proposals) · AI usage (budgets, per-person limits, model choice per feature, recent model calls) · Reports (standard reports, "describe a report", exports, compliance pack) · Access · Audit log (with a trace of everything each request or job did) |
 
 ## Connecting real tools (plug and play)
 

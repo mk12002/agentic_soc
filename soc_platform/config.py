@@ -74,6 +74,22 @@ class Settings(BaseModel):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """The settings, read once. A value that cannot be read stops here with the full list of what is wrong and how
+    to fix it (``settings_check``), never with a bare conversion traceback."""
+    try:
+        return _read_settings()
+    except ValueError as exc:
+        from soc_platform.settings_check import check_environment
+
+        problems = [str(p) for p in check_environment() if p.level == "error"] or [str(exc)]
+        raise SettingsError("invalid settings:\n  " + "\n  ".join(problems)) from exc
+
+
+class SettingsError(ValueError):
+    pass
+
+
+def _read_settings() -> Settings:
     env = os.environ
     approved = [e.strip() for e in env.get("SOC_LLM_APPROVED_ENDPOINTS", "").split(",") if e.strip()]
     return Settings(

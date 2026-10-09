@@ -37,7 +37,16 @@ from soc_platform.core.connector_config import ConfigRejected, ConfigStore, vers
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.db import get_database
 from soc_platform.core.entity_resolution import EntityResolver
-from soc_platform.core.models import AccessLogRecord, ActionRequest, Case, Entity, PolicyVersion, UnresolvedItem
+from soc_platform.core.models import (
+    AccessLogRecord,
+    ActionRequest,
+    AuditRecord,
+    Case,
+    Entity,
+    PolicyVersion,
+    UnresolvedItem,
+)
+from soc_platform.core.observability import TRACE, accept_trace, configure_logging, event
 from soc_platform.core.policy import PolicyEngine, PolicyStore
 from soc_platform.llm.gateway import LLMGateway
 
@@ -49,6 +58,13 @@ async def _lifespan(_app: FastAPI):
     platform. Deployments with a dedicated scheduler service set SOC_EMBEDDED_SCHEDULER=0; running both is also safe."""
     from soc_platform import scheduler as sched
     from soc_platform.domains.phishing.agents.analyzer import engine_enabled, warm_up_engine
+
+    configure_logging()                      # structured, trace-stamped log lines from every worker process
+    event("server.start", version=__version__, pid=__import__("os").getpid())
+    from soc_platform.settings_check import check_environment
+
+    for pr in check_environment():           # `serve` refuses errors; a server started some other way says so loudly
+        event("settings.problem", 40 if pr.level == "error" else 30, setting=pr.name, problem=pr.message, fix=pr.fix)
 
     threads = int(__import__("os").environ.get("SOC_API_THREADS", "40") or 40)
     __import__("anyio").to_thread.current_default_thread_limiter().total_tokens = max(4, threads)  # request threads
@@ -63,6 +79,8 @@ async def _lifespan(_app: FastAPI):
     finally:
         if sch is not None:
             sch.shutdown()
+        ACCESS_LOG.flush(timeout=5.0)        # the last requests' access-log rows are written before the process ends
+        event("server.stop", pid=__import__("os").getpid(), access_log_dropped=ACCESS_LOG.dropped)
 
 
 app = FastAPI(title="Agentic SOC Platform", version=__version__, lifespan=_lifespan,
@@ -143,6 +161,18 @@ def _is_https(request: Request) -> bool:
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # one trace id per request: on the access-log row, every audit event, model call and log line it causes
+        trace = accept_trace(request.headers.get("x-request-id"))
+        request.state.trace_id = trace
+        token = TRACE.set(trace)
+        try:
+            response = await self._dispatch(request, call_next)
+        finally:
+            TRACE.reset(token)
+        response.headers["X-Request-ID"] = trace
+        return response
+
+    async def _dispatch(self, request: Request, call_next):
         # NUL is never valid in an id, name or filter, and PostgreSQL rejects it in text: refuse it at the edge
         if "\x00" in request.url.path or b"%00" in request.scope.get("query_string", b"").lower():
             return JSONResponse({"detail": "invalid character in request"}, status_code=400)
@@ -151,6 +181,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "request too large"}, status_code=413)
         client = _client_ip(request)
         if not _limiter.allow(client):
+            event("http.rate_limited", 30, path=request.url.path[:200], client_ip=client)
             return JSONResponse({"detail": "rate limit exceeded"}, status_code=429, headers={"Retry-After": "5"})
         t0 = __import__("time").perf_counter()
         response = await call_next(request)
@@ -302,12 +333,15 @@ ACCESS_LOG = _AccessLogWriter()
 def _log_access(request: Request, status: int, latency_ms: float) -> None:
     from soc_platform.core.models import utcnow
 
-    ACCESS_LOG.put({"ts": utcnow(),
-                    "principal_id": getattr(request.state, "principal_id", None),
-                    "auth_method": getattr(request.state, "auth_method", None),
-                    "method": request.method[:8], "path": request.url.path[:512], "status": int(status),
-                    "client_ip": _client_ip(request),
-                    "user_agent": (request.headers.get("user-agent") or "")[:256], "latency_ms": round(latency_ms, 1)})
+    row = {"ts": utcnow(), "principal_id": getattr(request.state, "principal_id", None),
+           "auth_method": getattr(request.state, "auth_method", None),
+           "method": request.method[:8], "path": request.url.path[:512], "status": int(status),
+           "client_ip": _client_ip(request), "user_agent": (request.headers.get("user-agent") or "")[:256],
+           "latency_ms": round(latency_ms, 1), "trace_id": getattr(request.state, "trace_id", None)}
+    ACCESS_LOG.put(row)
+    route = getattr(request.scope.get("route"), "path", None)
+    event("http.request", 30 if status >= 500 else 20, method=row["method"], path=row["path"][:200], route=route,
+          status=row["status"], latency_ms=row["latency_ms"], principal=row["principal_id"], client_ip=row["client_ip"])
 
 
 # ----------------------------------------------------------------------------- dependencies
@@ -373,13 +407,25 @@ class _Registry:
 registry = _Registry()
 
 
-def db_session() -> Iterator[Session]:
+def db_session(request: Request) -> Iterator[Session]:
     """One session per request, committed when the handler returns. Always used with ``scope="function"`` so the
     commit happens *before* the response is sent: with FastAPI's default ("request") the commit ran after the reply,
     so a client could read back stale data - an upload's case was missing from the next list in 28 of 40 tries - or
-    be told a write succeeded that then failed to commit."""
+    be told a write succeeded that then failed to commit.
+
+    Every write request that succeeds leaves at least one audit event: if the handler and its services wrote none, a
+    generic ``api.<method>`` event (who, which route, which ids) is appended in the same transaction - so no change
+    on the platform, now or in a route added later, goes unaudited."""
     with get_database().session() as s:
         yield s
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not s.info.get("soc_audited"):
+            route = getattr(request.scope.get("route"), "path", request.url.path)
+            pid = getattr(request.state, "principal_id", None)
+            AuditLog(s).append(actor_type=getattr(request.state, "actor_type", None) or "system",
+                               actor_id=pid or "anonymous", event_type=f"api.{request.method.lower()}",
+                               subject_type="route", subject_id=str(route)[:64],
+                               payload={"route": route, "path_params": {k: str(v)[:200] for k, v in request.path_params.items()},
+                                        "query": {k: v[:200] for k, v in request.query_params.items()}})
 
 
 def current_user(request: Request, authorization: str | None = Header(default=None),
@@ -401,6 +447,7 @@ def current_user(request: Request, authorization: str | None = Header(default=No
         s.commit()  # keep the audit trail of failed break-glass attempts
         raise HTTPException(401, str(exc)) from exc
     request.state.principal_id, request.state.auth_method = p.id, p.auth_method
+    request.state.actor_type = p.actor_type
     return p
 
 
@@ -823,7 +870,7 @@ def logout(p: Principal = Depends(current_user), s: Session = Depends(db_session
 
 
 @app.get("/api/v1/admin/access-log")
-def admin_access_log(principal_id: str | None = None, status_min: int = 0, limit: int = Query(200, ge=1, le=2000),
+def admin_access_log(principal_id: str | None = None, status_min: int = Query(0, ge=0, le=999), limit: int = Query(200, ge=1, le=2000),
                      _: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = Depends(db_session, scope="function")):
     # request paths name cases and entities of every domain: all-domain readers only
     ACCESS_LOG.flush(2.0)
@@ -846,7 +893,7 @@ def admin_retention(dry_run: bool = True, p: Principal = Depends(need(Perm.MANAG
 
 
 @app.get("/api/v1/audit/export")
-def audit_export(since_seq: int = 0, p: Principal = Depends(need(Perm.EXPORT_EVIDENCE, "*")), s: Session = Depends(db_session, scope="function")):
+def audit_export(since_seq: int = Query(0, ge=0, le=2**31 - 1), p: Principal = Depends(need(Perm.EXPORT_EVIDENCE, "*")), s: Session = Depends(db_session, scope="function")):
     """JSON Lines export of the hash-chained audit log for external archiving / SIEM (NFR-04). The whole chain is
     needed to verify it, so this requires all-domain scope."""
     from fastapi.responses import PlainTextResponse
@@ -866,20 +913,22 @@ class PushedAlerts(BaseModel):
 
 @app.post("/api/v1/ingest/alerts")
 def ingest_alerts(body: PushedAlerts, p: Principal = Depends(need(Perm.INVESTIGATE, "incident")),
-                  s: Session = Depends(db_session, scope="function")) -> dict[str, int]:
-    """Push endpoint for any SIEM/SOAR (IM-T02 webhook ingestion; duplicates suppressed on replay)."""
+                  s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
+    """Push endpoint for any SIEM/SOAR (IM-T02 webhook ingestion; duplicates suppressed on replay). One malformed
+    alert is refused with its reason and the rest land: the batch is accepted, so the sender does not resend it
+    forever."""
     reg = registry()
     if "generic_siem" not in reg.enabled_names():
         raise HTTPException(409, "the generic SIEM connector is switched off or misconfigured: "
                                  + ("; ".join(reg.problems_of("generic_siem")) or "switch it on in Integrations"))
-    conn = reg.get("generic_siem")
-    store = ContextStore(s)
-    n = 0
-    for a in body.alerts:
-        for rec in conn.normalize("pushed", a):
-            store.ingest(rec)
-            n += 1
-    return {"ingested": n}
+    rep = SyncRunner(s, ContextStore(s)).ingest_records(reg.get("generic_siem"), "pushed", body.alerts)
+    if rep.failed:
+        event("ingest.rejected", 30, connector="generic_siem", rejected=rep.failed, accepted=rep.ingested,
+              first_reason=rep.errors[0] if rep.errors else None)
+    return {"ingested": rep.ingested, "rejected": rep.failed, "reasons": sorted(set(rep.errors))[:20]}
+
+
+LIST_LIMIT = 500   # one page of the case and action lists (?offset= reads the next)
 
 
 # ----------------------------------------------------------------------------- policy & kill switch
@@ -938,14 +987,15 @@ def action_catalog(_: Principal = Depends(need(Perm.READ)), s: Session = Depends
 
 @app.get("/api/v1/actions")
 def list_actions(status: str | None = None, case_id: str | None = None, domain: str | None = None,
-                 p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+                 offset: int = Query(0, ge=0, le=10_000_000), p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     if case_id:
         from soc_platform.core.cases import actions_for_case
 
         _case_in_scope(s, p, case_id)
         rows = [a for a in actions_for_case(s, case_id) if not status or a.status in status.split(",")]
         return [_action(a) for a in rows if "*" in p.domains or a.domain in p.domains]
-    q = select(ActionRequest).order_by(ActionRequest.created_at.desc()).limit(500)
+    # newest first, ties broken by id so pages never overlap or skip (equal times within one clock tick)
+    q = select(ActionRequest).order_by(ActionRequest.created_at.desc(), ActionRequest.id).offset(offset).limit(LIST_LIMIT)
     if status:
         q = q.where(ActionRequest.status.in_(status.split(",")))
     if domain:
@@ -1041,6 +1091,71 @@ def audit(subject_id: str | None = None, actor_id: str | None = None, event_type
         rows = [r for r in log.query(subject_id=subject_id, actor_id=actor_id, event_type=event_type, limit=100_000)
                 if r.actor_id == p.id or _audit_domain(s, r.subject_type, r.subject_id) in p.domains][:limit]
     return [{**rec, "ts_utc": row.ts.isoformat()} for rec, row in zip(AuditLog.export(rows), rows)]
+
+
+def _llm_call_row(c: Any, *, full: bool = False) -> dict[str, Any]:
+    out = {"id": c.id, "ts": c.ts.isoformat(), "workflow": c.workflow, "tier": c.tier, "status": c.status,
+           "actor": c.actor, "provider": c.provider, "model": c.model, "prompt_tokens": c.prompt_tokens,
+           "completion_tokens": c.completion_tokens, "latency_ms": c.latency_ms, "claims_kept": c.claims_kept,
+           "claims_dropped": c.claims_dropped, "max_tokens": c.max_tokens, "trace_id": c.trace_id}
+    if full:
+        out |= {"prompt": c.prompt_redacted, "response": c.response, "guardrail": c.guardrail}
+    return out
+
+
+@app.get("/api/v1/admin/trace/{trace_id}")
+def trace_view(trace_id: str, _: Principal = Depends(need(Perm.READ_AUDIT, "*")),
+               s: Session = Depends(db_session, scope="function")):
+    """Everything one request or job run did: the request, every audit event, every model call (with its prompt,
+    answer and what the evidence check removed) and the job run."""
+    from soc_platform.core.models import JobRun, LLMCall
+
+    ACCESS_LOG.flush(2.0)                       # rows are written in the background: include this trace's
+    reqs = s.execute(select(AccessLogRecord).where(AccessLogRecord.trace_id == trace_id)
+                     .order_by(AccessLogRecord.seq)).scalars().all()
+    events = s.execute(select(AuditRecord).where(AuditRecord.trace_id == trace_id).order_by(AuditRecord.seq)).scalars().all()
+    calls = s.execute(select(LLMCall).where(LLMCall.trace_id == trace_id).order_by(LLMCall.ts)).scalars().all()
+    run = s.execute(select(JobRun).where(JobRun.trace_id == trace_id)).scalars().first()
+    if not (reqs or events or calls or run):
+        raise HTTPException(404, "no record carries this trace id (or it has been pruned by retention)")
+    return {"trace_id": trace_id,
+            "requests": [{"ts": r.ts.isoformat(), "principal": r.principal_id, "method": r.method, "path": r.path,
+                          "status": r.status, "latency_ms": r.latency_ms, "client_ip": r.client_ip} for r in reqs],
+            "audit": [{**rec, "ts_utc": row.ts.isoformat()} for rec, row in zip(AuditLog.export(events), events)],
+            "llm_calls": [_llm_call_row(c, full=True) for c in calls],
+            "job_run": {"id": run.id, "job": run.job, "status": run.status, "trigger": run.trigger,
+                        "started_at": run.started_at.isoformat(), "attempts": run.attempts, "error": run.error,
+                        "summary": run.summary} if run else None}
+
+
+@app.get("/api/v1/admin/llm/calls")
+def llm_calls(workflow: str | None = None, status: str | None = None, actor: str | None = None,
+              limit: int = Query(50, ge=1, le=500), _: Principal = Depends(need(Perm.READ_AUDIT, "*")),
+              s: Session = Depends(db_session, scope="function")):
+    """Recent model calls, newest first, with tier, status, tokens, timing and the evidence check's outcome."""
+    from soc_platform.core.models import LLMCall
+
+    q = select(LLMCall).order_by(LLMCall.ts.desc()).limit(limit)
+    if workflow:
+        q = q.where(LLMCall.workflow.like(workflow.replace("*", "%")))
+    if status:
+        q = q.where(LLMCall.status == status)
+    if actor:
+        q = q.where(LLMCall.actor == actor)
+    return [_llm_call_row(c) for c in s.execute(q).scalars()]
+
+
+@app.get("/api/v1/admin/llm/calls/{call_id}")
+def llm_call_detail(call_id: str, _: Principal = Depends(need(Perm.READ_AUDIT, "*")),
+                    s: Session = Depends(db_session, scope="function")):
+    """One model call in full: the prompt as sent (identities pseudonymised), the answer, the statements the evidence
+    check removed and why, and the trace that led to it."""
+    from soc_platform.core.models import LLMCall
+
+    c = s.get(LLMCall, call_id)
+    if c is None:
+        raise HTTPException(404, "unknown model call")
+    return _llm_call_row(c, full=True)
 
 
 _VM_SUBJECTS = {"finding", "campaign", "misconfiguration", "plan", "action_plan", "risk_entry", "vm"}
@@ -1164,8 +1279,9 @@ def _assignee_filter(q: Any, assignee: str | None, p: Principal) -> Any:
 
 @app.get("/api/v1/cases")
 def list_cases(domain: str | None = None, status: str | None = None, assignee: str | None = Query(None, max_length=256),
+               offset: int = Query(0, ge=0, le=10_000_000),
                p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
-    q = select(Case).order_by(Case.created_at.desc()).limit(500)
+    q = select(Case).order_by(Case.created_at.desc(), Case.id).offset(offset).limit(LIST_LIMIT)
     if domain:
         q = q.where(Case.domain == domain)
     if "*" not in p.domains:
@@ -1176,9 +1292,6 @@ def list_cases(domain: str | None = None, status: str | None = None, assignee: s
     return [{"id": c.id, "domain": c.domain, "title": c.title, "status": c.status, "severity": c.severity,
              "verdict": c.verdict, "confidence": c.confidence, "assignee": c.assignee, "created_at": _iso(c.created_at)}
             for c in s.execute(q).scalars()]
-
-
-LIST_LIMIT = 500
 
 
 @app.get("/api/v1/cases/summary")
@@ -1727,7 +1840,7 @@ def job_replay(name: str, p: Principal = Depends(need(Perm.MANAGE_CONNECTORS)), 
         raise HTTPException(409, "job is running on another replica")
     return {"job": name, "status": run.status, "attempts": run.attempts,
             "error": (run.error or "").splitlines()[0] if run.error else None,
-            "summary": run.summary}
+            "summary": run.summary, "trace_id": run.trace_id}
 
 
 @app.post("/api/v1/vm/tickets/sync")

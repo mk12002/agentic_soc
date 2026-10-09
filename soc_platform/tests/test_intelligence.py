@@ -434,3 +434,63 @@ def test_a_newly_kev_listed_cve_does_not_age_out_of_a_frozen_catalogue(session, 
     monkeypatch.setenv("SOC_CLOCK_OFFSET_SECONDS", str(365 * 86400))
     rules = {i.rule for i in IntelligenceService(session, vm=world).refresh()}
     assert "new_kev_exposure" in rules
+
+
+ODD_MODEL_VALUES = [None, "x", "", -5, 10**30, float("nan"), True, [], ["x"], [1], {}, {"a": 1}, [["n"]]]
+
+
+class _Scripted(Provider):
+    """Answers each call with the next scripted document (a string is sent as is: broken JSON, prose)."""
+
+    name = "scripted"
+
+    def __init__(self, docs):
+        self.docs, self.i = docs, 0
+
+    def complete(self, system, user, *, tier):
+        d = self.docs[self.i % len(self.docs)]
+        self.i += 1
+        return Completion(d if isinstance(d, str) else json.dumps(d), 10, 10, "odd-1")
+
+
+def _odd(base: dict):
+    for k, v in base.items():
+        for odd in ODD_MODEL_VALUES:
+            yield {**base, k: odd}
+        if isinstance(v, list) and v and isinstance(v[0], dict):
+            for kk in v[0]:
+                for odd in ODD_MODEL_VALUES:
+                    yield {**base, k: [{**v[0], kk: odd}, *v[1:]]}
+    yield from ("plain prose, no JSON", "[1, 2]", '{"summary": ')
+
+
+def test_grounded_answers_survive_any_shape_of_model_answer(session):
+    base = {"summary": "One host reached the domain.", "insufficient_evidence": False, "missing": ["proxy logs"],
+            "claims": [{"text": "web01 reached the domain", "kind": "fact", "evidence_ids": ["E1"]}]}
+    ev = [{"id": "E1", "claim": "web01 reached bad.example"}, {"id": "E2", "claim": "jane opened the mail"}]
+    for doc in _odd(base):
+        out = LLMGateway(session, Settings(), provider=_Scripted([doc])).grounded("t", "what happened?", ev)
+        assert isinstance(out["summary"], str) and isinstance(out["insufficient_evidence"], bool), doc
+        assert all(c["evidence_ids"] and set(c["evidence_ids"]) <= {"E1", "E2"} for c in out["claims"]), doc
+    one_id = {**base, "claims": [{"text": "web01 reached the domain", "kind": "fact", "evidence_ids": "E1"}]}
+    assert LLMGateway(session, Settings(), provider=_Scripted([one_id])).grounded("t", "q?", ev)["source"] == "llm"
+    no = {**base, "claims": [], "insufficient_evidence": "false"}               # text "false" is not true
+    assert LLMGateway(session, Settings(), provider=_Scripted([no])).grounded("t", "q?", ev)["source"] == "deterministic"
+
+
+def test_planners_survive_any_shape_of_model_answer(session, world):
+    from soc_platform.reporting.builder import plan_report
+
+    report = {"title": "Monthly", "audience": "CISO", "format": "docx", "days": 30,
+              "sections": [{"source": "overview", "title": "Overview", "instruction": "brief"}]}
+    for doc in _odd(report):
+        plan = plan_report("monthly report for the CISO", LLMGateway(session, Settings(), provider=_Scripted([doc])))
+        assert 1 <= plan["days"] <= 730 and plan["format"] in {"docx", "pptx"} and plan["sections"], doc
+        assert isinstance(plan["title"], str) and isinstance(plan["audience"], str), doc
+    calls = {"calls": [{"tool": "top_risky", "args": {"limit": 5}}]}
+    docs = list(_odd(calls))
+    prov = _Scripted([d for d in docs for _ in range(2)])      # planner, then the grounded answer, per question
+    svc = IntelligenceService(session, LLMGateway(session, Settings(llm_monthly_token_budget=10**9), provider=prov), vm=world)
+    for _ in docs:
+        r = svc.analyst.ask("Who is most at risk right now?")
+        assert isinstance(r["answer"], str) and r["tool_calls"] and r["planner"] in {"llm", "deterministic"}, r
