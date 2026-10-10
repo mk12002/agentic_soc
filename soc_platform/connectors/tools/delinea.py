@@ -119,6 +119,7 @@ class PrivilegeManagerConnector(ToolConnector):
 
 def _ss_actions(c: SecretServerConnector) -> list:
     return [ConnectorAction("pam.rotate_secret", c, c.rotate, description="Rotate secret credential (Change Password Now)",
+                            destructive=True,                     # the old credential is gone: irreversible
                             preconditions=lambda p, t: [] if any(x.get("secret_id") for x in t) else ["no secret ids"])]
 
 

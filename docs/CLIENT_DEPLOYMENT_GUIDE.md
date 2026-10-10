@@ -298,7 +298,8 @@ risky users), directory role and Azure role assignments (privileged accounts), M
 actions (revoke sessions, disable account, reset password, confirm compromised).
 
 **Create:** an app registration `SOC Platform - Entra connector` (separate from the sign-in registration), with a
-certificate or secret. Application permissions on Microsoft Graph, admin-consented:
+certificate (recommended: the platform signs a short-lived client assertion with it, so no shared secret is sent) or a
+secret. Application permissions on Microsoft Graph, admin-consented:
 
 | Read (required) | Write (only for approved actions) |
 |---|---|
@@ -310,7 +311,8 @@ management group above them).
 **Licences:** Entra ID P2 for Identity Protection (risky users / risk detections); without it those streams return
 nothing and the rest works.
 
-**Settings:** `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET`, optional `ENTRA_AZURE_SUBSCRIPTIONS`
+**Settings:** `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_CERTIFICATE` (one PEM with the private key and the
+certificate, mounted as `ENTRA_CLIENT_CERTIFICATE_FILE`; recommended) or `ENTRA_CLIENT_SECRET`, optional `ENTRA_AZURE_SUBSCRIPTIONS`
 (comma-separated ids; empty = every subscription the app can read).
 
 **Egress:** `graph.microsoft.com`, `management.azure.com`, `login.microsoftonline.com`.
@@ -331,7 +333,8 @@ lookups; actions: isolate / release, AV scan, collect investigation package, cus
 
 **Licences:** Defender for Endpoint P2 (advanced hunting, TVM).
 
-**Settings:** `DEFENDER_ENDPOINT_TENANT_ID`, `DEFENDER_ENDPOINT_CLIENT_ID`, `DEFENDER_ENDPOINT_CLIENT_SECRET`,
+**Settings:** `DEFENDER_ENDPOINT_TENANT_ID`, `DEFENDER_ENDPOINT_CLIENT_ID`, `DEFENDER_ENDPOINT_CLIENT_CERTIFICATE`
+(recommended) or `DEFENDER_ENDPOINT_CLIENT_SECRET`,
 optional `DEFENDER_ENDPOINT_USER_DOMAIN` (UPN suffix for bare account names), optional `DEFENDER_ENDPOINT_MDE_BASE`
 for a regional endpoint (e.g. `https://api-eu.securitycenter.microsoft.com`).
 
@@ -363,7 +366,7 @@ mailbox> -AccessRight RestrictAccess`). Verify with `Test-ApplicationAccessPolic
 
 **Licences:** Defender for Office 365 Plan 2 for advanced hunting and click telemetry.
 
-**Settings:** `DEFENDER_OFFICE365_TENANT_ID`, `..._CLIENT_ID`, `..._CLIENT_SECRET`,
+**Settings:** `DEFENDER_OFFICE365_TENANT_ID`, `..._CLIENT_ID`, `..._CLIENT_CERTIFICATE` (recommended) or `..._CLIENT_SECRET`,
 `DEFENDER_OFFICE365_REPORTING_MAILBOX`.
 
 **Egress:** `graph.microsoft.com`, `outlook.office365.com`, `login.microsoftonline.com`.
@@ -537,7 +540,7 @@ the log and assigns no owners. The file is re-read when it changes; no restart i
 ### 4.15 Microsoft Sentinel (`sentinel`) and generic SIEM push (`generic_siem`)
 
 **Sentinel (pull):** app registration with **Microsoft Sentinel Reader** on the workspace (Azure RBAC). Settings:
-`SENTINEL_TENANT_ID`, `SENTINEL_CLIENT_ID`, `SENTINEL_CLIENT_SECRET`, `SENTINEL_SUBSCRIPTION_ID`,
+`SENTINEL_TENANT_ID`, `SENTINEL_CLIENT_ID`, `SENTINEL_CLIENT_CERTIFICATE` (recommended) or `SENTINEL_CLIENT_SECRET`, `SENTINEL_SUBSCRIPTION_ID`,
 `SENTINEL_RESOURCE_GROUP`, `SENTINEL_WORKSPACE`. Egress: `management.azure.com`. Each incident's entities
 (accounts, hosts, IPs, URLs, file hashes) are read with *Incidents - List Entities*, so a Sentinel incident joins the
 cases of the hosts and people it names (the same Reader role covers it).
@@ -562,7 +565,8 @@ on a partial rejection (an `ingest.rejected` line is also logged).
   `..._SHODAN_API_KEY`, `..._ABUSECH_AUTH_KEY` (URLhaus, ThreatFox, MalwareBazaar). Egress: `www.virustotal.com`,
   `api.abuseipdb.com`, `otx.alienvault.com`, `urlhaus-api.abuse.ch`, `threatfox-api.abuse.ch`, `mb-api.abuse.ch`,
   `api.greynoise.io`, `api.shodan.io`. The client must approve which sources may receive its indicators and check
-  each source's licence for commercial use.
+  each source's licence for commercial use. Internal indicators are never sent: private / reserved IP addresses,
+  single-label and private-suffix host names and anything under `SOC_ORG_DOMAINS` read "not checked".
 
 ### 4.17 Outbound allow-list (all tools)
 
@@ -748,7 +752,7 @@ redaction and fallbacks stay as they are. Add a test like `test_openai_compatibl
   automation admin, approved by a lead, versioned and audited (*Automation policy* screen). Use the shadow-mode metrics
   (`GET /api/v1/metrics/shadow?domain=...`) - agreement between what the platform recommended and what analysts
   decided - as the evidence for promotion.
-- **Kill switch** (*Automation policy* screen → *Engage kill switch*, or `SOC_KILL_SWITCH=true`): stops every action execution at once, durable
+- **Kill switch** (*Automation policy* screen → *Engage kill switch*, or `SOC_KILL_SWITCH=true`): stops every autonomous action execution at once (each action then waits for a person's approval; pause a tool to stop its writes entirely), durable
   across replicas. Test it before go-live.
 
 ---

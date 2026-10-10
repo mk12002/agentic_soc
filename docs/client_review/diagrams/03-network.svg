@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .zone{fill:#f1f5f9;stroke:#94a3b8;stroke-dasharray:6 4}
+      .zoneb{fill:#eef4ff;stroke:#7ea2d6;stroke-dasharray:6 4}
+      .zoned{fill:#f3f0ff;stroke:#a495d6;stroke-dasharray:6 4}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .ext{fill:#fff7e8;stroke:#c2410c;stroke-width:1.2}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .z{fill:#334155;font-weight:600;font-size:13px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .lbl{fill:#1e293b;font-size:12px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1200" height="800" fill="#ffffff"/>
+  <text x="30" y="36" class="h" font-size="20">Hosting model and network connectivity</text>
+  <text x="30" y="58" class="s">Reference deployment on containers (Docker / Kubernetes / VM). Labels give protocol and port; the arrow starts at the side that opens the connection.</text>
+
+  <!-- user zone -->
+  <rect x="20" y="80" width="230" height="300" rx="12" class="zone"/>
+  <text x="34" y="104" class="z">Corporate network</text>
+  <rect x="38" y="120" width="194" height="70" rx="8" class="box"/><text x="50" y="146" class="t">Analyst browsers</text><text x="50" y="166" class="s">Entra SSO, MFA by</text><text x="50" y="181" class="s">Conditional Access</text>
+  <rect x="38" y="210" width="194" height="70" rx="8" class="box"/><text x="50" y="236" class="t">SIEM / SOAR (optional)</text><text x="50" y="256" class="s">pushes alerts with an</text><text x="50" y="271" class="s">API key</text>
+  <rect x="38" y="300" width="194" height="62" rx="8" class="box"/><text x="50" y="326" class="t">Monitoring / log platform</text><text x="50" y="345" class="s">scrapes /metrics, reads stdout</text>
+
+  <!-- edge -->
+  <rect x="285" y="80" width="200" height="300" rx="12" class="zone"/>
+  <text x="299" y="104" class="z">Edge</text>
+  <rect x="300" y="150" width="170" height="210" rx="8" class="box"/><text x="312" y="176" class="t">TLS reverse proxy</text><text x="312" y="196" class="s">/ WAF / App Gateway</text><text x="312" y="216" class="s">terminates TLS, sets</text><text x="312" y="232" class="s">X-Forwarded-For/-Proto</text><text x="312" y="248" class="s">(trusted proxy list)</text><text x="312" y="280" class="s">rate limit / WAF rules</text><text x="312" y="298" class="s">in front of the API</text>
+
+  <!-- app zone -->
+  <rect x="520" y="80" width="330" height="440" rx="12" class="zoneb"/>
+  <text x="534" y="104" class="z">Application subnet (private)</text>
+  <rect x="540" y="120" width="290" height="96" rx="8" class="box"/><text x="552" y="146" class="t">platform-api (container)</text><text x="552" y="166" class="s">API + console, 4 worker processes,</text><text x="552" y="182" class="s">non-root uid 1001, port 8080 (HTTP,</text><text x="552" y="198" class="s">reachable only from the proxy)</text>
+  <rect x="540" y="232" width="290" height="78" rx="8" class="box"/><text x="552" y="258" class="t">platform-scheduler (container)</text><text x="552" y="278" class="s">scheduled jobs; no inbound port;</text><text x="552" y="294" class="s">several replicas safe (DB leases)</text>
+  <rect x="540" y="326" width="290" height="84" rx="8" class="box"/><text x="552" y="352" class="t">Secrets (Key Vault CSI / Docker</text><text x="552" y="370" class="t">secrets) mounted read-only</text><text x="552" y="390" class="s">/run/secrets/* as *_FILE settings</text>
+  <rect x="540" y="426" width="290" height="78" rx="8" class="box"/><text x="552" y="452" class="t">Egress: forward proxy (optional)</text><text x="552" y="472" class="s">HTTPS_PROXY / NO_PROXY; TLS</text><text x="552" y="488" class="s">inspection root via SSL_CERT_FILE</text>
+
+  <!-- data zone -->
+  <rect x="520" y="550" width="330" height="230" rx="12" class="zoned"/>
+  <text x="534" y="574" class="z">Data subnet (private)</text>
+  <rect x="540" y="590" width="290" height="80" rx="8" class="box"/><text x="552" y="616" class="t">PostgreSQL 16 (managed service)</text><text x="552" y="636" class="s">TCP 5432, TLS, dedicated login;</text><text x="552" y="652" class="s">audit table INSERT / SELECT only</text>
+  <rect x="540" y="686" width="290" height="80" rx="8" class="box"/><text x="552" y="712" class="t">Encrypted file store</text><text x="552" y="732" class="s">volume / blob mount; files are</text><text x="552" y="748" class="s">Fernet-encrypted before they land</text>
+
+  <!-- outbound targets -->
+  <rect x="890" y="80" width="290" height="250" rx="12" class="ext"/>
+  <text x="904" y="106" class="h">Internet (outbound allow-list)</text>
+  <text x="904" y="130" class="s">login.microsoftonline.com</text>
+  <text x="904" y="148" class="s">graph.microsoft.com · management.azure.com</text>
+  <text x="904" y="166" class="s">api.securitycenter.microsoft.com</text>
+  <text x="904" y="184" class="s">outlook.office365.com</text>
+  <text x="904" y="202" class="s">CrowdStrike, Wiz, Avanan regional hosts</text>
+  <text x="904" y="220" class="s">api.umbrella.com · &lt;hash&gt;.canary.tools</text>
+  <text x="904" y="238" class="s">&lt;instance&gt;.service-now.com / Jira site</text>
+  <text x="904" y="256" class="s">services.nvd.nist.gov · api.first.org</text>
+  <text x="904" y="274" class="s">www.cisa.gov · approved TI sources</text>
+  <text x="904" y="300" class="lbl">HTTPS 443 only</text>
+
+  <rect x="890" y="350" width="290" height="170" rx="12" class="ext"/>
+  <text x="904" y="376" class="h">Internal targets</text>
+  <text x="904" y="400" class="s">Rapid7 console (HTTPS, often 3780)</text>
+  <text x="904" y="418" class="s">Delinea Secret Server / PM (HTTPS)</text>
+  <text x="904" y="436" class="s">Organisation LLM gateway (HTTPS)</text>
+  <text x="904" y="454" class="s">Teams / Slack webhooks (HTTPS, optional)</text>
+  <text x="904" y="480" class="lbl">HTTPS; corporate CA via</text>
+  <text x="904" y="496" class="lbl">SSL_CERT_FILE / SOC_LLM_CA_BUNDLE</text>
+
+  <rect x="890" y="550" width="290" height="230" rx="12" class="zone"/>
+  <text x="904" y="576" class="h">Inbound to the platform</text>
+  <text x="904" y="600" class="s">Only through the reverse proxy (443).</text>
+  <text x="904" y="620" class="s">No tool connects in, except a SIEM</text>
+  <text x="904" y="638" class="s">pushing alerts (API key).</text>
+  <text x="904" y="662" class="s">No management port, no SSH required</text>
+  <text x="904" y="680" class="s">in the containers, no Docker socket</text>
+  <text x="904" y="698" class="s">mounted in the platform services.</text>
+  <text x="904" y="722" class="s">/health is unauthenticated (status only);</text>
+  <text x="904" y="740" class="s">/metrics needs an auditor API key.</text>
+
+  <!-- arrows -->
+  <path d="M232,155 L298,185" class="line"/><text x="238" y="150" class="lbl">HTTPS 443</text>
+  <path d="M232,245 L298,245" class="line"/>
+  <path d="M232,330 L298,330" class="line"/>
+  <path d="M470,190 L538,170" class="line"/><text x="476" y="168" class="lbl">HTTP 8080</text>
+  <path d="M540,190 L530,190 L530,630 L538,630" class="line"/>
+  <path d="M540,272 L530,272" stroke="#475569" stroke-width="1.5"/>
+  <path d="M530,630 L530,726 L538,726" class="line"/>
+  <text x="400" y="560" class="lbl">TCP 5432 / TLS</text><text x="400" y="576" class="lbl">and file mount</text>
+  <path d="M832,160 L888,160" class="line"/><text x="838" y="152" class="lbl">443</text>
+  <path d="M832,272 L860,272 L860,420 L888,420" class="line"/>
+</svg>

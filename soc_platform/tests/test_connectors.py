@@ -305,3 +305,82 @@ def test_processes_calling_a_tool_split_its_request_budget(monkeypatch):
     assert four.rate == pytest.approx(one.rate / 4) and four.capacity == max(1, one.capacity // 4)
     monkeypatch.setenv("SOC_CONNECTOR_RATE_SHARE", "many")             # unreadable: no split (and config check says so)
     assert ConnectorRegistry.all_fake().get("crowdstrike").budget.rate == pytest.approx(one.rate)
+
+
+def test_microsoft_apps_can_sign_in_with_a_certificate_instead_of_a_secret(monkeypatch):
+    # Security reviews commonly require certificate credentials for app registrations: the token request then carries
+    # a short-lived assertion signed with the certificate's key, and no shared secret ever leaves the platform.
+    import base64
+    import datetime as dt
+    import hashlib
+
+    import jwt
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    from soc_platform.connectors import http as h
+    from soc_platform.connectors.base import ConnectorError
+    from soc_platform.connectors.tools._microsoft import mde_transport
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "soc-connector")])
+    now = dt.datetime.now(dt.UTC)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(1).not_valid_before(now).not_valid_after(now + dt.timedelta(days=1)).sign(key, hashes.SHA256()))
+    pem = (key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+           + cert.public_bytes(serialization.Encoding.PEM)).decode()
+
+    sent = {}
+
+    class Reply:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"access_token": "t0k", "expires_in": 3600}
+
+    monkeypatch.setattr(h.httpx, "post", lambda url, data=None, **kw: sent.update(url=url, form=data) or Reply())
+    settings = {"tenant_id": "tid", "client_id": "cid", "client_secret": None, "client_certificate": pem}
+    transport = mde_transport(settings)
+    assert transport.auth.token() == "t0k"
+    form = sent["form"]
+    assert "client_secret" not in form and form["client_assertion_type"].endswith("jwt-bearer")
+    claims = jwt.decode(form["client_assertion"], cert.public_key(), algorithms=["RS256"], audience=sent["url"])
+    assert claims["iss"] == claims["sub"] == "cid" and claims["exp"] - claims["iat"] == 600
+    thumb = base64.urlsafe_b64encode(hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).digest()).decode()
+    assert jwt.get_unverified_header(form["client_assertion"])["x5t"] == thumb.rstrip("=")
+
+    with pytest.raises(ConnectorError, match="client_certificate"):
+        mde_transport({"tenant_id": "tid", "client_id": "cid", "client_secret": None, "client_certificate": None})
+    mde_transport({"tenant_id": "tid", "client_id": "cid", "client_secret": "s3cret", "client_certificate": None})
+
+
+def test_internal_indicators_are_never_sent_to_outside_reputation_services(monkeypatch):
+    # An incident names internal addresses and hosts, and reported mail links to the organisation's own sites: asking
+    # VirusTotal, Shodan or AbuseIPDB about them would disclose the organisation's internal structure.
+    from soc_platform.config import get_settings
+    from soc_platform.connectors.tools.threat_intel import internal_indicator
+
+    org = ["acme-demo.com"]
+    for t, v in [("ip", "10.20.30.40"), ("ip", "192.168.1.5"), ("ip", "127.0.0.1"), ("ip", "fe80::1"), ("ip", "fd00::7"),
+                 ("domain", "web01"), ("domain", "fs01.corp"), ("domain", "acme-demo.com"),
+                 ("domain", "intranet.acme-demo.com"), ("url", "https://sharepoint.acme-demo.com/x?y=1"),
+                 ("url", "http://10.1.1.1/admin"), ("url", "https://[fd00::1]/")]:
+        assert internal_indicator(t, v, org), (t, v)
+    for t, v in [("ip", "185.220.101.4"), ("domain", "micros0ft-helpdesk.com"), ("domain", "acme-demo.com.evil.io"),
+                 ("url", "https://login.micros0ft-helpdesk.com/verify"), ("hash", "a3f5c0e1")]:
+        assert internal_indicator(t, v, org) is None, (t, v)
+
+    monkeypatch.setenv("SOC_ORG_DOMAINS", "acme-demo.com")
+    get_settings.cache_clear()
+    try:
+        ti = ConnectorRegistry.all_fake().get("threat_intel")
+        asked = []
+        monkeypatch.setattr(ti, "_q", lambda *a, **k: asked.append(a) or {})
+        result = ti.enrich("ip", "10.0.0.5")
+        assert result["verdict"] == "not_checked" and result["withheld"] and asked == []
+        assert "not sent to outside sources" in ti.lookup("domain", "intranet.acme-demo.com").summary
+    finally:
+        get_settings.cache_clear()

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .zone{fill:#ecfdf3;stroke:#15803d;stroke-dasharray:6 4}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .chk{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.3}
+      .fb{fill:#fef2f2;stroke:#b91c1c;stroke-width:1.2}
+      .ext{fill:#fff7e8;stroke:#c2410c;stroke-width:1.2}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .z{fill:#166534;font-weight:600;font-size:13px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .red{stroke:#b91c1c;stroke-width:1.3;fill:none;stroke-dasharray:5 4;marker-end:url(#a)}
+      .lbl{fill:#1e293b;font-size:12px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1200" height="640" fill="#ffffff"/>
+  <text x="30" y="36" class="h" font-size="20">AI / LLM call path - every model call</text>
+  <text x="30" y="58" class="s">Figures, verdicts, scores and actions are computed before step 1 and never change. The model only writes wording; any refusal or failure uses the platform's own cited text.</text>
+
+  <rect x="20" y="80" width="200" height="120" rx="10" class="box"/>
+  <text x="34" y="106" class="t">Feature asks for text</text>
+  <text x="34" y="128" class="s">incident summary, finding</text>
+  <text x="34" y="144" class="s">narrative, brief, analyst</text>
+  <text x="34" y="160" class="s">answer, deep analysis,</text>
+  <text x="34" y="176" class="s">report section</text>
+  <text x="34" y="192" class="lbl">with evidence items + ids</text>
+
+  <rect x="250" y="80" width="700" height="340" rx="12" class="zone"/>
+  <text x="264" y="102" class="z">LLM gateway (inside the platform)</text>
+
+  <rect x="266" y="114" width="210" height="88" rx="8" class="chk"/><text x="278" y="138" class="t">1. Usage policy</text><text x="278" y="158" class="s">feature on? monthly / daily</text><text x="278" y="174" class="s">budget left? person's hourly /</text><text x="278" y="190" class="s">daily limit? answer cap set</text>
+  <rect x="496" y="114" width="210" height="88" rx="8" class="chk"/><text x="508" y="138" class="t">2. Circuit breaker</text><text x="508" y="158" class="s">endpoint failing 3 times in a</text><text x="508" y="174" class="s">row → skip it for 60 s</text>
+  <rect x="726" y="114" width="210" height="88" rx="8" class="chk"/><text x="738" y="138" class="t">3. Pseudonymise</text><text x="738" y="158" class="s">internal e-mails, names, phones,</text><text x="738" y="174" class="s">national ids, card numbers →</text><text x="738" y="190" class="s">USER_1, HOST_2 ... tokens</text>
+
+  <rect x="726" y="226" width="210" height="88" rx="8" class="chk"/><text x="738" y="250" class="t">4. Approved endpoint</text><text x="738" y="270" class="s">allow-list (fail closed); pinned</text><text x="738" y="286" class="s">model version; timeouts 10 s</text><text x="738" y="302" class="s">connect, 30 / 120 s read</text>
+  <rect x="496" y="226" width="210" height="88" rx="8" class="chk"/><text x="508" y="250" class="t">5. Grounding check</text><text x="508" y="270" class="s">untrusted JSON type-checked;</text><text x="508" y="286" class="s">uncited claims and figures not</text><text x="508" y="302" class="s">in the cited evidence removed</text>
+  <rect x="266" y="226" width="210" height="88" rx="8" class="chk"/><text x="278" y="250" class="t">6. Restore + log</text><text x="278" y="270" class="s">names restored for the reader;</text><text x="278" y="286" class="s">call logged: feature, who, tokens,</text><text x="278" y="302" class="s">removed statements + reason</text>
+
+  <rect x="266" y="332" width="670" height="74" rx="8" class="fb"/>
+  <text x="278" y="356" class="t">Deterministic fallback (always available)</text>
+  <text x="278" y="376" class="s">Refused by policy, breaker open, endpoint error or timeout, unusable answer, LLM off: the platform's own cited text.</text>
+  <text x="278" y="394" class="s">Same figures, verdicts and actions; the person is told why ("written by the platform without the model: ...").</text>
+
+  <rect x="990" y="190" width="190" height="150" rx="10" class="ext"/>
+  <text x="1004" y="214" class="t">Organisation's LLM</text>
+  <text x="1004" y="232" class="t">gateway</text>
+  <text x="1004" y="254" class="s">in-house endpoint in front</text>
+  <text x="1004" y="270" class="s">of the approved models</text>
+  <text x="1004" y="290" class="s">receives pseudonymised</text>
+  <text x="1004" y="306" class="s">evidence only; no training</text>
+  <text x="1004" y="322" class="s">on platform data</text>
+
+  <rect x="20" y="226" width="200" height="88" rx="10" class="box"/>
+  <text x="34" y="252" class="t">Analyst sees</text>
+  <text x="34" y="272" class="s">text with citations next to</text>
+  <text x="34" y="288" class="s">the computed figures; only</text>
+  <text x="34" y="304" class="s">data in their scope</text>
+
+  <rect x="20" y="450" width="1160" height="170" rx="10" class="box"/>
+  <text x="34" y="476" class="t">What the model can never do</text>
+  <text x="34" y="500" class="s">• Produce or change a figure, verdict, score, priority or severity - all computed in code; a test proves LLM on / off gives identical results on three sample organisations.</text>
+  <text x="34" y="522" class="s">• Trigger an action - model output has no path to the action layer; actions come only from deterministic recommendations and human approval under the autonomy policy.</text>
+  <text x="34" y="544" class="s">• Reach data outside the item it explains - each prompt carries only that item's evidence; the analyst assistant may only call a fixed catalogue of read-only tools (unknown tools ignored).</text>
+  <text x="34" y="566" class="s">• Reach the internet - the only model destination is the approved endpoint; the phishing ML models are local files verified by SHA-256 before loading and make no network calls.</text>
+  <text x="34" y="588" class="s">• See secrets - credentials never enter prompts; prompts and answers are stored pseudonymised and purged after the retention period.</text>
+  <text x="34" y="610" class="s">• Run up cost unchecked - monthly and daily token budgets, per-person limits and a hard cap on each answer, set only by administrators (versioned, audited).</text>
+
+  <path d="M220,140 L264,140" class="line"/>
+  <path d="M476,158 L494,158" class="line"/>
+  <path d="M706,158 L724,158" class="line"/>
+  <path d="M831,202 L831,224" class="line"/>
+  <path d="M936,250 L988,250" class="line"/><text x="944" y="242" class="lbl">HTTPS</text>
+  <path d="M988,290 L938,290" class="line"/>
+  <path d="M724,290 L708,290" class="line" transform="translate(0,0)"/>
+  <path d="M494,270 L478,270" class="line"/>
+  <path d="M264,270 L222,270" class="line"/>
+  <path d="M266,180 L258,180 L258,369 L264,369" class="red"/>
+  <path d="M601,314 L601,330" class="red"/>
+  <path d="M831,314 L831,330" class="red"/>
+</svg>

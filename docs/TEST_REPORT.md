@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-09 (rounds 15-20; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-10 (rounds 15-21; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,33 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 20 (2026-10-09) - latest results: bad data and bad input degrade one item, never the platform
+## 0. Round 21 (2026-10-10) - latest results: client security review pack, and the controls it claims verified in code
+
+Aim: write the review pack the client's security and architecture teams asked for (`docs/client_review/`: solution
+architecture, security tool integrations, data flow and protection, AI / LLM security, security risk and governance,
+deployment and validation, with six diagrams and a Word edition) - and check, before writing each security claim,
+that the code really enforces it. Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **648 passed**, 0 failed, 15 skipped (663 collected; the same opt-in / single-database skips) |
+| Platform suite on PostgreSQL 16 | **648 passed**, 0 failed, 15 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **108 of 108 features verified**; 240 mapped tests run, 0 failed; ML engine 205 passed; browser tour with the live LLM 0 problems (35 screenshots) |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / **0 known vulnerabilities** / clean |
+
+Three claims were not true in code; each is fixed with a regression test that fails on the old code:
+
+| Claim (in SECURITY / ARCHITECTURE / the deployment guide) | What the code did | Fix |
+|---|---|---|
+| "Destructive actions are never autonomous" | The policy capped destructive types at L3, but **no action was marked destructive**: a policy raising everything to L4 would have run password resets, secret rotation, mail purges and "confirm compromised" unattended | Those four are marked destructive; a test raises every action to L4 and requires exactly these four to wait for a person |
+| Microsoft app registrations "with a certificate or secret" | Secret only | Certificate credentials (RFC 7523 client assertion signed with the app's key, `x5t` thumbprint, 10-minute lifetime) for Entra ID, Defender for Endpoint, Defender for Office 365 and Sentinel; the secret still works |
+| Threat-intel lookups send "indicators only" | Internal IP addresses and the organisation's own domains (a link to its intranet in a reported e-mail, an incident's 10.x address) would have been sent to VirusTotal, Shodan and the other sources | Private / reserved addresses, single-label and private-suffix host names and anything under `SOC_ORG_DOMAINS` are withheld ("not checked") in the one path every lookup takes |
+
+One claim was overstated in the docs and is now described as the code behaves: the kill switch stops **autonomous**
+execution (every action then needs a person's approval); a human-approved action still executes, and pausing a tool
+stops every write to it.
+
+## Round 20 (2026-10-09): bad data and bad input degrade one item, never the platform
 
 Aim: a critical review for production - find every way discrepancies in data or inputs (vendor records, times,
 pushed alerts, spreadsheets, e-mail, settings, policy documents, model output, API parameters) or an operational

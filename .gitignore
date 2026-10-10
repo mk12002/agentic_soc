@@ -48,3 +48,6 @@ node_modules/
 .coverage
 .coverage.*
 .hypothesis/
+
+# generated Word edition of the client review pack (python scripts/build_review_pack.py)
+docs/client_review/word/

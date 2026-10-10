@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from soc_platform.connectors.base import ConnectorError, Page
-from soc_platform.connectors.http import HttpTransport, NoAuth, entra_app_auth
+from soc_platform.connectors.http import HttpTransport, NoAuth, entra_app_auth_from
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ToolConnector, parse_ts, sev_name
 from soc_platform.connectors.tools._microsoft import odata_page
@@ -184,11 +184,14 @@ MANIFESTS = [
         name="sentinel", tool="Microsoft Sentinel", vendor="Microsoft", category="siem", dimension="other",
         description="Sentinel incidents (if Sentinel is the client's SIEM).",
         factory=lambda s, t: SentinelConnector(s, t, rate_per_sec=2, burst=4),
-        live_transport=lambda s: HttpTransport("https://management.azure.com", entra_app_auth(
-            s["tenant_id"], s["client_id"], s["client_secret"], "https://management.azure.com/.default")),
+        live_transport=lambda s: HttpTransport("https://management.azure.com",
+                                               entra_app_auth_from(s, "https://management.azure.com/.default")),
         config=[ConfigField("tenant_id", "Entra tenant id"),
                 ConfigField("client_id", "App registration (client) id", secret=True),
-                ConfigField("client_secret", "App registration secret", secret=True),
+                ConfigField("client_secret", "App registration secret (or use client_certificate)", secret=True,
+                            required=False),
+                ConfigField("client_certificate", "App registration certificate: one PEM with the private key and the "
+                            "certificate (recommended over a secret)", secret=True, required=False),
                 ConfigField("subscription_id", "Azure subscription holding the Sentinel workspace"),
                 ConfigField("resource_group", "Resource group of the Log Analytics workspace"),
                 ConfigField("workspace", "Log Analytics workspace name")],

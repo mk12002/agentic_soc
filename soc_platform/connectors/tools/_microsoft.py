@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from soc_platform.connectors.base import Page
-from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth
+from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth_from
 from soc_platform.connectors.registry import ConfigField
 from soc_platform.connectors.tools._common import ToolConnector, Watermark
 
@@ -16,28 +16,28 @@ ARM = "https://management.azure.com"
 APP_FIELDS = [
     ConfigField("tenant_id", "Entra tenant id"),
     ConfigField("client_id", "App registration (client) id", secret=True),
-    ConfigField("client_secret", "App registration secret (prefer certificate-based auth in prod)", secret=True),
+    ConfigField("client_secret", "App registration secret (or use client_certificate)", secret=True, required=False),
+    ConfigField("client_certificate", "App registration certificate: one PEM with the private key and the certificate "
+                "(recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)", secret=True,
+                required=False),
 ]
 
 
 def graph_transport(settings: dict[str, Any]) -> HttpTransport:
     return HttpTransport(settings.get("graph_base") or GRAPH,
-                         entra_app_auth(settings["tenant_id"], settings["client_id"], settings["client_secret"],
-                                        "https://graph.microsoft.com/.default"))
+                         entra_app_auth_from(settings, "https://graph.microsoft.com/.default"))
 
 
 def graph_and_arm_transport(settings: dict[str, Any]) -> RoutingTransport:
     """Graph for Entra, plus Azure Resource Manager (own token audience) for Azure role assignments."""
     arm = HttpTransport(settings.get("arm_base") or ARM,
-                        entra_app_auth(settings["tenant_id"], settings["client_id"], settings["client_secret"],
-                                       "https://management.azure.com/.default"))
+                        entra_app_auth_from(settings, "https://management.azure.com/.default"))
     return RoutingTransport(graph_transport(settings), {ARM: arm})
 
 
 def mde_transport(settings: dict[str, Any]) -> HttpTransport:
     return HttpTransport(settings.get("mde_base") or MDE,
-                         entra_app_auth(settings["tenant_id"], settings["client_id"], settings["client_secret"],
-                                        "https://api.securitycenter.microsoft.com/.default"))
+                         entra_app_auth_from(settings, "https://api.securitycenter.microsoft.com/.default"))
 
 
 def odata_page(conn: ToolConnector, path: str, cursor: str | None, params: dict[str, Any] | None = None, *,

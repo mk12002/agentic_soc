@@ -305,10 +305,10 @@ def _actions(c: EntraConnector) -> list:
         ConnectorAction("identity.disable_account", c, c.disable, preconditions=_has_upn,
                         reverse_type="identity.enable_account", description="Disable the account"),
         ConnectorAction("identity.enable_account", c, c.enable, preconditions=_has_upn, description="Re-enable the account"),
-        ConnectorAction("identity.confirm_compromised", c, c.confirm_compromised,
+        ConnectorAction("identity.confirm_compromised", c, c.confirm_compromised, destructive=True,   # no undo
                         description="Mark user compromised in Identity Protection (raises risk; drives CA policy)"),
         ConnectorAction("identity.reset_password", c, c.force_password_change, preconditions=_has_upn,
-                        description="Force password change at next sign-in"),
+                        destructive=True, description="Force password change at next sign-in"),   # irreversible
     ]
 
 

@@ -160,6 +160,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | 25-minute client walkthrough, what a demo proves |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
 | [docs/CONNECTORS.md](docs/CONNECTORS.md) | Per-tool setup, scopes, configuration (generated from the code) |
+| [docs/client_review/](docs/client_review/README.md) | Review pack for the client's security and architecture teams: solution architecture, tool integrations, data flow and protection, AI / LLM security, risk and governance, deployment and validation (Word edition: `python scripts/build_review_pack.py`) |
 | [docs/CLIENT_DEPLOYMENT_GUIDE.md](docs/CLIENT_DEPLOYMENT_GUIDE.md) | Moving from the demo into the client's environment: hosting, Entra sign-in, connecting every tool, the client's in-house LLM, action rollout, go-live checklist |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Running, jobs, monitoring, access, break-glass, keys, retention, backups |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, controls, fixes, operator responsibilities |

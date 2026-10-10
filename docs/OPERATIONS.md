@@ -336,8 +336,10 @@ review the access log, rotate the secret, record the incident.
 ## Kill switch
 
 Console *Policy* → kill switch, or `POST /api/v1/kill-switch?on=true` (lead / admin / automation admin, MFA).
-It is stored in the database, so every API replica and the scheduler stop executing actions immediately and it
-survives restarts. `SOC_KILL_SWITCH=1` forces it on from configuration.
+It is stored in the database, so every API replica and the scheduler stop executing actions **autonomously**
+immediately, and it survives restarts: every action then waits for a person's approval (it caps the policy at L3), while
+recommendations continue. A human-approved action still executes - analysts may still need to contain. To stop every
+write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` forces it on from configuration.
 
 ## Where data is stored
 

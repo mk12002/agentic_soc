@@ -87,7 +87,7 @@ class OAuth2ClientCredentials(Auth):
 
     def __init__(self, token_url: str, client_id: str, client_secret: str, *, scope: str | None = None,
                  extra: dict[str, str] | None = None, grant_type: str = "client_credentials",
-                 json_body: bool = False, basic: bool = False) -> None:
+                 json_body: bool = False, basic: bool = False, assertion: Any = None) -> None:
         self.token_url = token_url
         self.client_id = client_id
         self.client_secret = client_secret
@@ -96,6 +96,7 @@ class OAuth2ClientCredentials(Auth):
         self.grant_type = grant_type
         self.json_body = json_body
         self.basic = basic
+        self.assertion = assertion          # callable -> a signed client assertion (certificate credential), else None
         self._token: str | None = None
         self._expires = 0.0
         self._lock = threading.Lock()
@@ -106,7 +107,10 @@ class OAuth2ClientCredentials(Auth):
                 return self._token
             form = {"grant_type": self.grant_type, **self.extra}
             headers = {}
-            if self.basic:
+            if self.assertion is not None:   # certificate credential: no shared secret leaves the platform
+                form.update({"client_id": self.client_id, "client_assertion": self.assertion(),
+                             "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"})
+            elif self.basic:
                 headers["Authorization"] = "Basic " + base64.b64encode(
                     f"{self.client_id}:{self.client_secret}".encode()).decode()
             else:
@@ -130,9 +134,50 @@ class OAuth2ClientCredentials(Auth):
             self._token, self._expires = None, 0.0
 
 
-def entra_app_auth(tenant_id: str, client_id: str, client_secret: str, scope: str) -> OAuth2ClientCredentials:
-    return OAuth2ClientCredentials(f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
-                                   client_id, client_secret, scope=scope)
+def certificate_assertion(pem: str, client_id: str, audience: str) -> Any:
+    """A function that signs a fresh client assertion (RFC 7523) with the app registration's certificate.
+
+    ``pem`` holds the private key and the certificate (one PEM file, as exported for the app registration). Entra ID
+    identifies the certificate by its SHA-1 thumbprint (``x5t``); each assertion lives 10 minutes and is used once."""
+    import hashlib
+    import uuid
+
+    import jwt
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    data = pem.encode() if isinstance(pem, str) else pem
+    key = serialization.load_pem_private_key(data, password=None)
+    cert = x509.load_pem_x509_certificate(data)
+    der = cert.public_bytes(serialization.Encoding.DER)
+    thumb = base64.urlsafe_b64encode(hashlib.sha1(der, usedforsecurity=False).digest()).decode().rstrip("=")
+
+    def sign() -> str:
+        now = int(time.time())
+        claims = {"aud": audience, "iss": client_id, "sub": client_id, "jti": uuid.uuid4().hex,
+                  "nbf": now, "iat": now, "exp": now + 600}
+        return jwt.encode(claims, key, algorithm="RS256", headers={"x5t": thumb, "typ": "JWT"})
+
+    return sign
+
+
+def entra_app_auth(tenant_id: str, client_id: str, client_secret: str | None, scope: str, *,
+                   certificate: str | None = None) -> OAuth2ClientCredentials:
+    """Entra ID client-credentials token for an app registration: with its certificate when one is configured
+    (recommended), else with its client secret."""
+    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    if certificate:
+        return OAuth2ClientCredentials(url, client_id, "", scope=scope,
+                                       assertion=certificate_assertion(certificate, client_id, url))
+    if not client_secret:
+        raise ConnectorError("the app registration needs a client_certificate (recommended) or a client_secret")
+    return OAuth2ClientCredentials(url, client_id, client_secret, scope=scope)
+
+
+def entra_app_auth_from(settings: dict[str, Any], scope: str) -> OAuth2ClientCredentials:
+    """``entra_app_auth`` from a Microsoft connector's settings (tenant_id, client_id, client_secret / certificate)."""
+    return entra_app_auth(settings["tenant_id"], settings["client_id"], settings.get("client_secret"), scope,
+                          certificate=settings.get("client_certificate"))
 
 
 # ----------------------------------------------------------------------------- transports

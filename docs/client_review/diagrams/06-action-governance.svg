@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .chk{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.3}
+      .hum{fill:#fef9c3;stroke:#a16207;stroke-width:1.3}
+      .stop{fill:#fef2f2;stroke:#b91c1c;stroke-width:1.2}
+      .ok{fill:#ecfdf3;stroke:#15803d;stroke-width:1.3}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .lbl{fill:#1e293b;font-size:12px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1200" height="600" fill="#ffffff"/>
+  <text x="30" y="36" class="h" font-size="20">Human approval controls - from recommendation to a tool write</text>
+  <text x="30" y="58" class="s">The action layer is the only code path that writes to a tool; by default a person approves every action (L2).</text>
+
+  <rect x="20" y="86" width="190" height="96" rx="10" class="box"/><text x="34" y="112" class="t">Recommendation</text><text x="34" y="134" class="s">from a workflow (computed in</text><text x="34" y="150" class="s">code) or an analyst request;</text><text x="34" y="166" class="s">idempotency key de-duplicates</text>
+
+  <rect x="240" y="86" width="210" height="96" rx="10" class="chk"/><text x="254" y="112" class="t">Tool stage ceiling</text><text x="254" y="134" class="s">fixtures / recording / read-only:</text><text x="254" y="150" class="s">manual step only · recommend:</text><text x="254" y="166" class="s">never above L2 · automate: policy</text>
+
+  <rect x="480" y="86" width="250" height="96" rx="10" class="chk"/><text x="494" y="112" class="t">Autonomy policy decision</text><text x="494" y="134" class="s">preconditions · hard target limit ·</text><text x="494" y="150" class="s">kill switch · destructive → max L3 ·</text><text x="494" y="166" class="s">VIP / critical · target count · four-eyes</text>
+
+  <rect x="760" y="86" width="200" height="96" rx="10" class="hum"/><text x="774" y="112" class="t">Human approval</text><text x="774" y="134" class="s">permission per role, in the</text><text x="774" y="150" class="s">action's domain; step-up MFA;</text><text x="774" y="166" class="s">no self-approval; never API key</text>
+
+  <rect x="990" y="86" width="190" height="96" rx="10" class="ok"/><text x="1004" y="112" class="t">Execute once</text><text x="1004" y="134" class="s">preconditions re-checked;</text><text x="1004" y="150" class="s">conditional update = exactly</text><text x="1004" y="166" class="s">once; result recorded</text>
+
+  <rect x="480" y="222" width="250" height="70" rx="10" class="stop"/><text x="494" y="246" class="t">Blocked</text><text x="494" y="266" class="s">precondition failed or more targets</text><text x="494" y="282" class="s">than the hard limit - recorded</text>
+  <rect x="760" y="222" width="200" height="70" rx="10" class="stop"/><text x="774" y="246" class="t">Rejected</text><text x="774" y="266" class="s">by the approver, with a</text><text x="774" y="282" class="s">reason - recorded</text>
+  <rect x="990" y="222" width="190" height="70" rx="10" class="box"/><text x="1004" y="246" class="t">Rollback</text><text x="1004" y="266" class="s">linked reverse action (release,</text><text x="1004" y="282" class="s">enable, restore, unblock)</text>
+
+  <rect x="20" y="330" width="1160" height="64" rx="10" class="box"/>
+  <text x="34" y="354" class="t">Audit chain - every step above is an append-only, SHA-256-linked audit event (who, what, when, why, trace id); tampering breaks the chain at the edited record.</text>
+  <text x="34" y="376" class="s">Verification on demand (/api/v1/audit/verify) and hourly by the platform self-check; full export as JSON Lines to the organisation's SIEM.</text>
+
+  <rect x="20" y="420" width="370" height="160" rx="10" class="box"/>
+  <text x="34" y="444" class="t">Levels</text>
+  <text x="34" y="466" class="s">L0 observe · L1 enrich · L2 recommend (default)</text>
+  <text x="34" y="484" class="s">L3 approve · L4 autonomous</text>
+  <text x="34" y="506" class="s">Four-eyes by default: disable account, isolate host.</text>
+  <text x="34" y="524" class="s">Never above L3 (destructive): mail purge, password</text>
+  <text x="34" y="542" class="s">reset, secret rotation, confirm-compromised.</text>
+  <text x="34" y="564" class="s">Per-request target limits on every action type.</text>
+
+  <rect x="410" y="420" width="370" height="160" rx="10" class="box"/>
+  <text x="424" y="444" class="t">Changing the rules</text>
+  <text x="424" y="466" class="s">Autonomy policy and tool configuration: proposed</text>
+  <text x="424" y="484" class="s">by one person, approved by another (MFA);</text>
+  <text x="424" y="502" class="s">versioned; validated field by field; a tool must</text>
+  <text x="424" y="520" class="s">pass its preflight before it can go live.</text>
+  <text x="424" y="542" class="s">Promotion evidence: shadow-mode agreement</text>
+  <text x="424" y="560" class="s">between recommendations and analyst decisions.</text>
+
+  <rect x="800" y="420" width="380" height="160" rx="10" class="stop"/>
+  <text x="814" y="444" class="t">Stopping it</text>
+  <text x="814" y="466" class="s">Kill switch: stops all autonomous execution at once;</text>
+  <text x="814" y="484" class="s">durable, every replica. Every action needs a person.</text>
+  <text x="814" y="506" class="s">Pause a tool: no write reaches it, approved or not;</text>
+  <text x="814" y="524" class="s">immediate, audited; resuming needs approval.</text>
+  <text x="814" y="546" class="s">Without a tool's write permission an approved</text>
+  <text x="814" y="564" class="s">action fails cleanly and is recorded.</text>
+
+  <path d="M210,134 L238,134" class="line"/>
+  <path d="M450,134 L478,134" class="line"/>
+  <path d="M730,134 L758,134" class="line"/><text x="731" y="154" class="lbl" font-size="11">L2/L3</text>
+  <path d="M960,134 L988,134" class="line"/>
+  <path d="M605,182 L605,220" class="line"/>
+  <path d="M860,182 L860,220" class="line"/>
+  <path d="M1085,182 L1085,220" class="line"/>
+  <path d="M605,86 L605,74 L1085,74 L1085,84" class="line"/><text x="800" y="70" class="lbl">L4 only, never for destructive types</text>
+</svg>

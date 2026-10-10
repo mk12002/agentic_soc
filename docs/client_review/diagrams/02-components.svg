@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 860" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .layer{fill:#f8fafc;stroke:#94a3b8;stroke-width:1.2}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.2}
+      .hl{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.4}
+      .gw{fill:#ecfdf3;stroke:#15803d;stroke-width:1.4}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13px}
+      .s{fill:#475569;font-size:12px}
+      .L{fill:#334155;font-weight:600;font-size:13px}
+      .line{stroke:#475569;stroke-width:1.4;fill:none;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect width="1200" height="860" fill="#ffffff"/>
+  <text x="30" y="36" class="h" font-size="20">Detailed architecture - components and layers</text>
+  <text x="30" y="58" class="s">Dependencies point downward only. The LLM gateway is optional: every layer works, with identical figures and decisions, without it.</text>
+
+  <!-- request path -->
+  <rect x="20" y="78" width="1160" height="96" rx="10" class="layer"/>
+  <text x="34" y="98" class="L">API layer - request path (every call)</text>
+  <g>
+    <rect x="34" y="108" width="150" height="54" rx="7" class="box"/><text x="44" y="129" class="t">Body limit</text><text x="44" y="148" class="s">30 MB on the byte stream</text>
+    <rect x="198" y="108" width="170" height="54" rx="7" class="box"/><text x="208" y="129" class="t">Security middleware</text><text x="208" y="148" class="s">NUL refusal · size · rate limit</text>
+    <rect x="382" y="108" width="190" height="54" rx="7" class="box"/><text x="392" y="129" class="t">Authentication</text><text x="392" y="148" class="s">Entra · API key · break-glass</text>
+    <rect x="586" y="108" width="190" height="54" rx="7" class="box"/><text x="596" y="129" class="t">Authorisation</text><text x="596" y="148" class="s">role → permission · domain scope</text>
+    <rect x="790" y="108" width="180" height="54" rx="7" class="box"/><text x="800" y="129" class="t">Handler</text><text x="800" y="148" class="s">one transaction, commit first</text>
+    <rect x="984" y="108" width="182" height="54" rx="7" class="box"/><text x="994" y="129" class="t">Response</text><text x="994" y="148" class="s">security headers · access log</text>
+    <path d="M184,135 L196,135" class="line"/><path d="M368,135 L380,135" class="line"/><path d="M572,135 L584,135" class="line"/><path d="M776,135 L788,135" class="line"/><path d="M970,135 L982,135" class="line"/>
+  </g>
+
+  <!-- console -->
+  <rect x="20" y="186" width="1160" height="58" rx="10" class="layer"/>
+  <text x="34" y="208" class="L">Web console</text>
+  <text x="34" y="228" class="s">Static single-page app, no build step, strict Content-Security-Policy (no inline script), every value HTML-escaped, Entra sign-in with PKCE</text>
+
+  <!-- intelligence -->
+  <rect x="20" y="256" width="1160" height="110" rx="10" class="layer"/>
+  <text x="34" y="276" class="L">Intelligence layer (reads every domain)</text>
+  <rect x="34" y="286" width="210" height="66" rx="7" class="box"/><text x="44" y="307" class="t">Risk engine</text><text x="44" y="325" class="s">explainable, per user / host,</text><text x="44" y="341" class="s">time-decayed</text>
+  <rect x="258" y="286" width="210" height="66" rx="7" class="box"/><text x="268" y="307" class="t">Correlation</text><text x="268" y="325" class="s">12 cross-domain rules,</text><text x="268" y="341" class="s">findings with evidence</text>
+  <rect x="482" y="286" width="210" height="66" rx="7" class="box"/><text x="492" y="307" class="t">Attack story</text><text x="492" y="325" class="s">ATT&amp;CK kill chain, blast</text><text x="492" y="341" class="s">radius, phased response</text>
+  <rect x="706" y="286" width="210" height="66" rx="7" class="box"/><text x="716" y="307" class="t">Analyst assistant · brief</text><text x="716" y="325" class="s">read-only tool catalogue,</text><text x="716" y="341" class="s">cited answers</text>
+  <rect x="930" y="286" width="236" height="66" rx="7" class="box"/><text x="940" y="307" class="t">Coverage · shadow IT · drift</text><text x="940" y="325" class="s">report builder (Word / PPT),</text><text x="940" y="341" class="s">compliance evidence pack</text>
+
+  <!-- domains -->
+  <rect x="20" y="378" width="1160" height="96" rx="10" class="layer"/>
+  <text x="34" y="398" class="L">Workflow domains</text>
+  <rect x="34" y="408" width="370" height="54" rx="7" class="box"/><text x="44" y="429" class="t">Phishing</text><text x="44" y="448" class="s">reported e-mail → verdict → campaign → clicks → impact</text>
+  <rect x="418" y="408" width="370" height="54" rx="7" class="box"/><text x="428" y="429" class="t">Incident</text><text x="428" y="448" class="s">alerts → clusters → enrichment → severity → MITRE</text>
+  <rect x="802" y="408" width="364" height="54" rx="7" class="box"/><text x="812" y="429" class="t">Vulnerability + cloud posture</text><text x="812" y="448" class="s">4 scanners → one finding per host+CVE → owner</text>
+
+  <!-- core -->
+  <rect x="20" y="486" width="1160" height="168" rx="10" class="layer"/>
+  <text x="34" y="506" class="L">Core services</text>
+  <rect x="34" y="516" width="220" height="58" rx="7" class="box"/><text x="44" y="538" class="t">Context store</text><text x="44" y="557" class="s">entity resolution: one host / person</text>
+  <rect x="268" y="516" width="200" height="58" rx="7" class="box"/><text x="278" y="538" class="t">Cases &amp; evidence</text><text x="278" y="557" class="s">fact vs inference, source</text>
+  <rect x="482" y="516" width="200" height="58" rx="7" class="hl"/><text x="492" y="538" class="t">Action layer</text><text x="492" y="557" class="s">the ONLY path to a tool write</text>
+  <rect x="696" y="516" width="220" height="58" rx="7" class="hl"/><text x="706" y="538" class="t">Autonomy policy</text><text x="706" y="557" class="s">L0-L4, default L2 recommend</text>
+  <rect x="930" y="516" width="236" height="58" rx="7" class="hl"/><text x="940" y="538" class="t">Audit chain</text><text x="940" y="557" class="s">append-only, SHA-256 linked</text>
+  <rect x="34" y="584" width="220" height="58" rx="7" class="box"/><text x="44" y="606" class="t">Enrichment orchestrator</text><text x="44" y="625" class="s">16 parallel lookups, 20 s deadline</text>
+  <rect x="268" y="584" width="200" height="58" rx="7" class="box"/><text x="278" y="606" class="t">Access</text><text x="278" y="625" class="s">grants, API keys, revocation</text>
+  <rect x="482" y="584" width="200" height="58" rx="7" class="box"/><text x="492" y="606" class="t">Crypto · retention</text><text x="492" y="625" class="s">Fernet at rest, legal hold</text>
+  <rect x="696" y="584" width="220" height="58" rx="7" class="box"/><text x="706" y="606" class="t">Jobs · scheduler</text><text x="706" y="625" class="s">DB leases, retries, dead letter</text>
+  <rect x="930" y="584" width="236" height="58" rx="7" class="box"/><text x="940" y="606" class="t">Config store · self-check</text><text x="940" y="625" class="s">four-eyes changes, consistency</text>
+
+  <!-- connectors + gateway -->
+  <rect x="20" y="666" width="760" height="90" rx="10" class="layer"/>
+  <text x="34" y="686" class="L">Connector SDK - 20 connectors (live or fixture mode, same parsing code)</text>
+  <text x="34" y="708" class="s">Per-tool rate budget (token bucket) · retries honouring Retry-After · token renewal on 401 · 403 reported, never retried</text>
+  <text x="34" y="726" class="s">Watermark resume · page-by-page commits · records conformed to the vendor shape · one broken tool isolated</text>
+  <text x="34" y="744" class="s">Staged rollout per tool: fixtures → recording → read-only → recommend → automate</text>
+
+  <rect x="796" y="666" width="384" height="90" rx="10" class="gw"/>
+  <text x="810" y="686" class="L">LLM gateway (optional leaf)</text>
+  <text x="810" y="708" class="s">approved endpoint · usage policy · pseudonymisation</text>
+  <text x="810" y="726" class="s">grounding + numeric guardrail · breaker · call log</text>
+  <text x="810" y="744" class="s">providers: OpenAI-compatible, Azure, Anthropic</text>
+
+  <!-- storage -->
+  <rect x="20" y="768" width="1160" height="72" rx="10" class="layer"/>
+  <text x="34" y="790" class="L">Persistence</text>
+  <rect x="160" y="778" width="420" height="52" rx="7" class="box"/><text x="172" y="800" class="t">PostgreSQL 16 (production) / SQLite (development)</text><text x="172" y="818" class="s">all records, audit chain, access log, model-call log</text>
+  <rect x="600" y="778" width="420" height="52" rx="7" class="box"/><text x="612" y="800" class="t">Encrypted file store (volume or blob mount)</text><text x="612" y="818" class="s">raw payloads, reported e-mail, reports, evidence packs</text>
+</svg>

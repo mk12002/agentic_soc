@@ -18,7 +18,7 @@ import base64
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
-from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth
+from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth_from
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, sev_name
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport, kql_list, kql_str
@@ -294,7 +294,7 @@ EXO = "https://outlook.office365.com"
 
 def _live(s: dict[str, Any]) -> RoutingTransport:
     """Graph for mail/alerts; the Exchange Online admin API needs its own token audience."""
-    exo = HttpTransport(EXO, entra_app_auth(s["tenant_id"], s["client_id"], s["client_secret"], f"{EXO}/.default"))
+    exo = HttpTransport(EXO, entra_app_auth_from(s, f"{EXO}/.default"))
     return RoutingTransport(graph_transport(s), {EXO: exo})
 
 
@@ -307,7 +307,7 @@ def _actions(c: DefenderOffice365Connector) -> list:
     return [
         ConnectorAction("email.campaign_purge", c, c.purge, preconditions=_email_targets,
                         description="Tenant-wide soft delete of delivered copies (reversible)",
-                        reverse_type="email.restore"),
+                        reverse_type="email.restore", destructive=True),   # removes mail; a hard delete can be asked
         ConnectorAction("email.restore", c, c.restore, preconditions=_email_targets,
                         description="Move remediated copies back to the inbox"),
         ConnectorAction("email.tag", c, c.tag, description="Categorise message in the recipient mailbox"),

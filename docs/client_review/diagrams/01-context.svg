@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .zone{fill:#f1f5f9;stroke:#94a3b8;stroke-dasharray:6 4}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.4}
+      .core{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.6}
+      .ext{fill:#fff7e8;stroke:#c2410c;stroke-width:1.2}
+      .h{font-weight:600;fill:#0f172a}
+      .s{fill:#475569;font-size:12.5px}
+      .z{fill:#334155;font-weight:600;font-size:13px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .lbl{fill:#334155;font-size:12px}
+    </style>
+  </defs>
+  <rect width="1200" height="720" fill="#ffffff"/>
+  <text x="30" y="36" class="h" font-size="20">High-level architecture - system context</text>
+  <text x="30" y="58" class="s">Everything inside the dashed boundary runs in the organisation's own environment. Arrows show who opens the connection.</text>
+
+  <!-- organisation boundary -->
+  <rect x="20" y="78" width="760" height="620" rx="14" class="zone"/>
+  <text x="38" y="102" class="z">Organisation environment (client-hosted)</text>
+
+  <!-- users -->
+  <rect x="50" y="125" width="200" height="74" rx="10" class="box"/>
+  <text x="66" y="152" class="h">SOC analysts, leads,</text>
+  <text x="66" y="170" class="h">admins, auditors</text>
+  <text x="66" y="189" class="s">browser, Entra SSO + MFA</text>
+
+  <!-- platform -->
+  <rect x="300" y="125" width="450" height="300" rx="12" class="core"/>
+  <text x="318" y="152" class="h" font-size="16">Agentic SOC platform</text>
+  <text x="318" y="174" class="s">API + web console · scheduler · workflow services</text>
+  <rect x="318" y="190" width="200" height="54" rx="8" class="box"/><text x="330" y="212" class="h">Workflows</text><text x="330" y="231" class="s">phishing · incident · vulnerability</text>
+  <rect x="532" y="190" width="200" height="54" rx="8" class="box"/><text x="544" y="212" class="h">Intelligence</text><text x="544" y="231" class="s">risk · correlation · attack story</text>
+  <rect x="318" y="256" width="200" height="54" rx="8" class="box"/><text x="330" y="278" class="h">Governance</text><text x="330" y="297" class="s">RBAC · approvals · audit chain</text>
+  <rect x="532" y="256" width="200" height="54" rx="8" class="box"/><text x="544" y="278" class="h">LLM gateway</text><text x="544" y="297" class="s">redaction · grounding · budgets</text>
+  <rect x="318" y="322" width="414" height="54" rx="8" class="box"/><text x="330" y="344" class="h">Connector SDK (20 connectors)</text><text x="330" y="363" class="s">read by default; writes only as approved action requests</text>
+  <text x="318" y="405" class="s">Phishing ML engine runs in-process, strictly offline</text>
+
+  <!-- data -->
+  <rect x="300" y="450" width="215" height="70" rx="10" class="box"/>
+  <text x="316" y="476" class="h">PostgreSQL 16</text><text x="316" y="495" class="s">cases, entities, audit chain,</text><text x="316" y="511" class="s">access log, model-call log</text>
+  <rect x="535" y="450" width="215" height="70" rx="10" class="box"/>
+  <text x="551" y="476" class="h">Encrypted file store</text><text x="551" y="495" class="s">raw payloads, reported e-mail,</text><text x="551" y="511" class="s">reports (Fernet at rest)</text>
+  <rect x="50" y="450" width="200" height="70" rx="10" class="box"/>
+  <text x="66" y="476" class="h">Key Vault / secrets</text><text x="66" y="495" class="s">mounted as files (*_FILE);</text><text x="66" y="511" class="s">never in config or console</text>
+
+  <!-- internal tools -->
+  <rect x="50" y="560" width="300" height="110" rx="10" class="box"/>
+  <text x="66" y="586" class="h">On-premises tools (if used)</text>
+  <text x="66" y="607" class="s">Rapid7 InsightVM console</text>
+  <text x="66" y="625" class="s">Delinea Secret Server / Privilege Manager</text>
+  <text x="66" y="643" class="s">ownership CSV (fallback CMDB)</text>
+  <text x="66" y="661" class="s">client LLM gateway (internal endpoint)</text>
+
+  <rect x="400" y="560" width="350" height="110" rx="10" class="box"/>
+  <text x="416" y="586" class="h">Organisation services</text>
+  <text x="416" y="607" class="s">Microsoft Entra ID (sign-in, app roles)</text>
+  <text x="416" y="625" class="s">SIEM / log platform (stdout, audit export)</text>
+  <text x="416" y="643" class="s">Teams / Slack webhooks (optional)</text>
+  <text x="416" y="661" class="s">Monitoring (Prometheus /metrics)</text>
+
+  <!-- external -->
+  <rect x="830" y="125" width="345" height="200" rx="12" class="ext"/>
+  <text x="848" y="152" class="h">Security tools (vendor cloud APIs)</text>
+  <text x="848" y="176" class="s">Microsoft Defender for Endpoint / Office 365</text>
+  <text x="848" y="196" class="s">Entra ID (Graph), Azure RM, Sentinel</text>
+  <text x="848" y="216" class="s">CrowdStrike Falcon · Wiz · Cisco Umbrella</text>
+  <text x="848" y="236" class="s">Check Point Avanan · Thinkst Canary</text>
+  <text x="848" y="256" class="s">ServiceNow / Jira</text>
+  <text x="848" y="284" class="lbl">HTTPS, outbound only, per-tool</text>
+  <text x="848" y="301" class="lbl">service identity, least privilege</text>
+
+  <rect x="830" y="350" width="345" height="130" rx="12" class="ext"/>
+  <text x="848" y="377" class="h">Public intelligence (no account data sent)</text>
+  <text x="848" y="401" class="s">NIST NVD · FIRST EPSS · CISA KEV (CVE ids)</text>
+  <text x="848" y="421" class="s">Optional threat-intel sources (indicators only),</text>
+  <text x="848" y="441" class="s">enabled per source with the organisation's approval</text>
+  <text x="848" y="464" class="lbl">HTTPS, outbound only</text>
+
+  <rect x="830" y="505" width="345" height="165" rx="12" class="ext"/>
+  <text x="848" y="532" class="h">Not used / never contacted</text>
+  <text x="848" y="556" class="s">No vendor-operated SaaS: the platform is not a</text>
+  <text x="848" y="574" class="s">hosted service and sends no telemetry home.</text>
+  <text x="848" y="598" class="s">No URL from e-mail content is ever fetched.</text>
+  <text x="848" y="622" class="s">The ML engine makes no network calls.</text>
+  <text x="848" y="646" class="s">No model is trained on the organisation's data.</text>
+
+  <!-- arrows -->
+  <path d="M250,162 L298,162" class="line"/><text x="252" y="152" class="lbl">HTTPS</text>
+  <path d="M752,230 L828,230" class="line"/>
+  <path d="M752,400 L828,410" class="line"/>
+  <path d="M400,425 L400,448" class="line"/>
+  <path d="M640,425 L640,448" class="line"/>
+  <path d="M300,392 L150,392 L150,448" class="line"/><text x="160" y="386" class="lbl">reads secrets</text>
+  <path d="M300,412 L275,412 L275,558" class="line"/>
+  <path d="M525,425 L525,558" class="line"/>
+</svg>

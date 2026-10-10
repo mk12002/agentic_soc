@@ -222,3 +222,23 @@ def test_notes_stay_newest_first_even_within_one_clock_tick(session, analyst, mo
     for i in range(5):
         svc.add_note(case.id, f"note {i}", by=analyst)
     assert [n["text"] for n in svc.view(case.id)["notes"]] == [f"note {i}" for i in reversed(range(5))]
+
+
+def test_irreversible_actions_are_never_autonomous_whatever_the_policy_says():
+    # The policy has always capped destructive action types at L3 (a person approves), but no action was marked
+    # destructive, so a policy promoting everything to L4 would have let password resets, secret rotation, mail purges
+    # and "confirm compromised" run unattended.
+    import copy
+
+    from soc_platform.connectors.registry import ConnectorRegistry
+
+    specs = dict(ConnectorRegistry.all_fake().action_registry()._specs)
+    assert {t for t, s in specs.items() if s.destructive} == {
+        "email.campaign_purge", "identity.reset_password", "identity.confirm_compromised", "pam.rotate_secret"}
+    doc = copy.deepcopy(DEFAULT_POLICY)
+    doc["default_level"] = 4
+    doc["actions"] = {t: {"level": 4} for t in specs}
+    engine = PolicyEngine(doc)
+    for t, s in specs.items():
+        decision = engine.decide(t, [{"type": "asset", "id": "h1"}], destructive=s.destructive)
+        assert (decision.outcome == "execute") is (not s.destructive), (t, decision.outcome)

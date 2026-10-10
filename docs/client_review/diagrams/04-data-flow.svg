@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .step{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.4}
+      .store{fill:#f3f0ff;stroke:#6d5bb8;stroke-width:1.3}
+      .ext{fill:#fff7e8;stroke:#c2410c;stroke-width:1.2}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .n{fill:#ffffff;font-weight:700;font-size:13px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .dash{stroke:#6d5bb8;stroke-width:1.3;fill:none;stroke-dasharray:5 4;marker-end:url(#a)}
+      .lbl{fill:#1e293b;font-size:12px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1200" height="760" fill="#ffffff"/>
+  <text x="30" y="36" class="h" font-size="20">Data flow - collection, processing, storage, retention</text>
+  <text x="30" y="58" class="s">Solid arrows: data movement. Dashed arrows: writes to a store. Purple boxes are stores, with what is encrypted and how long it is kept.</text>
+
+  <!-- sources -->
+  <rect x="20" y="80" width="210" height="300" rx="10" class="ext"/>
+  <text x="34" y="104" class="h">Sources</text>
+  <text x="34" y="128" class="s">EDR alerts, devices, vulns</text>
+  <text x="34" y="146" class="s">Identity: users, sign-ins, risk,</text>
+  <text x="34" y="162" class="s">roles, MFA, inbox rules</text>
+  <text x="34" y="180" class="s">E-mail: user-reported mail,</text>
+  <text x="34" y="196" class="s">alerts, message trace, clicks</text>
+  <text x="34" y="214" class="s">DNS (security categories)</text>
+  <text x="34" y="232" class="s">Deception, PAM audits</text>
+  <text x="34" y="250" class="s">Scanners, cloud posture</text>
+  <text x="34" y="268" class="s">ITSM tickets, CMDB owners</text>
+  <text x="34" y="286" class="s">SIEM incidents / pushes</text>
+  <text x="34" y="304" class="s">Public CVE intel (NVD, EPSS,</text>
+  <text x="34" y="320" class="s">KEV); optional TI lookups</text>
+  <text x="34" y="350" class="lbl">pulled over HTTPS with</text>
+  <text x="34" y="366" class="lbl">read-only service identities</text>
+
+  <!-- steps -->
+  <rect x="270" y="80" width="190" height="96" rx="10" class="step"/><circle cx="292" cy="102" r="12" fill="#2f6bb3"/><text x="287" y="107" class="n">1</text>
+  <text x="312" y="107" class="t">Ingest</text><text x="284" y="130" class="s">normalise to one schema;</text><text x="284" y="146" class="s">conform odd fields; resume</text><text x="284" y="162" class="s">from a watermark</text>
+  <rect x="490" y="80" width="190" height="96" rx="10" class="step"/><circle cx="512" cy="102" r="12" fill="#2f6bb3"/><text x="507" y="107" class="n">2</text>
+  <text x="532" y="107" class="t">Resolve</text><text x="504" y="130" class="s">one host / one person across</text><text x="504" y="146" class="s">tools; unsure matches go to</text><text x="504" y="162" class="s">an analyst review queue</text>
+  <rect x="710" y="80" width="200" height="96" rx="10" class="step"/><circle cx="732" cy="102" r="12" fill="#2f6bb3"/><text x="727" y="107" class="n">3</text>
+  <text x="752" y="107" class="t">Investigate</text><text x="724" y="130" class="s">case + evidence (source,</text><text x="724" y="146" class="s">fact vs inference); scores</text><text x="724" y="162" class="s">computed in code</text>
+  <rect x="940" y="80" width="240" height="96" rx="10" class="step"/><circle cx="962" cy="102" r="12" fill="#2f6bb3"/><text x="957" y="107" class="n">4</text>
+  <text x="982" y="107" class="t">Decide &amp; act</text><text x="954" y="130" class="s">recommendations → policy →</text><text x="954" y="146" class="s">human approval → connector</text><text x="954" y="162" class="s">write (only approved actions)</text>
+
+  <rect x="270" y="210" width="310" height="96" rx="10" class="box"/><circle cx="292" cy="232" r="12" fill="#15803d"/><text x="287" y="237" class="n">5</text>
+  <text x="312" y="237" class="t">Narrative (optional LLM)</text><text x="284" y="260" class="s">evidence pseudonymised → organisation's LLM</text><text x="284" y="276" class="s">gateway → cited answer checked → names</text><text x="284" y="292" class="s">restored for authorised readers only</text>
+  <rect x="610" y="210" width="300" height="96" rx="10" class="box"/><circle cx="632" cy="232" r="12" fill="#2f6bb3"/><text x="627" y="237" class="n">6</text>
+  <text x="652" y="237" class="t">Correlate &amp; report</text><text x="624" y="260" class="s">risk, 12 rules, attack story;</text><text x="624" y="276" class="s">reports and evidence packs built</text><text x="624" y="292" class="s">from the same records</text>
+  <rect x="940" y="210" width="240" height="96" rx="10" class="box"/><circle cx="962" cy="232" r="12" fill="#2f6bb3"/><text x="957" y="237" class="n">7</text>
+  <text x="982" y="237" class="t">Present</text><text x="954" y="260" class="s">console; notifications (finding</text><text x="954" y="276" class="s">title, severity, next steps, link);</text><text x="954" y="292" class="s">audit export to the SIEM</text>
+
+  <!-- stores -->
+  <rect x="270" y="380" width="290" height="160" rx="10" class="store"/>
+  <text x="284" y="404" class="t">Encrypted file store</text>
+  <text x="284" y="426" class="s">Raw vendor payloads - Fernet, 180 days</text>
+  <text x="284" y="444" class="s">Reported e-mails - Fernet; 180 days</text>
+  <text x="284" y="460" class="s">after the case closes (open = legal hold)</text>
+  <text x="284" y="478" class="s">Reports, evidence packs - Fernet,</text>
+  <text x="284" y="494" class="s">decrypted only on a scoped download</text>
+  <text x="284" y="520" class="lbl">key: SOC_DATA_KEY (vault), rotatable</text>
+
+  <rect x="580" y="380" width="330" height="230" rx="10" class="store"/>
+  <text x="594" y="404" class="t">PostgreSQL</text>
+  <text x="594" y="426" class="s">Entities, relations, cases, evidence, actions,</text>
+  <text x="594" y="442" class="s">findings - kept while referenced</text>
+  <text x="594" y="460" class="s">Telemetry events (sign-ins, DNS, mail events,</text>
+  <text x="594" y="476" class="s">PAM) - 400 days unless a case cites them</text>
+  <text x="594" y="494" class="s">Access log - 400 days</text>
+  <text x="594" y="512" class="s">Model-call log - prompt/answer text 180 days</text>
+  <text x="594" y="528" class="s">(pseudonymised), token counts kept</text>
+  <text x="594" y="546" class="s">Audit chain - never pruned by the platform</text>
+  <text x="594" y="572" class="lbl">at rest: the database's own encryption</text>
+  <text x="594" y="588" class="lbl">(managed service / disk), TLS in transit</text>
+
+  <rect x="930" y="380" width="250" height="160" rx="10" class="store"/>
+  <text x="944" y="404" class="t">Recordings (deployment only)</text>
+  <text x="944" y="426" class="s">Live responses saved as test</text>
+  <text x="944" y="442" class="s">fixtures, sanitised as written:</text>
+  <text x="944" y="460" class="s">people, hosts, domains → keyed</text>
+  <text x="944" y="476" class="s">pseudonyms; secrets never kept;</text>
+  <text x="944" y="492" class="s">free text → length only</text>
+  <text x="944" y="518" class="lbl">off unless switched on per tool</text>
+
+  <rect x="20" y="420" width="210" height="190" rx="10" class="ext"/>
+  <text x="34" y="444" class="h">Leaves the environment</text>
+  <text x="34" y="468" class="s">To tool APIs: queries and</text>
+  <text x="34" y="484" class="s">approved actions only</text>
+  <text x="34" y="506" class="s">To public CVE feeds: CVE ids</text>
+  <text x="34" y="528" class="s">To approved TI sources:</text>
+  <text x="34" y="544" class="s">indicators (IP, domain, URL,</text>
+  <text x="34" y="560" class="s">hash) - opt-in per source</text>
+  <text x="34" y="582" class="s">To the LLM gateway: pseudo-</text>
+  <text x="34" y="598" class="s">nymised evidence (in-house)</text>
+
+  <rect x="270" y="640" width="910" height="96" rx="10" class="box"/>
+  <text x="284" y="664" class="t">Retention job (daily, audited)</text>
+  <text x="284" y="686" class="s">Prunes raw payloads, closed-case e-mail, model-call text, access log and old telemetry by policy; anything a case, evidence row, insight or analyst override</text>
+  <text x="284" y="704" class="s">refers to is kept; open cases are on legal hold; a dry run counts without deleting. All periods are settings (SOC_RAW_RETENTION_DAYS, SOC_EVENT_RETENTION_DAYS,</text>
+  <text x="284" y="722" class="s">SOC_LLM_LOG_RETENTION_DAYS, SOC_ACCESS_LOG_RETENTION_DAYS) to be set to the organisation's retention policy.</text>
+
+  <!-- arrows -->
+  <path d="M232,128 L268,128" class="line"/>
+  <path d="M460,128 L488,128" class="line"/>
+  <path d="M680,128 L708,128" class="line"/>
+  <path d="M910,128 L938,128" class="line"/>
+  <path d="M805,176 L805,190 L425,190 L425,208" class="line"/>
+  <path d="M760,176 L760,208" class="line"/>
+  <path d="M1060,176 L1060,208" class="line"/>
+  <path d="M910,258 L938,258" class="line"/>
+  <path d="M285,176 L285,196 L250,196 L250,400 L268,400" class="dash"/>
+  <path d="M760,306 L760,378" class="dash"/>
+  <path d="M440,176 L440,200 L925,200 L925,400 L928,400" class="dash"/><text x="936" y="372" class="lbl">recording stage only</text>
+</svg>

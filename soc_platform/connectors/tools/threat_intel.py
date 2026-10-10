@@ -39,6 +39,50 @@ SOURCES: dict[str, dict[str, Any]] = {
 }
 
 
+# Suffixes that name a private network, never a public internet host.
+PRIVATE_SUFFIXES = (".local", ".lan", ".internal", ".intranet", ".corp", ".home", ".home.arpa", ".localdomain")
+
+
+def internal_indicator(ioc_type: str, value: str, org_domains: list[str] | tuple[str, ...] = ()) -> str | None:
+    """Why an indicator must not be sent to an outside reputation service, or None when it may be.
+
+    Third-party sources receive what they are asked about. A private or reserved address, a single-label or
+    private-suffix host name, and anything under the organisation's own domains describe the organisation, not an
+    attacker: asking about them would disclose its internal structure and gives no reputation answer anyway."""
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    v = str(value or "").strip()
+    if ioc_type == "hash" or not v:
+        return None
+    host = v
+    if ioc_type == "url":
+        try:
+            host = urlsplit(v if "://" in v else f"http://{v}").hostname or ""
+        except ValueError:
+            return None
+    host = host.strip("[]").rstrip(".").lower()
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            return "private or reserved address"
+        return None
+    if ioc_type == "ip":
+        return None
+    if host and "." not in host:
+        return "single-label (internal) host name"
+    if host.endswith(PRIVATE_SUFFIXES):
+        return "private-network host name"
+    for d in org_domains:
+        d = d.strip().lower().rstrip(".")
+        if d and (host == d or host.endswith("." + d)):
+            return "the organisation's own domain"
+    return None
+
+
 class ThreatIntelConnector(ToolConnector):
     name = "threat_intel"
     tool = "threat_intel"
@@ -112,6 +156,12 @@ class ThreatIntelConnector(ToolConnector):
         return None, f"Shodan: {len(ports)} open port(s) {ports[:8]}, org={body.get('org')}, tags={body.get('tags')}"
 
     def enrich(self, ioc_type: str, value: str) -> dict[str, Any]:
+        from soc_platform.config import get_settings
+
+        withheld = internal_indicator(ioc_type, value, get_settings().org_domains)
+        if withheld:                    # never disclosed to an outside service (and nothing to learn from one)
+            return {"type": ioc_type, "value": value, "verdict": "not_checked", "score": None, "sources_hit": 0,
+                    "sources": {}, "unavailable": [], "withheld": withheld}
         wanted = [src for src, meta in SOURCES.items() if src in self.transports and ioc_type in meta["types"]]
 
         def ask(src: str) -> dict[str, Any]:
@@ -137,6 +187,9 @@ class ThreatIntelConnector(ToolConnector):
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run():
             e = self.enrich(entity_type, value)
+            if e.get("withheld"):
+                return ok_lookup(self, [], f"{value}: not sent to outside sources ({e['withheld']})",
+                                 verdict=e["verdict"], score=None, sources_hit=0)
             parts = [r["summary"] for r in e["sources"].values() if r.get("ok")]
             res = ok_lookup(self, [], f"{value}: {e['verdict']} ({e['sources_hit']} source(s) flagging) | " + "; ".join(parts),
                             verdict=e["verdict"], score=e["score"], sources_hit=e["sources_hit"])

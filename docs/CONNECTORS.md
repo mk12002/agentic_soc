@@ -144,7 +144,8 @@ Alerts, device inventory, TVM vulnerabilities, advanced hunting, isolation, scan
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
-  - `client_secret` (secret): App registration secret (prefer certificate-based auth in prod)
+  - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
+  - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
   - `user_domain` (optional): UPN suffix for alert users
   - `mde_base` (optional): API base (regional endpoints)
 
@@ -159,7 +160,8 @@ User-reported mail, email alerts, message trace & campaign hunting, click teleme
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
-  - `client_secret` (secret): App registration secret (prefer certificate-based auth in prod)
+  - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
+  - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
   - `reporting_mailbox`: Mailbox receiving user-reported messages / SOC mailbox
   - `graph_base` (optional): Microsoft Graph base (national clouds only)
 
@@ -206,7 +208,8 @@ Users, sign-ins, risky users and detections, directory and Azure roles, MFA, inb
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
-  - `client_secret` (secret): App registration secret (prefer certificate-based auth in prod)
+  - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
+  - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
   - `azure_subscriptions` (optional): Azure subscription ids to read role assignments from (comma-separated; empty = every subscription the app can read)
   - `graph_base` (optional): Microsoft Graph base (national clouds only)
   - `arm_base` (optional): Azure Resource Manager base (national clouds only)
@@ -286,7 +289,8 @@ Sentinel incidents (if Sentinel is the client's SIEM).
 - Configuration:
   - `tenant_id`: Entra tenant id
   - `client_id` (secret): App registration (client) id
-  - `client_secret` (secret): App registration secret
+  - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
+  - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret)
   - `subscription_id`: Azure subscription holding the Sentinel workspace
   - `resource_group`: Resource group of the Log Analytics workspace
   - `workspace`: Log Analytics workspace name

@@ -123,7 +123,7 @@ and a unified cross-tool timeline.
 * **Action layer:** pre-conditions re-checked at execution, idempotency keys (replays never duplicate
   containment), multi-vendor routing (e.g. isolate via CrowdStrike *or* Defender), reverse actions / rollback,
   execution records. The same containment recommended by two cases is **one approval**, visible from both.
-* **Durable kill switch** - halts all automated actions on every replica immediately, survives restarts.
+* **Durable kill switch** - halts all autonomous actions on every replica immediately (every action then needs a person's approval), survives restarts. Pausing a tool stops every write to it.
 * **Versioned policy** with propose / approve separation (the proposer cannot approve).
 
 | Approvals | Automation policy |
