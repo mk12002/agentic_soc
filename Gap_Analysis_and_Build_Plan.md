@@ -25,7 +25,7 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | 1 | Entra SSO (RS256/JWKS) + RBAC + separation of duties; dev HS256 mode | ✅ | `core/auth.py` (NFR-09) |
 | 1 | LLM gateway: redaction, approved endpoints, pinning, prompt log, token budget, tiered routing, grounded claims | ✅ | `soc_platform/llm/` (NFR-11, IM-T05, IM-T11) |
 | 1 | Connector SDK: rate-limit budget, backoff, cursor checkpoints, reconciliation, per-record fault isolation | ✅ | `connectors/base.py`, `connectors/http.py` (NFR-14, VM-T02) |
-| 1 | Plug-and-play connector registry + one connector per tool (live + fixture mode) | ✅ | 20 connectors: CrowdStrike, MDE, MDO (+reporting mailbox), Entra, Rapid7, Wiz, Avanan, Umbrella, Canary, Delinea SS, Delinea PM, NVD, EPSS, CISA KEV, TI fusion (8 sources), ServiceNow, Jira, CSV CMDB, Sentinel, generic SIEM |
+| 1 | Plug-and-play connector registry + one connector per tool (live + fixture mode) | ✅ | 21 connectors: CrowdStrike, MDE, MDI, MDO (+reporting mailbox), Entra, Rapid7, Wiz, Avanan, Umbrella, Canary, Delinea SS, Delinea PM, NVD, EPSS, CISA KEV, TI fusion (8 sources), ServiceNow, Jira, CSV CMDB, Sentinel, generic SIEM |
 | 1 | Refactor email system into `soc_platform/domains/phishing` | ✅ | ML engine at `domains/phishing/engine`, artifacts at `artifacts/phishing`; 173/176 engine tests pass in new layout (3 await repo-level deploy files) |
 | 1 | Shared case / enrichment layer (consolidated view, parallel enrichment, partial-result transparency, shadow agreement) | ✅ | `core/cases.py`, `core/enrichment.py` |
 | 1 | Platform API + analyst console (all 3 domains, approvals, policy, audit, reports) | ✅ | `soc_platform/api/` - strict CSP, rate limiting, RBAC; real-server smoke tested |
@@ -35,7 +35,7 @@ Legend: ✅ done and tested · 🟡 in progress · ⬜ not started · ⛔ blocke
 | 4 | Incident: ingestion, clustering+suppression, entity extraction, 8-dimension enrichment, exposure-informed severity, MITRE, grounded summary, recommendations, similar incidents, handover, Canary triage | ✅ | `domains/incident/service.py` - IM-F01..F16 |
 | 5 | Vulnerability: ingestion, consolidation, NVD/EPSS/KEV prioritisation, ownership, affected devices, campaigns, notifications, follow-up, validation+false closure, exceptions, risk register, metrics, NL query, new-KEV assessment, coverage | ✅ | `domains/vulnerability/` - VM-F01..F18 (report templates pending under phase 3) |
 | 6 | Guarded response: all actions via native APIs behind policy; promotion L2→L3/L4 by policy change | ✅ | promotion is a reviewed policy change; nothing auto-executes by default |
-| — | Realistic-data testing: 20 connectors, 400-host resolution stress test, live NVD/EPSS/KEV, phishing corpus + engine evaluation, resilience & security tests | ✅ | `docs/TEST_REPORT.md` |
+| — | Realistic-data testing: 21 connectors, 400-host resolution stress test, live NVD/EPSS/KEV, phishing corpus + engine evaluation, resilience & security tests | ✅ | `docs/TEST_REPORT.md` |
 | H | Sandbox hardening: fail-closed isolation, host watchdog, output cap, pinned image, gVisor option, CAPEv2 backend for Windows payloads, executor fail-closed auth | ✅ | `docs/SECURITY.md` |
 | H | Engine API auth on by default + constant-time compare; model integrity manifest (pickle); DB circuit breaker; bidi chars removed; dependency CVEs fixed / unused deps removed | ✅ | bandit + pip-audit clean |
 | H | Entity resolution fixes found by stress test (clone-serial false merges, IP-only phantoms) | ✅ | 0 false merges |

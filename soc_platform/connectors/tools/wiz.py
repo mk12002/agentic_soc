@@ -99,6 +99,7 @@ class WizConnector(ToolConnector):
             refs=[EntityRef(kind="asset", role="resource", keys={"wiz_id": es.get("id"), "cloud_resource_id": es.get("providerId")},
                             attributes={"hostname": es.get("name")})],
             attributes={"status": raw.get("status"), "issue_type": raw.get("type"), "resource_type": es.get("type"),
+                        "rule_id": (raw.get("sourceRule") or {}).get("id"),
                         "cloud": es.get("cloudPlatform"), "region": es.get("region"),
                         "subscription": es.get("subscriptionExternalId")},
             deep_link=f"https://app.wiz.io/issues#~(issue~'{raw['id']})")]

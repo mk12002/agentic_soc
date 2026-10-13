@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-10 (rounds 15-21; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-12 (rounds 15-22; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,52 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 21 (2026-10-10) - latest results: client security review pack, and the controls it claims verified in code
+## 0. Round 22 (2026-10-12) - latest results: the organisation's data handoff workbook, reconciled connector by connector
+
+Aim: line the platform up with the organisation's security tool data types handoff workbook (13 tool families, 38
+synthetic payload types, 17 correlation rules, 8 acceptance scenarios, generation rules, 21 integration rows) and make
+each expectation either true in code with a test or listed as open. The answer is
+`docs/DATA_HANDOFF_RECONCILIATION.md`. Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **682 passed**, 0 failed, 15 skipped (697 collected) |
+| Platform suite on PostgreSQL 16 | **682 passed**, 0 failed, 15 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **108 of 108 features verified**; 240 mapped tests run, 0 failed; ML engine 205 passed; browser tour with the live LLM 0 problems (35 screenshots) |
+| Lint / bandit / pip-audit / JS syntax | clean / no issues / **0 known vulnerabilities** / clean |
+| Demo seed | unchanged: 7 phishing + 3 incident cases, 34 recommended actions, 6 open vulnerabilities |
+
+What changed, each with tests:
+
+| Workbook expectation | Before | Now |
+|---|---|---|
+| Microsoft Defender for Identity is one of the 13 tool families | no connector | `defender_identity`: alerts (Graph alerts_v2) and domain logon events (`IdentityLogonEvents`); people linked to Entra by the on-premises SID (a directory fact), machine accounts never people. 21 connectors = the workbook's 21 integration rows |
+| PHISH-02: flag risky OAuth consent, no compromise without corroboration | consent audits ingested as plain directory events | rule `consent_after_phishing` (consent within 7 days after a click; "verify the application"); 4 negative cases |
+| EDGE-01: conflicting EDR verdicts flagged, no autonomous containment | not detected | a tool's own disposition is normalised (`source_verdict`); a case where tools disagree carries the conflict as evidence and every action is capped at approval |
+| VM-02: exception expiry tracked; accepted risk is not fixed | platform exceptions only | Rapid7 exceptions read and shown on the finding (in force / expired), never applied |
+| Privileged identity: explicit admin -> person mapping | none | approved `account_owners` map on Secret Server; never inferred from the account name |
+| Ticket evidence keeps the original alert ids | ticket carried the case id only | platform tickets list `tool:alert id` of every alert on the case |
+| Field dictionary | - | added: Defender alert IP evidence, Entra correlationId / appId / authenticationRequirement, Umbrella return code, Wiz rule id, ServiceNow priority / opened / resolved / assignee / CI / parent |
+
+The full runs (680 passed on each database) caught one leak: the help text of the new Secret Server setting used a
+demo name as its example, shown by the connectors API on every generated estate; replaced with a neutral placeholder,
+the 2 affected route-sweep tests re-run on both databases and passing.
+
+Found while building it: the new hunting stream applied the watermark's 30-minute overlap between pages of one sync,
+so a busy stream would re-read its first rows and stall; a continuation now asks from the exact newest time (overlap
+only between syncs) - `test_connector_defender_identity.py`.
+
+Checked and already aligned (now proven by named tests): a blocked click never counts as a click-through; a name alone,
+or a re-used name and address at another time, never joins two devices (review queue); a unique name plus the same
+address inside the IP window and the same OS family joins the two tools' records (the workbook's "host name plus
+inventory and time"); people sharing a public IP stay separate; one hash seen by two tools is one indicator.
+
+Open (in the reconciliation document): a workbook-conformant synthetic estate (`example.invalid`, RFC 5737 addresses,
+≥ 1,000 events, set benign share and duplicates) is not generated yet; a few fields no workflow uses are not read
+(Entra `mfaResult`, Umbrella policy name, Secret Server checkout expiry, Privilege Manager policyId / approvedBy,
+ServiceNow state history, Rapid7 scan runs); the workbook calls the SIEM push outbound, the platform's is inbound.
+
+## Round 21 (2026-10-10): client security review pack, and the controls it claims verified in code
 
 Aim: write the review pack the client's security and architecture teams asked for (`docs/client_review/`: solution
 architecture, security tool integrations, data flow and protection, AI / LLM security, security risk and governance,

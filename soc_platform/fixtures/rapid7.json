@@ -508,6 +508,59 @@
    "status": 200
   },
   {
+   "method": "GET",
+   "path": "^/api/3/vulnerability_exceptions$",
+   "body": {
+    "resources": [
+     {
+      "id": 9001,
+      "state": "Approved",
+      "expires": "2026-12-31T00:00:00Z",
+      "scope": {
+       "type": "Asset",
+       "id": 101,
+       "vulnerability": "r7-cve-2023-38408"
+      },
+      "submit": {
+       "reason": "Compensating Control",
+       "comment": "Agent forwarding disabled fleet-wide",
+       "date": "2026-08-20T10:00:00Z"
+      },
+      "review": {
+       "comment": "Approved until the next maintenance window",
+       "date": "2026-08-21T09:00:00Z"
+      }
+     },
+     {
+      "id": 9002,
+      "state": "Approved",
+      "expires": "2026-09-01T00:00:00Z",
+      "scope": {
+       "type": "Asset",
+       "id": 110,
+       "vulnerability": "r7-cve-2024-21412"
+      },
+      "submit": {
+       "reason": "Acceptable Risk",
+       "comment": "Deferred to the quarterly patch cycle",
+       "date": "2026-07-01T10:00:00Z"
+      },
+      "review": {
+       "comment": "Approved for 60 days",
+       "date": "2026-07-02T09:00:00Z"
+      }
+     }
+    ],
+    "page": {
+     "number": 0,
+     "size": 500,
+     "totalPages": 1,
+     "totalResources": 2
+    }
+   },
+   "status": 200
+  },
+  {
    "method": "POST",
    "path": "^/api/3/assets/search$",
    "body": {

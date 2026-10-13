@@ -140,7 +140,7 @@ FEATURES: list[tuple[str, str, list[str]]] = [
     ("Intelligence", "Shadow IT (U11)", ["test_feature_checks.py::test_shadow_it_classifies_services_and_risky_destinations"]),
     ("Intelligence", "Drift monitoring (R14)", ["test_intelligence.py::test_drift_monitor_flags_agreement_drop_and_verdict_shift"]),
     # ---------------------------------------------------------------- connectors
-    ("Connectors", "All 20 connectors discovered; every stream syncs; every lookup answers",
+    ("Connectors", "All 21 connectors discovered; every stream syncs; every lookup answers",
      ["test_connectors.py::test_every_tool_in_the_requirements_has_a_connector", "test_connectors.py::test_all_streams_sync_into_context_store",
       "test_connectors.py::test_lookups", "test_connectors.py::test_registry_status_lists_everything"]),
     ("Connectors", "Health probes and Test endpoint (failures reported without leaking secrets)",

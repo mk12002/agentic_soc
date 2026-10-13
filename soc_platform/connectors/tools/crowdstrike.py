@@ -19,6 +19,7 @@ from soc_platform.connectors.tools._common import (
     need,
     ok_lookup,
     parse_ts,
+    source_verdict,
     targets_of,
 )
 from soc_platform.core.identity import user_ref
@@ -150,7 +151,8 @@ class CrowdStrikeConnector(ToolConnector):
             attributes={"description": a.get("description"), "tactic": a.get("tactic"), "technique": a.get("technique"),
                         "technique_id": a.get("technique_id"), "cmdline": a.get("cmdline"), "filename": a.get("filename"),
                         "sha256": a.get("sha256"), "parent_cmdline": (a.get("parent_details") or {}).get("cmdline"),
-                        "status": a.get("status"), "confidence": a.get("confidence")},
+                        "status": a.get("status"), "confidence": a.get("confidence"),
+                        "source_verdict": source_verdict(a.get("status"), a.get("tags"))},
             deep_link=a.get("falcon_host_link"),
         )
 

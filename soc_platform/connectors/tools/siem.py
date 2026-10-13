@@ -17,7 +17,7 @@ from typing import Any
 from soc_platform.connectors.base import ConnectorError, Page
 from soc_platform.connectors.http import HttpTransport, NoAuth, entra_app_auth_from
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ToolConnector, parse_ts, sev_name
+from soc_platform.connectors.tools._common import ToolConnector, parse_ts, sev_name, source_verdict
 from soc_platform.connectors.tools._microsoft import odata_page
 from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
@@ -105,6 +105,7 @@ class SentinelConnector(ToolConnector):
             title=p.get("title") or "Sentinel incident", severity=sev_name(p.get("severity")), dimension="other",
             refs=self._refs(inc.get("_entities") or []),
             attributes={"status": p.get("status"), "incident_number": p.get("incidentNumber"),
+                        "source_verdict": source_verdict(p.get("classification")),
                         "classification": p.get("classification"), "tactics": extra.get("tactics"),
                         "techniques": extra.get("techniques"), "alert_count": extra.get("alertsCount"),
                         "products": extra.get("alertProductNames"), "description": p.get("description"),

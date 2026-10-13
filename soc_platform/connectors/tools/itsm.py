@@ -122,10 +122,13 @@ class ServiceNowConnector(ToolConnector):
                             "criticality": (d.get("business_criticality") or "").lower() or None,
                             "location": d.get("location")})]
         return [NormalizedRecord(
-            kind="ticket", tool=self.tool, source_type=self.table, source_id=r["sys_id"], dimension="ticketing",
+            kind="ticket", tool=self.tool, source_type=self.table, source_id=need(r, "sys_id"), dimension="ticketing",
             observed_at=parse_ts(r.get("sys_updated_on")), title=f"{r.get('number')}: {r.get('short_description')}",
             attributes={"number": r.get("number"), "state": _SN_STATE.get(str(r.get("state")), r.get("state")),
-                        "assignment_group": d.get("assignment_group"), "correlation_id": r.get("correlation_id")})]
+                        "assignment_group": d.get("assignment_group"), "correlation_id": r.get("correlation_id"),
+                        "priority": r.get("priority"), "opened_at": r.get("opened_at"),
+                        "resolved_at": r.get("resolved_at"), "assigned_to": d.get("assigned_to"),
+                        "cmdb_ci": d.get("cmdb_ci"), "parent": d.get("parent")})]
 
     # ticketing interface ------------------------------------------------------------------
     def create_ticket(self, *, title: str, description: str, group: str | None, priority: int = 3,

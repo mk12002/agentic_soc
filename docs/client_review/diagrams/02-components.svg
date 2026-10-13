@@ -67,7 +67,7 @@
 
   <!-- connectors + gateway -->
   <rect x="20" y="666" width="760" height="90" rx="10" class="layer"/>
-  <text x="34" y="686" class="L">Connector SDK - 20 connectors (live or fixture mode, same parsing code)</text>
+  <text x="34" y="686" class="L">Connector SDK - 21 connectors (live or fixture mode, same parsing code)</text>
   <text x="34" y="708" class="s">Per-tool rate budget (token bucket) · retries honouring Retry-After · token renewal on 401 · 403 reported, never retried</text>
   <text x="34" y="726" class="s">Watermark resume · page-by-page commits · records conformed to the vendor shape · one broken tool isolated</text>
   <text x="34" y="744" class="s">Staged rollout per tool: fixtures → recording → read-only → recommend → automate</text>

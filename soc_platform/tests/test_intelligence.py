@@ -494,3 +494,56 @@ def test_planners_survive_any_shape_of_model_answer(session, world):
     for _ in docs:
         r = svc.analyst.ask("Who is most at risk right now?")
         assert isinstance(r["answer"], str) and r["tool_calls"] and r["planner"] in {"llm", "deterministic"}, r
+
+
+def _consent(session, upn: str, when: str, *, result: str = "success", rid: str = "da-consent-1") -> None:
+    """An Entra directory audit 'Consent to application' by ``upn`` (the workbook's PHISH-02 consent event)."""
+    from soc_platform.core.context_store import ContextStore
+
+    raw = {"id": rid, "activityDateTime": when, "activityDisplayName": "Consent to application",
+           "category": "ApplicationManagement", "result": result, "correlationId": f"corr-{rid}",
+           "initiatedBy": {"user": {"userPrincipalName": upn}},
+           "targetResources": [{"id": "sp-demo-0002", "displayName": "Invoice Viewer Pro", "type": "ServicePrincipal"}]}
+    store = ContextStore(session)
+    for rec in ConnectorRegistry.all_fake().get("entra").normalize("directory_audits", raw):
+        store.ingest(rec)
+    session.flush()
+
+
+def _click_time(session, upn: str) -> str:
+    from soc_platform.core.models import Case
+
+    for case in session.query(Case).filter(Case.domain == "phishing"):
+        row = ((case.assessment or {}).get("user_impact") or {}).get("per_user", {}).get(upn) or {}
+        if row.get("click_time"):
+            return row["click_time"]
+    raise AssertionError(f"{upn} has no recorded click")
+
+
+def test_application_consent_after_a_phishing_click_is_flagged_for_verification(session, world):
+    upn = "jane.doe@acme-demo.com"
+    clicked = _click_time(session, upn)
+    _consent(session, upn, clicked[:11] + "23:59:00Z")
+    ins = [i for i in IntelligenceService(session, vm=world).refresh() if i.rule == "consent_after_phishing"]
+    assert len(ins) == 1 and ins[0].severity == "high"
+    assert "Invoice Viewer Pro" in ins[0].title and "verify the application" in ins[0].title
+    assert "compromise" not in ins[0].title.lower()            # consent alone is not a compromise verdict
+    assert {e["signal"] for e in ins[0].evidence} == {"phishing_click", "application_consent"}
+    assert any("corroboration" in s for s in ins[0].next_steps)
+
+
+@pytest.mark.parametrize("case", ["no_click", "before_click", "failed", "long_after"])
+def test_application_consent_is_not_flagged_without_a_preceding_click(session, world, case):
+    jane, other = "jane.doe@acme-demo.com", "li.chen@acme-demo.com"
+    clicked = _click_time(session, jane)
+    day = clicked[:10]
+    if case == "no_click":                                     # a routine consent by someone who never clicked
+        _consent(session, other, f"{day}T23:00:00Z")
+    elif case == "before_click":
+        _consent(session, jane, f"{day}T00:00:01Z")
+    elif case == "failed":
+        _consent(session, jane, f"{day}T23:00:00Z", result="failure")
+    else:                                                      # outside the 7-day window
+        _consent(session, jane, "2026-12-31T00:00:00Z")
+    rules = {i.rule for i in IntelligenceService(session, vm=world).refresh()}
+    assert "consent_after_phishing" not in rules

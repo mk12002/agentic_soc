@@ -14,6 +14,7 @@
       "jobTitle": "Finance Analyst",
       "accountEnabled": true,
       "onPremisesSamAccountName": "jane.doe",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1101",
       "createdDateTime": "2022-01-10T00:00:00Z"
      },
      {
@@ -25,6 +26,7 @@
       "jobTitle": "IT Support Engineer",
       "accountEnabled": true,
       "onPremisesSamAccountName": "bob.lee",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1102",
       "createdDateTime": "2022-01-10T00:00:00Z"
      },
      {
@@ -36,6 +38,7 @@
       "jobTitle": "Chief Executive Officer",
       "accountEnabled": true,
       "onPremisesSamAccountName": "raj.mehta",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1103",
       "createdDateTime": "2022-01-10T00:00:00Z"
      },
      {
@@ -47,6 +50,7 @@
       "jobTitle": "Accounts Payable",
       "accountEnabled": true,
       "onPremisesSamAccountName": "priya.nair",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1104",
       "createdDateTime": "2022-01-10T00:00:00Z"
      },
      {
@@ -58,6 +62,7 @@
       "jobTitle": "Account Manager",
       "accountEnabled": true,
       "onPremisesSamAccountName": "arun.k",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1105",
       "createdDateTime": "2022-01-10T00:00:00Z"
      },
      {
@@ -69,6 +74,7 @@
       "jobTitle": "HR Partner",
       "accountEnabled": true,
       "onPremisesSamAccountName": "meera.s",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1106",
       "createdDateTime": "2022-01-10T00:00:00Z"
      },
      {
@@ -80,6 +86,7 @@
       "jobTitle": "Counsel",
       "accountEnabled": true,
       "onPremisesSamAccountName": "tom.w",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1107",
       "createdDateTime": "2022-01-10T00:00:00Z"
      },
      {
@@ -91,6 +98,7 @@
       "jobTitle": "Developer",
       "accountEnabled": true,
       "onPremisesSamAccountName": "li.chen",
+      "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1108",
       "createdDateTime": "2022-01-10T00:00:00Z"
      }
     ]
@@ -388,6 +396,7 @@
     "jobTitle": "Finance Analyst",
     "accountEnabled": true,
     "onPremisesSamAccountName": "jane.doe",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1101",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200
@@ -482,6 +491,7 @@
     "jobTitle": "IT Support Engineer",
     "accountEnabled": true,
     "onPremisesSamAccountName": "bob.lee",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1102",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200
@@ -546,6 +556,7 @@
     "jobTitle": "Chief Executive Officer",
     "accountEnabled": true,
     "onPremisesSamAccountName": "raj.mehta",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1103",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200
@@ -610,6 +621,7 @@
     "jobTitle": "Accounts Payable",
     "accountEnabled": true,
     "onPremisesSamAccountName": "priya.nair",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1104",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200
@@ -670,6 +682,7 @@
     "jobTitle": "Account Manager",
     "accountEnabled": true,
     "onPremisesSamAccountName": "arun.k",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1105",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200
@@ -730,6 +743,7 @@
     "jobTitle": "HR Partner",
     "accountEnabled": true,
     "onPremisesSamAccountName": "meera.s",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1106",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200
@@ -790,6 +804,7 @@
     "jobTitle": "Counsel",
     "accountEnabled": true,
     "onPremisesSamAccountName": "tom.w",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1107",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200
@@ -850,6 +865,7 @@
     "jobTitle": "Developer",
     "accountEnabled": true,
     "onPremisesSamAccountName": "li.chen",
+    "onPremisesSecurityIdentifier": "S-1-5-21-3623811015-3361044348-30300820-1108",
     "createdDateTime": "2022-01-10T00:00:00Z"
    },
    "status": 200

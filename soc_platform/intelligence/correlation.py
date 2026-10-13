@@ -4,6 +4,7 @@ single tool can see. Each rule emits an ``Insight`` with the exact evidence it r
 
 Rules and the requirement / use case each serves:
   phishing_compromise_chain   U08 phishing -> endpoint -> identity chaining
+  consent_after_phishing      U08 / PH-F08 a user granted an application access after clicking a phishing link
   privileged_after_compromise U07 identity-centric risk (privileged credential access after compromise indicators)
   deception_corroborated      U04 / IM deception hit corroborated by other telemetry
   exposed_host_under_attack   U06 exposure-informed triage (KEV / P1 vuln on an attacked host)
@@ -24,7 +25,7 @@ import json
 import logging
 import re
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -46,6 +47,24 @@ def _key(*parts: Any) -> str:
 def _ev(f) -> dict[str, Any]:
     return {"ref": f.ref, "signal": f.signal, "source": f.source, "dimension": f.dimension, "when": f.when,
             "summary": f.detail}
+
+
+def _aware_dt(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def _when(v: Any) -> datetime | None:
+    if not v:
+        return None
+    try:
+        return _aware_dt(datetime.fromisoformat(str(v)))
+    except ValueError:
+        return None
+
+
+def _app_names(event: Entity) -> list[str]:
+    return [str(a.get("name") or a.get("id")) for a in (event.attributes or {}).get("apps") or []
+            if isinstance(a, dict) and (a.get("name") or a.get("id"))]
 
 
 def _basis(ins: Insight) -> str:
@@ -71,7 +90,8 @@ class CorrelationEngine:
         profiles = {eid: p for eid in entity_ids if (p := self.risk.profile(eid)) is not None}
         found: list[Insight] = []
         for p in profiles.values():
-            for rule in (self._phishing_chain, self._privileged_after_compromise, self._deception_corroborated,
+            for rule in (self._phishing_chain, self._consent_after_phishing, self._privileged_after_compromise,
+                         self._deception_corroborated,
                          self._exposed_host_under_attack, self._attacked_host_without_edr, self._entity_risk_high):
                 ins = rule(p)
                 if ins is not None:
@@ -107,6 +127,53 @@ class CorrelationEngine:
                                    "Purge the campaign tenant-wide and block its domains",
                                    "Review mailbox rules and new device registrations since the click"],
                        requirement_refs=["U08", "PH-F06", "PH-F07", "PH-F08"])
+
+    CONSENT_WINDOW = timedelta(days=7)
+
+    def _consent_after_phishing(self, p: RiskProfile) -> Insight | None:
+        """A person consented to an application within a week after clicking a phishing link (consent phishing: the
+        attacker gets data access without a password). Flagged for verification of the application, its permissions
+        and impact - never called a compromise on its own: that needs corroboration (risky sign-ins, mailbox rules)."""
+        if p.kind != "identity":
+            return None
+        from soc_platform.core.models import Case
+
+        clicks = [f for f in p.factors if f.signal == "phishing_click"]
+        if not clicks:
+            return None
+        upn = self.store.keys_of(p.entity_id).get("upn", "")
+        times = []
+        for f in clicks:
+            case = self.s.get(Case, f.ref)
+            row = (((case.assessment or {}).get("user_impact") or {}).get("per_user") or {}).get(upn, {}) if case else {}
+            t = _when(row.get("click_time")) or _when(f.when)
+            if t is not None:
+                times.append(t)
+        if not times:
+            return None
+        first = min(times)
+        consents = sorted((e for e in self.store.events_for(p.entity_id)
+                           if (e.attributes or {}).get("consent") and (e.attributes or {}).get("result") != "failure"
+                           and first <= _aware_dt(e.first_seen) <= first + self.CONSENT_WINDOW),
+                          key=lambda e: (e.first_seen, e.id))
+        if not consents:
+            return None
+        apps = sorted({n for e in consents for n in _app_names(e)})
+        return Insight(rule="consent_after_phishing", dedupe_key=_key("consent", p.entity_id), severity="high",
+                       title=f"{p.name} granted an application access after a phishing click"
+                             + (f" ({', '.join(apps[:3])})" if apps else "") + " - verify the application",
+                       score=p.score, entity_ids=[p.entity_id], domains=["phishing", "incident"],
+                       evidence=[_ev(f) for f in clicks] + [
+                           {"ref": e.id, "signal": "application_consent", "source": (e.attributes or {}).get("tool"),
+                            "dimension": "identity", "when": _aware_dt(e.first_seen).isoformat(),
+                            "summary": " ".join([e.display_name, *_app_names(e)])}
+                           for e in consents],
+                       next_steps=["Review the application's publisher and the permissions granted in Entra ID",
+                                   ("If the application is not approved, request revocation of the consent grant and "
+                                    "disabling of its service principal (through the approval workflow)"),
+                                   ("Look for corroboration (risky sign-ins, new mailbox rules, data access by the app) "
+                                    "before treating the account as compromised")],
+                       requirement_refs=["U08", "PH-F08"])
 
     def _privileged_after_compromise(self, p: RiskProfile) -> Insight | None:
         if p.kind != "identity":

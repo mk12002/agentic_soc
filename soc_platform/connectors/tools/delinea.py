@@ -8,13 +8,14 @@ version and must be verified against the client's deployment (section 10: Medium
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, need, ok_lookup, parse_ts
-from soc_platform.core.identity import user_ref
+from soc_platform.core.identity import split_account, user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
 SENSITIVE_ACTIONS = {"VIEW", "COPY PASSWORD", "LAUNCH", "CHECK OUT", "PASSWORD DISPLAYED", "EXPORT"}
@@ -22,6 +23,17 @@ SENSITIVE_ACTIONS = {"VIEW", "COPY PASSWORD", "LAUNCH", "CHECK OUT", "PASSWORD D
 
 def _uref(username: str | None, domain: str | None) -> EntityRef | None:
     return user_ref(username, default_domain=domain)
+
+
+def _owners(v: Any) -> dict[str, str]:
+    """``account_owners``: the approved admin-account -> person map (account name -> the person's UPN). From
+    connectors.yaml it is a mapping; from an environment variable a JSON string. Shared accounts are left out."""
+    if not v:
+        return {}
+    value = json.loads(v) if isinstance(v, str) else v
+    if not isinstance(value, dict):
+        raise TypeError("delinea_secret_server account_owners must be a JSON object")
+    return {str(k).strip().lower(): str(x).strip().lower() for k, x in value.items() if str(k).strip() and str(x).strip()}
 
 
 class SecretServerConnector(ToolConnector):
@@ -41,7 +53,16 @@ class SecretServerConnector(ToolConnector):
         return Page(rows, str(skip + len(rows)), source_total=body.get("total"), has_more=bool(body.get("hasNext")))
 
     def normalize(self, stream: str, r: dict[str, Any]) -> list[NormalizedRecord]:
-        refs = [x for x in [_uref(r.get("byUserName") or r.get("userName"), self.settings.get("user_domain"))] if x]
+        account = r.get("byUserName") or r.get("userName")
+        refs = [x for x in [_uref(account, self.settings.get("user_domain"))] if x]
+        # an admin account stays its own identity; an approved mapping adds the person who owns it (never inferred
+        # from the name: "adm-jane" is not proof of Jane, and shared accounts have no single owner)
+        owner = None
+        if account:
+            owners = _owners(self.settings.get("account_owners"))
+            owner = owners.get(split_account(str(account))[1].lower()) or owners.get(str(account).lower())
+            if owner:
+                refs.append(EntityRef(kind="identity", role="human_owner", keys={"upn": owner}))
         if r.get("machineName"):
             refs.append(EntityRef(kind="asset", role="source_host", attributes={"hostname": r["machineName"],
                                                                                  "ip": r.get("ipAddress")}))
@@ -52,7 +73,8 @@ class SecretServerConnector(ToolConnector):
             observed_at=parse_ts(r.get("dateRecorded")), title=f"{action.title()} secret '{r.get('secretName')}'",
             severity="medium" if action in SENSITIVE_ACTIONS else "informational", dimension="privileged_access",
             refs=refs, attributes={"secret_id": r.get("secretId"), "secret_name": r.get("secretName"), "action": action,
-                                   "folder": r.get("folderPath"), "notes": r.get("notes"), "ip": r.get("ipAddress")},
+                                   "folder": r.get("folderPath"), "notes": r.get("notes"), "ip": r.get("ipAddress"),
+                                   "account": account, "human_owner": owner},
             deep_link=f"{self.settings.get('base_url', '')}/app/#/secrets/{r.get('secretId')}/audit")]
 
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
@@ -146,7 +168,9 @@ MANIFESTS = [
                 ConfigField("user_domain", "UPN suffix", required=False),
                 ConfigField("audit_path", "Secret audit endpoint (default /api/v1/secret-audits)", required=False),
                 ConfigField("sessions_path", "Launched sessions endpoint (default /api/v1/launched-sessions)", required=False),
-                ConfigField("sync_from", "First sync starts here (ISO date; default: everything)", required=False)],
+                ConfigField("sync_from", "First sync starts here (ISO date; default: everything)", required=False),
+                ConfigField("account_owners", "Approved admin-account -> person map, e.g. {\"adm-first.last\": "
+                            "\"first.last@example.com\"}; shared accounts stay unmapped", required=False, kind="map")],
         actions=_ss_actions, confidence="Medium",
         to_confirm="API access approval - privileged access data needs extra governance",
         fake_settings={"user_domain": "acme-demo.com", "base_url": "https://pam.acme-demo.com/SecretServer"},

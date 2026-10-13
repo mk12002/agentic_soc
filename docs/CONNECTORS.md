@@ -52,6 +52,7 @@ config entry; adapt the endpoints and fields, then `python -m soc_platform conne
 | `cmdb_csv` | Ownership mapping (CSV) | cmdb | cmdb | host | - | High |
 | `crowdstrike` | CrowdStrike Falcon | edr | alerts, hosts, vulnerabilities | host, hash, domain, ip, user | endpoint.collect_forensics, endpoint.isolate, endpoint.release | High |
 | `defender_endpoint` | Microsoft Defender for Endpoint | edr | alerts, machines, vulnerabilities | host, ip, hash, domain, user | endpoint.collect_forensics, endpoint.isolate, endpoint.release, endpoint.scan, indicator.block, indicator.unblock | High |
+| `defender_identity` | Microsoft Defender for Identity | identity | alerts, logon_events | - | - | Medium |
 | `defender_office365` | Microsoft Defender for Office 365 | email | reported_messages, email_alerts | email_message, user, domain, url, hash | email.block_sender, email.campaign_purge, email.reporter_feedback, email.restore, email.tag, email.unblock_sender, notify.email | High |
 | `delinea_privilege_manager` | Delinea Privilege Manager | pam | elevation_events | user, host | - | Medium |
 | `delinea_secret_server` | Delinea Secret Server | pam | secret_audits | user | pam.rotate_secret | Medium |
@@ -60,7 +61,7 @@ config entry; adapt the endpoints and fields, then `python -m soc_platform conne
 | `generic_siem` | Generic SIEM/SOAR webhook | siem | pushed | - | - | High |
 | `jira` | Jira (ITSM) | itsm | tickets | - | ticket.create, ticket.update | Unknown |
 | `nvd` | NIST NVD | intel | recent_cves | cve | - | High |
-| `rapid7` | Rapid7 InsightVM / Nexpose | vuln | assets, findings | host, ip, cve | - | Medium-High |
+| `rapid7` | Rapid7 InsightVM / Nexpose | vuln | assets, findings, exceptions | host, ip, cve | - | Medium-High |
 | `sentinel` | Microsoft Sentinel | siem | incidents | - | - | Unknown |
 | `servicenow` | ServiceNow (ITSM + CMDB) | itsm | tickets, cmdb | host | ticket.create, ticket.update | Unknown |
 | `threat_intel` | Threat intelligence fusion | intel | - | ip, domain, url, hash | - | High |
@@ -149,6 +150,24 @@ Alerts, device inventory, TVM vulnerabilities, advanced hunting, isolation, scan
   - `user_domain` (optional): UPN suffix for alert users
   - `mde_base` (optional): API base (regional endpoints)
 
+### Microsoft Defender for Identity (`defender_identity`)
+
+On-premises Active Directory identity alerts and domain logon events (Defender XDR, through Graph).
+
+- Vendor: Microsoft · focus areas: incident
+- Read scopes: SecurityAlert.Read.All, ThreatHunting.Read.All
+- Write scopes (only for approved actions): -
+- To confirm with the client: Defender for Identity licence and sensor coverage of the domain controllers; Graph app permissions SecurityAlert.Read.All and ThreatHunting.Read.All
+- Configuration:
+  - `tenant_id`: Entra tenant id
+  - `client_id` (secret): App registration (client) id
+  - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
+  - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
+  - `user_domain` (optional): UPN suffix for bare account names
+  - `lookback_days` (optional): Days of logon events read on the first sync (default 7)
+  - `hunting_page_size` (optional): Rows per advanced-hunting call (default 1000)
+  - `graph_base` (optional): Microsoft Graph base (national clouds only)
+
 ### Microsoft Defender for Office 365 (`defender_office365`)
 
 User-reported mail, email alerts, message trace & campaign hunting, click telemetry, remediation.
@@ -196,6 +215,7 @@ Secret access audit, privileged sessions, standing privilege; credential rotatio
   - `audit_path` (optional): Secret audit endpoint (default /api/v1/secret-audits)
   - `sessions_path` (optional): Launched sessions endpoint (default /api/v1/launched-sessions)
   - `sync_from` (optional): First sync starts here (ISO date; default: everything)
+  - `account_owners` (optional): Approved admin-account -> person map, e.g. {"adm-jane": "jane.doe@example.com"}; shared accounts stay unmapped
 
 ### Microsoft Entra ID (`entra`)
 

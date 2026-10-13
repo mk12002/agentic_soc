@@ -1,0 +1,142 @@
+{
+ "routes": [
+  {
+   "method": "GET",
+   "path": "^/v1.0/security/alerts_v2$",
+   "body": {
+    "value": [
+     {
+      "id": "mdi-alert-0001",
+      "title": "Account enumeration reconnaissance (LDAP)",
+      "severity": "medium",
+      "status": "new",
+      "category": "Discovery",
+      "serviceSource": "microsoftDefenderForIdentity",
+      "detectionSource": "microsoftDefenderForIdentity",
+      "incidentId": "mdi-inc-0001",
+      "createdDateTime": "2026-09-20T09:43:00Z",
+      "lastUpdateDateTime": "2026-09-20T09:44:00Z",
+      "mitreTechniques": [
+       "T1087.002"
+      ],
+      "description": "Directory queries for many accounts from one device.",
+      "alertWebUrl": "https://security.microsoft.com/alerts/mdi-alert-0001",
+      "evidence": [
+       {
+        "@odata.type": "#microsoft.graph.security.userEvidence",
+        "userAccount": {
+         "accountName": "jane.doe",
+         "domainName": "ACME",
+         "userSid": "S-1-5-21-3623811015-3361044348-30300820-1101"
+        }
+       },
+       {
+        "@odata.type": "#microsoft.graph.security.deviceEvidence",
+        "deviceDnsName": "jane-lt01.acme-demo.com",
+        "mdeDeviceId": "mde-jane01",
+        "ipInterfaces": [
+         "10.20.1.15"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "POST",
+   "path": "^/v1.0/security/runHuntingQuery$",
+   "body": {
+    "results": [
+     {
+      "Timestamp": "2026-09-20T07:58:00Z",
+      "ReportId": "mdi-logon-0001",
+      "ActionType": "LogonSuccess",
+      "Application": "Active Directory",
+      "LogonType": "Interactive",
+      "Protocol": "Kerberos",
+      "FailureReason": null,
+      "AccountName": "bob.lee",
+      "AccountDomain": "ACME",
+      "AccountUpn": "bob.lee@acme-demo.com",
+      "AccountSid": "S-1-5-21-3623811015-3361044348-30300820-1102",
+      "AccountObjectId": null,
+      "AccountDisplayName": "Bob Lee",
+      "DeviceName": "BOB-LT02",
+      "IPAddress": "10.20.1.22",
+      "DestinationDeviceName": "DC01",
+      "DestinationIPAddress": "10.10.0.2"
+     },
+     {
+      "Timestamp": "2026-09-20T08:25:00Z",
+      "ReportId": "mdi-logon-0002",
+      "ActionType": "LogonSuccess",
+      "Application": "Active Directory",
+      "LogonType": "Interactive",
+      "Protocol": "Kerberos",
+      "FailureReason": null,
+      "AccountName": "jane.doe",
+      "AccountDomain": "ACME",
+      "AccountUpn": "jane.doe@acme-demo.com",
+      "AccountSid": "S-1-5-21-3623811015-3361044348-30300820-1101",
+      "AccountObjectId": null,
+      "AccountDisplayName": "Jane Doe",
+      "DeviceName": "JANE-LT01",
+      "IPAddress": "10.20.1.15",
+      "DestinationDeviceName": "DC01",
+      "DestinationIPAddress": "10.10.0.2"
+     },
+     {
+      "Timestamp": "2026-09-20T09:41:30Z",
+      "ReportId": "mdi-logon-0003",
+      "ActionType": "LogonFailed",
+      "Application": "Active Directory",
+      "LogonType": "Network",
+      "Protocol": "NTLM",
+      "FailureReason": "InvalidPassword",
+      "AccountName": "jane.doe",
+      "AccountDomain": "ACME",
+      "AccountUpn": null,
+      "AccountSid": "S-1-5-21-3623811015-3361044348-30300820-1101",
+      "AccountObjectId": null,
+      "AccountDisplayName": "Jane Doe",
+      "DeviceName": "JANE-LT01",
+      "IPAddress": "10.20.1.15",
+      "DestinationDeviceName": "DC01",
+      "DestinationIPAddress": "10.10.0.2"
+     },
+     {
+      "Timestamp": "2026-09-20T09:42:00Z",
+      "ReportId": "mdi-logon-0004",
+      "ActionType": "LogonSuccess",
+      "Application": "Active Directory",
+      "LogonType": "Interactive",
+      "Protocol": "Kerberos",
+      "FailureReason": null,
+      "AccountName": "JANE-LT01$",
+      "AccountDomain": "ACME",
+      "AccountUpn": null,
+      "AccountSid": null,
+      "AccountObjectId": null,
+      "AccountDisplayName": null,
+      "DeviceName": "JANE-LT01",
+      "IPAddress": "10.20.1.15",
+      "DestinationDeviceName": "DC01",
+      "DestinationIPAddress": "10.10.0.2"
+     }
+    ]
+   },
+   "status": 200,
+   "body_contains": "IdentityLogonEvents"
+  },
+  {
+   "method": "POST",
+   "path": "^/v1.0/security/runHuntingQuery$",
+   "body": {
+    "results": []
+   },
+   "status": 200
+  }
+ ]
+}

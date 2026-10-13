@@ -35,7 +35,7 @@
   <rect x="532" y="190" width="200" height="54" rx="8" class="box"/><text x="544" y="212" class="h">Intelligence</text><text x="544" y="231" class="s">risk · correlation · attack story</text>
   <rect x="318" y="256" width="200" height="54" rx="8" class="box"/><text x="330" y="278" class="h">Governance</text><text x="330" y="297" class="s">RBAC · approvals · audit chain</text>
   <rect x="532" y="256" width="200" height="54" rx="8" class="box"/><text x="544" y="278" class="h">LLM gateway</text><text x="544" y="297" class="s">redaction · grounding · budgets</text>
-  <rect x="318" y="322" width="414" height="54" rx="8" class="box"/><text x="330" y="344" class="h">Connector SDK (20 connectors)</text><text x="330" y="363" class="s">read by default; writes only as approved action requests</text>
+  <rect x="318" y="322" width="414" height="54" rx="8" class="box"/><text x="330" y="344" class="h">Connector SDK (21 connectors)</text><text x="330" y="363" class="s">read by default; writes only as approved action requests</text>
   <text x="318" y="405" class="s">Phishing ML engine runs in-process, strictly offline</text>
 
   <!-- data -->
@@ -64,7 +64,7 @@
   <!-- external -->
   <rect x="830" y="125" width="345" height="200" rx="12" class="ext"/>
   <text x="848" y="152" class="h">Security tools (vendor cloud APIs)</text>
-  <text x="848" y="176" class="s">Microsoft Defender for Endpoint / Office 365</text>
+  <text x="848" y="176" class="s">Microsoft Defender: Endpoint · Office 365 · Identity</text>
   <text x="848" y="196" class="s">Entra ID (Graph), Azure RM, Sentinel</text>
   <text x="848" y="216" class="s">CrowdStrike Falcon · Wiz · Cisco Umbrella</text>
   <text x="848" y="236" class="s">Check Point Avanan · Thinkst Canary</text>

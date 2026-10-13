@@ -11,7 +11,7 @@ governed context store, with a cross-domain intelligence layer on top.
 | **Phishing / reported email** | Ingests user-reported mail, decomposes it (incl. QR codes), analyses it with the 7-agent ML swarm and a deterministic analyser, reconciles with Defender/Avanan, scopes the campaign tenant-wide, finds who clicked and whether any endpoint or identity was compromised, monitors supplier email risk, recommends gated remediation, answers the reporter, auto-closes clear benign reports with QA sampling | PH-F01…F16, PH-T01…T09, U16, U18 |
 | **Incident management** | Ingests alerts from every tool, clusters them into incidents, enriches every entity in parallel across 8 dimensions, scores severity deterministically (exposure-informed), maps MITRE ATT&CK with evidence, recommends ranked guarded actions, recalls similar incidents, writes the shift handover | IM-F01…F16, IM-T01…T11, U04–U06, U13–U15 |
 | **Vulnerability management** | Pulls findings from Rapid7, CrowdStrike, Wiz and Defender, resolves the same host across tools, deduplicates, prioritises (CVSS + EPSS + KEV + exposure + criticality), routes to owners, tracks plans, syncs ITSM tickets both ways, validates remediation (catches false closures), manages exceptions, runs Wiz misconfigurations through the same lifecycle, generates reports | VM-F01…F18, VM-T01…T13, U01–U03, U12 |
-| **Intelligence layer** | Explainable per-user/host risk across all streams, 12 correlation rules, analyst assistant with cited answers, situation brief, ATT&CK coverage, shadow IT, drift monitoring | U02, U04, U06–U12, U16, U18, R14 |
+| **Intelligence layer** | Explainable per-user/host risk across all streams, 13 correlation rules, analyst assistant with cited answers, situation brief, ATT&CK coverage, shadow IT, drift monitoring | U02, U04, U06–U12, U16, U18, R14 |
 | **Attack story** | The whole attack across every tool on one page: ATT&CK kill chain (observed / blocked / checked / blind), cited timeline, benign explanations tested, gaps, blast radius, phased response plan with one-step governed approval; optional evidence-bound LLM deep analysis | U08, U13, U14 |
 | **Report builder** | Seven preconfigured standard reports (board deck, CISO brief, VM, phishing, post-incident, control assurance, SOC daily) and any other report described in words; figures computed in code, LLM narrative must cite them; scoped, audited, encrypted at rest | U01, U15, VM-F13 |
 
@@ -175,7 +175,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 soc_platform/
   core/          schema, context store, entity + identity resolution, policy, actions, audit, auth, access,
                  crypto, retention, cases, enrichment
-  connectors/    SDK (rate limits, backoff, checkpoints, reconciliation), registry, tools/ (20 connectors)
+  connectors/    SDK (rate limits, backoff, checkpoints, reconciliation), registry, tools/ (21 connectors)
   llm/           governed LLM gateway (redaction, budget, prompt log, grounding)
   domains/       phishing/ (workflow, supplier risk, engine/ = 7-agent ML system) · incident/ · vulnerability/ (+ misconfig)
   intelligence/  risk, correlation, analyst, drift, ATT&CK coverage, shadow IT

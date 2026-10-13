@@ -48,10 +48,10 @@ every layer works - with identical figures and decisions - when it is switched o
 | Layer | Components | Responsibility |
 |---|---|---|
 | API and console | FastAPI application, static single-page console | Authentication, authorisation, input limits, rate limiting, security headers, access log; the console is static files served by the same process (no separate web server, no build-time dependencies at run time) |
-| Intelligence | Risk engine, 12 correlation rules, attack story, analyst assistant, situation brief, ATT&CK coverage, shadow IT, drift monitoring, report builder, compliance evidence pack | Cross-domain analysis on the shared picture; every figure computed in code |
+| Intelligence | Risk engine, 13 correlation rules, attack story, analyst assistant, situation brief, ATT&CK coverage, shadow IT, drift monitoring, report builder, compliance evidence pack | Cross-domain analysis on the shared picture; every figure computed in code |
 | Workflow domains | Phishing, incident, vulnerability (with cloud posture) | Case building, enrichment, deterministic scoring, recommendations |
 | Core services | Context store and entity resolution; cases and evidence; enrichment orchestrator; action layer; autonomy policy; audit chain; access management; encryption and retention; jobs and scheduler; connector configuration store; self-check | The governed foundation every workflow uses |
-| Connector SDK | 20 connectors | Uniform, rate-limited, resumable access to each tool; fixture mode for testing with the same parsing code |
+| Connector SDK | 21 connectors | Uniform, rate-limited, resumable access to each tool; fixture mode for testing with the same parsing code |
 | LLM gateway (optional) | Providers for OpenAI-compatible gateways, Azure OpenAI / AI Foundry and the Claude Messages API | Usage policy, pseudonymisation, approved-endpoint enforcement, grounding and numeric guardrails, circuit breaker, call log |
 | Persistence | PostgreSQL 16; encrypted file store | All records; raw payloads, reported e-mail and generated reports encrypted before they are written |
 
@@ -145,7 +145,7 @@ Only the hosts of the tools the organisation enables are needed.
 | Destination | Used by |
 |---|---|
 | `login.microsoftonline.com` | Entra sign-in token validation keys; every Microsoft connector's token |
-| `graph.microsoft.com`, `management.azure.com` | Entra ID, Azure role assignments, Sentinel, Defender for Office 365 |
+| `graph.microsoft.com`, `management.azure.com` | Entra ID, Azure role assignments, Sentinel, Defender for Office 365, Defender for Identity |
 | `api.securitycenter.microsoft.com` (or the regional host) | Defender for Endpoint |
 | `outlook.office365.com` | Defender for Office 365 (Tenant Allow/Block List actions) |
 | The CrowdStrike API host of the organisation's cloud | CrowdStrike Falcon |

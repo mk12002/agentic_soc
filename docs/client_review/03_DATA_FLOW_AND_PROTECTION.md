@@ -58,7 +58,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Data category | Source tools | Typical content | Personal data | Purpose |
 |---|---|---|---|---|
 | Identities | Entra ID, CMDB, all tools naming users | Name, UPN / e-mail, department, manager, roles, MFA methods, account state | Yes (workforce) | Know who is affected, who owns what, who is privileged |
-| Sign-ins and identity risk | Entra ID | Time, user, IP address, location, device compliance, Conditional Access result, risk detections | Yes | Detect compromised accounts |
+| Sign-ins and identity risk | Entra ID, Defender for Identity | Time, user, IP address, location, device compliance, Conditional Access result, risk detections; domain-controller logons (success / failure, protocol, source device) and on-premises identity alerts | Yes | Detect compromised accounts |
 | Endpoint data | Defender for Endpoint, CrowdStrike | Host name, IP, OS, logged-on user, alerts with process / file / network evidence | Yes (host-to-user link) | Incident investigation, containment |
 | E-mail | Defender for Office 365, Avanan | User-reported messages in full (headers, body, attachments), message trace metadata, URL click events, verdicts | Yes (sender, recipients, content) | Phishing analysis, campaign scope, who clicked |
 | DNS activity | Umbrella | Queried domain, verdict, category, internal IP, identity - **security categories only by default** | Yes | Did a user reach a malicious site; shadow IT |

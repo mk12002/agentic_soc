@@ -50,7 +50,7 @@ Companion documents: [ARCHITECTURE.md](ARCHITECTURE.md) (diagram-level overview)
 ## 1. What the system is, and the constraints that shaped it
 
 **Purpose.** One investigation and automation layer over the security tools an organisation already runs. It pulls
-from 20 tools through their APIs and resolves every host and person to a single identity across them. On that
+from 21 tools through their APIs and resolves every host and person to a single identity across them. On that
 shared picture it runs three SOC workflows:
 - reported phishing
 - incident management
@@ -90,7 +90,7 @@ A cross-domain intelligence layer correlates across the workflows.
   Browser  ---> |  API (FastAPI) + web console (static SPA, strict CSP)        |
                 |   auth, RBAC + domain scope, rate limit, access log          |
                 +--------------------------------------------------------------+
-                |  Intelligence: risk engine, 12 correlation rules, attack     |
+                |  Intelligence: risk engine, 13 correlation rules, attack     |
                 |  story, deep analysis, analyst Q&A, brief, coverage,         |
                 |  shadow IT, drift, report builder                            |
                 +--------------------------------------------------------------+
@@ -101,7 +101,7 @@ A cross-domain intelligence layer correlates across the workflows.
                 |  audit chain, access mgmt, crypto, retention, self-check,    |
                 |  jobs + scheduler                                            |
                 +--------------------------------------------------------------+
-                |  Connector SDK: 20 connectors, live (HTTP) or fake (fixtures)|
+                |  Connector SDK: 21 connectors, live (HTTP) or fake (fixtures)|
                 +--------------------------------------------------------------+
                 |  LLM gateway (optional): providers, redaction, grounding,    |
                 |  guardrails, breaker, budget, call log                       |
@@ -196,7 +196,7 @@ soc_platform/
     base.py              BaseConnector, TokenBucket, with_backoff, SyncRunner, Page, LookupResult
     http.py              Transport protocol; HttpTransport; FixtureTransport; auth strategies
     registry.py          discovery (modules + entry points), manifests, config, ConnectorRegistry
-    tools/*.py           one module per tool (20 connectors), shared helpers in _common.py / _microsoft.py
+    tools/*.py           one module per tool (21 connectors), shared helpers in _common.py / _microsoft.py
   core/
     schema.py            NormalizedRecord, EntityRef (canonical schema)
     models.py            ORM tables for the core; utcnow() (the platform clock); new_id()
@@ -361,7 +361,7 @@ same code:
   rules, its fixtures, its paging test and a switched-off config entry; `connector check` runs it through the shared
   conformance suite. The coverage test reads `PAGING_TESTED` from every `test_connector_<name>.py`.
 
-### 5.6 The 20 connectors
+### 5.6 The 21 connectors
 
 The Entra connector also reads each person's **Azure role assignments** (Owner, Contributor, User Access
 Administrator... on subscriptions or resource groups, directly or through a group) from Azure Resource Manager,
@@ -370,14 +370,16 @@ through a `RoutingTransport` that gives `management.azure.com` its own token aud
 lookup still succeeds and says so.
 
 CrowdStrike Falcon, Defender for Endpoint, Defender for Office 365 (+ Exchange via Graph), Avanan (HEC Smart API;
-falls back to the shared mailbox), Entra ID (+ Identity Protection), Cisco Umbrella, Thinkst Canary, Delinea Secret
-Server, Delinea Privilege Manager, Rapid7 InsightVM (API v3 or CSV export), Wiz (GraphQL), NVD, FIRST EPSS,
+falls back to the shared mailbox), Entra ID (+ Identity Protection), Defender for Identity (alerts and domain logon
+events through Graph), Cisco Umbrella, Thinkst Canary, Delinea Secret
+Server, Delinea Privilege Manager, Rapid7 InsightVM (API v3 or CSV export; plus its vulnerability exceptions), Wiz (GraphQL), NVD, FIRST EPSS,
 CISA KEV, threat-intel fusion, ServiceNow, Jira, CMDB CSV, Microsoft Sentinel, and the generic SIEM webhook.
 - **Threat-intel fusion** covers VirusTotal, AbuseIPDB, OTX, URLhaus, ThreatFox, MalwareBazaar, GreyNoise and
   Shodan, with per-source attribution.
 - **The generic SIEM webhook** takes `POST /api/v1/ingest/alerts` with a configurable field map.
 
-What each pulls and does is tabled in PRESENTER_GUIDE.md §15.1.
+What each pulls and does is tabled in PRESENTER_GUIDE.md §15.1; how each lines up with the organisation's data
+handoff workbook (every payload type and field) is in DATA_HANDOFF_RECONCILIATION.md.
 
 ---
 
@@ -1632,6 +1634,12 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 67 | Irreversible action types are marked destructive (mail purge, password reset, secret rotation, confirm-compromised), so the policy never lets them run autonomously | Leave it to the policy document | The policy rule "destructive -> at most L3" existed but no action carried the flag, so a policy raising everything to L4 would have run them unattended - found while writing the client security review | They can still be promoted to L3 (a person approves); a test raises every action to L4 and checks exactly these four still wait |
 | 68 | Microsoft app registrations can authenticate with a certificate (RFC 7523 client assertion, `x5t`, 10-minute lifetime) as well as a secret | Secret only | Security reviews commonly require certificate credentials; no shared secret then leaves the platform | The PEM (key + certificate) is one vault-mounted secret, `<CONNECTOR>_CLIENT_CERTIFICATE_FILE` |
 | 69 | Internal indicators are never sent to outside threat-intelligence sources: private / reserved addresses, single-label and private-suffix host names, anything under `SOC_ORG_DOMAINS` | Send everything the case names | An incident's internal IP or a link to the organisation's own site would have been disclosed to VirusTotal, Shodan and others, with no reputation to gain | Such an indicator reads "not checked"; the check sits in `ThreatIntelConnector.enrich`, the one path every lookup takes |
+| 70 | Defender for Identity read through Microsoft Graph (alerts_v2 + `IdentityLogonEvents` hunting), people linked by the on-premises SID | A separate Defender for Identity API; join people on account names | One Graph app registration pattern for every Microsoft connector; the SID is what the directory itself maps (`onPremisesSecurityIdentifier`), so the link is a directory fact, not a guess | Logon events are evidence only (no risk factor); the domain controller stays an attribute, so a host known only by name never becomes an asset |
+| 71 | A hunting stream continues within a sync from the exact newest time; the overlap applies only between syncs | Reuse the watermark's overlap for every call | With the 30-minute overlap on every call, a busy stream re-read its first rows and stalled | Boundary rows are read twice and ignored (idempotent by ReportId); more rows than a page at one second still stop that sync early |
+| 72 | Application consent after a phishing click is a correlation rule that asks for verification | Treat consent as compromise; ignore consent | The handoff's PHISH-02 asks to flag risky consent without inferring compromise; consent alone is routine | Window: from the click to 7 days after; failed consents and consents before the click are ignored |
+| 73 | When tools disagree on a case (one closed an alert as a false positive / benign, another still reports it), the conflict is evidence and every action on the case is capped at approval | Pick the more severe tool; let severity drop | The platform never picks a side and must not act unattended on contested evidence (handoff EDGE-01); severity stays as computed | `source_verdict` is normalised per connector from classification / determination / status / tags; `ActionService.request(ceiling=)` takes the stricter of the stage's and the case's ceiling |
+| 74 | A scanner's own vulnerability exceptions (Rapid7) are shown on the finding, never applied | Honour the scanner's exception (accepted risk) | Exceptions the platform honours are approved in it with four-eyes and an expiry; a tool-side exception past its expiry must not hide active risk | The finding shows state, expiry and "in force" / "expired"; status, priority and SLA are unchanged |
+| 75 | Admin accounts link to their owner only through an approved map (`account_owners`) | Infer the owner from the name (`adm-jane`) | A name is not proof, and shared admin accounts have no single owner (handoff privileged-identity rule) | The admin account stays its own identity; the owner is an extra reference on each event |
 ---
 
 ## 26. Known limitations and trade-offs

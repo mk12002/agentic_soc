@@ -20,7 +20,7 @@ from typing import Any
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, RoutingTransport, entra_app_auth_from
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, sev_name
+from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, sev_name, source_verdict
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport, kql_list, kql_str
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -118,6 +118,7 @@ class DefenderOffice365Connector(MicrosoftConnector):
             observed_at=parse_ts(a.get("createdDateTime")), title=a.get("title", "Defender for Office 365 alert"),
             severity=sev_name(a.get("severity")), refs=refs, dimension="email",
             attributes={"category": a.get("category"), "status": a.get("status"),
+                        "source_verdict": source_verdict(a.get("classification"), a.get("determination")),
                         "mitre_techniques": a.get("mitreTechniques") or [], "incident_id": a.get("incidentId"),
                         "description": a.get("description"),
                         "internet_message_id": msg.get("internetMessageId"),

@@ -374,7 +374,27 @@ mailbox> -AccessRight RestrictAccess`). Verify with `Test-ApplicationAccessPolic
 **Notes:** remediation uses Graph's `analyzedEmails/remediate`, which is a **beta** Graph API at the time of writing;
 if Microsoft changes it, only `_remediate` in `soc_platform/connectors/tools/defender_office365.py` changes.
 
-### 4.5 CrowdStrike Falcon (`crowdstrike`)
+### 4.5 Microsoft Defender for Identity (`defender_identity`)
+
+**Used for:** on-premises Active Directory identity alerts (Graph `security/alerts_v2`, service source
+`microsoftDefenderForIdentity`) and domain-controller logon events (`IdentityLogonEvents` through advanced hunting:
+success / failure, protocol, source device) as investigation evidence. A person is linked by the on-premises SID,
+which the directory maps to the Entra user (`onPremisesSecurityIdentifier`); machine and built-in accounts are never
+people. Read-only: containment of an identity goes through Entra ID.
+
+**Create:** app registration; Microsoft Graph application permissions `SecurityAlert.Read.All` and
+`ThreatHunting.Read.All` (no write permission).
+
+**Licences:** Defender for Identity, with sensors on the domain controllers.
+
+**Settings:** `DEFENDER_IDENTITY_TENANT_ID`, `DEFENDER_IDENTITY_CLIENT_ID`, `DEFENDER_IDENTITY_CLIENT_CERTIFICATE`
+(recommended) or `DEFENDER_IDENTITY_CLIENT_SECRET`, optional `DEFENDER_IDENTITY_USER_DOMAIN`. Connector settings
+`lookback_days` (logon events read on the first sync, default 7) and `hunting_page_size` (rows per hunting call,
+default 1000) can be set in `config/connectors.yaml`.
+
+**Egress:** `graph.microsoft.com`, `login.microsoftonline.com`.
+
+### 4.6 CrowdStrike Falcon (`crowdstrike`)
 
 **Used for:** alerts, host inventory, Spotlight vulnerabilities, IOC lookups; actions: contain / lift containment,
 RTR forensic collection.
@@ -393,12 +413,16 @@ optional `CROWDSTRIKE_USER_DOMAIN`.
 
 **Licences:** Spotlight (Falcon Exposure Management) for vulnerabilities.
 
-### 4.6 Rapid7 InsightVM / Nexpose (`rapid7`)
+### 4.7 Rapid7 InsightVM / Nexpose (`rapid7`)
 
-**Used for:** asset inventory and vulnerability findings (with fix text), CVE-to-asset lookups, fix validation.
+**Used for:** asset inventory and vulnerability findings (with fix text), CVE-to-asset lookups, fix validation, and
+the console's vulnerability exceptions (state, expiry, reason - shown on the matching finding as in force or
+expired; never used to close or suppress it: an exception the platform honours is approved in the platform).
 
 **Create:** a Security Console user with a read-only role that can view site and asset-group data (a custom role
-with *View Site Asset Data* and *View Group Asset Data* is enough). The API is the console's own v3 API (basic
+with *View Site Asset Data* and *View Group Asset Data* is enough), plus the right to view vulnerability exceptions
+(confirm the role permission for the console's version; without it the exceptions stream reports a missing
+permission and everything else keeps working). The API is the console's own v3 API (basic
 authentication).
 
 **Settings:** `RAPID7_CONSOLE_URL` (e.g. `https://ivm.client.local:3780`), `RAPID7_USERNAME`, `RAPID7_PASSWORD`,
@@ -413,7 +437,7 @@ corporate CA via `SSL_CERT_FILE` over setting `false`).
 **Notes:** the findings stream reads each asset's vulnerabilities and each vulnerability definition once (cached)
 plus its solution text; the first full sync of a large console takes a while - run it outside office hours.
 
-### 4.7 Wiz (`wiz`)
+### 4.8 Wiz (`wiz`)
 
 **Used for:** cloud inventory, vulnerability findings with internet exposure, misconfiguration issues (which share
 the vulnerability lifecycle).
@@ -427,7 +451,7 @@ optional `WIZ_LOOKUP_MAX_PAGES`.
 
 **Egress:** the API host, the auth host.
 
-### 4.8 Avanan / Check Point Harmony Email & Collaboration (`avanan`)
+### 4.9 Avanan / Check Point Harmony Email & Collaboration (`avanan`)
 
 **Used for:** Avanan's security events and per-message verdicts (reconciled with Defender's), quarantine / restore.
 
@@ -444,7 +468,7 @@ region-specific gateway URL shown with the key.
 recipients, subject and Message-ID. The overall verdict is the worst verdict any Avanan engine gave. If the HEC API is
 not licensed, set `AVANAN_FALLBACK=shared_mailbox` and have Avanan's reports delivered to the reporting mailbox.
 
-### 4.9 Cisco Umbrella (`umbrella`)
+### 4.10 Cisco Umbrella (`umbrella`)
 
 **Used for:** did the user reach the site (DNS activity), categories, shadow IT; action: block domain via a
 destination list.
@@ -464,7 +488,7 @@ and shadow IT query Umbrella live, whatever the setting.
 
 **Egress:** `api.umbrella.com`.
 
-### 4.10 Thinkst Canary (`canary`)
+### 4.11 Thinkst Canary (`canary`)
 
 **Used for:** Canary and Canarytoken incidents (high-fidelity), device inventory; action: acknowledge.
 
@@ -476,7 +500,7 @@ console offers one; acknowledge needs a normal token).
 
 **Egress:** `<hash>.canary.tools`.
 
-### 4.11 Delinea Secret Server (`delinea_secret_server`) and Privilege Manager (`delinea_privilege_manager`)
+### 4.12 Delinea Secret Server (`delinea_secret_server`) and Privilege Manager (`delinea_privilege_manager`)
 
 **Used for:** who opened which privileged secret and session (Secret Server), elevation events (Privilege Manager);
 action: rotate a secret.
@@ -497,9 +521,14 @@ elevation events.
 `DELINEA_PRIVILEGE_MANAGER_EVENTS_PATH` (default `/Tms/api/v1/events/elevation`). Confirm them against the client's
 version's REST API reference before go-live.
 
+**Admin accounts:** optional `DELINEA_SECRET_SERVER_ACCOUNT_OWNERS` - the approved map of admin account to the
+person who owns it, as JSON (`{"adm-jane": "jane.doe@client.com"}`). A mapped account's activity is linked to its
+owner as well; the admin account stays its own identity. Leave shared accounts out: an owner is never guessed from
+the account name.
+
 **Governance:** privileged-access data needs the client's explicit approval (it is flagged "to confirm").
 
-### 4.12 ServiceNow (`servicenow`) - tickets and CMDB
+### 4.13 ServiceNow (`servicenow`) - tickets and CMDB
 
 **Used for:** remediation / incident tickets with status sync back, and the CMDB for owner, support group,
 criticality and location of each host (drives vulnerability ownership and campaigns).
@@ -521,14 +550,14 @@ the display values (display timestamps would be in the integration user's timezo
 field names for criticality or environment, map them in `normalize` / `owner_for` in
 `soc_platform/connectors/tools/itsm.py`.
 
-### 4.13 Jira (`jira`) - alternative ticketing
+### 4.14 Jira (`jira`) - alternative ticketing
 
 Only if the client tickets in Jira instead of ServiceNow (enable one of them). Integration user with *Browse
 projects*, *Create issues*, *Add comments*, *Transition issues* on the SOC project; an API token.
 Settings: `JIRA_BASE_URL` (`https://<site>.atlassian.net`), `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`.
 Uses the current `/rest/api/3/search/jql` endpoint. Egress: the site host.
 
-### 4.14 Ownership CSV (`cmdb_csv`) - fallback CMDB
+### 4.15 Ownership CSV (`cmdb_csv`) - fallback CMDB
 
 If there is no usable CMDB: a maintained CSV `hostname,owner,platform_team,environment,criticality,serial_number`
 (hostname may be a pattern), path in `CMDB_CSV_PATH`. Can run alongside ServiceNow as a gap-filler. Save it from
@@ -537,7 +566,7 @@ or pipes; headers in any case or spacing, and the usual aliases (`Host Name`, `S
 `Serial`, `Subscription ID`) are recognised. A file with neither a hostname nor a subscription column is reported in
 the log and assigns no owners. The file is re-read when it changes; no restart is needed.
 
-### 4.15 Microsoft Sentinel (`sentinel`) and generic SIEM push (`generic_siem`)
+### 4.16 Microsoft Sentinel (`sentinel`) and generic SIEM push (`generic_siem`)
 
 **Sentinel (pull):** app registration with **Microsoft Sentinel Reader** on the workspace (Azure RBAC). Settings:
 `SENTINEL_TENANT_ID`, `SENTINEL_CLIENT_ID`, `SENTINEL_CLIENT_CERTIFICATE` (recommended) or `SENTINEL_CLIENT_SECRET`, `SENTINEL_SUBSCRIPTION_ID`,
@@ -556,7 +585,7 @@ notable and an Elastic Security alert. The response is `{"ingested": n, "rejecte
 without its id is refused with the reason while the rest of the batch lands, so the SIEM should not resend the batch
 on a partial rejection (an `ingest.rejected` line is also logged).
 
-### 4.16 Public intelligence (`nvd`, `epss`, `cisa_kev`) and threat-intel fusion (`threat_intel`)
+### 4.17 Public intelligence (`nvd`, `epss`, `cisa_kev`) and threat-intel fusion (`threat_intel`)
 
 - **NVD / EPSS / CISA KEV:** no account needed; an NVD API key (`NVD_API_KEY`, free from NIST) raises the rate limit.
   Egress: `services.nvd.nist.gov`, `api.first.org`, `www.cisa.gov`. Verified live.
@@ -568,12 +597,12 @@ on a partial rejection (an `ingest.rejected` line is also logged).
   each source's licence for commercial use. Internal indicators are never sent: private / reserved IP addresses,
   single-label and private-suffix host names and anything under `SOC_ORG_DOMAINS` read "not checked".
 
-### 4.17 Outbound allow-list (all tools)
+### 4.18 Outbound allow-list (all tools)
 
 | Host | For |
 |---|---|
 | `login.microsoftonline.com` | Entra sign-in and every Microsoft connector's token |
-| `graph.microsoft.com`, `management.azure.com`, `api.securitycenter.microsoft.com`, `outlook.office365.com` | Entra, Azure roles, Sentinel, Defender for Endpoint, Defender for Office 365 |
+| `graph.microsoft.com`, `management.azure.com`, `api.securitycenter.microsoft.com`, `outlook.office365.com` | Entra, Azure roles, Sentinel, Defender for Endpoint, Defender for Office 365, Defender for Identity |
 | CrowdStrike API host of the client's cloud | CrowdStrike |
 | Wiz API and auth hosts | Wiz |
 | Check Point regional gateway | Avanan |
@@ -582,7 +611,7 @@ on a partial rejection (an `ingest.rejected` line is also logged).
 | `<instance>.service-now.com` / `<site>.atlassian.net` | ticketing |
 | internal: Rapid7 console, Delinea servers | vulnerability, PAM |
 | `services.nvd.nist.gov`, `api.first.org`, `www.cisa.gov` | public vulnerability intelligence |
-| approved threat-intel sources (4.16) | enrichment |
+| approved threat-intel sources (4.17) | enrichment |
 | the client's LLM gateway | narrative (section 5) |
 | the client's Teams/Slack webhook hosts | notifications (`SOC_NOTIFY_WEBHOOKS`) |
 
@@ -782,7 +811,7 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 - [ ] PostgreSQL: TLS, dedicated login, backups and a tested restore (`docs/OPERATIONS.md` - Backups).
 - [ ] Every connector credential in the vault; least privilege as listed; write scopes only for approved actions.
 - [ ] Break-glass secret sealed; hash configured; tested once.
-- [ ] Outbound allow-list (4.17) enforced at the firewall/proxy.
+- [ ] Outbound allow-list (4.18) enforced at the firewall/proxy.
 - [ ] LLM: approved endpoint set, budget set, redaction on, demo keys absent.
 - [ ] Monitoring: `/metrics` scraped with an auditor API key; alerts from `docs/OPERATIONS.md` - Monitoring.
 - [ ] Logs: stdout of every container collected (`SOC_LOG_FORMAT=json`) into the client's log platform / SIEM;

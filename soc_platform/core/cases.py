@@ -172,7 +172,7 @@ class CaseService:
     # ------------------------------------------------------------------ recommendations (IM-F07, PH-F11)
 
     def recommend(self, case: Case, recs: list[Recommendation], registry: ActionRegistry, policy: PolicyEngine,
-                  *, agent: str) -> list[ActionRequest]:
+                  *, agent: str, ceiling: tuple[int, str] | None = None) -> list[ActionRequest]:
         svc = ActionService(self.s, registry, policy)
         out = []
         for r in sorted(recs, key=lambda x: x.priority):
@@ -185,7 +185,8 @@ class CaseService:
                                   data={"recommendation": asdict(r), "executable": False})
                 continue
             req = svc.request(r.action_type, params=r.params, targets=r.targets, requested_by=agent_principal(agent),
-                              case_id=case.id, domain=case.domain, rationale=r.rationale, evidence_ids=r.evidence_ids)
+                              case_id=case.id, domain=case.domain, rationale=r.rationale, evidence_ids=r.evidence_ids,
+                              ceiling=ceiling)
             req.result = {**(req.result or {}), "expected_impact": r.expected_impact, "blast_radius": r.blast_radius,
                           "reversible": r.reversible, "priority": r.priority}
             out.append(req)

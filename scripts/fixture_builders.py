@@ -26,6 +26,12 @@ def u(k):
     return USERS[k]
 
 
+def sid(k):
+    """The person's on-premises Active Directory SID (Entra onPremisesSecurityIdentifier, Defender for Identity
+    AccountSid): the directory mapping that links the two tools."""
+    return f"S-1-5-21-3623811015-3361044348-30300820-{1101 + list(USERS).index(k)}"
+
+
 # ----------------------------------------------------------------------------- Microsoft
 
 
@@ -181,8 +187,9 @@ def defender_office365() -> None:
 def entra() -> None:
     users = [{"id": x["id"], "userPrincipalName": x["upn"], "mail": x["upn"], "displayName": x["name"],
               "department": x["dept"], "jobTitle": x["title"], "accountEnabled": True,
-              "onPremisesSamAccountName": x["upn"].split("@")[0], "createdDateTime": "2022-01-10T00:00:00Z"}
-             for x in USERS.values()]
+              "onPremisesSamAccountName": x["upn"].split("@")[0], "onPremisesSecurityIdentifier": sid(k),
+              "createdDateTime": "2022-01-10T00:00:00Z"}
+             for k, x in USERS.items()]
     j = u("jane")
     signins = [
         {"id": "si-001", "createdDateTime": f"{D}08:30:00Z", "userPrincipalName": j["upn"], "userId": j["id"],
@@ -271,6 +278,47 @@ def entra() -> None:
     write("entra", routes)
 
 
+def defender_identity() -> None:
+    """Defender for Identity: one alert on Jane's laptop after the compromise (it names her by SID and account name
+    only - the directory links her), her domain logons, Bob's routine logon and a machine-account logon (not a person)."""
+    j, b = u("jane"), u("bob")
+    alert = {"id": "mdi-alert-0001", "title": "Account enumeration reconnaissance (LDAP)", "severity": "medium",
+             "status": "new", "category": "Discovery", "serviceSource": "microsoftDefenderForIdentity",
+             "detectionSource": "microsoftDefenderForIdentity", "incidentId": "mdi-inc-0001",
+             "createdDateTime": f"{D}09:43:00Z", "lastUpdateDateTime": f"{D}09:44:00Z",
+             "mitreTechniques": ["T1087.002"], "description": "Directory queries for many accounts from one device.",
+             "alertWebUrl": "https://security.microsoft.com/alerts/mdi-alert-0001",
+             "evidence": [{"@odata.type": "#microsoft.graph.security.userEvidence",
+                           "userAccount": {"accountName": "jane.doe", "domainName": "ACME", "userSid": sid("jane")}},
+                          {"@odata.type": "#microsoft.graph.security.deviceEvidence",
+                           "deviceDnsName": HOSTS["jane"]["fqdn"], "mdeDeviceId": HOSTS["jane"]["mde"],
+                           "ipInterfaces": [HOSTS["jane"]["ip"]]}]}
+    hunt = r"^/v1.0/security/runHuntingQuery$"
+
+    def logon(rid, when, who, action, protocol, host, ip, *, upn=None, failure=None, sam=None):
+        return {"Timestamp": f"{D}{when}Z", "ReportId": rid, "ActionType": action, "Application": "Active Directory",
+                "LogonType": "Network" if protocol == "NTLM" else "Interactive", "Protocol": protocol,
+                "FailureReason": failure, "AccountName": sam or (who["upn"].split("@")[0] if who else None),
+                "AccountDomain": "ACME", "AccountUpn": upn, "AccountSid": sid(next(k for k, v in USERS.items() if v is who))
+                if who else None, "AccountObjectId": None, "AccountDisplayName": who["name"] if who else None,
+                "DeviceName": host, "IPAddress": ip, "DestinationDeviceName": "DC01",
+                "DestinationIPAddress": "10.10.0.2"}
+
+    logons = [logon("mdi-logon-0001", "07:58:00", b, "LogonSuccess", "Kerberos", "BOB-LT02", HOSTS["bob"]["ip"],
+                    upn=b["upn"]),
+              logon("mdi-logon-0002", "08:25:00", j, "LogonSuccess", "Kerberos", "JANE-LT01", HOSTS["jane"]["ip"],
+                    upn=j["upn"]),
+              logon("mdi-logon-0003", "09:41:30", j, "LogonFailed", "NTLM", "JANE-LT01", HOSTS["jane"]["ip"],
+                    failure="InvalidPassword"),
+              logon("mdi-logon-0004", "09:42:00", None, "LogonSuccess", "Kerberos", "JANE-LT01", HOSTS["jane"]["ip"],
+                    sam="JANE-LT01$")]
+    write("defender_identity", [
+        route("GET", r"^/v1.0/security/alerts_v2$", {"value": [alert]}),
+        route("POST", hunt, {"results": logons}, body_contains="IdentityLogonEvents"),
+        route("POST", hunt, {"results": []}),
+    ])
+
+
 # ----------------------------------------------------------------------------- exposure tools
 
 
@@ -304,6 +352,19 @@ def rapid7() -> None:
             "summary": {"text": f"Upgrade {meta['product']}", "html": f"<p>Upgrade {meta['product']}</p>"}}))
     routes += [
     ]
+    exceptions = [
+        {"id": 9001, "state": "Approved", "expires": "2026-12-31T00:00:00Z",
+         "scope": {"type": "Asset", "id": HOSTS["web01"]["r7"], "vulnerability": "r7-cve-2023-38408"},
+         "submit": {"reason": "Compensating Control", "comment": "Agent forwarding disabled fleet-wide",
+                    "date": "2026-08-20T10:00:00Z"},
+         "review": {"comment": "Approved until the next maintenance window", "date": "2026-08-21T09:00:00Z"}},
+        {"id": 9002, "state": "Approved", "expires": "2026-09-01T00:00:00Z",
+         "scope": {"type": "Asset", "id": 110, "vulnerability": "r7-cve-2024-21412"},
+         "submit": {"reason": "Acceptable Risk", "comment": "Deferred to the quarterly patch cycle",
+                    "date": "2026-07-01T10:00:00Z"},
+         "review": {"comment": "Approved for 60 days", "date": "2026-07-02T09:00:00Z"}}]
+    routes.append(route("GET", r"^/api/3/vulnerability_exceptions$", {"resources": exceptions, "page": {
+        "number": 0, "size": 500, "totalPages": 1, "totalResources": len(exceptions)}}))
     for c in CVES:  # asset search with the "cve" filter -> assets where Rapid7 reports that CVE
         hit = [a for a, k in zip(assets, order) if c in EXPOSURE.get(k, []) and not (k == "web01" and c == "CVE-2023-44487")]
         routes.append(route("POST", r"^/api/3/assets/search$", {"resources": hit}, body_contains=['"cve"', c]))
@@ -741,6 +802,6 @@ def generic_siem() -> None:
     (OUT / "generic_siem.json").write_text(json.dumps({"routes": [], "push_samples": samples}, indent=1), encoding="utf-8")
 
 
-BUILDERS = [defender_endpoint, defender_office365, entra, rapid7, wiz, umbrella, canary, delinea_secret_server,
+BUILDERS = [defender_endpoint, defender_office365, entra, defender_identity, rapid7, wiz, umbrella, canary, delinea_secret_server,
             delinea_privilege_manager, avanan, nvd, epss, cisa_kev, threat_intel, servicenow, jira, cmdb_csv,
             sentinel, generic_siem]

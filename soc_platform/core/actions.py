@@ -105,6 +105,7 @@ class ActionService:
         rationale: str = "",
         evidence_ids: list[str] | None = None,
         key: str | None = None,
+        ceiling: tuple[int, str] | None = None,
     ) -> ActionRequest:
         spec = self.registry.get(action_type)
         params = params or {}
@@ -133,7 +134,9 @@ class ActionService:
             return shared
 
         failures = spec.preconditions(params, targets)
-        ceiling = (spec.max_level, spec.max_level_reason) if getattr(spec, "max_level", None) is not None else None
+        stage = (spec.max_level, spec.max_level_reason) if getattr(spec, "max_level", None) is not None else None
+        # the stricter of the tool's rollout stage and the caller's own ceiling (e.g. a case whose tools disagree)
+        ceiling = min((c for c in (stage, ceiling) if c is not None), key=lambda c: int(c[0]), default=None)
         decision = self.policy.decide(action_type, targets, destructive=spec.destructive,
                                       precondition_failures=failures, ceiling=ceiling)
         req = ActionRequest(

@@ -120,6 +120,7 @@ ODATA = [  # (connector, stream, demo path fragment, watermark field, filter fie
     ("defender_endpoint", "vulnerabilities", "machinesVulnerabilities", None, None),
     ("defender_office365", "reported_messages", "mailFolders/inbox/messages", "receivedDateTime", "receivedDateTime"),
     ("defender_office365", "email_alerts", "alerts_v2", "lastUpdateDateTime", "lastUpdateDateTime"),
+    ("defender_identity", "alerts", "alerts_v2", "lastUpdateDateTime", "lastUpdateDateTime"),
     ("entra", "users", "/v1.0/users$", None, None),
     ("entra", "signins", "auditLogs/signIns", "createdDateTime", "createdDateTime"),
     ("entra", "risky_users", "riskyUsers", "riskLastUpdatedDateTime", "riskLastUpdatedDateTime"),

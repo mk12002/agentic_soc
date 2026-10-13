@@ -1,7 +1,9 @@
 """Rapid7 InsightVM / Nexpose connector (VM-T01, VM-F01, VM-F10, IM-F04 exposure).
 
 Uses the InsightVM Security Console API v3 (/api/3). Assets page with their
-vulnerability findings; vulnerability definitions are cached per CVE.
+vulnerability findings; vulnerability definitions are cached per CVE. ``exceptions`` reads the console's
+vulnerability exceptions (accepted risk: state, expiry, reason) - shown on the matching finding, never used to close or
+suppress it (an exception the platform honours is approved in the platform, with four-eyes and an expiry).
 Legacy Nexpose without API: point ``export_csv`` at a data-warehouse / report export instead.
 """
 
@@ -28,7 +30,7 @@ class Rapid7Connector(ToolConnector):
     name = "rapid7"
     tool = "rapid7"
     dimension = "exposure"
-    streams = ("assets", "findings")
+    streams = ("assets", "findings", "exceptions")
     lookups = ("host", "ip", "cve")
     read_scopes = ("Security Console: read-only user / API key",)
     page_size = 500
@@ -45,6 +47,8 @@ class Rapid7Connector(ToolConnector):
         if self.settings.get("export_csv"):
             return self._csv_page(stream, cursor)
         page = int(cursor or 0)
+        if stream == "exceptions":
+            return self._exceptions_page(page)
         body = self.get("/api/3/assets", params={"page": page, "size": self.page_size})
         info = body.get("page") or {}
         assets = body.get("resources") or []
@@ -61,6 +65,16 @@ class Rapid7Connector(ToolConnector):
         # assets and their findings change: read in full each sync (the page number used to be kept, so the next
         # sync asked for the page after the last one and never saw an asset again)
         return Page(assets, None, has_more=False, reset=True)
+
+    def _exceptions_page(self, page: int) -> Page:
+        body = self.get("/api/3/vulnerability_exceptions", params={"page": page, "size": self.page_size})
+        rows = body.get("resources") or []
+        for r in rows:          # the scope names a Rapid7 vulnerability id: its CVEs come from the definition
+            vid = (r.get("scope") or {}).get("vulnerability")
+            r["_cves"] = (self._definition(vid).get("cves") or []) if vid else []
+        if page + 1 < int((body.get("page") or {}).get("totalPages", 1)):
+            return Page(rows, str(page + 1), has_more=True)
+        return Page(rows, None, has_more=False, reset=True)      # few, and their state changes: read in full
 
     def _definition(self, vuln_id: str) -> dict[str, Any]:
         if vuln_id not in self._vuln_cache:
@@ -86,6 +100,8 @@ class Rapid7Connector(ToolConnector):
     def _csv_page(self, stream: str, cursor: str | None) -> Page:
         with Path(self.settings["export_csv"]).open(encoding="utf-8", newline="") as fh:
             rows = list(csv.DictReader(fh))
+        if stream == "exceptions":
+            return Page([], None, has_more=False)                  # a findings export carries no exceptions
         if stream == "assets":
             seen: dict[str, dict] = {}
             for r in rows:
@@ -102,6 +118,8 @@ class Rapid7Connector(ToolConnector):
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         if stream == "assets":
             return [self._asset(raw)]
+        if stream == "exceptions":
+            return [self._exception(raw)]
         a, f, d = raw.get("asset") or {}, raw.get("finding") or {}, raw.get("definition") or {}
         if not a.get("id") or not f.get("id"):
             raise ValueError("Rapid7 finding without its identifier (asset id or vulnerability id)")
@@ -124,6 +142,23 @@ class Rapid7Connector(ToolConnector):
                             "malware_kits": d.get("malwareKits", 0), "solution": d.get("_solution")},
                 deep_link=f"{self.console}/asset.jsp?devid={a['id']}"))
         return out
+
+    def _exception(self, x: dict[str, Any]) -> NormalizedRecord:
+        scope, submit, review = x.get("scope") or {}, x.get("submit") or {}, x.get("review") or {}
+        refs = []
+        if str(scope.get("type") or "").lower() == "asset" and scope.get("id") is not None:
+            refs.append(EntityRef(kind="asset", role="host", keys={"rapid7_asset_id": str(scope["id"])}))
+        cves = [c for c in x.get("_cves") or [] if c]
+        return NormalizedRecord(
+            kind="risk_exception", tool=self.tool, source_type="vulnerability_exception", source_id=str(need(x, "id")),
+            observed_at=parse_ts(review.get("date") or submit.get("date")), dimension="exposure",
+            title=f"Rapid7 exception ({x.get('state') or 'unknown'}) for {', '.join(cves) or scope.get('vulnerability')}",
+            severity="informational", refs=refs,
+            attributes={"cves": cves, "vuln_id": scope.get("vulnerability"), "scope_type": scope.get("type"),
+                        "state": str(x.get("state") or "").lower() or None, "expires": x.get("expires"),
+                        "reason": submit.get("reason"), "comment": submit.get("comment"),
+                        "reviewer_comment": review.get("comment")},
+            deep_link=f"{self.console}/vulnerability/exceptions/listing.jsp")
 
     def _asset(self, a: dict[str, Any]) -> NormalizedRecord:
         host = a.get("hostName") or ""

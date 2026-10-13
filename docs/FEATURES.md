@@ -260,7 +260,8 @@ legitimate vendor, internal and marketing mail).
 ![](screenshots/02-intelligence.png)
 
 * **Explainable risk engine** - per user and host across all domains, time-decayed, every factor shown.
-* **12 correlation rules** raising insights with evidence and next steps (plus three operational alerts: a scheduled job dead-lettered, break-glass access used, platform self-check failing): phishing → endpoint → identity chain
+* **13 correlation rules** raising insights with evidence and next steps (plus three operational alerts: a scheduled job dead-lettered, break-glass access used, platform self-check failing): phishing → endpoint → identity chain,
+  application consent after a phishing click - flagged for verification, never called a compromise on its own
   (U08), privileged access after compromise (U07), deception corroborated (U04), exposed host under attack (U06),
   attacked host without EDR, control gap - a blocked indicator still reachable in another control (U10), repeat
   clickers (U16), new KEV exposure (U02), shared infrastructure, high entity risk, **supplier risk (U18)** and

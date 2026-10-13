@@ -384,7 +384,7 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/incidents/run -H "Authorization: Be
 | **Start campaign** | Vulnerabilities | Open a remediation campaign for a CVE (notifications need approval) |
 | **Sync tickets** | Vulnerabilities | Two-way ticket sync; catches false closures |
 | **Route to owners** | Cloud posture | Send misconfigurations to their teams |
-| **Re-correlate** | Intelligence | Recompute risk, the 12 correlation rules and the brief |
+| **Re-correlate** | Intelligence | Recompute risk, the 13 correlation rules and the brief |
 | **Run now** | Integrations | Run any scheduled job immediately (incident, phishing, vulnerability, intelligence, follow-up, daily report, retention, self-check) |
 | **Test** | Integrations | Check a connector: authenticate and read one page |
 

@@ -12,7 +12,15 @@ from typing import Any
 
 from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, sev_name, targets_of
+from soc_platform.connectors.tools._common import (
+    ConnectorAction,
+    need,
+    ok_lookup,
+    parse_ts,
+    sev_name,
+    source_verdict,
+    targets_of,
+)
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, kql_str, mde_transport
 from soc_platform.core.identity import user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
@@ -80,11 +88,15 @@ class DefenderEndpointConnector(MicrosoftConnector):
             if ev.get("url"):
                 refs.append(EntityRef(kind="indicator", role="observable", keys={"value": ev["url"]},
                                       attributes={"type": "url"}))
+            if ev.get("ipAddress"):          # the remote address of the alert (handoff: RemoteIP)
+                refs.append(EntityRef(kind="indicator", role="observable", keys={"value": ev["ipAddress"]},
+                                      attributes={"type": "ip"}))
         return NormalizedRecord(
             kind="alert", tool=self.tool, source_type="alert", source_id=need(a, "id"),
             observed_at=parse_ts(a.get("alertCreationTime")), title=a.get("title", "Defender alert"),
             severity=sev_name(a.get("severity")), refs=refs, dimension="endpoint",
             attributes={"category": a.get("category"), "status": a.get("status"),
+                        "source_verdict": source_verdict(a.get("classification"), a.get("determination")),
                         "mitre_techniques": a.get("mitreTechniques") or [], "description": a.get("description"),
                         "detection_source": a.get("detectionSource"), "incident_id": a.get("incidentId")},
             deep_link=f"{PORTAL}/alerts/{a['id']}")

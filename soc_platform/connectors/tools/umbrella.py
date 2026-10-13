@@ -90,6 +90,7 @@ class UmbrellaConnector(ToolConnector):
             dimension="dns", refs=refs,
             attributes={"domain": raw.get("domain"), "verdict": raw.get("verdict"), "internal_ip": raw.get("internalip"),
                         "external_ip": raw.get("externalip"), "query_type": raw.get("querytype"),
+                        "return_code": raw.get("returncode"),
                         "categories": [c.get("label") for c in raw.get("categories") or []],
                         "identity": ident.get("label"), "user": user.get("label")},
             deep_link="https://dashboard.umbrella.com/o/reports/activity-search")]

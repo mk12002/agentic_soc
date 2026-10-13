@@ -45,6 +45,15 @@ connectors:
       client_certificate: "${DEFENDER_ENDPOINT_CLIENT_CERTIFICATE}"   # SECRET - app registration certificate (PEM with key); recommended over the secret (optional)
       user_domain: "${DEFENDER_ENDPOINT_USER_DOMAIN}"   # UPN suffix for alert users (optional)
       mde_base: "${DEFENDER_ENDPOINT_MDE_BASE}"   # API base (regional endpoints) (optional)
+  defender_identity:   # Microsoft Defender for Identity - identity; confidence Medium
+    enabled: true
+    mode: fake
+    settings:
+      tenant_id: "${DEFENDER_IDENTITY_TENANT_ID}"   # Entra tenant id
+      client_id: "${DEFENDER_IDENTITY_CLIENT_ID}"   # SECRET - App registration (client) id
+      client_secret: "${DEFENDER_IDENTITY_CLIENT_SECRET}"   # SECRET - App registration secret (or client_certificate below)
+      client_certificate: "${DEFENDER_IDENTITY_CLIENT_CERTIFICATE}"   # SECRET - app registration certificate (PEM with key); recommended over the secret (optional)
+      user_domain: "${DEFENDER_IDENTITY_USER_DOMAIN}"   # UPN suffix for bare account names (optional)
   defender_office365:   # Microsoft Defender for Office 365 - email; confidence High
     enabled: true
     mode: fake
@@ -73,6 +82,7 @@ connectors:
       user_domain: "${DELINEA_SECRET_SERVER_USER_DOMAIN}"   # UPN suffix (optional)
       audit_path: "${DELINEA_SECRET_SERVER_AUDIT_PATH}"   # Secret audit endpoint (default /api/v1/secret-audits) (optional)
       sessions_path: "${DELINEA_SECRET_SERVER_SESSIONS_PATH}"   # Launched sessions endpoint (default /api/v1/launched-sessions) (optional)
+      account_owners: "${DELINEA_SECRET_SERVER_ACCOUNT_OWNERS}"   # approved admin-account -> person map, JSON (optional; shared accounts stay unmapped)
   entra:   # Microsoft Entra ID - identity; confidence High
     enabled: true
     mode: fake

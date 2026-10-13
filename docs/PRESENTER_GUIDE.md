@@ -40,7 +40,7 @@ Nobody sees the attack. Analysts stitch it together by hand, across consoles, un
 three workflows - reported phishing, incidents, vulnerabilities - consume most of the day.
 
 **What this is.** One investigation and automation layer on top of the tools the organisation already owns. It
-pulls from 20 tools through their APIs, resolves every host and person to one identity across all of them, and runs
+pulls from 21 tools through their APIs, resolves every host and person to one identity across all of them, and runs
 the three workflows on that shared picture. A cross-domain intelligence layer then correlates across workflows:
 one page tells the whole attack story across every tool, with the evidence for each step, what was checked and
 not found, who and what was reached, and a phased response plan.
@@ -93,7 +93,7 @@ Draw it as four layers (full diagram in [ARCHITECTURE.md](ARCHITECTURE.md)):
      Cloud misconfigurations go through the same lifecycle.
 4. **Intelligence.**
    - Explainable fused risk per user and host.
-   - 12 correlation rules, plus 4 operational alerts.
+   - 13 correlation rules, plus 4 operational alerts.
    - A platform self-check that proves the same figures agree everywhere (hourly).
    - Analyst Q&A with cited answers.
    - Situation brief.
@@ -611,7 +611,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 648 passed on SQLite (with PostgreSQL's rules enforced) and 648 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 682 passed on SQLite (with PostgreSQL's rules enforced) and 682 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -761,7 +761,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 648 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 682 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -842,7 +842,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 16 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 648 SQLite, 648 PostgreSQL / 205 |
+| Platform tests / engine tests | 682 SQLite, 682 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
 | Features verified | 108 of 108 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
@@ -889,7 +889,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 
 Use this section when someone drills into a detail. Every fact here is taken from the code.
 
-### 15.1 The 20 connectors
+### 15.1 The 21 connectors
 
 Every connector runs on the same SDK:
 - per-tool request budgets under the vendor's rate limits
@@ -907,12 +907,13 @@ code).
 | Microsoft Defender for Endpoint | EDR | alerts, machines, vulnerabilities | Same as CrowdStrike, second source | Isolation and release; antivirus scan; investigation package; custom indicators (block and unblock) |
 | Microsoft Defender for Office 365 (+ Exchange admin) | Email | user-reported messages, email alerts; campaign search, clicks and post-delivery events through advanced hunting | The phishing intake, campaign scope, who clicked, what the admin already did | Tag; tenant-wide purge and restore; block and unblock sender; reporter feedback; notification e-mail |
 | Check Point Avanan | Email | security events | A second email-control verdict ("control disagreement") | Quarantine and restore |
-| Microsoft Entra ID | Identity | users, sign-ins, risky users, risk detections, directory audits | Identity resolution; risky sign-ins; MFA methods; inbox rules; devices | Revoke sessions; force password reset; disable and re-enable; mark compromised |
+| Microsoft Entra ID | Identity | users, sign-ins, risky users, risk detections, directory audits | Identity resolution; risky sign-ins; MFA methods; inbox rules; devices; application consent (consent after a phishing click) | Revoke sessions; force password reset; disable and re-enable; mark compromised |
+| Microsoft Defender for Identity | Identity (on-premises AD) | alerts, domain logon events (advanced hunting) | On-premises identity alerts; domain logons as evidence; people linked to Entra by their on-premises SID | - |
 | Cisco Umbrella | DNS | DNS activity | Malicious destinations reached; shadow IT | Block and unblock a domain |
 | Thinkst Canary | Deception | incidents, devices | High-fidelity deception hits (decoys are sensors, never scored as assets) | Acknowledge |
-| Delinea Secret Server | PAM | secret audit events | Privileged credential viewed or copied | Rotate a secret |
+| Delinea Secret Server | PAM | secret audit events | Privileged credential viewed or copied; an approved admin-account -> owner map links admin activity to the person | Rotate a secret |
 | Delinea Privilege Manager | PAM | elevation events | Elevation allowed or denied | - |
-| Rapid7 InsightVM | Vulnerability | assets, findings (API or CSV export) | Findings and asset inventory | - |
+| Rapid7 InsightVM | Vulnerability | assets, findings (API or CSV export), vulnerability exceptions | Findings and asset inventory; the console's exceptions shown on the finding (in force / expired), never applied | - |
 | Wiz | Cloud | resources, vulnerabilities, issues | Cloud vulnerabilities, internet exposure, misconfigurations | - |
 | NVD | Intel | recent CVEs; per-CVE lookup | CVSS and description | - |
 | FIRST EPSS | Intel | per-CVE lookup | Probability of exploitation in 30 days | - |
@@ -1188,7 +1189,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 648 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 682 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |

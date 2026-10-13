@@ -91,6 +91,22 @@ def sev_name(v: Any) -> str:
             "moderate": "medium", "high": "high", "critical": "critical", "severe": "critical"}.get(s, "medium" if s else "informational")
 
 
+def source_verdict(*values: Any) -> str | None:
+    """A tool's own disposition of an alert (classification / determination / status / tag) as one word:
+    false_positive, benign or true_positive; None while the tool has not decided. Used to show where tools disagree,
+    never to change a severity or a verdict the platform computes."""
+    for v in values:
+        for item in (v if isinstance(v, list | tuple) else [v]):
+            s = re.sub(r"[^a-z]", "", str(item or "").lower())
+            if s in {"falsepositive", "closedfalsepositive"}:
+                return "false_positive"
+            if s in {"benignpositive", "informationalexpectedactivity", "benign", "ignored", "expectedactivity"}:
+                return "benign"
+            if s in {"truepositive", "truepositivemalicious"}:
+                return "true_positive"
+    return None
+
+
 FUTURE_TOLERANCE = timedelta(hours=1)
 
 

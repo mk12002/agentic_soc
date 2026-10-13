@@ -1,7 +1,7 @@
 # Client demo guide
 
 A 25-minute walkthrough of the platform on the built-in scenario (fixture mode: realistic, vendor-shaped data from
-20 tools about one fictional organisation, `acme-demo.com`). Everything shown is computed live by the platform.
+21 tools about one fictional organisation, `acme-demo.com`). Everything shown is computed live by the platform.
 
 ## What a demo proves, and what it does not
 

@@ -24,7 +24,8 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 
 ## 1 Summary
 
-- **20 connectors**, one per tool or feed. The organisation enables only the tools it owns; a tool switched off
+- **21 connectors**, one per tool or feed: the organisation's 13 security tool families plus 8 feeds and
+  interfaces (public intelligence, threat-intel fusion, Jira, an ownership spreadsheet, Sentinel, SIEM push). The organisation enables only the tools it owns; a tool switched off
   disappears from every workflow and screen.
 - Every connector uses the **vendor's documented API over HTTPS**, initiated by the platform, with a **dedicated
   service identity per tool**. No agent is installed and no tool connects to the platform (except an optional SIEM
@@ -45,6 +46,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | `entra` | Microsoft Entra ID (+ Azure role assignments) | Identity | OAuth 2.0 client credentials, Entra app registration; certificate (recommended) or secret | Yes | Revoke sessions, disable / enable account, force password change, confirm compromised | Implemented; to validate in tenant |
 | `defender_endpoint` | Microsoft Defender for Endpoint | EDR | As Entra | Yes | Isolate / release, AV scan, collect investigation package, block / unblock indicator | Implemented; to validate in tenant |
 | `defender_office365` | Microsoft Defender for Office 365 / Exchange Online | E-mail | As Entra | Yes | Campaign soft-delete / restore, block / unblock sender, tag, reporter feedback e-mail | Implemented; to validate in tenant |
+| `defender_identity` | Microsoft Defender for Identity | Identity (on-premises AD) | As Entra | Yes | - | Implemented; to validate in tenant |
 | `crowdstrike` | CrowdStrike Falcon | EDR | OAuth 2.0 client credentials (API client) | Yes | Contain / lift containment, Real Time Response collection | Implemented; to validate in tenant |
 | `avanan` | Check Point Harmony Email & Collaboration (Avanan) | E-mail | Infinity Portal API key exchanged for a bearer token | Yes | Quarantine / restore | Implemented; to validate in tenant |
 | `umbrella` | Cisco Umbrella | DNS | OAuth 2.0 client credentials (API key / secret) | Yes | Block / unblock domain (SOC destination list) | Implemented; to validate in tenant |
@@ -107,6 +109,18 @@ when the organisation approves the action type it enables.
 | Licence dependency | Defender for Office 365 Plan 2 for advanced hunting and click telemetry |
 | Note | Remediation uses Microsoft Graph's `analyzedEmails/remediate`, a beta API at the time of writing |
 
+### Microsoft Defender for Identity (`defender_identity`)
+
+| | |
+|---|---|
+| Used for | On-premises Active Directory identity alerts, and domain-controller logon events (success / failure, protocol, source device) as investigation evidence |
+| Read (Microsoft Graph application permissions) | `SecurityAlert.Read.All` (alerts, `serviceSource = microsoftDefenderForIdentity`), `ThreatHunting.Read.All` (`IdentityLogonEvents` through advanced hunting) |
+| Write | None - containment of an identity goes through Entra ID |
+| Egress | `graph.microsoft.com`, `login.microsoftonline.com` |
+| Licence dependency | Defender for Identity, with sensors on the domain controllers |
+| Identity mapping | A person is linked by the on-premises SID, which the directory maps to the Entra user (`onPremisesSecurityIdentifier`) - never by name similarity; machine and built-in accounts are not people |
+| Settings | `DEFENDER_IDENTITY_TENANT_ID`, `DEFENDER_IDENTITY_CLIENT_ID`, `DEFENDER_IDENTITY_CLIENT_CERTIFICATE` (recommended) or `DEFENDER_IDENTITY_CLIENT_SECRET` |
+
 ### CrowdStrike Falcon (`crowdstrike`)
 
 | | |
@@ -155,14 +169,15 @@ when the organisation approves the action type it enables.
 | Read | Secret Server API user with *View Secret Audit* and *View Launched Sessions*; Privilege Manager API client allowed to read elevation events |
 | Write | *Change Password Now* on the target secrets only (rotation) |
 | Egress | The organisation's Delinea servers (internal) |
+| Admin accounts | An optional, approved map (`account_owners`: admin account -> the person's UPN) links an admin account's activity to its owner; the admin account stays its own identity, an unmapped (shared) account gets no owner, and an owner is never guessed from the account name |
 | Note | API paths differ between Delinea versions and are settings; privileged-access data needs the organisation's explicit governance approval |
 
 ### Rapid7 InsightVM / Nexpose (`rapid7`)
 
 | | |
 |---|---|
-| Used for | Asset inventory, vulnerability findings with fix text, fix validation |
-| Read | Security Console user with a read-only role (*View Site Asset Data*, *View Group Asset Data*) |
+| Used for | Asset inventory, vulnerability findings with fix text, fix validation, the console's vulnerability exceptions (shown on the finding with state and expiry; never used to close or suppress it) |
+| Read | Security Console user with a read-only role (*View Site Asset Data*, *View Group Asset Data*) and the right to view vulnerability exceptions (the exact role permission to confirm per console version) |
 | Write | None |
 | Egress | The console host (internal, often port 3780) |
 | Note | TLS verification on by default; an internally issued certificate is trusted by supplying the corporate CA, not by disabling verification. Fallback: a scheduled CSV export |

@@ -25,7 +25,7 @@ from soc_platform.core.actions import ActionRegistry
 from soc_platform.core.cases import CaseService, Recommendation, detection_quality
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.enrichment import EnrichmentOrchestrator, Target, evidence_for_llm
-from soc_platform.core.models import Case, CaseEntity, Disposition, Entity, Evidence, utcnow
+from soc_platform.core.models import Case, CaseEntity, Disposition, Entity, Evidence, SourceRecord, utcnow
 from soc_platform.core.policy import PolicyEngine
 from soc_platform.core.schema import severity_rank
 from soc_platform.llm.gateway import LLMGateway, deterministic_grounded
@@ -194,6 +194,10 @@ class IncidentService:
             self.cases.add_evidence(case_id, summary=f"Host {f['host']} carries KEV-listed {f['cve']} "
                                                      f"(CVSS {f.get('cvss')}) reported by {f['tool']}",
                                     source=f["tool"], dimension="exposure", entity_id=f["host_id"])
+        conflict = self._verdict_conflict(case_id)
+        if conflict:
+            self.cases.add_evidence(case_id, summary=conflict["summary"], source="platform", dimension="verdict_conflict",
+                                    data={k: v for k, v in conflict.items() if k != "summary"})
         evidence = self.s.execute(select(Evidence).where(Evidence.case_id == case_id)).scalars().all()
         ev_llm = evidence_for_llm(evidence)
 
@@ -212,12 +216,35 @@ class IncidentService:
                                               "insufficient_evidence": grounded.get("insufficient_evidence", False),
                                               "evidence_index": {e["id"]: e["evidence_row"] for e in ev_llm},
                                               "similar_incidents": self.similar(case_id),
+                                              "verdict_conflict": conflict,
                                               **({"narration_pending": self.cases.narration_request(
                                                   "incident.summary", question, ev_llm)} if defer else {})},
                                   completeness=outcome.completeness(), actor=f"agent:{AGENT}")
         recs = self._recommendations(case, evidence, ev_llm, severity)
-        self.cases.recommend(case, recs, self.actions, self.policy, agent=AGENT)
+        self.cases.recommend(case, recs, self.actions, self.policy, agent=AGENT,
+                             ceiling=(3, "tools disagree on this activity: a person resolves it before any action")
+                             if conflict else None)
         return self.cases.view(case_id)
+
+    def _verdict_conflict(self, case_id: str) -> dict[str, Any] | None:
+        """Where one tool closed this activity as a false positive / benign and another still reports it: shown on the
+        case and every action held for a person - the platform never picks a side (severity is left as computed)."""
+        dismissed, active = [], []
+        for ln in self.s.execute(select(CaseEntity).where(CaseEntity.case_id == case_id, CaseEntity.role == "alert")
+                                 .order_by(CaseEntity.entity_id)).scalars():
+            e = self.s.get(Entity, ln.entity_id)
+            a = (e.attributes or {}) if e else {}
+            row = {"tool": a.get("tool"), "alert": e.display_name if e else ln.entity_id, "entity_id": ln.entity_id,
+                   "source_verdict": a.get("source_verdict"), "status": a.get("status")}
+            (dismissed if a.get("source_verdict") in {"false_positive", "benign"} else active).append(row)
+        pairs = [(d, x) for d in dismissed for x in active if d["tool"] != x["tool"]]
+        if not pairs:
+            return None
+        d, x = pairs[0]
+        return {"summary": f"Tools disagree: {d['tool']} closed '{d['alert']}' as {d['source_verdict'].replace('_', ' ')}"
+                           f" while {x['tool']} reports '{x['alert']}' as {x['status'] or 'open'} - an analyst resolves "
+                           "the conflict; no action runs without approval",
+                "dismissed": dismissed, "active": active}
 
     def reassess_open(self, *, exclude: set[str] | frozenset[str] = frozenset(), narrate: bool = True) -> list[str]:
         """Investigate open incidents again when KEV-listed exposure appeared on their hosts after they were assessed
@@ -410,11 +437,21 @@ class IncidentService:
                                            expected_impact="EDR blocks the indicator", blast_radius="1 indicator",
                                            priority=26))
         if high:
+            alerts = self._source_alert_ids(case.id)
             recs.append(Recommendation("ticket.create", [], "Track containment and follow-up in ITSM.", [],
-                                       params={"title": f"[SOC] {case.title}", "description": case.summary or case.title,
+                                       params={"title": f"[SOC] {case.title}",
+                                               "description": (case.summary or case.title)
+                                               + (f"\n\nSource alerts: {', '.join(alerts)}" if alerts else ""),
                                                "group": "SOC", "priority": 1 if severity == "critical" else 2,
-                                               "correlation_id": case.id}, priority=60))
+                                               "correlation_id": case.id, "source_alert_ids": alerts}, priority=60))
         return recs
+
+    def _source_alert_ids(self, case_id: str) -> list[str]:
+        """``tool:alert id`` of every vendor alert on the case, as the tools know them."""
+        ids = self.s.execute(select(SourceRecord.tool, SourceRecord.source_id)
+                             .join(CaseEntity, CaseEntity.entity_id == SourceRecord.entity_id)
+                             .where(CaseEntity.case_id == case_id, CaseEntity.role == "alert")).all()
+        return sorted({f"{tool}:{sid}" for tool, sid in ids})
 
     # ------------------------------------------------------------------ IM-F11 similar incidents
 

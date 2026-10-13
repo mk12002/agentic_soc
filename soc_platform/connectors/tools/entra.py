@@ -105,6 +105,8 @@ class EntraConnector(MicrosoftConnector):
                         "risk_level": s.get("riskLevelDuringSignIn"), "risk_state": s.get("riskState"),
                         "conditional_access": s.get("conditionalAccessStatus"), "client_app": s.get("clientAppUsed"),
                         "device_compliant": dev.get("isCompliant"), "interactive": s.get("isInteractive"),
+                        "app_id": s.get("appId"), "correlation_id": s.get("correlationId"),
+                        "authentication_requirement": s.get("authenticationRequirement"),
                         "risk_events": s.get("riskEventTypes_v2") or []},   # v1.0 fields only (no beta mfaDetail)
             deep_link=f"{PORTAL}/#view/Microsoft_AAD_IAM/SignInLogsList.ReactView")
 
@@ -132,15 +134,22 @@ class EntraConnector(MicrosoftConnector):
     def _audit(self, a: dict[str, Any]) -> NormalizedRecord:
         by = ((a.get("initiatedBy") or {}).get("user") or {})
         refs = [self._uref(by.get("userPrincipalName"), by.get("id"))] if by.get("userPrincipalName") else []
+        apps = []
         for t in a.get("targetResources") or []:
             if t.get("type") == "User" and t.get("userPrincipalName"):
                 refs.append(EntityRef(kind="identity", role="target", keys={"upn": t["userPrincipalName"]}))
+            elif t.get("type") in {"ServicePrincipal", "Application"} or (t.get("id") and not t.get("type")):
+                apps.append({"id": t.get("id"), "name": t.get("displayName")})
+        # a user granting an application access to their data (the consent-phishing pattern): kept as evidence for the
+        # consent_after_phishing rule, never a compromise verdict on its own
+        consent = str(a.get("activityDisplayName") or "").lower() == "consent to application"
         return NormalizedRecord(
             kind="alert" if a.get("category") in {"RoleManagement"} else "signin", tool=self.tool,
             source_type="directory_audit", source_id=need(a, "id"), dimension="identity",
             observed_at=parse_ts(a.get("activityDateTime")), title=a.get("activityDisplayName", "Directory change"),
             severity="informational", refs=refs,
-            attributes={"category": a.get("category"), "result": a.get("result")})
+            attributes={"category": a.get("category"), "result": a.get("result"), "activity": a.get("activityDisplayName"),
+                        "consent": consent, "apps": apps, "correlation_id": a.get("correlationId")})
 
     # ------------------------------------------------------------------ identity context (PH-F08, IM-F04)
 

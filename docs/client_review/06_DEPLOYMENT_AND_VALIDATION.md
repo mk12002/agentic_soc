@@ -64,7 +64,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 |---|---|---|
 | Service identity | One per tool with read permissions; certificate credentials for Microsoft app registrations recommended | Tool owner |
 | Credentials | In the vault under the names the console shows | Tool owner |
-| Licences | Confirmed where a capability depends on them (Entra ID P2, Defender P2 plans, CrowdStrike Spotlight, Avanan HEC API) | Tool owner |
+| Licences | Confirmed where a capability depends on them (Entra ID P2, Defender P2 plans, Defender for Identity sensors on the domain controllers, CrowdStrike Spotlight, Avanan HEC API) | Tool owner |
 | Reporting mailbox | User-reported mail routed to a dedicated mailbox; `Mail.Read` scoped to it | Messaging team |
 | Version specifics | Delinea API paths; ServiceNow ticket table and CMDB field names; Rapid7 API or CSV export | Tool owner |
 
@@ -146,7 +146,7 @@ immediately (section 6).
 
 | Activity | Result at the time of writing |
 |---|---|
-| Platform test suite on SQLite and PostgreSQL 16 | 648 tests passing on each |
+| Platform test suite on SQLite and PostgreSQL 16 | 682 tests passing on each |
 | Phishing ML engine tests | 205 passing |
 | Feature verification (including a real-browser tour, live public feeds and a live LLM) | 108 of 108 features verified |
 | Penetration suite, input fuzzing, static analysis, dependency audit | No open findings |
