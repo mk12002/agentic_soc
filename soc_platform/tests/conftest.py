@@ -198,7 +198,7 @@ def registry() -> ActionRegistry:
 # ------------------------------------------------------------------------------------------------ sample estates
 # The built-in estate plus seeded variants (different organisation, people, machines, IP plan, suppliers,
 # volumes). Tests that assert relationships run on all of them, so nothing can depend on one data set.
-ESTATES = ["demo", "seed7", "seed23"]
+ESTATES = ["demo", "seed7", "seed23", "handoff"]   # handoff: the data handoff workbook's estate (scripts/build_estate_variant.py --handoff)
 
 
 @pytest.fixture(scope="session")
@@ -218,7 +218,8 @@ def estate_configs(tmp_path_factory) -> dict[str, dict[str, Any]]:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     for name in ESTATES[1:]:
-        d = mod.main(str(tmp_path_factory.mktemp(name)), seed=int(name[4:]))
+        d = (mod.main(str(tmp_path_factory.mktemp(name)), handoff=True) if name == "handoff"
+             else mod.main(str(tmp_path_factory.mktemp(name)), seed=int(name[4:])))
         out[name] = {**json.loads((d / "estate.json").read_text()), "name": name}
     return out
 
@@ -253,8 +254,10 @@ class estate_env:
         if app is not None:
             app.registry.cache_clear()
         from soc_platform.config import get_settings
+        from soc_platform.connectors.conform import reset_shapes
 
         get_settings.cache_clear()
+        reset_shapes()          # record shapes are learned from the active fixtures: another estate, another lesson
 
     def __exit__(self, *exc):
         import os

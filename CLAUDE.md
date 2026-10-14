@@ -119,9 +119,10 @@ PostgreSQL data folder: delete both after the run (repeated full runs once fille
 temp folders and the variant-estate builders overwrite each other (seen as "demo names leaked" failures).
 
 **Other scripts** (`scripts/`): `build_fixtures.py` + `fixture_builders.py` (regenerate fake-mode fixtures),
-`build_email_corpus.py` (labelled `.eml` corpus), `build_estate_variant.py OUT --seed N [--scale X] [--messy]` (a
+`build_email_corpus.py` (labelled `.eml` corpus), `build_estate_variant.py OUT --seed N [--scale X] [--messy] [--handoff]` (a
 different organisation: fixtures, settings, suppliers, corpus, `estate.json`; `--messy` adds real-tenant disorder and
-event volume), `measure_scale.py --scales 1,20,40 [--db URL]` (time and SQL per stage on growing messy estates),
+event volume; `--handoff` builds the data handoff workbook's estate), `estate_profile.py FIXTURES ORG` (events, benign
+share and replays through the connectors' own parsers), `measure_scale.py --scales 1,20,40 [--db URL]` (time and SQL per stage on growing messy estates),
 `load_test.py --users N --seconds S --workers W [--db URL]` (a real multi-process server under concurrent analysts), `rename_estate.py`, `eval_phishing.py`,
 `eval_identity_resolution.py`, `eval_resolution_at_scale.py`, `measure_llm_usage.py` (token/cost measurement),
 `build_connector_docs.py`, `ui_tour/tour.js` (Playwright browser tour: layout at 4 widths, axe-core accessibility,
@@ -315,7 +316,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 
 ## 6. Testing: how it is organised and what not to break
 
-- **Fixtures** (`tests/conftest.py`): `db`/`session` (fresh in-memory DB), `ESTATES = ["demo", "seed7", "seed23"]`,
+- **Fixtures** (`tests/conftest.py`): `db`/`session` (fresh in-memory DB), `ESTATES = ["demo", "seed7", "seed23", "handoff"]`,
   `estate_configs` (builds variant estates once per session), `estate_env` (points fixtures, suppliers, org domain at
   an estate and resets caches). Tests default to `SOC_EMBEDDED_SCHEDULER=0` and temporary raw/report dirs - tests
   must never write into the project folder.
@@ -342,14 +343,15 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `test_data_tolerance.py` (malformed vendor fields and times, SIEM batches, ownership CSVs, unreadable e-mail, settings, policy documents),
   `test_commit_before_response.py` (commit before reply, real server),
   `test_handoff_scenarios.py` (the data handoff's acceptance scenarios and correlation rules - see
-  docs/DATA_HANDOFF_RECONCILIATION.md), `test_connector_defender_identity.py` / `test_connector_rapid7.py`
+  docs/DATA_HANDOFF_RECONCILIATION.md), `test_handoff_estate.py` (the workbook estate: volume, benign share, replays,
+  reserved addresses only, every scenario's ground truth on the real pipelines), `test_connector_defender_identity.py` / `test_connector_rapid7.py`
   (per-connector paging and behaviour),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 682 platform tests passing on SQLite and on PostgreSQL (697 collected, 15 skips: 12 opt-in live tests, 2 per-estate repeats of input fuzzing, 1 database-specific check), 205
+- Current counts (keep docs in sync when they change): 706 platform tests passing on SQLite and on PostgreSQL (722 collected, 16 skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, 1 database-specific check), 205
   engine tests, 108/108 features verified.
 
 ---
@@ -459,6 +461,15 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **Connector setting descriptions are shown by the API** (`/api/v1/connectors`, the console form): an example
   value with a demo name (`adm-jane`) leaked into every generated estate and failed the no-demo-names test. Use
   neutral placeholders (`first.last@example.com`).
+- **Learned record shapes are cached per process** (`connectors/conform.py`): a test that switches estates must call
+  `reset_shapes()` (`estate_env` does) - a shape learned against another estate's fixtures (a renamed mailbox route)
+  was "unknown" and silently disabled type coercion for later tests.
+- **Scheduled syncs read alerts, inventory and Entra directory audits only**; activity (sign-ins, DNS, PAM audits,
+  domain logons) arrives through investigation look-ups. A rule that needs another stream must get it synced
+  (`IncidentService` `AUDIT_STREAMS`) - the consent rule never fired in production until directory audits were.
+- **Fixture data is dated; processing stamps the wall clock.** Risk's "now" is the latest observation, so the gap to
+  the fixtures' day grows with the calendar: a test comparing two points in time must allow activity to leave the
+  window (`test_time.py` broke 23 days after the fixture date).
 - **The kill switch stops autonomous execution only** (caps the policy at L3); a human-approved action still runs. To
   stop every write to a tool, pause the tool. Describe it that way.
 - **Wall-clock windows over vendor data age out.** "Newly KEV-listed" once meant "last 14 days of real time", so the

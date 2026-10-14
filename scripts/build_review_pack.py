@@ -25,7 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "docs" / "client_review"
 DOCS = ["01_SOLUTION_ARCHITECTURE.md", "02_SECURITY_TOOL_INTEGRATIONS.md",
         "03_DATA_FLOW_AND_PROTECTION.md", "04_AI_LLM_SECURITY.md", "05_SECURITY_RISK_AND_GOVERNANCE.md",
-        "06_DEPLOYMENT_AND_VALIDATION.md"]
+        "06_DEPLOYMENT_AND_VALIDATION.md", "07_USE_CASE_MAPPING.md", "08_ARCHITECTURE_AND_DATA_FLOW_OVERVIEW.md",
+        "09_DEVELOPMENT_ROADMAP_AND_READINESS.md"]
 INLINE = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*\s][^*]*\*)")
 
 

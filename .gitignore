@@ -51,5 +51,7 @@ node_modules/
 
 # generated Word edition of the client review pack (python scripts/build_review_pack.py)
 docs/client_review/word/
+docs/client_review/deck/
 # the organisation's data-types handoff workbook (names the organisation; reconciled in docs/DATA_HANDOFF_RECONCILIATION.md)
 SOC_Security_Tool_Data_Types*.xlsx
+*_SOC_Key_Operational_Challenges*.pptx

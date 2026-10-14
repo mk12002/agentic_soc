@@ -1,6 +1,6 @@
 """Generate a seeded variant of the sample estate: a different organisation with different volumes.
 
-    python scripts/build_estate_variant.py OUT_DIR [--seed 7] [--scale 1.0] [--messy]
+    python scripts/build_estate_variant.py OUT_DIR [--seed 7] [--scale 1.0] [--messy] [--handoff]
 
 What changes per seed (so tests on several seeds prove nothing depends on one data set):
 
@@ -17,6 +17,12 @@ accented and non-Latin names, renamed users (new UPN, old SAM and alias), leaver
 (two EDR records, one serial), stale devices, hostname case and FQDN differences between tools, missing and null
 optional fields, epoch-millisecond timestamps, ServiceNow custom ``u_`` fields and untidy values, and a CVE no
 intelligence feed knows. With ``--scale`` it is the volume test estate (``scripts/measure_scale.py``).
+
+``--handoff`` builds the estate the organisation's data handoff workbook describes (docs/DATA_HANDOFF_RECONCILIATION.md):
+its naming (``example.invalid``, ``analyst.demo``, ``demo-laptop-01``), RFC 5737 documentation addresses for every
+address that is not private, the messy volume, and the workbook's scenarios that the storyline lacks - OAuth consent
+after the click (PHISH-02) and a routine consent, a contradicting EDR verdict (EDGE-01), a second person on the same
+public IP, a stale device re-using a host name and address (EDGE-02), and 1-3 % replayed records in shuffled order.
 
 The attack storyline stays the one the built-in estate models; everything around it varies. Output:
 ``fixtures/`` (+ ``settings.json``), ``corpus/`` (+ ``labels.json``), ``suppliers.yaml``, ``estate.json``.
@@ -120,6 +126,117 @@ def mapping_for(seed: int) -> tuple[list[tuple[str, str]], dict]:
     meta = {"seed": seed, "org_name": org_name, "org": dom, "netbios": nb, "supplier": supplier, "supplier_domain": supplier_dom,
             "lookalike_supplier": lookalike_supplier, "people_pool": list(zip(firsts[10:], lasts[10:]))}
     return m, meta
+
+
+def handoff_mapping() -> tuple[list[tuple[str, str]], dict]:
+    """The data handoff workbook's naming: organisation ``example.invalid``, people ``<role>.demo``, devices
+    ``demo-laptop-NN`` / ``demo-<role>-01``, internal networks and public addresses in RFC 5737 documentation ranges,
+    every outside domain under the reserved ``.invalid`` top-level domain."""
+    org, nb = "example.invalid", "EXAMPLE"
+    firsts = {"jane": "analyst", "bob": "other", "priya": "payables", "raj": "exec", "arun": "sales", "meera": "hr",
+              "tom": "legal", "li": "developer", "sunita": "ops", "anil": "infra"}
+    lasts = {k: "demo" for k in ("doe", "lee", "nair", "mehta", "chen", "iyer", "rao")}
+    m: list[tuple[str, str]] = [
+        ("Acme Human Resources", "Example Organisation Human Resources"), ("acmebackups", "examplebackups"),
+        ("Acme Production", "Example Organisation Production"), ("Acme Development", "Example Organisation Development"),
+        ("acme-demo.com", org), ("acme-dem0.com", "examp1e.invalid"), ("acme-demo", "example"), ("ACME", nb),
+        ("micros0ft-helpdesk.com", "m1crosoft-servicedesk.invalid"), ("micros0ft", "m1crosoft"),
+        ("185.220.101.4", "198.51.100.66"),
+        ("benefits-portal.payroll-update.support", "staff-benefits.salary-review.invalid"),
+        ("payroll-update.support", "salary-review.invalid"),
+        ("krishna-logistlcs.com", "merldian-freight.invalid"), ("krishna-logistics.com", "meridian-freight.invalid"),
+        ("Krishna Logistics", "Meridian Freight"), ("Global Freight Ltd", "Atlas Cargo Group"),
+        ("Global Freight", "Atlas Cargo"), ("global-freight-ltd.com", "atlas-cargo-group.invalid"),
+        ("SAP-Prod-Finance-Service", "Oracle-ERP-Payroll-Admin"), ("FS01-Finance-Backups", "DEMO-FS-01-Finance-Archive"),
+        ("JANE-LT01", "DEMO-LAPTOP-01"), ("BOB-LT02", "DEMO-LAPTOP-02"), ("PRIYA-LT07", "DEMO-LAPTOP-07"),
+        ("ARUN-LT05", "DEMO-LAPTOP-05"), ("MEERA-LT06", "DEMO-LAPTOP-06"), ("TOM-LT07", "DEMO-LAPTOP-08"),
+        ("LI-DEV08", "DEMO-DEV-01"), ("web01", "demo-web-01"), ("db01", "demo-db-01"), ("fs01", "demo-fs-01"),
+        ("10.20.1.", "192.0.2."), ("10.10.0.", "203.0.113."), ("203.0.113.10", "198.51.100.15"),
+        *firsts.items(), *lasts.items(),
+    ]
+    meta = {"seed": 0, "org_name": "Example Organisation", "org": org, "netbios": nb, "supplier": "Meridian Freight",
+            "supplier_domain": "meridian-freight.invalid", "lookalike_supplier": "merldian-freight.invalid",
+            "people_pool": [("Hannah", "Okafor"), ("Ravi", "Lindqvist")], "handoff": True}
+    return m, meta
+
+
+HANDOFF_BACKGROUND = {"dns": 760, "signins": 260, "blocked_threat_dns": 110}   # >= 1,000 events, ~85-90 % benign
+SECURITY_DNS = [("update-check.pkg-mirror.invalid", "Malware"), ("secure-login.verify-account.invalid", "Phishing"),
+                ("cdn.beacon-relay.invalid", "Command and Control"), ("miner.pool-stats.invalid", "Cryptomining")]
+
+
+def make_handoff(fx: dict, org: str, rng: random.Random, laptops: list[dict], extra: list[dict]) -> dict:
+    """The handoff workbook's scenarios that the storyline does not carry (see the module docstring). Returns counts."""
+    analyst, other = f"analyst.demo@{org}", f"other.demo@{org}"
+    ent, cs, umb = fx["entra"]["routes"], fx["crowdstrike"]["routes"], fx["umbrella"]["routes"]
+    # PHISH-02: the clicker grants an application access 15 minutes after the click; a routine consent by someone who
+    # never clicked is the negative case
+    audits = _route(ent, "GET", r"^/v1.0/auditLogs/directoryAudits$")["body"]["value"]
+    for i, (who, app, when) in enumerate([(analyst, "Invoice Viewer Pro", "2026-09-20T09:20:00Z"),
+                                          (other, "Meeting Notes Sync", "2026-09-19T14:00:00Z")]):
+        audits.append({"id": f"da-consent-{i + 1:03d}", "activityDateTime": when, "activityDisplayName": "Consent to application",
+                       "category": "ApplicationManagement", "result": "success", "correlationId": f"corr-consent-{i + 1:03d}",
+                       "initiatedBy": {"user": {"userPrincipalName": who}},
+                       "targetResources": [{"id": f"sp-handoff-{i + 1:03d}", "displayName": app, "type": "ServicePrincipal"}]})
+    # EDGE-01: Falcon closes a detection on the clicker's laptop as a false positive while Defender still reports it
+    ents = _route(cs, "POST", r"^/alerts/entities/alerts/v2$")["body"]["resources"]
+    src = next(a for a in ents if (a.get("device") or {}).get("hostname") == "DEMO-LAPTOP-01")
+    contra = {**json.loads(json.dumps(src)), "composite_id": src["composite_id"] + "-fp", "status": "closed",
+              "tags": ["false_positive"], "severity": 20, "display_name": "Low-confidence script activity (closed false positive)"}
+    ents.append(contra)
+    _route(cs, "GET", r"^/alerts/queries/alerts/v2$")["body"]["resources"].append(contra["composite_id"])
+    # EDGE-01: a second person signs in from the same public address (a shared office / NAT egress): two people, not one
+    signins = _route(ent, "GET", r"^/v1.0/auditLogs/signIns$")["body"]["value"]
+    base = next(s for s in signins if s.get("ipAddress") == "198.51.100.15")
+    signins.append({**json.loads(json.dumps(base)), "id": "si-shared-ip-001", "userPrincipalName": other,
+                    "userId": "u-other-shared", "createdDateTime": "2026-09-20T08:40:00Z",
+                    "deviceDetail": {"deviceId": "", "displayName": "", "isCompliant": True}})
+    # EDGE-02: a stale device re-uses the laptop's host name and address two months earlier (DHCP, re-issued name)
+    devs = _route(cs, "POST", r"^/devices/entities/devices/v2$")["body"]["resources"]
+    laptop = next(d for d in devs if d.get("hostname") == "DEMO-LAPTOP-01")
+    devs.append({**json.loads(json.dumps(laptop)), "device_id": "cs-aid-reuse-0001", "serial_number": "CZC9REUSE01",
+                 "mac_address": "00-1A-2B-9F-9F-01", "first_seen": "2025-11-02T08:00:00Z", "last_seen": "2026-07-15T08:00:00Z"})
+    _route(cs, "GET", r"^/devices/queries/devices-scroll/v1$")["body"]["resources"].append("cs-aid-reuse-0001")
+    # background volume (workbook: >= 1,000 events, 80-95 % benign): browsing, sign-ins (some failed), and threat
+    # categories the DNS layer blocked - suspicious but contained; times spread over the day plus 0-15 min ingest lag
+    dns = _route(umb, "GET", r"^/reports/v2/activity/dns$")["body"]["data"]
+    hosts = laptops or [{"hostname": "DEMO-LAPTOP-02", "ip": "192.0.2.22"}]
+
+    def at(i: int) -> str:
+        return f"2026-09-20T{6 + i % 13:02d}:{(i * 7) % 60:02d}:{(i * 13) % 60:02d}Z"
+
+    def dns_row(i: int, dom: str, cat: str, kind: str, verdict: str) -> dict:
+        h = hosts[i % len(hosts)]
+        return {"timestamp": at(i), "domain": dom, "verdict": verdict, "internalip": h["ip"], "externalip": "198.51.100.44",
+                "querytype": "A", "categories": [{"label": cat, "type": kind}],
+                "identities": [{"label": h["hostname"], "type": {"type": "roaming"}}]}
+
+    for i in range(HANDOFF_BACKGROUND["dns"]):
+        dom, cat = BENIGN_DNS[(i * 5 + 3) % len(BENIGN_DNS)]
+        dns.append(dns_row(i, dom, cat, "content", "allowed"))
+    for i in range(HANDOFF_BACKGROUND["blocked_threat_dns"]):
+        dom, cat = SECURITY_DNS[i % len(SECURITY_DNS)]
+        dns.append(dns_row(i * 3 + 1, dom, cat, "security", "blocked"))
+    people = [u["upn"] for u in extra] or [other]
+    for i in range(HANDOFF_BACKGROUND["signins"]):
+        failed = i % 17 == 0                                    # a mistyped password now and then: not a risk signal
+        signins.append({"id": f"si-bg-{i:04d}", "createdDateTime": at(i * 2 + 1), "userPrincipalName": people[i % len(people)],
+                        "userId": f"u-bg-{i % len(people):03d}", "appDisplayName": ["Office 365 Exchange Online", "Microsoft Teams",
+                        "SharePoint Online"][i % 3], "ipAddress": f"192.0.2.{30 + i % 60}", "clientAppUsed": "Browser",
+                        "status": {"errorCode": 50126 if failed else 0, "failureReason": "Invalid username or password" if failed else None},
+                        "location": {"city": "Kolkata", "countryOrRegion": "IN"}, "riskLevelDuringSignIn": "none",
+                        "riskState": "none", "conditionalAccessStatus": "success" if not failed else "notApplied",
+                        "deviceDetail": {"deviceId": "", "displayName": "", "isCompliant": True}, "isInteractive": True,
+                        "riskEventTypes_v2": []})
+    # 1-3 % replayed records, delivered out of order
+    dups = 0
+    for rows in (signins, _route(umb, "GET", r"^/reports/v2/activity/dns$")["body"]["data"]):
+        k = max(1, round(len(rows) * 0.02))
+        rows += [json.loads(json.dumps(r)) for r in rng.sample(rows, k)]
+        rng.shuffle(rows)
+        dups += k
+    return {"consents": 2, "contradicting_alerts": 1, "shared_ip_signins": 1, "reused_devices": 1, "replayed": dups,
+            **{f"background_{k}": v for k, v in HANDOFF_BACKGROUND.items()}}
 
 
 # ------------------------------------------------------------------------------------------------ helpers
@@ -285,7 +402,7 @@ def make_messy(fx: dict, extra: list[dict], laptops: list[dict], rng: random.Ran
 
 
 # ------------------------------------------------------------------------------------------------ main
-def main(out: str, seed: int = 7, scale: float = 1.0, messy: bool = False) -> Path:
+def main(out: str, seed: int = 7, scale: float = 1.0, messy: bool = False, handoff: bool = False) -> Path:
     rng = random.Random(seed * 7919)
     ren = _load("rename_estate")
     bf = _load("build_fixtures")
@@ -295,7 +412,8 @@ def main(out: str, seed: int = 7, scale: float = 1.0, messy: bool = False) -> Pa
     fb = _load("fixture_builders")
     for b in [bf.crowdstrike, *fb.BUILDERS]:
         b()
-    mapping, meta = mapping_for(seed)
+    mapping, meta = handoff_mapping() if handoff else mapping_for(seed)
+    messy = messy or handoff
     rx, table = ren.build_pattern(mapping)
     org, nb = meta["org"], meta["netbios"]
     dst = Path(out)
@@ -441,6 +559,7 @@ def main(out: str, seed: int = 7, scale: float = 1.0, messy: bool = False) -> Pa
                                            "params": {"ip": h["ip"]}, "body": {"data": rows}}])
 
     messy_stats = make_messy(fx, extra, laptops, rng, seed, org, nb, scale) if messy else None
+    handoff_stats = make_handoff(fx, org, rng, laptops, extra) if handoff else None
 
     for name, doc in fx.items():
         (dst / "fixtures" / f"{name}.json").write_text(json.dumps(doc, indent=1), encoding="utf-8")
@@ -488,8 +607,10 @@ def main(out: str, seed: int = 7, scale: float = 1.0, messy: bool = False) -> Pa
               "suppliers_file": str(dst / "suppliers.yaml"), "focus_upn": focus, "campaign_cve": "CVE-2021-44228",
               "phish_subject_token": "password expires", "uploads": sorted(uploads), "lead": f"soc.lead@{org}",
               "extra_users": len(extra), "extra_laptops": len(laptops), "extra_recipients": len(extra_rcpt),
-              "laptops_without_edr": sum(1 for h in laptops if not h["cs"] and not h["mde"]), "messy": messy_stats,
+              "laptops_without_edr": sum(1 for h in laptops if not h["cs"] and not h["mde"]), "messy": messy_stats, "handoff": handoff_stats,
               "original_tokens": ["jane", "acme", "krishna", "micros0ft", "web01", "sap-prod", "185.220.101.4"]}
+    if handoff:
+        estate["lead"] = f"soc.lead@{org}"
     (dst / "estate.json").write_text(json.dumps(estate, indent=1), encoding="utf-8")
     shutil.rmtree(tmp, ignore_errors=True)
     return dst
@@ -501,5 +622,6 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--messy", action="store_true", help="add real-tenant disorder and event volume")
+    ap.add_argument("--handoff", action="store_true", help="the data handoff workbook's estate (naming, addresses, scenarios)")
     a = ap.parse_args()
-    print(main(a.out, a.seed, a.scale, a.messy))
+    print(main(a.out, a.seed, a.scale, a.messy, a.handoff))

@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from soc_platform.connectors.base import Page
+from soc_platform.connectors.base import LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import Watermark, need, parse_ts, sev_name, source_verdict
-from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport
+from soc_platform.connectors.tools._common import Watermark, need, ok_lookup, parse_ts, sev_name, source_verdict
+from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, graph_transport, kql_str
 from soc_platform.core.identity import is_builtin, user_ref
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -34,6 +34,7 @@ class DefenderIdentityConnector(MicrosoftConnector):
     tool = "defender_identity"
     dimension = "identity"
     streams = ("alerts", "logon_events")
+    lookups = ("user", "ip")
     read_scopes = ("SecurityAlert.Read.All", "ThreatHunting.Read.All")
     write_scopes = ()
 
@@ -72,6 +73,28 @@ class DefenderIdentityConnector(MicrosoftConnector):
         if len(rows) >= self.page_size and wm.best is not None and wm.best != before:
             return Page(rows, "at:" + wm.finish()[6:], has_more=True)
         return Page(rows, wm.finish(), has_more=False, reset=True)
+
+    def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
+        """Domain logons of one person or from one address in the investigation window - logon events are read on
+        demand like this, never bulk-synced (every domain logon of a tenant is far too much to store)."""
+        def run() -> LookupResult:
+            if entity_type == "user":
+                sam = value.split("@")[0]
+                cond = f"AccountUpn =~ {kql_str(value)} or AccountName =~ {kql_str(sam)}"
+            elif entity_type == "ip":
+                cond = f"IPAddress == {kql_str(value)}"
+            else:
+                raise ValueError(entity_type)
+            since = context.get("since")
+            when = f"Timestamp >= datetime({since})" if since else "Timestamp > ago(7d)"
+            rows = self.graph_hunt(f"IdentityLogonEvents | where {when} | where {cond}\n"
+                                   f"| order by Timestamp asc | take 200\n| project {LOGON_COLUMNS}")
+            recs = [r for row in rows for r in self.normalize("logon_events", row)]
+            failed = sum(1 for r in rows if str(r.get("ActionType") or "").lower() == "logonfailed")
+            return ok_lookup(self, recs, f"{len(rows)} domain logon(s), {failed} failed",
+                             domain_logons=len(rows), failed_logons=failed)
+
+        return self.timed_lookup(run)
 
     def normalize(self, stream: str, raw: dict[str, Any]) -> list[NormalizedRecord]:
         if stream == "alerts":

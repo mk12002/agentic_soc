@@ -146,8 +146,16 @@ def test_activity_decays_by_half_every_half_life_but_open_exposure_does_not(sess
         far_days = max(eng.window.days + 1, HALF_LIFE_DAYS * (math.log2(heaviest / NEGLIGIBLE) + 1))   # +1 half-life: stored to 2 dp
         latest = max([now, *(datetime.fromisoformat(f.when) for f in p0.factors if f.when)])
         far = RiskEngine(session, as_of=latest + timedelta(days=far_days)).profile(top.entity_id)
-        for f0, f1 in zip(p0.factors, p1.factors, strict=True):
-            assert f0.signal == f1.signal
+        # a half-life later an activity older than the window has left it (fixture data is dated, processing stamps the
+        # wall clock - so the gap grows with the calendar): such a factor may be gone, nothing else may change
+        later = {(f.signal, f.ref): f for f in p1.factors}
+        start1 = now + timedelta(days=HALF_LIFE_DAYS) - eng.window
+        for f0 in p0.factors:
+            f1 = later.get((f0.signal, f0.ref))
+            if f1 is None:
+                # (an amplifier has no time of its own: it leaves with the activity that triggered it)
+                assert f0.signal not in STANDING and (not f0.when or datetime.fromisoformat(f0.when) < start1), f0
+                continue
             if f0.signal in STANDING:                                             # counts in full while open
                 assert f0.decayed == f1.decayed == f0.weight, f0.signal
             elif f0.decayed:                                                      # activity and its amplifiers fade

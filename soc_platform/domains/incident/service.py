@@ -32,6 +32,8 @@ from soc_platform.llm.gateway import LLMGateway, deterministic_grounded
 
 AGENT = "incident"
 ALERT_STREAMS = {"alerts", "incidents", "risk_detections", "email_alerts"}
+# directory changes are few and security-relevant (role grants, application consent, inbox rules): synced with alerts
+AUDIT_STREAMS = {"entra": ("directory_audits",)}
 INVENTORY_STREAMS = {"entra": ("users",), "crowdstrike": ("hosts",), "defender_endpoint": ("machines",)}
 ALERT_KINDS = {"alert", "deception"}
 SEV = ["informational", "low", "medium", "high", "critical"]
@@ -69,7 +71,8 @@ class IncidentService:
         enabled = self.registry.enabled()
         # Directory and inventory are ingested first, so alert references resolve against known users/hosts; every
         # stream downloads at the same time (sync_many), ingestion keeps this order.
-        inventory = [(c, st) for c in enabled for st in c.streams if st in INVENTORY_STREAMS.get(c.name, ())]
+        inventory = [(c, st) for c in enabled for st in c.streams if st in INVENTORY_STREAMS.get(c.name, ())
+                     or st in AUDIT_STREAMS.get(c.name, ())]
         alerts = [(c, st) for c in enabled for st in c.streams if st in ALERT_STREAMS]
         for (c, stream), rep in zip(inventory + alerts, runner.sync_many(inventory + alerts), strict=True):
             synced[f"{c.name}.{stream}"] = rep.ingested

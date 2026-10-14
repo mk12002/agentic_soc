@@ -27,6 +27,9 @@ explanatory narrative but never produces a figure, verdict, score or decision.
 | 4 | [AI / LLM security](04_AI_LLM_SECURITY.md) | Model hosting, what data the model sees, access restrictions, safeguards against unauthorised actions, cost and abuse controls, the offline phishing ML models |
 | 5 | [Security risk and governance](05_SECURITY_RISK_AND_GOVERNANCE.md) | Risk assessment, RBAC, audit logging, monitoring, human approval controls, security testing performed |
 | 6 | [Deployment and validation](06_DEPLOYMENT_AND_VALIDATION.md) | Controlled pilot, integration prerequisites, testing methodology, success criteria, rollback procedures |
+| 7 | [Use-case mapping](07_USE_CASE_MAPPING.md) | For the customer presentation: phishing, incident and vulnerability challenges mapped to planned capabilities and expected benefits |
+| 8 | [Architecture and data flow overview](08_ARCHITECTURE_AND_DATA_FLOW_OVERVIEW.md) | For the customer presentation: one-view architecture, data flow, AI components, analyst control, external transfers |
+| 9 | [Development roadmap and readiness](09_DEVELOPMENT_ROADMAP_AND_READINESS.md) | For the customer presentation: current status, planned capabilities, roadmap, dependencies, next steps |
 
 Diagrams are in [`diagrams/`](diagrams/) as SVG (scalable, open in any browser). A Word edition - one independent .docx per
 document, each readable on its own - is generated with `python scripts/build_review_pack.py` (it embeds the diagrams
@@ -58,7 +61,7 @@ estimated. The supporting detail is in the repository:
 | Test rounds and results | `docs/TEST_REPORT.md`, `docs/FEATURE_VERIFICATION.md` |
 | Requirement-by-requirement coverage | `docs/REQUIREMENTS_TRACEABILITY.md` |
 
-Latest verification at the time of writing (`docs/TEST_REPORT.md`): 682 platform tests passing on SQLite and on
+Latest verification at the time of writing (`docs/TEST_REPORT.md`): 706 platform tests passing on SQLite and on
 PostgreSQL 16, 205 phishing ML engine tests, 108 of 108 features verified (including a browser tour, live public feeds
 and a live LLM), static security analysis (bandit) and dependency audit (pip-audit) with no findings.
 

@@ -10,6 +10,7 @@ fixture transport keyed by path prefix.
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -40,6 +41,7 @@ SOURCES: dict[str, dict[str, Any]] = {
 
 
 # Suffixes that name a private network, never a public internet host.
+DOC_NETS = tuple(ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"))
 PRIVATE_SUFFIXES = (".local", ".lan", ".internal", ".intranet", ".corp", ".home", ".home.arpa", ".localdomain")
 
 
@@ -49,7 +51,6 @@ def internal_indicator(ioc_type: str, value: str, org_domains: list[str] | tuple
     Third-party sources receive what they are asked about. A private or reserved address, a single-label or
     private-suffix host name, and anything under the organisation's own domains describe the organisation, not an
     attacker: asking about them would disclose its internal structure and gives no reputation answer anyway."""
-    import ipaddress
     from urllib.parse import urlsplit
 
     v = str(value or "").strip()
@@ -67,6 +68,10 @@ def internal_indicator(ioc_type: str, value: str, org_domains: list[str] | tuple
     except ValueError:
         ip = None
     if ip is not None:
+        # documentation ranges (RFC 5737 / RFC 3849) belong to no organisation: Python calls them "private", but asking
+        # about one discloses nothing (synthetic test estates use them for outside addresses)
+        if any(ip in n for n in DOC_NETS):
+            return None
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
             return "private or reserved address"
         return None

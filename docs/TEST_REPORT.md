@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-12 (rounds 15-22; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-14 (rounds 15-23; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,34 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 22 (2026-10-12) - latest results: the organisation's data handoff workbook, reconciled connector by connector
+## 0. Round 23 (2026-10-14) - latest results: the data handoff workbook's own estate, and what it exposed
+
+Aim: test the platform on data built to the organisation's data handoff workbook rules, not only on the presenter demo.
+A fourth test estate (`build_estate_variant.py --handoff`) carries the workbook's naming (`example.invalid`,
+`analyst.demo`, `demo-laptop-01`), only private and RFC 5737 addresses, the full storyline plus the workbook scenarios
+it lacked (OAuth consent after the click and a routine consent, a contradicting EDR verdict, two people on one public
+IP, a stale device re-using a host name and address), and real-tenant volume. Measured through the connectors' own
+parsers (`scripts/estate_profile.py`): **1,279 activity events, 89.5 % benign, 1.95 % replayed records**, delivered
+out of order. Every multi-estate test now also runs on it, and `test_handoff_estate.py` checks the rules and each
+scenario's ground truth. Results on the final code:
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **706 passed**, 0 failed, 16 skipped (722 collected) |
+| Platform suite on PostgreSQL 16 | **706 passed**, 0 failed, 16 skipped |
+| Demo seed | unchanged: 7 phishing + 3 incident cases, 34 recommended actions, 6 open vulnerabilities |
+
+What the estate exposed, each fixed with a test:
+
+| Finding | Effect | Fix |
+|---|---|---|
+| No scheduled job synced Entra directory audits | the consent-after-phishing rule could never fire in production | directory audits are synced with the alerts (`IncidentService.AUDIT_STREAMS`) |
+| Defender for Identity had no look-up | its domain logons were never used as evidence | per-person / per-address look-up (`IdentityLogonEvents`, investigation window) |
+| RFC 5737 documentation addresses counted as "private" | an attacker address in a synthetic estate was never checked against threat intelligence | documentation ranges are outside addresses; real private ranges still withheld |
+| Switching estates in a test kept the learned record shapes | a shape learned on another estate's fixtures disabled type coercion for later tests | `estate_env` resets the shapes |
+| The decay test compared two points in time strictly | it failed once the calendar passed 23 days after the fixture date (activity leaves the risk window) | a factor may leave only if its activity left the window |
+
+## Round 22 (2026-10-12): the organisation's data handoff workbook, reconciled connector by connector
 
 Aim: line the platform up with the organisation's security tool data types handoff workbook (13 tool families, 38
 synthetic payload types, 17 correlation rules, 8 acceptance scenarios, generation rules, 21 integration rows) and make

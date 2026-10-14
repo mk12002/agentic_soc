@@ -56,9 +56,9 @@ All 38 payload rows. Field names on the right are the vendor fields the connecto
 | Defender for Endpoint `device_network_event`, `device_process_event`, `device_file_event` | advanced hunting (`DeviceNetworkEvents`, `DeviceProcessEvents`, `DeviceFileEvents`) | Aligned (on demand) | queried for a case's host and indicators during enrichment |
 | Defender for Endpoint `duplicate_network_event` | ingestion | Aligned | a replayed record is ignored by its source id; every pipeline is run twice in tests and changes nothing |
 | Defender for Identity `identity_alert` | `defender_identity.alerts` (Graph alerts_v2) | Aligned | AlertId → `id`; AccountSid → `userEvidence.userAccount.userSid`; AccountUpn → `userPrincipalName`; DeviceName → `deviceEvidence.deviceDnsName`; IPAddress → `ipEvidence`; Timestamp → `createdDateTime` |
-| Defender for Identity `identity_logon_event` | `defender_identity.logon_events` (`IdentityLogonEvents`) | Aligned | Timestamp, AccountSid, AccountUpn, DeviceName, DomainController → `DestinationDeviceName`, ActionType, LogonType, Protocol, IPAddress, FailureReason; evidence only, raises no risk on its own |
+| Defender for Identity `identity_logon_event` | `IdentityLogonEvents` on demand (look-up per person / address); `defender_identity.logon_events` stream for an explicit sync | Aligned (on demand) | Timestamp, AccountSid, AccountUpn, DeviceName, DomainController → `DestinationDeviceName`, ActionType, LogonType, Protocol, IPAddress, FailureReason; evidence only, raises no risk on its own |
 | Entra `signin_log` | `entra.signins` | Partial | id, userId, userPrincipalName, ipAddress, appId, correlationId, createdDateTime, status.errorCode, riskLevelDuringSignIn, conditionalAccessStatus, appDisplayName, authenticationRequirement. `mfaResult` is not a Graph v1.0 sign-in field (per-method MFA detail is beta-only) and is not read |
-| Entra `audit_event` | `entra.directory_audits` | Aligned | id, activityDisplayName, initiatedBy.user, targetResources, activityDateTime, category, result |
+| Entra `audit_event` | `entra.directory_audits` (synced with the alerts: few, and security-relevant) | Aligned | id, activityDisplayName, initiatedBy.user, targetResources, activityDateTime, category, result |
 | Entra `consent_audit_event` | `entra.directory_audits` | Aligned | "Consent to application" recorded with the application(s) and correlationId; rule `consent_after_phishing` (section 5, PHISH-02) |
 | Entra `benign_signin` | `entra.signins` | Aligned | informational, no risk factor |
 | Wiz `cloud_finding` | `wiz.vulnerabilities` (+ `wiz.resources`) | Aligned | findingId → `id`; resourceId → vulnerable asset id; cve; severity / score; publicExposure → `hasWideInternetExposure`; detectedAt → `firstDetectedAt`; fixedVersion; resource name, type, region and cloud account from the resource record |
@@ -126,14 +126,21 @@ indicators keep their type; tickets keep their number and sys_id.
 
 ## 6. Generation rules (sheet "Final Generation Rules")
 
+The **workbook estate** is generated to these rules: `python scripts/build_estate_variant.py OUT --handoff`. It is the
+fourth test estate (`ESTATES` in the test suite), so every multi-estate test - re-runs change nothing, the same figure on
+every surface, LLM on / off identical, the attack story, time travel, no demo names leaking - also runs on it, and
+`test_handoff_estate.py` checks the rules below and each scenario's ground truth on it. Measured through the connectors'
+own parsers (`python scripts/estate_profile.py OUT/fixtures example.invalid`): **1,279 activity events, 89.5 % benign,
+1.95 % replayed records**.
+
 | Rule | Platform |
 |---|---|
-| Fictional data only | the demo organisation is fictional (Acme, `acme-demo.com`) and variant estates are generated; the built-in fixtures use private and documentation address ranges plus a few public addresses as indicators. **Open:** the workbook asks for `example.invalid` and RFC 5737 addresses only - a workbook-conformant estate is not built yet (section 7) |
+| Fictional data only | workbook estate: organisation `example.invalid`, people `analyst.demo`, `other.demo` ..., devices `demo-laptop-01` ..., every outside domain under `.invalid`, every address private or RFC 5737 - checked over all its fixtures (`test_every_address_and_mailbox_is_reserved_for_testing`). The presenter demo stays the fictional Acme organisation |
 | ISO 8601 UTC canonical times; vendor formats kept raw | canonical times are aware UTC; raw payloads are stored encrypted as received; odd vendor times are read or treated as absent |
 | Canonical ids separate from vendor ids | section 4 |
 | Multi-key correlation, never IP / host name / CVE alone | section 3 |
-| ≥ 1,000 events; 80-95 % benign | `build_estate_variant.py --messy --scale N` adds sign-in, DNS and low-severity alert volume; the benign share is not a set parameter |
-| 0-15 minute ingest lag, late and out-of-order records | the watermark overlap re-reads late records (default 30 minutes) |
+| ≥ 1,000 events; 80-95 % benign | workbook estate: 1,279 events, 89.5 % benign (browsing, sign-ins incl. failed logons, DNS threat categories blocked) - `test_the_estate_carries_the_workbook_volume_benign_share_and_replays` |
+| 0-15 minute ingest lag, late and out-of-order records | workbook estate: records delivered shuffled, 1.95 % replayed; live syncs re-read late records through the watermark overlap (default 30 minutes) |
 | Nulls, duplicate retries, inconsistent verdicts, shared IP, reused host name, API error, pagination | conformance suite (every field missing / null / wrong-typed, 429 / 401 / 403, paging and resume for every stream), section 5 |
 | Ground truth per scenario | section 5 (each scenario's expected outcome is a test) |
 | Phishing: a clicked message is not also blocked before the click; later actions only recommended | click logic in section 2; remediation is an action request (L2) |
@@ -143,9 +150,7 @@ indicators keep their type; tickets keep their number and sys_id.
 
 ## 7. Open items
 
-1. **A workbook-conformant synthetic estate** (the workbook's own entity catalog: `example.invalid`, RFC 5737
-   addresses, the PHISH-01 ... EDGE-03 chains, ≥ 1,000 events with a configurable benign share and 1-3 % duplicates)
-   is not generated yet. The behaviour each scenario expects is tested on the built-in and generated estates.
+1. ~~Workbook-conformant synthetic estate~~ - built (section 6).
 2. **Partial fields** (section 2): Entra `mfaResult`, Umbrella policy name, Secret Server checkout expiry, Privilege
    Manager policyId / approvedBy, ServiceNow state history, Rapid7 scan runs. None is used by a workflow decision.
 3. **Generic SIEM push direction**: the workbook row says outbound; the platform's is inbound (section 1).
