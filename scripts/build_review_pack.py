@@ -84,7 +84,7 @@ def add_table(doc, rows: list[list[str]]) -> None:
         cells = t.add_row().cells
         for i in range(cols):
             cells[i].text = ""
-            add_runs(cells[i].paragraphs[0], (row[i] if i < len(row) else "").strip())
+            add_runs(cells[i].paragraphs[0], (row[i] if i < len(row) else "").strip().replace("<br>", "\n"))
     # widths follow content: a short "#" or "Status" column should not take as much room as "Controls in place"
     all_rows = ([] if blank_header else [header]) + body
     weight = [max(7, min(60, max((len(r[c].strip()) if c < len(r) else 0) for r in all_rows))) for c in range(cols)]
@@ -99,9 +99,20 @@ def add_table(doc, rows: list[list[str]]) -> None:
     doc.add_paragraph()
 
 
+def restart_numbering(doc, par) -> str:
+    """Give a numbered list its own sequence starting at 1 (python-docx otherwise numbers every list in a document as
+    one); returns the numId the rest of the list must carry."""
+    numbering = doc.part.numbering_part.numbering_definitions._numbering
+    abstract = numbering.num_having_numId(par.style.element.pPr.numPr.numId.val).abstractNumId.val
+    num = numbering.add_num(abstract)
+    num.add_lvlOverride(ilvl=0).add_startOverride(1)
+    return str(num.numId)
+
+
 def convert(md: Path, doc, pngs: dict[str, Path]) -> None:
     lines = md.read_text(encoding="utf-8").splitlines()
     i = 0
+    list_num = None                                  # numId of the numbered list in progress; a heading ends it
     while i < len(lines):
         line = lines[i]
         if line.startswith("```"):
@@ -129,6 +140,7 @@ def convert(md: Path, doc, pngs: dict[str, Path]) -> None:
                 cap.runs[0].italic = True
         elif m := re.match(r"^(#{1,4})\s+(.*)", line):
             doc.add_heading(m.group(2), level=min(len(m.group(1)) - 1, 3) if len(m.group(1)) > 1 else 0)
+            list_num = None
         elif re.match(r"^\s*[-*]\s+", line) or re.match(r"^\s*\d+\.\s+", line):
             numbered = bool(re.match(r"^\s*\d+\.\s+", line))
             text = re.sub(r"^\s*(?:[-*]|\d+\.)\s+", "", line)
@@ -136,7 +148,12 @@ def convert(md: Path, doc, pngs: dict[str, Path]) -> None:
             while i + 1 < len(lines) and re.match(r"^\s{2,}\S", lines[i + 1])                     and not re.match(r"^\s*(?:[-*]|\d+\.)\s+", lines[i + 1]):
                 i += 1
                 text += " " + lines[i].strip()           # a wrapped list item continues on indented lines
-            add_runs(doc.add_paragraph(style="List Number" if numbered else "List Bullet"), text)
+            nested = " 2" if len(line) - len(line.lstrip()) >= 2 else ""   # an indented item sits under its parent
+            item = doc.add_paragraph(style=("List Number" if numbered else "List Bullet") + nested)
+            if numbered and not nested:
+                list_num = list_num or restart_numbering(doc, item)
+                item._p.get_or_add_pPr().get_or_add_numPr().get_or_add_numId().val = int(list_num)
+            add_runs(item, text)
         elif line.strip():
             par = [line.strip()]
             while i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r"^(\||#|```|!\[|\s*[-*]\s|\s*\d+\.\s)", lines[i + 1]):

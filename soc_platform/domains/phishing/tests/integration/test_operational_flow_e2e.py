@@ -44,7 +44,7 @@ class _FakeRedis:
     def get(self, key: str) -> str | None:
         return self.store.get(key)
 
-    def set(self, key: str, value: str) -> None:
+    def set(self, key: str, value: str, ex: int | None = None) -> None:
         self.store[key] = value
 
     def setex(self, key: str, _ttl: int, value: str) -> None:

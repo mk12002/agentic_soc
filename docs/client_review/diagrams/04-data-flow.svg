@@ -50,7 +50,7 @@
   <rect x="270" y="210" width="310" height="96" rx="10" class="box"/><circle cx="292" cy="232" r="12" fill="#15803d"/><text x="287" y="237" class="n">5</text>
   <text x="312" y="237" class="t">Narrative (optional LLM)</text><text x="284" y="260" class="s">evidence pseudonymised → organisation's LLM</text><text x="284" y="276" class="s">gateway → cited answer checked → names</text><text x="284" y="292" class="s">restored for authorised readers only</text>
   <rect x="610" y="210" width="300" height="96" rx="10" class="box"/><circle cx="632" cy="232" r="12" fill="#2f6bb3"/><text x="627" y="237" class="n">6</text>
-  <text x="652" y="237" class="t">Correlate &amp; report</text><text x="624" y="260" class="s">risk, 12 rules, attack story;</text><text x="624" y="276" class="s">reports and evidence packs built</text><text x="624" y="292" class="s">from the same records</text>
+  <text x="652" y="237" class="t">Correlate &amp; report</text><text x="624" y="260" class="s">risk, 13 rules, attack story;</text><text x="624" y="276" class="s">reports and evidence packs built</text><text x="624" y="292" class="s">from the same records</text>
   <rect x="940" y="210" width="240" height="96" rx="10" class="box"/><circle cx="962" cy="232" r="12" fill="#2f6bb3"/><text x="957" y="237" class="n">7</text>
   <text x="982" y="237" class="t">Present</text><text x="954" y="260" class="s">console; notifications (finding</text><text x="954" y="276" class="s">title, severity, next steps, link);</text><text x="954" y="292" class="s">audit export to the SIEM</text>
 

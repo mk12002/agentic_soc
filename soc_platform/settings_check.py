@@ -23,6 +23,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 
@@ -217,6 +218,15 @@ def check_environment(env: Mapping[str, str] | None = None) -> list[SettingProbl
             near = difflib.get_close_matches(name, names, n=1, cutoff=0.75)
             out.append(SettingProblem("warning", name, "not a setting of this platform: it is ignored",
                                       f"did you mean {near[0]}?" if near else ""))
+            continue
+        if name.endswith("_FILE") and name not in SPEC and name not in TEXT and raw.strip():
+            # a vault-mounted secret: a wrong path would silently leave the secret empty
+            p = Path(raw.strip())
+            if not p.is_file():
+                out.append(SettingProblem("error", name, f"the secret file {raw.strip()} does not exist",
+                                          "mount the secret there, or correct the path"))
+            elif not p.read_text(encoding="utf-8", errors="ignore").strip():
+                out.append(SettingProblem("error", name, "the secret file is empty", "write the secret into the file"))
             continue
         if raw.strip() == "" or name.endswith("_FILE"):
             continue

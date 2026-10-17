@@ -483,6 +483,7 @@ IP plan, suppliers and volumes.
 
 ```powershell
 python scripts\build_estate_variant.py out\veridian --seed 7           # --seed 23 gives another one; --scale 3 a bigger one
+python scripts\build_estate_variant.py out\handoff --handoff          # the client's data handoff workbook estate (example.invalid)
 (Get-Content out\veridian\estate.json | ConvertFrom-Json).org            # -> veridianfoods-demo.com
 $env:SOC_FIXTURES_DIR = "out\veridian\fixtures"
 $env:SOC_SUPPLIERS_FILE = "out\veridian\suppliers.yaml"

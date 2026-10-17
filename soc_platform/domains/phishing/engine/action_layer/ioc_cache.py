@@ -250,7 +250,7 @@ class MultiTierIOCCache:
             if redis:
                 tier_obj = self.TIERS[tier]
                 redis_key = f"{self.cache_prefix}{cache_key}"
-                redis.setex(redis_key, tier_obj.ttl_seconds, json.dumps(entry))
+                redis.set(redis_key, json.dumps(entry), ex=tier_obj.ttl_seconds)
             
             logger.debug(
                 "IOC cached",

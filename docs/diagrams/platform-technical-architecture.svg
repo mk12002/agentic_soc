@@ -1,0 +1,277 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1090" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <marker id="w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
+    <style>
+      .zone{fill:#f1f5f9;stroke:#94a3b8;stroke-dasharray:6 4}
+      .zoneb{fill:#eef4ff;stroke:#7ea2d6;stroke-dasharray:6 4}
+      .zoned{fill:#f3f0ff;stroke:#a495d6;stroke-dasharray:6 4}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .key{fill:#ffffff;stroke:#2563eb;stroke-width:1.5}
+      .gov{fill:#fff7ed;stroke:#c2410c;stroke-width:1.5}
+      .ext{fill:#fff7e8;stroke:#c2410c;stroke-width:1.2}
+      .no{fill:#fef2f2;stroke:#b91c1c;stroke-width:1.2}
+      .bar{fill:#1e293b}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .z{fill:#334155;font-weight:600;font-size:13px}
+      .w{fill:#ffffff;font-weight:600;font-size:12.5px}
+      .n{fill:#ffffff;font-weight:700;font-size:12px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .write{stroke:#c2410c;stroke-width:2.2;fill:none;marker-end:url(#w)}
+      .dash{stroke:#475569;stroke-width:1.3;fill:none;stroke-dasharray:5 4;marker-end:url(#a)}
+      .lbl{fill:#1e293b;font-size:11.5px;font-weight:600}
+      .wl{fill:#c2410c;font-size:11.5px;font-weight:700}
+    </style>
+  </defs>
+  <rect width="1600" height="1090" fill="#ffffff"/>
+  <text x="30" y="34" class="h" font-size="20">Agentic SOC platform - technical architecture (production, in the client's environment)</text>
+  <text x="30" y="56" class="s">Layers depend downwards only (API → intelligence → workflows → core → connectors). Arrows start at the side that opens the connection. Orange = the only path that can change a security tool.</text>
+
+  <!-- ===================== client services (left) -->
+  <rect x="20" y="70" width="250" height="790" rx="12" class="zone"/>
+  <text x="34" y="92" class="z">Client environment services</text>
+  <rect x="36" y="104" width="218" height="80" rx="8" class="box"/>
+  <text x="48" y="127" class="t">SOC users (browser)</text>
+  <text x="48" y="146" class="s">analyst · lead · automation admin</text>
+  <text x="48" y="162" class="s">· admin · auditor, scoped per</text>
+  <text x="48" y="178" class="s">domain (phishing / incident / VM)</text>
+  <rect x="36" y="200" width="218" height="96" rx="8" class="box"/>
+  <text x="48" y="223" class="t">Microsoft Entra ID</text>
+  <text x="48" y="242" class="s">OIDC code flow + PKCE;</text>
+  <text x="48" y="258" class="s">MFA by Conditional Access;</text>
+  <text x="48" y="274" class="s">app roles SOC.Role.Domain;</text>
+  <text x="48" y="290" class="s">RS256 tokens (JWKS)</text>
+  <rect x="36" y="312" width="218" height="80" rx="8" class="box"/>
+  <text x="48" y="335" class="t">Key Vault</text>
+  <text x="48" y="354" class="s">every secret mounted as a file</text>
+  <text x="48" y="370" class="s">(*_FILE); never in config, the</text>
+  <text x="48" y="386" class="s">database or the console</text>
+  <rect x="36" y="408" width="218" height="112" rx="8" class="box"/>
+  <text x="48" y="431" class="t">SIEM (e.g. Sentinel)</text>
+  <text x="48" y="450" class="s">receives JSON logs, access log</text>
+  <text x="48" y="466" class="s">and the audit export; may push</text>
+  <text x="48" y="482" class="s">alerts in (API key, analyst role,</text>
+  <text x="48" y="498" class="s">incident domain); replays</text>
+  <text x="48" y="514" class="s">de-duplicated</text>
+  <rect x="36" y="536" width="218" height="80" rx="8" class="box"/>
+  <text x="48" y="559" class="t">Teams / Slack / webhook</text>
+  <text x="48" y="578" class="s">findings above a threshold;</text>
+  <text x="48" y="594" class="s">HTTPS only, set in settings,</text>
+  <text x="48" y="610" class="s">URL never logged or shown</text>
+  <rect x="36" y="632" width="218" height="80" rx="8" class="box"/>
+  <text x="48" y="655" class="t">Monitoring</text>
+  <text x="48" y="674" class="s">/health (scheduler, audit chain,</text>
+  <text x="48" y="690" class="s">self-check) · /metrics</text>
+  <text x="48" y="706" class="s">(Prometheus, auditor key)</text>
+  <rect x="36" y="728" width="218" height="116" rx="8" class="box"/>
+  <text x="48" y="751" class="t">Network rules</text>
+  <text x="48" y="770" class="s">inbound: only the proxy reaches</text>
+  <text x="48" y="786" class="s">:8080 (+ optional SIEM push);</text>
+  <text x="48" y="802" class="s">outbound: per-connector hosts,</text>
+  <text x="48" y="818" class="s">the LLM gateway, Entra -</text>
+  <text x="48" y="834" class="s">an explicit allow-list</text>
+
+  <!-- ===================== platform (centre) -->
+  <rect x="290" y="70" width="940" height="790" rx="12" class="zoneb"/>
+  <text x="306" y="92" class="z">Agentic SOC platform - containers on a VM or Kubernetes; non-root images; API stateless, scheduler leases</text>
+  <rect x="306" y="104" width="908" height="42" rx="8" class="bar"/>
+  <text x="320" y="130" class="w">TLS reverse proxy + WAF (client's: App Gateway / Front Door / on-premises) → API :8080 · X-Forwarded-For trusted from the proxy only</text>
+
+  <!-- API layer -->
+  <rect x="306" y="158" width="908" height="122" rx="10" class="zoned"/>
+  <text x="320" y="178" class="z">API service (FastAPI, one process per core) and web console</text>
+  <rect x="318" y="188" width="212" height="82" rx="8" class="box"/>
+  <text x="330" y="209" class="t">Request guard</text>
+  <text x="330" y="227" class="s">30 MB body cap, NUL and size</text>
+  <text x="330" y="243" class="s">checks, rate limit 20/s burst 120,</text>
+  <text x="330" y="259" class="s">security headers, access log</text>
+  <rect x="542" y="188" width="212" height="82" rx="8" class="box"/>
+  <text x="554" y="209" class="t">Authentication</text>
+  <text x="554" y="227" class="s">Entra JWT (exp + iat required),</text>
+  <text x="554" y="243" class="s">API keys (machines), sealed</text>
+  <text x="554" y="259" class="s">break-glass; revocation list</text>
+  <rect x="766" y="188" width="212" height="82" rx="8" class="box"/>
+  <text x="778" y="209" class="t">Authorisation</text>
+  <text x="778" y="227" class="s">role permissions + domain scope;</text>
+  <text x="778" y="243" class="s">step-up MFA; human-only perms;</text>
+  <text x="778" y="259" class="s">out-of-scope records answer 404</text>
+  <rect x="990" y="188" width="212" height="82" rx="8" class="box"/>
+  <text x="1002" y="209" class="t">Web console</text>
+  <text x="1002" y="227" class="s">vanilla JS, strict CSP, no inline</text>
+  <text x="1002" y="243" class="s">handlers, every value escaped;</text>
+  <text x="1002" y="259" class="s">one DB session per request</text>
+
+  <!-- workflows + intelligence -->
+  <rect x="306" y="294" width="218" height="124" rx="8" class="key"/>
+  <text x="318" y="316" class="t">Phishing</text>
+  <text x="318" y="335" class="s">reported mail → decompose →</text>
+  <text x="318" y="351" class="s">rules + offline ML engine →</text>
+  <text x="318" y="367" class="s">verdict, campaign scope, who</text>
+  <text x="318" y="383" class="s">clicked, endpoint / identity</text>
+  <text x="318" y="399" class="s">impact → recommendations</text>
+  <rect x="536" y="294" width="218" height="124" rx="8" class="key"/>
+  <text x="548" y="316" class="t">Incident</text>
+  <text x="548" y="335" class="s">alerts + directory audits →</text>
+  <text x="548" y="351" class="s">clusters per host / person →</text>
+  <text x="548" y="367" class="s">parallel enrichment → rule-</text>
+  <text x="548" y="383" class="s">based severity, MITRE, tool</text>
+  <text x="548" y="399" class="s">disagreement → recommendations</text>
+  <rect x="766" y="294" width="218" height="124" rx="8" class="key"/>
+  <text x="778" y="316" class="t">Vulnerability</text>
+  <text x="778" y="335" class="s">4 scanners → one finding per</text>
+  <text x="778" y="351" class="s">host + CVE → CVSS/EPSS/KEV/</text>
+  <text x="778" y="367" class="s">exposure priority → owner,</text>
+  <text x="778" y="383" class="s">campaign, verified fix, time-</text>
+  <text x="778" y="399" class="s">bound exceptions (four-eyes)</text>
+  <rect x="996" y="294" width="218" height="124" rx="8" class="key"/>
+  <text x="1008" y="316" class="t">Intelligence and reporting</text>
+  <text x="1008" y="335" class="s">risk per person / host, 13</text>
+  <text x="1008" y="351" class="s">correlation rules, attack story,</text>
+  <text x="1008" y="367" class="s">analyst assistant (read-only</text>
+  <text x="1008" y="383" class="s">tools), Word / PowerPoint</text>
+  <text x="1008" y="399" class="s">reports, compliance pack</text>
+
+  <!-- core -->
+  <rect x="306" y="432" width="908" height="190" rx="10" class="zoned"/>
+  <text x="320" y="452" class="z">Core services (every workflow uses the same ones)</text>
+  <rect x="318" y="462" width="212" height="72" rx="8" class="box"/>
+  <text x="330" y="483" class="t">Context store</text>
+  <text x="330" y="503" class="s">one record per host / person;</text>
+  <text x="330" y="520" class="s">keys, scored hints, review queue</text>
+  <rect x="542" y="462" width="212" height="72" rx="8" class="box"/>
+  <text x="554" y="483" class="t">Cases and evidence</text>
+  <text x="554" y="503" class="s">cited evidence, notes, owner,</text>
+  <text x="554" y="520" class="s">decisions, deferred narration</text>
+  <rect x="766" y="462" width="212" height="72" rx="8" class="box"/>
+  <text x="778" y="483" class="t">Enrichment orchestrator</text>
+  <text x="778" y="503" class="s">parallel look-ups, 20 s deadline;</text>
+  <text x="778" y="520" class="s">a down tool is unavailable, not clean</text>
+  <rect x="990" y="462" width="212" height="72" rx="8" class="box"/>
+  <text x="1002" y="483" class="t">Observability</text>
+  <text x="1002" y="503" class="s">trace id on every request and job;</text>
+  <text x="1002" y="520" class="s">JSON logs, secrets masked</text>
+  <rect x="318" y="542" width="212" height="72" rx="8" class="box"/>
+  <text x="330" y="563" class="t">Audit trail</text>
+  <text x="330" y="583" class="s">hash-chained, append-only,</text>
+  <text x="330" y="600" class="s">never pruned, exportable</text>
+  <rect x="542" y="542" width="212" height="72" rx="8" class="box"/>
+  <text x="554" y="563" class="t">Crypto and retention</text>
+  <text x="554" y="583" class="s">Fernet at rest, key rotation;</text>
+  <text x="554" y="600" class="s">retention per class, legal hold</text>
+  <rect x="766" y="542" width="212" height="72" rx="8" class="gov"/>
+  <text x="778" y="563" class="t">Action service + policy</text>
+  <text x="778" y="583" class="s">L0-L4, default L2 = approval;</text>
+  <text x="778" y="600" class="s">four-eyes, kill switch, rollback</text>
+  <rect x="990" y="542" width="212" height="72" rx="8" class="box"/>
+  <text x="1002" y="563" class="t">Governance stores</text>
+  <text x="1002" y="583" class="s">versioned policy and connector</text>
+  <text x="1002" y="600" class="s">config (four-eyes), AI usage policy</text>
+
+  <!-- connectors -->
+  <rect x="306" y="636" width="908" height="96" rx="10" class="key"/>
+  <text x="320" y="659" class="t">Connector SDK - 21 connectors (13 tool families + public intelligence, threat-intel fusion, Jira, ownership sheet, Sentinel, SIEM push)</text>
+  <text x="320" y="680" class="s">per-tool rate budget · backoff, Retry-After capped · watermark resume, idempotent ingest · records conformed to the documented shape</text>
+  <text x="320" y="698" class="s">rollout stage per tool: recording → read-only → recommend (actions capped at approval) → automate · preflight before every promotion (four-eyes)</text>
+  <text x="320" y="716" class="s">reads on schedule (alerts, inventory, directory audits) and per investigation (sign-ins, DNS, logons); internal indicators never sent to intel sources</text>
+
+  <!-- data + scheduler + llm -->
+  <rect x="306" y="746" width="224" height="100" rx="8" class="box"/>
+  <text x="318" y="769" class="t">PostgreSQL 16</text>
+  <text x="318" y="788" class="s">cases, entities, evidence,</text>
+  <text x="318" y="804" class="s">audit chain, policy versions,</text>
+  <text x="318" y="820" class="s">access and model-call logs;</text>
+  <text x="318" y="836" class="s">encrypted volume / managed</text>
+  <rect x="542" y="746" width="224" height="100" rx="8" class="box"/>
+  <text x="554" y="769" class="t">Encrypted file store</text>
+  <text x="554" y="788" class="s">raw vendor payloads, reported</text>
+  <text x="554" y="804" class="s">e-mail, reports and evidence</text>
+  <text x="554" y="820" class="s">packs (Fernet, SOC_DATA_KEY);</text>
+  <text x="554" y="836" class="s">atomic writes, mode 0600</text>
+  <rect x="778" y="746" width="212" height="100" rx="8" class="box"/>
+  <text x="790" y="769" class="t">Scheduler (container)</text>
+  <text x="790" y="788" class="s">jobs: vulnerability, incident,</text>
+  <text x="790" y="804" class="s">phishing, follow-up, reports,</text>
+  <text x="790" y="820" class="s">intelligence, retention, notify;</text>
+  <text x="790" y="836" class="s">DB leases, retries, heartbeat</text>
+  <rect x="1002" y="746" width="212" height="100" rx="8" class="key"/>
+  <text x="1014" y="769" class="t">LLM gateway (optional)</text>
+  <text x="1014" y="788" class="s">pseudonymise → cited evidence</text>
+  <text x="1014" y="804" class="s">only → drop uncited claims and</text>
+  <text x="1014" y="820" class="s">figures → restore names; budgets,</text>
+  <text x="1014" y="836" class="s">limits, breaker, fallback</text>
+
+  <!-- ===================== outside (right) -->
+  <rect x="1250" y="70" width="330" height="790" rx="12" class="zone"/>
+  <text x="1264" y="92" class="z">Outside the platform (outbound HTTPS 443)</text>
+  <rect x="1266" y="104" width="298" height="104" rx="8" class="no"/>
+  <text x="1278" y="127" class="t">Never contacted</text>
+  <text x="1278" y="146" class="s">no vendor-hosted service, no telemetry</text>
+  <text x="1278" y="162" class="s">home; no URL from an e-mail is fetched;</text>
+  <text x="1278" y="178" class="s">the ML engine makes no network calls;</text>
+  <text x="1278" y="194" class="s">no model is trained on client data</text>
+  <rect x="1266" y="330" width="298" height="80" rx="8" class="ext"/>
+  <text x="1278" y="353" class="t">Public vulnerability intelligence</text>
+  <text x="1278" y="372" class="s">NIST NVD · FIRST EPSS · CISA KEV</text>
+  <text x="1278" y="388" class="s">CVE identifiers only</text>
+  <text x="1278" y="404" class="s">(an outage keeps last known values)</text>
+  <rect x="1266" y="428" width="298" height="96" rx="8" class="ext"/>
+  <text x="1278" y="451" class="t">Threat-intel sources (opt-in)</text>
+  <text x="1278" y="470" class="s">VirusTotal, AbuseIPDB, OTX, URLhaus,</text>
+  <text x="1278" y="486" class="s">ThreatFox, MalwareBazaar, GreyNoise,</text>
+  <text x="1278" y="502" class="s">Shodan - external indicators only, each</text>
+  <text x="1278" y="518" class="s">source only if its key is configured</text>
+  <rect x="1266" y="560" width="298" height="190" rx="8" class="ext"/>
+  <text x="1278" y="583" class="t">Client security tools (vendor APIs)</text>
+  <text x="1278" y="602" class="s">EDR: CrowdStrike, Defender for Endpoint</text>
+  <text x="1278" y="618" class="s">E-mail: Defender for O365, Avanan</text>
+  <text x="1278" y="634" class="s">Identity: Entra ID, Defender for Identity</text>
+  <text x="1278" y="650" class="s">DNS: Umbrella · Deception: Canary</text>
+  <text x="1278" y="666" class="s">PAM: Delinea SS / PM</text>
+  <text x="1278" y="682" class="s">Exposure: Rapid7, Wiz (+ Spotlight, TVM)</text>
+  <text x="1278" y="698" class="s">ITSM / CMDB: ServiceNow, Jira, CSV</text>
+  <text x="1278" y="714" class="s">SIEM: Sentinel</text>
+  <text x="1278" y="736" class="s">one least-privilege identity per tool</text>
+  <rect x="1266" y="770" width="298" height="76" rx="8" class="ext"/>
+  <text x="1278" y="793" class="t">Client's LLM gateway</text>
+  <text x="1278" y="812" class="s">approved endpoint only (e.g. Azure</text>
+  <text x="1278" y="828" class="s">OpenAI); pseudonymised text</text>
+
+  <!-- ===================== arrows -->
+  <path d="M254 125 H302" class="line"/><text x="258" y="118" class="lbl">HTTPS</text>
+  <path d="M302 248 H258" class="line"/><text x="262" y="242" class="lbl">JWKS</text>
+  <path d="M254 352 H302" class="dash"/><text x="258" y="346" class="lbl">files</text>
+  <path d="M302 444 H258" class="dash"/><text x="262" y="438" class="lbl">logs</text>
+  <path d="M254 492 H302" class="line"/><text x="258" y="486" class="lbl">push</text>
+  <path d="M302 576 H258" class="line"/><text x="262" y="570" class="lbl">HTTPS</text>
+  <path d="M254 672 H302" class="line"/><text x="258" y="666" class="lbl">scrape</text>
+  <!-- connectors to outside, through a bus between the zones -->
+  <path d="M1214 652 H1240 V370 H1262" class="line"/>
+  <path d="M1240 476 H1262" class="line"/>
+  <path d="M1214 668 H1262" class="line"/>
+  <path d="M1214 808 H1262" class="line"/>
+  <!-- the only write path: action service → connector → tool -->
+  <path d="M872 614 V632" class="write"/>
+  <path d="M1214 720 H1262" class="write"/>
+  <rect x="1060" y="616" width="152" height="18" rx="3" fill="#fff7ed"/>
+  <text x="1065" y="629" class="wl">policy-gated actions only</text>
+
+  <!-- ===================== key flows -->
+  <rect x="20" y="874" width="1560" height="204" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="36" y="898" class="z">Key flows</text>
+  <g>
+    <circle cx="46" cy="920" r="10" fill="#2563eb"/><text x="42" y="924" class="n">1</text>
+    <text x="64" y="924" class="s"><tspan class="t">Sign in.</tspan> Browser → proxy → API; the Entra token is checked (RS256, JWKS); the role and its domain scope decide what is shown; privileged steps need step-up MFA.</text>
+    <circle cx="46" cy="948" r="10" fill="#2563eb"/><text x="42" y="952" class="n">2</text>
+    <text x="64" y="952" class="s"><tspan class="t">Collect.</tspan> Scheduler jobs call the connectors (rate-limited, resumable); every record is resolved to one host or one person in the context store; ambiguous matches wait for an analyst.</text>
+    <circle cx="46" cy="976" r="10" fill="#2563eb"/><text x="42" y="980" class="n">3</text>
+    <text x="64" y="980" class="s"><tspan class="t">Investigate.</tspan> Workflows enrich across every tool in parallel, score with fixed rules, map MITRE ATT&amp;CK, and the intelligence layer correlates across domains.</text>
+    <circle cx="46" cy="1004" r="10" fill="#c2410c"/><text x="42" y="1008" class="n">4</text>
+    <text x="64" y="1008" class="s"><tspan class="t">Decide and act.</tspan> Recommendations → autonomy policy (default L2: a person approves; four-eyes for high impact; irreversible types never autonomous) → action service → connector → tool; audited, reversible ones keep their rollback.</text>
+    <circle cx="46" cy="1032" r="10" fill="#2563eb"/><text x="42" y="1036" class="n">5</text>
+    <text x="64" y="1036" class="s"><tspan class="t">Explain (optional).</tspan> The LLM gateway sends pseudonymised, cited evidence to the client's LLM; uncited statements and figures are removed; the model never sets a score, verdict or action.</text>
+    <circle cx="46" cy="1060" r="10" fill="#2563eb"/><text x="42" y="1064" class="n">6</text>
+    <text x="64" y="1064" class="s"><tspan class="t">Observe.</tspan> JSON logs, access log and audit export to the SIEM; /health and /metrics for monitoring; notifications for findings above a threshold; hourly self-check of the audit chain.</text>
+  </g>
+</svg>

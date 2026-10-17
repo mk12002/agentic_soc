@@ -37,7 +37,7 @@ responsibility of the hosting environment.
 | Runaway AI spend (a script, a flood of work, a misbehaving model) | Monthly and daily token budgets, per-person hourly / daily limits, a hard cap on every answer's length, per-feature off switch - set only by administrators (manage_access, MFA), versioned and audited; refused calls are logged with the reason and fall back to deterministic text | `llm/usage_policy.py`, `llm/gateway.py` |
 | Tampering with tool configuration (pointing a connector elsewhere, switching a tool off, promoting it to act) | Console changes are proposed by a person with manage_connectors (never an API key or agent) and approved by another with approve_policy and MFA; versioned, audited, re-checked at approval (stale proposals refused, preflight must still match); only pausing - the safe direction - is immediate. Secrets cannot be entered or stored: a secret setting may only be a `${VAR}` reference, the console shows *set / not set* only; export carries no secret values | `core/connector_config.py`, `api/app.py` |
 | A broken or malicious connector configuration taking the platform down | Strict schema (unknown tools / keys / stages, malformed values, secrets in clear) refused at start-up and at proposal; a connector that cannot be built is isolated, the rest work; a connector module that fails to import is skipped | `connectors/config_schema.py`, `connectors/registry.py` |
-| Disclosure to outside intelligence services | Threat-intel lookups send only external indicators: private / reserved IP addresses, single-label and private-suffix host names and anything under the organisation's domains are withheld ("not checked"); e-mail bodies, user names and internal host names are never sent | `connectors/tools/threat_intel.py`, `test_internal_indicators_are_never_sent_to_outside_reputation_services` |
+| Disclosure to outside intelligence services | Threat-intel lookups send only external indicators: private / reserved IP addresses (documentation ranges - RFC 5737 - belong to no organisation and may be looked up), single-label and private-suffix host names and anything under the organisation's domains are withheld ("not checked"); e-mail bodies, user names and internal host names are never sent | `connectors/tools/threat_intel.py`, `test_internal_indicators_are_never_sent_to_outside_reputation_services` |
 | Irreversible actions run unattended | Mail purge, password reset, secret rotation and confirm-compromised are marked destructive: whatever the policy says they stop at L3 (a person approves) | connector action factories, `core/policy.py`, `test_irreversible_actions_are_never_autonomous_whatever_the_policy_says` |
 | Supply chain | `pip-audit` clean (setuptools pinned ≥ 83, unused packages removed incl. `nltk` with an unfixed advisory); detonation image built locally and pinned by digest in prod | `requirements/`, `deploy/sandbox/Dockerfile` |
 
@@ -208,6 +208,31 @@ probe showed the attack working.
 - The `reporter` of an uploaded message is free text, because analysts upload on someone's behalf. The uploader is
   the authenticated principal in the audit and access logs.
 - Failed break-glass attempts are audited individually. That volume is bounded by the rate limit.
+
+## Supply chain and build pipeline
+
+| Control | How |
+|---|---|
+| Reproducible dependencies | `requirements/platform.lock` pins every package (direct and transitive) at an exact version; the container build installs with it as constraints. `python scripts/supply_chain.py lock` regenerates it, `check` fails when the environment drifts from it |
+| Software bill of materials | `python scripts/supply_chain.py sbom` writes a CycloneDX 1.5 document (component, version, package URL, licence, direct / transitive), deterministic, produced by CI for every build |
+| Known vulnerabilities | pip-audit over the lock on every change and in CI; container image scanned with Trivy in CI (fails on fixable high / critical) |
+| Runtime image hardening | Non-root user; the base image's stale setuptools (vendored `wheel` and `jaraco.context` with known CVEs) upgraded to the locked version; pip removed from the runtime image (its vendored `msgpack`, `urllib3` and `setuptools` carried known CVEs, and production needs no package manager). First local Trivy scan: 2 high, then 4 high after a pip upgrade; after hardening: 0 fixable high / critical; the container starts and `/health` reports ok |
+| Secrets and confidential names | `scripts/precommit_scan.py` as the git pre-commit hook and in CI over every tracked file (`.env` secret values; the confidential-name pattern is kept outside the repository); gitleaks over the git history in CI |
+| Gates on every push | `.github/workflows/ci.yml`: lint, bandit, pip-audit, lock check, JavaScript syntax, the full test suite on SQLite and on PostgreSQL 16, SBOM, image scan |
+
+## Independent penetration test - scope (planned before client data)
+
+The attack suite above runs on every build; an independent test of the deployed platform is planned before it handles
+the client's data. Scope and rules of engagement:
+
+- **In scope:** the console and API (`/api/v1/*`, `/auth/*`, `/health`, `/metrics`), authentication (Entra and API
+  keys), authorisation per role and domain, the SIEM push endpoint, file upload of reported e-mail, report downloads,
+  rate limiting and request limits, the container image and the reverse proxy configuration.
+- **Accounts:** one test identity per role (analyst, lead, automation administrator, administrator, auditor, a
+  domain-scoped analyst) and one API key; connectors in fake mode, so no client tool is touched.
+- **Out of scope:** the client's security tools and their APIs; denial-of-service volume tests against shared
+  infrastructure.
+- **Exit:** every high / critical finding fixed and retested before go-live; the report is shared with the client.
 
 ## Console sign-in (production)
 

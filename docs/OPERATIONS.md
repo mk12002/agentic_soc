@@ -72,7 +72,7 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 | Job | Default interval | Does |
 |---|---|---|
 | vulnerability | 6 h | ingest, consolidate, enrich, prioritise, Wiz misconfigurations; keep the risk register current (new P1 CVEs proposed, entries updated / marked remediated) |
-| incident | 5 min | ingest alerts, cluster, investigate; reassess open incidents when KEV-listed exposure appeared on their hosts since they were scored; commit the cases, then add the model's explanations in parallel |
+| incident | 5 min | ingest alerts (and Entra directory audits, inventory first), cluster, investigate - activity such as sign-ins, DNS and domain logons is read per investigation, not bulk-synced; reassess open incidents when KEV-listed exposure appeared on their hosts since they were scored; commit the cases, then add the model's explanations in parallel |
 | phishing | 2 min | pull reported mail, analyse; commit the verdicts, then add the model's explanations in parallel |
 | follow_up | 24 h | ITSM ticket sync (+ closure validation), weekly follow-up per remediation plan (`SOC_VM_FOLLOWUP_DAYS`, default 7), exception expiry |
 | intelligence | 10 min | risk + correlation + drift, insight narration |

@@ -1872,7 +1872,7 @@ async def analyze_email(request: EmailAnalysisRequest, http_request: Request, _a
         try:
             import redis
             r = redis.from_url(settings.redis_url or "redis://localhost:6379/0")
-            r.setex(f"email_dedup_mapping:{analysis_id}", settings.orchestrator_cache_ttl_seconds, fingerprint)
+            r.set(f"email_dedup_mapping:{analysis_id}", fingerprint, ex=settings.orchestrator_cache_ttl_seconds)
         except Exception as e:
             logger.warning("Failed to store deduplication mapping", error=str(e))
 

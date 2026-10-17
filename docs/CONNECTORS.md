@@ -52,7 +52,7 @@ config entry; adapt the endpoints and fields, then `python -m soc_platform conne
 | `cmdb_csv` | Ownership mapping (CSV) | cmdb | cmdb | host | - | High |
 | `crowdstrike` | CrowdStrike Falcon | edr | alerts, hosts, vulnerabilities | host, hash, domain, ip, user | endpoint.collect_forensics, endpoint.isolate, endpoint.release | High |
 | `defender_endpoint` | Microsoft Defender for Endpoint | edr | alerts, machines, vulnerabilities | host, ip, hash, domain, user | endpoint.collect_forensics, endpoint.isolate, endpoint.release, endpoint.scan, indicator.block, indicator.unblock | High |
-| `defender_identity` | Microsoft Defender for Identity | identity | alerts, logon_events | - | - | Medium |
+| `defender_identity` | Microsoft Defender for Identity | identity | alerts, logon_events | user, ip | - | Medium |
 | `defender_office365` | Microsoft Defender for Office 365 | email | reported_messages, email_alerts | email_message, user, domain, url, hash | email.block_sender, email.campaign_purge, email.reporter_feedback, email.restore, email.tag, email.unblock_sender, notify.email | High |
 | `delinea_privilege_manager` | Delinea Privilege Manager | pam | elevation_events | user, host | - | Medium |
 | `delinea_secret_server` | Delinea Secret Server | pam | secret_audits | user | pam.rotate_secret | Medium |
@@ -215,7 +215,7 @@ Secret access audit, privileged sessions, standing privilege; credential rotatio
   - `audit_path` (optional): Secret audit endpoint (default /api/v1/secret-audits)
   - `sessions_path` (optional): Launched sessions endpoint (default /api/v1/launched-sessions)
   - `sync_from` (optional): First sync starts here (ISO date; default: everything)
-  - `account_owners` (optional): Approved admin-account -> person map, e.g. {"adm-jane": "jane.doe@example.com"}; shared accounts stay unmapped
+  - `account_owners` (optional): Approved admin-account -> person map, e.g. {"adm-first.last": "first.last@example.com"}; shared accounts stay unmapped
 
 ### Microsoft Entra ID (`entra`)
 

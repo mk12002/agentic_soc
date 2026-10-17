@@ -259,3 +259,15 @@ def test_deferred_narration_for_reported_email(session, ph):
     after = ph.cases.view(v["case"]["id"])["case"]
     assert after["summary"] == "Written explanation." and after["verdict"] == v["case"]["verdict"]
     assert ph.narrate_pending() == 0
+
+
+def test_a_one_standing_for_an_i_is_recognised_as_a_look_alike():
+    """"1" imitates "i" (m1crosoft) as often as "l" (paypa1); the second reading was missed."""
+    from soc_platform.domains.phishing.agents.analyzer import lookalike
+
+    assert lookalike("m1crosoft-servicedesk.example", ["microsoft.com"])[0] == "microsoft.com"
+    assert lookalike("paypa1.example", ["paypal.com"])[0] == "paypal.com"
+    assert lookalike("mlcrosoft-idverify.example", ["microsoft.com"])[0] == "microsoft.com"     # l for i
+    assert lookalike("micros0ft-helpdesk.com", ["microsoft.com"])[0] == "microsoft.com"
+    assert lookalike("github.com", ["microsoft.com", "paypal.com"]) is None
+    assert lookalike("microsoft.com", ["microsoft.com"]) is None

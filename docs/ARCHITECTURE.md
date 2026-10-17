@@ -1,5 +1,9 @@
 # Architecture
 
+![Platform technical architecture](diagrams/platform-technical-architecture.svg)
+
+Detailed technical view above (every layer, data store, trust boundary and external flow; the only write path in orange). The development VM is drawn in [DEV_VM_SETUP.md](DEV_VM_SETUP.md). The component-level view (every container, module, table group and vendor endpoint, with each flow walked step by step) is [ARCHITECTURE_COMPONENTS.md](ARCHITECTURE_COMPONENTS.md).
+
 ## One platform, three workflows, one context
 
 ```
@@ -25,7 +29,7 @@
 │ notify (Teams / Slack / webhook for findings) · case ownership + notes · schema evolution (add / widen)      │
 └──────────────────────────────────────────────────────┬────────────────────────────────────────────────────────┘
                                                        │ uniform connector SDK (rate budget, backoff, cursors)
-  CrowdStrike · Defender for Endpoint · Defender for Office 365 / Exchange · Entra ID · Rapid7 · Wiz · Avanan ·
+  CrowdStrike · Defender for Endpoint · Defender for Office 365 / Exchange · Entra ID · Defender for Identity · Rapid7 · Wiz · Avanan ·
   Umbrella · Canary · Delinea SS/PM · NVD · EPSS · CISA KEV · TI fusion · ServiceNow · Jira · CMDB CSV · Sentinel ·
   generic SIEM webhook              (fake mode: vendor-shaped fixtures through the same code)
 ```

@@ -326,9 +326,10 @@ removed": statements the model produced without valid evidence were dropped by t
 
 ## 6. Connectors
 
-20 plug-and-play connectors behind one SDK (rate budgets, backoff, cursors, reconciliation, per-record fault
+21 plug-and-play connectors behind one SDK (rate budgets, backoff, cursors, reconciliation, per-record fault
 isolation), each with a live mode and a fixture mode running the same code: CrowdStrike Falcon, Microsoft Defender
-for Endpoint, Defender for Office 365 (+ Exchange admin API with its own token audience), Entra ID, Rapid7, Wiz
+for Endpoint, Defender for Office 365 (+ Exchange admin API with its own token audience), Entra ID, Defender for Identity, Rapid7
+(+ its vulnerability exceptions), Wiz
 (GraphQL, `issuesV2`, full pagination), Avanan, Cisco Umbrella, Thinkst Canary, Delinea Secret Server, Delinea
 Privilege Manager, NIST NVD, FIRST EPSS, CISA KEV, threat-intel fusion (8 sources), ServiceNow (ITSM + CMDB), Jira
 (enhanced search with page tokens), CSV / subscription ownership mapping, Microsoft Sentinel, generic SIEM webhook.

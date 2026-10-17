@@ -76,6 +76,14 @@ called out where they apply, with the file to change.
   except the optional SIEM push endpoint (`POST /api/v1/ingest/alerts`, authenticated with an API key).
 - **Outbound:** HTTPS to the hosts listed per connector in section 4, the LLM gateway, and Entra ID. Nothing ever
   fetches URLs found in e-mail content (no SSRF surface), and the ML engine makes no outbound calls at all.
+- **WAF and DDoS protection:** put the console behind the client's web application firewall / reverse proxy (Azure
+  Application Gateway WAF, Front Door or the on-premises equivalent) with TLS; the platform adds its own rate limit,
+  request-size cap and security headers. Keep the console off the internet where possible (internal network / VPN).
+- **Logs to the SIEM:** collect every container's stdout (`SOC_LOG_FORMAT=json`) and the audit export into the
+  client's SIEM (for example Microsoft Sentinel through its log agent), so the SOC monitors the platform itself.
+- **Encryption at rest:** files the platform writes (raw payloads, reported e-mail, reports) are encrypted with
+  `SOC_DATA_KEY`; the database is protected by the managed PostgreSQL service's encryption or encrypted volumes
+  (Azure Disk Encryption / BitLocker / LUKS) - confirm one is on before go-live.
 
 ---
 
@@ -594,7 +602,7 @@ on a partial rejection (an `ingest.rejected` line is also logged).
   `..._SHODAN_API_KEY`, `..._ABUSECH_AUTH_KEY` (URLhaus, ThreatFox, MalwareBazaar). Egress: `www.virustotal.com`,
   `api.abuseipdb.com`, `otx.alienvault.com`, `urlhaus-api.abuse.ch`, `threatfox-api.abuse.ch`, `mb-api.abuse.ch`,
   `api.greynoise.io`, `api.shodan.io`. The client must approve which sources may receive its indicators and check
-  each source's licence for commercial use. Internal indicators are never sent: private / reserved IP addresses,
+  each source's licence for commercial use. Internal indicators are never sent: private / reserved IP addresses (documentation ranges - RFC 5737 - belong to no organisation and may be looked up),
   single-label and private-suffix host names and anything under `SOC_ORG_DOMAINS` read "not checked".
 
 ### 4.18 Outbound allow-list (all tools)

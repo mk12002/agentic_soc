@@ -91,7 +91,7 @@ Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md); deploy
 |---|---|
 | EDR | CrowdStrike Falcon, Microsoft Defender for Endpoint |
 | Email | Defender for Office 365 (+ reporting mailbox, Exchange admin API), Avanan |
-| Identity | Microsoft Entra ID / Identity Protection |
+| Identity | Microsoft Entra ID / Identity Protection, Microsoft Defender for Identity |
 | DNS / web | Cisco Umbrella |
 | Deception | Thinkst Canary |
 | Privileged access | Delinea Secret Server, Delinea Privilege Manager |
@@ -161,6 +161,10 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
 | [docs/CONNECTORS.md](docs/CONNECTORS.md) | Per-tool setup, scopes, configuration (generated from the code) |
 | [docs/client_review/](docs/client_review/README.md) | Review pack for the client's security and architecture teams: solution architecture, tool integrations, data flow and protection, AI / LLM security, risk and governance, deployment and validation (Word edition: `python scripts/build_review_pack.py`) |
+| [docs/DATA_HANDOFF_RECONCILIATION.md](docs/DATA_HANDOFF_RECONCILIATION.md) | The platform against the client's data handoff workbook: connector scope, every payload type and field, correlation rules, acceptance scenarios, generation rules, open items |
+| [docs/ARCHITECTURE_COMPONENTS.md](docs/ARCHITECTURE_COMPONENTS.md) | Component architecture: every client service, container, module, table group and connector endpoint in one diagram, and every flow step by step |
+| [docs/ARCHITECTURE_WALKTHROUGH.md](docs/ARCHITECTURE_WALKTHROUGH.md) | What to say for each part of the platform and dev-VM technical diagrams, the six flows, and likely review questions |
+| [docs/DEV_VM_SETUP.md](docs/DEV_VM_SETUP.md) | The internal development / demo VM: size, outbound allow-list, secrets, CI gates, decommissioning |
 | [docs/CLIENT_DEPLOYMENT_GUIDE.md](docs/CLIENT_DEPLOYMENT_GUIDE.md) | Moving from the demo into the client's environment: hosting, Entra sign-in, connecting every tool, the client's in-house LLM, action rollout, go-live checklist |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Running, jobs, monitoring, access, break-glass, keys, retention, backups |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, controls, fixes, operator responsibilities |

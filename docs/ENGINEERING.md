@@ -1206,7 +1206,7 @@ speeds.
 | Ingest alerts from every tool (incident) | nobody (every 5 min) | 11 | **0.9 s** (was 4.5 s) | 0.9 s |
 | Investigate an incident (enrichment across tools) | nobody | 92 | **1.8-2.6 s** (was 3.8 s) | 8-16 s (the model's response time varies) |
 | Vulnerability refresh (4 scanners + feeds) | nobody (every 6 h) | 32 | **6.5 s** (was 13.1 s) | 6.5 s |
-| Re-correlate (risk, 12 rules, narratives) | nobody (every 10 min) | 0 | 0.1 s | 19 s first time (was 67 s); 0.1 s when nothing changed |
+| Re-correlate (risk, correlation rules, narratives) | nobody (every 10 min) | 0 | 0.1 s | 19 s first time (was 67 s); 0.1 s when nothing changed |
 | Open a case, story, 360 view or list | analyst | 0 | < 0.1 s | < 0.1 s (results are stored) |
 | Situation brief | analyst | 0 | < 0.1 s | 0 s when prepared by the job; ~6 s if not yet prepared |
 | Analyst question | analyst | 0 | < 0.1 s | ~6-7 s |
@@ -1643,6 +1643,10 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 76 | A fourth test estate built to the data handoff workbook's rules (`--handoff`): `example.invalid`, RFC 5737 addresses, the workbook's scenarios, >= 1,000 events at 80-95 % benign with 1-3 % replays | Rename the presenter demo to the workbook's naming | The demo is the presenter storyline whose figures the guides quote; a separate estate lets every multi-estate test and the scenario tests run on workbook-conformant data | Volume and benign share are measured through the connectors' own parsers (`estate_profile.py`), not counted from the generator |
 | 77 | Entra directory audits are synced with the alerts; other activity streams stay on demand | Sync every stream on a schedule | Directory changes are few and carry security decisions (role grants, application consent); sign-ins, DNS and domain logons are large and are read per investigation | Defender for Identity logons got a per-person / per-address look-up |
 | 78 | Documentation address ranges (RFC 5737 / RFC 3849) count as outside addresses for threat intelligence | Treat them as private, as Python does | They belong to no organisation, so a look-up discloses nothing; synthetic estates use them for attacker addresses | Real private ranges are still withheld |
+| 79 | A dependency lock and a CycloneDX SBOM generated from the installed closure, no extra tool | pip-tools / cyclonedx-py as new dependencies | Reproducible builds and a component inventory with nothing new to trust; deterministic output | The lock is resolved on one OS: `check` compares shared packages' versions; the container build uses it as constraints |
+| 80 | CI (GitHub Actions) runs the commit gates, both test suites, the SBOM and a Trivy image scan on every push | Gates on the developer's machine only | A gate that only runs locally can be skipped; a build record is evidence for security reviews | The confidential-name pattern is a repository secret, never in the workflow |
+| 81 | A `*_FILE` secret that points at a missing or empty file is a configuration error | Fall back to the plain variable silently | A mistyped vault mount left the secret empty with no message | Checked by `config check`, which `serve` runs before starting |
+| 82 | No pip in the runtime image; the base image's setuptools upgraded to the locked version | Ship the base image as is; upgrade pip | Trivy found fixable high CVEs in the base image's vendored copies (setuptools' wheel / jaraco.context) and then in pip's own vendored libraries; production installs nothing at run time | Debugging inside a running container cannot `pip install`; build a new image instead |
 ---
 
 ## 26. Known limitations and trade-offs

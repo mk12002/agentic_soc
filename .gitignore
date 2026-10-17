@@ -55,3 +55,8 @@ docs/client_review/deck/
 # the organisation's data-types handoff workbook (names the organisation; reconciled in docs/DATA_HANDOFF_RECONCILIATION.md)
 SOC_Security_Tool_Data_Types*.xlsx
 *_SOC_Key_Operational_Challenges*.pptx
+# internal security assessment forms (name the company)
+Security Preliminary Assessment*.xlsx
+
+# generated per build (scripts/supply_chain.py sbom; a CI artefact)
+sbom/

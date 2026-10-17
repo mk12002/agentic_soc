@@ -1,0 +1,487 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1700" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <marker id="w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
+    <style>
+      .zone{fill:#f1f5f9;stroke:#94a3b8;stroke-dasharray:6 4}
+      .zoneb{fill:#eef4ff;stroke:#7ea2d6;stroke-dasharray:6 4}
+      .zoned{fill:#f3f0ff;stroke:#a495d6;stroke-dasharray:6 4}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.2}
+      .ctr{fill:#ffffff;stroke:#0f766e;stroke-width:1.4}
+      .key{fill:#ffffff;stroke:#2563eb;stroke-width:1.4}
+      .gov{fill:#fff7ed;stroke:#c2410c;stroke-width:1.5}
+      .ext{fill:#fff7e8;stroke:#c2410c;stroke-width:1.1}
+      .t{font-weight:600;fill:#0f172a;font-size:13px}
+      .s{fill:#334155;font-size:11.5px}
+      .m{fill:#334155;font-size:11.5px}
+      .z{fill:#334155;font-weight:600;font-size:13px}
+      .n{fill:#ffffff;font-weight:700;font-size:12px}
+      .h{font-weight:600;fill:#0f172a}
+      .line{stroke:#475569;stroke-width:1.6;fill:none;marker-end:url(#a)}
+      .none{stroke:none;fill:none}
+      .write{stroke:#c2410c;stroke-width:2.4;fill:none;marker-end:url(#w)}
+      .lbl{fill:#1e293b;font-size:11.5px;font-weight:600}
+      .wl{fill:#c2410c;font-size:11.5px;font-weight:700}
+    </style>
+  </defs>
+  <rect width="2400" height="1700" fill="#ffffff"/>
+  <text x="30" y="34" class="h" font-size="22">Agentic SOC platform - component architecture (tools, modules, technologies, endpoints)</text>
+  <text x="30" y="56" class="s">Production shape in the client's environment. Boxes are real components (file / module / technology / table / vendor endpoint). R = read, W = write (policy-gated). Orange = the only path that can change a security tool.</text>
+  <rect x="20" y="70" width="300" height="1610" rx="12" class="zone"/>
+<text x="34" y="90" class="z">Client environment services</text>
+<rect x="32" y="100" width="276" height="94" rx="7" class="box"/>
+<text x="42" y="118" class="t">Analyst browser</text>
+<text x="42" y="136" class="s">Static console: index.html, app.js,</text>
+<text x="42" y="151" class="s">views.js, theme.js, styles.css</text>
+<text x="42" y="166" class="s">(vanilla JS, strict CSP, no inline</text>
+<text x="42" y="181" class="s">handlers; esc() on every value)</text>
+<rect x="32" y="208" width="276" height="94" rx="7" class="box"/>
+<text x="42" y="226" class="t">Reverse proxy + WAF</text>
+<text x="42" y="244" class="s">Azure App Gateway / Front Door /</text>
+<text x="42" y="259" class="s">nginx / IIS ARR; TLS 443 -&gt; :8080;</text>
+<text x="42" y="274" class="s">SOC_TRUSTED_PROXIES for</text>
+<text x="42" y="289" class="s">X-Forwarded-For</text>
+<rect x="32" y="316" width="276" height="94" rx="7" class="box"/>
+<text x="42" y="334" class="t">Microsoft Entra ID</text>
+<text x="42" y="352" class="s">OIDC auth code + PKCE (console)</text>
+<text x="42" y="367" class="s">RS256 access tokens, JWKS keys</text>
+<text x="42" y="382" class="s">App roles SOC.&lt;Role&gt;[.&lt;Domain&gt;]</text>
+<text x="42" y="397" class="s">MFA via Conditional Access</text>
+<rect x="32" y="424" width="276" height="94" rx="7" class="box"/>
+<text x="42" y="442" class="t">Azure Key Vault</text>
+<text x="42" y="460" class="s">Secrets mounted as files:</text>
+<text x="42" y="475" class="s">&lt;NAME&gt;_FILE (DB URL, SOC_DATA_KEY,</text>
+<text x="42" y="490" class="s">tool keys, PEM certificates,</text>
+<text x="42" y="505" class="s">SOC_LLM_API_KEY, webhooks)</text>
+<rect x="32" y="532" width="276" height="94" rx="7" class="box"/>
+<text x="42" y="550" class="t">Client LLM gateway</text>
+<text x="42" y="568" class="s">Azure OpenAI / AI Foundry, or</text>
+<text x="42" y="583" class="s">Anthropic / OpenAI-compatible</text>
+<text x="42" y="598" class="s">endpoint approved by the client</text>
+<text x="42" y="613" class="s">(SOC_LLM_PROVIDER, _ENDPOINT)</text>
+<rect x="32" y="640" width="276" height="94" rx="7" class="box"/>
+<text x="42" y="658" class="t">SIEM (Microsoft Sentinel)</text>
+<text x="42" y="676" class="s">Log agent reads container stdout</text>
+<text x="42" y="691" class="s">(SOC_LOG_FORMAT=json) + audit</text>
+<text x="42" y="706" class="s">export; optional push to</text>
+<text x="42" y="721" class="s">POST /api/v1/ingest/alerts</text>
+<rect x="32" y="748" width="276" height="64" rx="7" class="box"/>
+<text x="42" y="766" class="t">Teams / Slack / JSON webhook</text>
+<text x="42" y="784" class="s">SOC_NOTIFY_WEBHOOKS (HTTPS only)</text>
+<text x="42" y="799" class="s">kind|url; label kind:host only</text>
+<rect x="32" y="826" width="276" height="79" rx="7" class="box"/>
+<text x="42" y="844" class="t">Prometheus / monitoring</text>
+<text x="42" y="862" class="s">GET /metrics (auditor API key)</text>
+<text x="42" y="877" class="s">GET /health: scheduler, audit chain,</text>
+<text x="42" y="892" class="s">self-check, kill switch</text>
+<rect x="32" y="919" width="276" height="94" rx="7" class="box"/>
+<text x="42" y="937" class="t">GitHub + Actions CI</text>
+<text x="42" y="955" class="s">ruff, bandit, pip-audit (lock),</text>
+<text x="42" y="970" class="s">pytest SQLite + PostgreSQL 16,</text>
+<text x="42" y="985" class="s">precommit_scan, gitleaks,</text>
+<text x="42" y="1000" class="s">CycloneDX SBOM, Trivy image scan</text>
+<circle cx="298" cy="104" r="11" fill="#2563eb"/>
+<text x="298" y="108" class="n" text-anchor="middle">1</text>
+<circle cx="298" cy="212" r="11" fill="#2563eb"/>
+<text x="298" y="216" class="n" text-anchor="middle">1</text>
+<rect x="340" y="70" width="1300" height="1610" rx="12" class="zoneb"/>
+<text x="354" y="90" class="z">Agentic SOC platform (Python 3.11) - Docker images, non-root uid 1001</text>
+<rect x="352.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
+<text x="362.0" y="118" class="t">soc-api container</text>
+<text x="362.0" y="136" class="s">python -m soc_platform serve</text>
+<text x="362.0" y="151" class="s">uvicorn, SOC_API_WORKERS processes</text>
+<text x="362.0" y="166" class="s">FastAPI / Starlette, port 8080</text>
+<text x="362.0" y="181" class="s">config check refuses bad settings</text>
+<rect x="674.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
+<text x="684.0" y="118" class="t">soc-scheduler container</text>
+<text x="684.0" y="136" class="s">python -m soc_platform scheduler</text>
+<text x="684.0" y="151" class="s">scheduler.py + jobs.py JOBS</text>
+<text x="684.0" y="166" class="s">DB leases (system_flags), retries,</text>
+<text x="684.0" y="181" class="s">heartbeat for /health</text>
+<rect x="996.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
+<text x="1006.0" y="118" class="t">postgres:16 container</text>
+<text x="1006.0" y="136" class="s">SQLAlchemy 2 + psycopg2</text>
+<text x="1006.0" y="151" class="s">pool per worker; PG column widening</text>
+<text x="1006.0" y="166" class="s">SQLite for dev / tests</text>
+<text x="1006.0" y="181" class="s">(PostgreSQL rules enforced)</text>
+<rect x="1318.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
+<text x="1328.0" y="118" class="t">Build and supply chain</text>
+<text x="1328.0" y="136" class="s">deploy/Dockerfile (multi-stage)</text>
+<text x="1328.0" y="151" class="s">requirements/platform.lock</text>
+<text x="1328.0" y="166" class="s">scripts/supply_chain.py (SBOM)</text>
+<text x="1328.0" y="181" class="s">no pip in the runtime image</text>
+<circle cx="656.0" cy="104" r="11" fill="#2563eb"/>
+<text x="656.0" y="108" class="n" text-anchor="middle">2</text>
+<rect x="352" y="220" width="1276" height="150" rx="12" class="zoned"/>
+<text x="366" y="240" class="z">Request pipeline - api/app.py (every request, in this order)</text>
+<rect x="364.0" y="252" width="197.0" height="64" rx="7" class="box"/>
+<text x="374.0" y="270" class="t">BodyLimitMiddleware</text>
+<text x="374.0" y="288" class="s">rejects bodies &gt; 30 MB</text>
+<text x="374.0" y="303" class="s">(streamed, not buffered)</text>
+<rect x="575.0" y="252" width="197.0" height="79" rx="7" class="box"/>
+<text x="585.0" y="270" class="t">SecurityMiddleware</text>
+<text x="585.0" y="288" class="s">NUL in path/query -&gt; 400</text>
+<text x="585.0" y="303" class="s">bad Content-Length -&gt; 413</text>
+<text x="585.0" y="318" class="s">token bucket 20/s, burst 120</text>
+<path d="M562.0 290 H573.0" class="line"/>
+<rect x="786.0" y="252" width="197.0" height="79" rx="7" class="box"/>
+<text x="796.0" y="270" class="t">current_user</text>
+<text x="796.0" y="288" class="s">core/auth.py: Entra RS256 /</text>
+<text x="796.0" y="303" class="s">dev HS256 (PyJWT); API key;</text>
+<text x="796.0" y="318" class="s">break-glass; core/access.py</text>
+<path d="M773.0 290 H784.0" class="line"/>
+<rect x="997.0" y="252" width="197.0" height="79" rx="7" class="box"/>
+<text x="1007.0" y="270" class="t">need(Perm, domain)</text>
+<text x="1007.0" y="288" class="s">role permissions + domain</text>
+<text x="1007.0" y="303" class="s">scope; step-up MFA; human-</text>
+<text x="1007.0" y="318" class="s">only perms; out of scope=404</text>
+<path d="M984.0 290 H995.0" class="line"/>
+<rect x="1208.0" y="252" width="197.0" height="79" rx="7" class="box"/>
+<text x="1218.0" y="270" class="t">Route handler</text>
+<text x="1218.0" y="288" class="s">api/app.py, api/dashboards.py</text>
+<text x="1218.0" y="303" class="s">DataError 400, KeyError 404,</text>
+<text x="1218.0" y="318" class="s">PermissionError 403</text>
+<path d="M1195.0 290 H1206.0" class="line"/>
+<rect x="1419.0" y="252" width="197.0" height="79" rx="7" class="box"/>
+<text x="1429.0" y="270" class="t">db_session + response</text>
+<text x="1429.0" y="288" class="s">commit before reply</text>
+<text x="1429.0" y="303" class="s">security headers + CSP</text>
+<text x="1429.0" y="318" class="s">queued access-log row</text>
+<path d="M1406.0 290 H1417.0" class="line"/>
+<circle cx="555.0" cy="256" r="11" fill="#2563eb"/>
+<text x="555.0" y="260" class="n" text-anchor="middle">3</text>
+<rect x="352.0" y="384" width="245.6" height="169" rx="7" class="key"/>
+<text x="362.0" y="402" class="t">domains/phishing/</text>
+<text x="362.0" y="420" class="s">service.py pipeline, models.py</text>
+<text x="362.0" y="435" class="s">agents/decompose.py (MIME, QR:</text>
+<text x="362.0" y="450" class="s">pyzbar, Pillow; ppdeep hashes)</text>
+<text x="362.0" y="465" class="s">agents/analyzer.py (rules, look-</text>
+<text x="362.0" y="480" class="s">alikes) + CompositeAnalyzer.fuse</text>
+<text x="362.0" y="495" class="s">engine/: LangGraph 7-agent swarm,</text>
+<text x="362.0" y="510" class="s">scikit-learn 1.8 TF-IDF (offline)</text>
+<text x="362.0" y="525" class="s">agents/investigation.py (impact)</text>
+<text x="362.0" y="540" class="s">supplier.py (vendor e-mail risk)</text>
+<rect x="609.6" y="384" width="245.6" height="154" rx="7" class="key"/>
+<text x="619.6" y="402" class="t">domains/incident/</text>
+<text x="619.6" y="420" class="s">service.py: ingest ALERT_STREAMS</text>
+<text x="619.6" y="435" class="s">+ AUDIT_STREAMS (Entra audits),</text>
+<text x="619.6" y="450" class="s">cluster by host / person,</text>
+<text x="619.6" y="465" class="s">investigate: enrichment, _score</text>
+<text x="619.6" y="480" class="s">(deterministic severity), _mitre,</text>
+<text x="619.6" y="495" class="s">_verdict_conflict (tools disagree),</text>
+<text x="619.6" y="510" class="s">_recommendations, reassess_open,</text>
+<text x="619.6" y="525" class="s">narrate_pending (deferred LLM)</text>
+<rect x="867.2" y="384" width="245.6" height="154" rx="7" class="key"/>
+<text x="877.2" y="402" class="t">domains/vulnerability/</text>
+<text x="877.2" y="420" class="s">service.py: ingest 4 scanners,</text>
+<text x="877.2" y="435" class="s">consolidate (asset + CVE),</text>
+<text x="877.2" y="450" class="s">refresh_intel (NVD/EPSS/KEV),</text>
+<text x="877.2" y="465" class="s">prioritise P1-P4 + SLA, owners,</text>
+<text x="877.2" y="480" class="s">campaigns, follow_up, validate</text>
+<text x="877.2" y="495" class="s">(verify_finding), exceptions</text>
+<text x="877.2" y="510" class="s">(four-eyes, expiry), risk register;</text>
+<text x="877.2" y="525" class="s">misconfig.py (Wiz issues)</text>
+<rect x="1124.8000000000002" y="384" width="245.6" height="139" rx="7" class="key"/>
+<text x="1134.8000000000002" y="402" class="t">intelligence/</text>
+<text x="1134.8000000000002" y="420" class="s">risk.py RiskEngine (cached,</text>
+<text x="1134.8000000000002" y="435" class="s">data-anchored decay)</text>
+<text x="1134.8000000000002" y="450" class="s">correlation.py (13 rules)</text>
+<text x="1134.8000000000002" y="465" class="s">story.py (attack story)</text>
+<text x="1134.8000000000002" y="480" class="s">deep_analysis.py, analyst.py</text>
+<text x="1134.8000000000002" y="495" class="s">attack_coverage.py (ATT&amp;CK)</text>
+<text x="1134.8000000000002" y="510" class="s">shadow_it.py, drift.py (PSI)</text>
+<rect x="1382.4" y="384" width="245.6" height="124" rx="7" class="key"/>
+<text x="1392.4" y="402" class="t">reporting/</text>
+<text x="1392.4" y="420" class="s">builder.py: 16 sources,</text>
+<text x="1392.4" y="435" class="s">7 standard reports, planner</text>
+<text x="1392.4" y="450" class="s">reports.py: python-docx,</text>
+<text x="1392.4" y="465" class="s">python-pptx, charts</text>
+<text x="1392.4" y="480" class="s">compliance.py: evidence pack</text>
+<text x="1392.4" y="495" class="s">Jinja2 templates</text>
+<circle cx="591.6" cy="388" r="11" fill="#2563eb"/>
+<text x="591.6" y="392" class="n" text-anchor="middle">5</text>
+<circle cx="849.2" cy="388" r="11" fill="#2563eb"/>
+<text x="849.2" y="392" class="n" text-anchor="middle">4</text>
+<circle cx="1106.8000000000002" cy="388" r="11" fill="#2563eb"/>
+<text x="1106.8000000000002" y="392" class="n" text-anchor="middle">6</text>
+<rect x="352" y="572" width="1276" height="330" rx="12" class="zoned"/>
+<text x="366" y="592" class="z">core/ - shared services (services take a Session and never commit; the request or job owns the transaction)</text>
+<rect x="364.0" y="604" width="304.0" height="64" rx="7" class="box"/>
+<text x="374.0" y="622" class="t">context_store.py</text>
+<text x="374.0" y="640" class="s">ingest(), neighbors, timelines,</text>
+<text x="374.0" y="655" class="s">keys_of; one SourceRecord each</text>
+<rect x="680.0" y="604" width="304.0" height="64" rx="7" class="box"/>
+<text x="690.0" y="622" class="t">entity_resolution.py</text>
+<text x="690.0" y="640" class="s">keys -&gt; scored hints (rapidfuzz)</text>
+<text x="690.0" y="655" class="s">auto 0.85, review 0.55 -&gt; queue</text>
+<rect x="996.0" y="604" width="304.0" height="64" rx="7" class="box"/>
+<text x="1006.0" y="622" class="t">identity.py</text>
+<text x="1006.0" y="640" class="s">user_ref(): UPN / SAM / SID keys</text>
+<text x="1006.0" y="655" class="s">built-in &amp; machine accounts out</text>
+<rect x="1312.0" y="604" width="304.0" height="64" rx="7" class="box"/>
+<text x="1322.0" y="622" class="t">cases.py (CaseService)</text>
+<text x="1322.0" y="640" class="s">cases, evidence, notes, owner,</text>
+<text x="1322.0" y="655" class="s">recommend(ceiling=), narration</text>
+<rect x="364.0" y="678" width="304.0" height="64" rx="7" class="box"/>
+<text x="374.0" y="696" class="t">enrichment.py</text>
+<text x="374.0" y="714" class="s">EnrichmentOrchestrator: 16</text>
+<text x="374.0" y="729" class="s">threads, 20 s deadline, cache</text>
+<rect x="680.0" y="678" width="304.0" height="64" rx="7" class="gov"/>
+<text x="690.0" y="696" class="t">actions.py (ActionService)</text>
+<text x="690.0" y="714" class="s">the ONLY write path; idempotency</text>
+<text x="690.0" y="729" class="s">keys; conditional updates</text>
+<rect x="996.0" y="678" width="304.0" height="64" rx="7" class="gov"/>
+<text x="1006.0" y="696" class="t">policy.py</text>
+<text x="1006.0" y="714" class="s">L0-L4, PolicyEngine.decide(ceiling)</text>
+<text x="1006.0" y="729" class="s">PolicyStore propose / approve</text>
+<rect x="1312.0" y="678" width="304.0" height="64" rx="7" class="box"/>
+<text x="1322.0" y="696" class="t">auth.py + access.py</text>
+<text x="1322.0" y="714" class="s">roles/perms, token checks; grants,</text>
+<text x="1322.0" y="729" class="s">API keys, revocation, kill switch</text>
+<rect x="364.0" y="752" width="304.0" height="64" rx="7" class="box"/>
+<text x="374.0" y="770" class="t">audit.py</text>
+<text x="374.0" y="788" class="s">hash-chained append-only log;</text>
+<text x="374.0" y="803" class="s">_lock_chain serialises appends</text>
+<rect x="680.0" y="752" width="304.0" height="64" rx="7" class="box"/>
+<text x="690.0" y="770" class="t">crypto.py</text>
+<text x="690.0" y="788" class="s">Fernet / MultiFernet; atomic</text>
+<text x="690.0" y="803" class="s">0600 writes; key rotation</text>
+<rect x="996.0" y="752" width="304.0" height="64" rx="7" class="box"/>
+<text x="1006.0" y="770" class="t">retention.py + selfcheck.py</text>
+<text x="1006.0" y="788" class="s">per-class retention, legal hold;</text>
+<text x="1006.0" y="803" class="s">cross-surface consistency proof</text>
+<rect x="1312.0" y="752" width="304.0" height="64" rx="7" class="box"/>
+<text x="1322.0" y="770" class="t">connector_config.py</text>
+<text x="1322.0" y="788" class="s">ConfigStore: propose / approve /</text>
+<text x="1322.0" y="803" class="s">pause / restore; preflight gate</text>
+<rect x="364.0" y="826" width="304.0" height="64" rx="7" class="box"/>
+<text x="374.0" y="844" class="t">observability.py</text>
+<text x="374.0" y="862" class="s">trace ids (TRACE, traced()),</text>
+<text x="374.0" y="877" class="s">event() JSON logs, masking</text>
+<rect x="680.0" y="826" width="304.0" height="64" rx="7" class="box"/>
+<text x="690.0" y="844" class="t">notify.py</text>
+<text x="690.0" y="862" class="s">Notification table, webhook</text>
+<text x="690.0" y="877" class="s">delivery, dedupe per channel</text>
+<rect x="996.0" y="826" width="304.0" height="64" rx="7" class="box"/>
+<text x="1006.0" y="844" class="t">db.py + models.py</text>
+<text x="1006.0" y="862" class="s">UTCDateTime, BoundedText, NUL</text>
+<text x="1006.0" y="877" class="s">strip; utcnow(), new_id()</text>
+<rect x="1312.0" y="826" width="304.0" height="64" rx="7" class="box"/>
+<text x="1322.0" y="844" class="t">settings_check.py + config.py</text>
+<text x="1322.0" y="862" class="s">SPEC validation, secret() reads</text>
+<text x="1322.0" y="877" class="s">&lt;NAME&gt;_FILE; missing file = error</text>
+<circle cx="978.0" cy="682" r="11" fill="#c2410c"/>
+<text x="978.0" y="686" class="n" text-anchor="middle">7</text>
+<rect x="352" y="916" width="400" height="184" rx="7" class="key"/>
+<text x="362" y="934" class="t">llm/ - model access (optional)</text>
+<text x="362" y="952" class="s">gateway.py: LLMGateway grounded() /</text>
+<text x="362" y="967" class="s">complete_json(); citations validated,</text>
+<text x="362" y="982" class="s">numeric-fidelity guardrail, breaker,</text>
+<text x="362" y="997" class="s">timeouts, SOC_LLM_CONCURRENCY</text>
+<text x="362" y="1012" class="s">redaction.py: Redactor pseudonymise /</text>
+<text x="362" y="1027" class="s">restore</text>
+<text x="362" y="1042" class="s">usage_policy.py: budgets, per-person</text>
+<text x="362" y="1057" class="s">limits, per-feature tier, usage_report</text>
+<text x="362" y="1072" class="s">providers/: openai_compatible</text>
+<text x="362" y="1087" class="s">(azure_openai), anthropic_provider</text>
+<circle cx="740" cy="920" r="11" fill="#2563eb"/>
+<text x="740" y="924" class="n" text-anchor="middle">8</text>
+<rect x="764" y="916" width="864" height="154" rx="7" class="key"/>
+<text x="774" y="934" class="t">connectors/ - integration framework</text>
+<text x="774" y="952" class="s">base.py: BaseConnector, TokenBucket (thread-safe rate budget), with_backoff (Retry-After &lt;= 120 s), SyncRunner</text>
+<text x="774" y="967" class="s">(sync, sync_many: parallel download, ordered ingest, savepoint + commit per page), Page, Watermark, LookupResult</text>
+<text x="774" y="982" class="s">http.py: HttpTransport (httpx), FixtureTransport (fake mode), OAuth2ClientCredentials, RFC 7523 certificate</text>
+<text x="774" y="997" class="s">assertion (x5t, 10 min), BasicAuth, ApiKeyHeader/Query, RoutingTransport (Graph + ARM), raise_for_status</text>
+<text x="774" y="1012" class="s">registry.py: MANIFEST discovery, ConnectorRegistry (isolation, stages fake/record/read/recommend/automate)</text>
+<text x="774" y="1027" class="s">config_schema.py (strict, did-you-mean) | preflight.py (sign-in, streams, scopes) | conform.py (shape from fixtures)</text>
+<text x="774" y="1042" class="s">recording.py (record-and-sanitise) | devkit.py (connector new / check) | tools/*.py: one module per tool (21)</text>
+<text x="774" y="1057" class="s">Outbound only through each connector&#x27;s TokenBucket; 401 -&gt; token renewed once, 403 -&gt; PermissionDenied</text>
+<circle cx="1614" cy="920" r="11" fill="#2563eb"/>
+<text x="1614" y="924" class="n" text-anchor="middle">2</text>
+<rect x="352" y="1110" width="760" height="124" rx="7" class="box"/>
+<text x="362" y="1128" class="t">PostgreSQL 16 - main table groups</text>
+<text x="362" y="1146" class="s">Context: entities, entity_keys, entity_hints, relations, source_records, unresolved_items, resolution_overrides</text>
+<text x="362" y="1161" class="s">Cases: cases, evidence, case_entities, case_notes, decisions, dispositions</text>
+<text x="362" y="1176" class="s">Actions and governance: action_requests, policy_versions, connector_config_versions, access grants, api keys</text>
+<text x="362" y="1191" class="s">Audit and logs: audit_log (hash chain), access_log, llm_calls / usage, job_runs, system_flags (leases, kill switch)</text>
+<text x="362" y="1206" class="s">Phishing: ph_submissions (unique source_ref) | Vulnerability: vm_findings, campaigns, action plans,</text>
+<text x="362" y="1221" class="s">vuln_exceptions, risk register, vuln_intel | Intelligence: insights, briefs | notifications</text>
+<rect x="1124" y="1110" width="252" height="109" rx="7" class="box"/>
+<text x="1134" y="1128" class="t">Encrypted file store</text>
+<text x="1134" y="1146" class="s">SOC_RAW_PAYLOAD_DIR: raw vendor</text>
+<text x="1134" y="1161" class="s">payloads, reported .eml</text>
+<text x="1134" y="1176" class="s">SOC_REPORT_OUTPUT_DIR: Word /</text>
+<text x="1134" y="1191" class="s">PowerPoint reports, evidence packs</text>
+<text x="1134" y="1206" class="s">Fernet (SOC_DATA_KEY), 0600</text>
+<rect x="1388" y="1110" width="240" height="109" rx="7" class="box"/>
+<text x="1398" y="1128" class="t">Configuration + artefacts</text>
+<text x="1398" y="1146" class="s">config/connectors.yaml (${VAR}</text>
+<text x="1398" y="1161" class="s">refs only), suppliers.yaml,</text>
+<text x="1398" y="1176" class="s">sanctioned_services.yaml;</text>
+<text x="1398" y="1191" class="s">artifacts/phishing/models/</text>
+<text x="1398" y="1206" class="s">(trained models, offline)</text>
+<rect x="352" y="1262" width="1276" height="400" rx="12" class="zone"/>
+<text x="366" y="1282" class="z">Flows (numbered badges) - each explained step by step in the component architecture document</text>
+<circle cx="380" cy="1312" r="11" fill="#2563eb"/>
+<text x="380" y="1316" class="n" text-anchor="middle">1</text>
+<text x="400" y="1316" class="s">Sign-in: browser -&gt; proxy/WAF -&gt; soc-api; Entra token (RS256, JWKS) -&gt; roles + domain scope.</text>
+<circle cx="380" cy="1350" r="11" fill="#2563eb"/>
+<text x="380" y="1354" class="n" text-anchor="middle">2</text>
+<text x="400" y="1354" class="s">Collect: scheduler job -&gt; SyncRunner.sync_many -&gt; connector fetch_page -&gt; normalize -&gt; context_store.ingest.</text>
+<circle cx="380" cy="1388" r="11" fill="#2563eb"/>
+<text x="380" y="1392" class="n" text-anchor="middle">3</text>
+<text x="400" y="1392" class="s">Request: BodyLimit -&gt; Security -&gt; current_user -&gt; need(Perm, domain) -&gt; handler -&gt; commit -&gt; headers.</text>
+<circle cx="380" cy="1426" r="11" fill="#2563eb"/>
+<text x="380" y="1430" class="n" text-anchor="middle">4</text>
+<text x="400" y="1430" class="s">Investigate: workflow -&gt; EnrichmentOrchestrator (parallel lookups) -&gt; evidence -&gt; fixed-rule scoring.</text>
+<circle cx="380" cy="1464" r="11" fill="#2563eb"/>
+<text x="380" y="1468" class="n" text-anchor="middle">5</text>
+<text x="400" y="1468" class="s">Phishing: reported mail -&gt; decompose -&gt; rules + offline ML -&gt; campaign / clicks / impact -&gt; case.</text>
+<circle cx="380" cy="1502" r="11" fill="#2563eb"/>
+<text x="380" y="1506" class="n" text-anchor="middle">6</text>
+<text x="400" y="1506" class="s">Correlate and report: RiskEngine -&gt; 13 rules -&gt; insights -&gt; notify / reports (python-docx / pptx).</text>
+<circle cx="380" cy="1540" r="11" fill="#c2410c"/>
+<text x="380" y="1544" class="n" text-anchor="middle">7</text>
+<text x="400" y="1544" class="s">Act: recommendation -&gt; PolicyEngine.decide -&gt; approval (four-eyes) -&gt; ActionService -&gt; connector write.</text>
+<circle cx="380" cy="1578" r="11" fill="#2563eb"/>
+<text x="380" y="1582" class="n" text-anchor="middle">8</text>
+<text x="400" y="1582" class="s">Explain: LLMGateway -&gt; Redactor -&gt; client LLM -&gt; citation + figure checks -&gt; narrative stored.</text>
+<circle cx="380" cy="1616" r="11" fill="#475569"/>
+<text x="380" y="1620" class="n" text-anchor="middle">A</text>
+<text x="400" y="1620" class="s">Every step: trace id (observability.py), audit_log append, access_log row, JSON log to SIEM.</text>
+<rect x="1660" y="70" width="720" height="1610" rx="12" class="zone"/>
+<text x="1674" y="90" class="z">21 connectors (tools/*.py) - vendor APIs over HTTPS 443, one least-privilege identity per tool</text>
+<rect x="1672" y="100" width="344" height="124" rx="7" class="ext"/>
+<text x="1682" y="118" class="t">CrowdStrike Falcon  (crowdstrike)</text>
+<text x="1682" y="136" class="s">OAuth2 client credentials</text>
+<text x="1682" y="151" class="s">R /alerts/queries + entities/alerts/v2</text>
+<text x="1682" y="166" class="s">R /devices/queries/devices-scroll/v1</text>
+<text x="1682" y="181" class="s">R /spotlight/combined/vulnerabilities/v1</text>
+<text x="1682" y="196" class="s">W /devices/entities/devices-actions/v2</text>
+<text x="1682" y="211" class="s">W /real-time-response/entities/*</text>
+<rect x="2028" y="100" width="344" height="124" rx="7" class="ext"/>
+<text x="2038" y="118" class="t">Defender for Endpoint  (defender_endpoint)</text>
+<text x="2038" y="136" class="s">Entra app: certificate or secret</text>
+<text x="2038" y="151" class="s">R /api/alerts, /api/machines</text>
+<text x="2038" y="166" class="s">R /api/vulnerabilities/machinesVuln...</text>
+<text x="2038" y="181" class="s">R /api/advancedqueries/run</text>
+<text x="2038" y="196" class="s">W /api/machines/{id}/isolate | scan |</text>
+<text x="2038" y="211" class="s">  collectInvestigationPackage; /api/indicators</text>
+<rect x="1672" y="234" width="344" height="124" rx="7" class="ext"/>
+<text x="1682" y="252" class="t">Defender for O365  (defender_office365)</text>
+<text x="1682" y="270" class="s">Graph + Exchange admin API</text>
+<text x="1682" y="285" class="s">R users/{mbox}/mailFolders/inbox/messages</text>
+<text x="1682" y="300" class="s">R security/alerts_v2, runHuntingQuery</text>
+<text x="1682" y="315" class="s">  (EmailEvents, UrlClickEvents, ...)</text>
+<text x="1682" y="330" class="s">W beta analyzedEmails/remediate, sendMail</text>
+<text x="1682" y="345" class="s">W adminapi InvokeCommand (block list)</text>
+<rect x="2028" y="234" width="344" height="94" rx="7" class="ext"/>
+<text x="2038" y="252" class="t">Defender for Identity  (defender_identity)</text>
+<text x="2038" y="270" class="s">Entra app via Graph (read-only)</text>
+<text x="2038" y="285" class="s">R security/alerts_v2 (MDI source)</text>
+<text x="2038" y="300" class="s">R runHuntingQuery: IdentityLogonEvents</text>
+<text x="2038" y="315" class="s">  (look-up per person / address)</text>
+<rect x="2028" y="338" width="344" height="124" rx="7" class="ext"/>
+<text x="2038" y="356" class="t">Microsoft Entra ID  (entra)</text>
+<text x="2038" y="374" class="s">Graph + ARM, certificate or secret</text>
+<text x="2038" y="389" class="s">R /v1.0/users, auditLogs/signIns,</text>
+<text x="2038" y="404" class="s">  auditLogs/directoryAudits</text>
+<text x="2038" y="419" class="s">R identityProtection/riskyUsers, ...</text>
+<text x="2038" y="434" class="s">R ARM roleAssignments (Azure roles)</text>
+<text x="2038" y="449" class="s">W revoke sessions, disable, reset, risk</text>
+<rect x="1672" y="368" width="344" height="94" rx="7" class="ext"/>
+<text x="1682" y="386" class="t">Avanan / Harmony Email  (avanan)</text>
+<text x="1682" y="404" class="s">API key exchanged for a token</text>
+<text x="1682" y="419" class="s">R /app/hec-api/v1.0 search / event</text>
+<text x="1682" y="434" class="s">R verdict by internetMessageId</text>
+<text x="1682" y="449" class="s">W quarantine / restore action</text>
+<rect x="1672" y="472" width="344" height="109" rx="7" class="ext"/>
+<text x="1682" y="490" class="t">Cisco Umbrella  (umbrella)</text>
+<text x="1682" y="508" class="s">OAuth2 client credentials</text>
+<text x="1682" y="523" class="s">R /reports/v2/activity/dns</text>
+<text x="1682" y="538" class="s">R /reports/v2/categories</text>
+<text x="1682" y="553" class="s">W /policies/v2/destinationlists/{id}/</text>
+<text x="1682" y="568" class="s">  destinations (+ /remove)</text>
+<rect x="2028" y="472" width="344" height="94" rx="7" class="ext"/>
+<text x="2038" y="490" class="t">Thinkst Canary  (canary)</text>
+<text x="2038" y="508" class="s">API auth token</text>
+<text x="2038" y="523" class="s">R /api/v1/incidents/all</text>
+<text x="2038" y="538" class="s">R /api/v1/devices/all</text>
+<text x="2038" y="553" class="s">W /api/v1/incident/acknowledge</text>
+<rect x="2028" y="576" width="344" height="109" rx="7" class="ext"/>
+<text x="2038" y="594" class="t">Delinea Secret Server</text>
+<text x="2038" y="612" class="s">OAuth2 password grant (API user)</text>
+<text x="2038" y="627" class="s">R /api/v1/secret-audits</text>
+<text x="2038" y="642" class="s">R /api/v1/launched-sessions</text>
+<text x="2038" y="657" class="s">W secret change-password (rotation)</text>
+<text x="2038" y="672" class="s">account_owners map (admin -&gt; person)</text>
+<rect x="1672" y="591" width="344" height="64" rx="7" class="ext"/>
+<text x="1682" y="609" class="t">Delinea Privilege Manager</text>
+<text x="1682" y="627" class="s">OAuth2 client credentials</text>
+<text x="1682" y="642" class="s">R /Tms/api/v1/events/elevation</text>
+<rect x="1672" y="665" width="344" height="94" rx="7" class="ext"/>
+<text x="1682" y="683" class="t">Rapid7 InsightVM  (rapid7)</text>
+<text x="1682" y="701" class="s">HTTP Basic, read-only user (or CSV)</text>
+<text x="1682" y="716" class="s">R /api/3/assets (+ /{id}/vulnerabilities)</text>
+<text x="1682" y="731" class="s">R /api/3/vulnerabilities/{id} (+solutions)</text>
+<text x="1682" y="746" class="s">R /api/3/vulnerability_exceptions</text>
+<rect x="2028" y="695" width="344" height="94" rx="7" class="ext"/>
+<text x="2038" y="713" class="t">Wiz  (wiz)</text>
+<text x="2038" y="731" class="s">OAuth2 service account</text>
+<text x="2038" y="746" class="s">R POST /graphql: cloudResources,</text>
+<text x="2038" y="761" class="s">  vulnerabilityFindings, issuesV2</text>
+<text x="2038" y="776" class="s">  (cursor paging)</text>
+<rect x="1672" y="769" width="344" height="94" rx="7" class="ext"/>
+<text x="1682" y="787" class="t">ServiceNow  (servicenow)</text>
+<text x="1682" y="805" class="s">OAuth2 client credentials or Basic</text>
+<text x="1682" y="820" class="s">R/W /api/now/table/{ticket_table}</text>
+<text x="1682" y="835" class="s">R /api/now/table/cmdb_ci_computer</text>
+<text x="1682" y="850" class="s">W create / update ticket (correlation_id)</text>
+<rect x="2028" y="799" width="344" height="79" rx="7" class="ext"/>
+<text x="2038" y="817" class="t">Jira  (jira)</text>
+<text x="2038" y="835" class="s">Basic: e-mail + API token</text>
+<text x="2038" y="850" class="s">R /rest/api/3/search/jql</text>
+<text x="2038" y="865" class="s">W /rest/api/3/issue (+ /comment)</text>
+<rect x="1672" y="873" width="344" height="79" rx="7" class="ext"/>
+<text x="1682" y="891" class="t">Ownership CSV  (cmdb_csv)</text>
+<text x="1682" y="909" class="s">mounted file</text>
+<text x="1682" y="924" class="s">owner, platform team, environment,</text>
+<text x="1682" y="939" class="s">criticality per host</text>
+<rect x="2028" y="888" width="344" height="94" rx="7" class="ext"/>
+<text x="2038" y="906" class="t">Microsoft Sentinel  (sentinel)</text>
+<text x="2038" y="924" class="s">Entra app via ARM (Reader)</text>
+<text x="2038" y="939" class="s">R /subscriptions/../workspaces/..</text>
+<text x="2038" y="954" class="s">  /Microsoft.SecurityInsights/incidents</text>
+<text x="2038" y="969" class="s">  (+ entities)</text>
+<rect x="1672" y="962" width="344" height="79" rx="7" class="ext"/>
+<text x="1682" y="980" class="t">Generic SIEM push  (generic_siem)</text>
+<text x="1682" y="998" class="s">inbound: platform API key</text>
+<text x="1682" y="1013" class="s">POST /api/v1/ingest/alerts</text>
+<text x="1682" y="1028" class="s">field map; bad item refused alone</text>
+<rect x="2028" y="992" width="344" height="79" rx="7" class="ext"/>
+<text x="2038" y="1010" class="t">NIST NVD  (nvd)</text>
+<text x="2038" y="1028" class="s">optional API key</text>
+<text x="2038" y="1043" class="s">R services.nvd.nist.gov</text>
+<text x="2038" y="1058" class="s">  /rest/json/cves/2.0 (CVE ids only)</text>
+<rect x="1672" y="1051" width="344" height="64" rx="7" class="ext"/>
+<text x="1682" y="1069" class="t">FIRST EPSS  (epss)</text>
+<text x="1682" y="1087" class="s">none</text>
+<text x="1682" y="1102" class="s">R api.first.org/data/v1/epss</text>
+<rect x="2028" y="1081" width="344" height="79" rx="7" class="ext"/>
+<text x="2038" y="1099" class="t">CISA KEV  (cisa_kev)</text>
+<text x="2038" y="1117" class="s">none</text>
+<text x="2038" y="1132" class="s">R www.cisa.gov .../known_exploited_</text>
+<text x="2038" y="1147" class="s">  vulnerabilities.json</text>
+<rect x="1672" y="1125" width="344" height="109" rx="7" class="ext"/>
+<text x="1682" y="1143" class="t">Threat-intel fusion  (threat_intel)</text>
+<text x="1682" y="1161" class="s">per-source API key (opt-in)</text>
+<text x="1682" y="1176" class="s">VirusTotal v3, AbuseIPDB v2/check, OTX,</text>
+<text x="1682" y="1191" class="s">URLhaus, ThreatFox, MalwareBazaar,</text>
+<text x="1682" y="1206" class="s">GreyNoise, Shodan - external</text>
+<text x="1682" y="1221" class="s">indicators only (internal withheld)</text>
+<path d="M308 196 H348" class="line"/>
+<path d="M1628 1000 H1668" class="line"/>
+<path d="M984.0 712 H990.0 V912" class="write"/>
+<text x="998.0" y="912" class="wl">policy-gated writes only</text>
+<path d="M1628 1030 H1668" class="write"/>
+</svg>

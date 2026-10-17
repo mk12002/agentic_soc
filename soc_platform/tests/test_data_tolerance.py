@@ -292,6 +292,15 @@ def test_a_misspelt_setting_name_is_reported_with_the_nearest_real_one():
     assert p.level == "warning" and "SOC_RAW_RETENTION_DAYS" in p.fix
 
 
+def test_a_secret_file_that_is_missing_or_empty_is_an_error_not_a_silently_empty_secret(tmp_path):
+    empty, good = tmp_path / "empty", tmp_path / "key"
+    empty.write_text("\n", encoding="utf-8")
+    good.write_text("sk-real-value\n", encoding="utf-8")
+    problems = check_environment({"SOC_LLM_API_KEY_FILE": str(tmp_path / "missing"), "SOC_DATA_KEY_FILE": str(empty),
+                                  "SOC_DEV_JWT_SECRET_FILE": str(good)})
+    assert sorted((p.name, p.level) for p in problems) == [("SOC_DATA_KEY_FILE", "error"), ("SOC_LLM_API_KEY_FILE", "error")]
+
+
 def test_production_refuses_dev_sign_in_and_no_encryption_key():
     names = {p.name for p in check_environment({"SOC_ENVIRONMENT": "prod"}) if p.level == "error"}
     assert {"SOC_AUTH_MODE", "SOC_DATA_KEY"} <= names

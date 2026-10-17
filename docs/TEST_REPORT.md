@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-14 (rounds 15-23; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-15 (rounds 15-24; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,27 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 23 (2026-10-14) - latest results: the data handoff workbook's own estate, and what it exposed
+## 0. Round 24 (2026-10-15) - latest results: supply chain, build pipeline and dev-VM security
+
+Aim: close the gaps raised by the internal security preliminary assessment for the development VM.
+
+| Gap | Now | Evidence |
+|---|---|---|
+| Dependencies were minimum versions only, no SBOM | `requirements/platform.lock` (50 packages, exact versions; the container build uses it as constraints) and a deterministic CycloneDX 1.5 SBOM (`scripts/supply_chain.py`); pip-audit over the lock: 0 known vulnerabilities | `test_supply_chain.py` |
+| Gates ran only on the developer's machine | `.github/workflows/ci.yml`: lint, bandit, pip-audit, lock check, JavaScript syntax, secret and confidential-name scan, gitleaks, both test suites, SBOM, Trivy image scan | `test_ci_runs_every_gate` (the workflow itself runs on the first push) |
+| No commit-time secret block | `scripts/precommit_scan.py` (git hook and CI); the name pattern lives outside the repository | `test_the_pre_commit_scan_blocks_secrets_and_confidential_names` |
+| A `*_FILE` secret pointing at a missing or empty file left the secret silently empty | `config check` (and therefore `serve`) reports it as an error | `test_a_secret_file_that_is_missing_or_empty_is_an_error_not_a_silently_empty_secret` |
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **713 passed**, 0 failed, 16 skipped (729 collected) |
+| Platform suite on PostgreSQL 16 | **713 passed**, 0 failed, 16 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **108 of 108 features verified**; 240 mapped tests run, 0 failed; browser tour with the live LLM 0 problems (35 screenshots); ML engine 205 passed |
+| ML engine warnings | the verification run showed 301 warnings (was 1): every one from the engine calling the Redis client's deprecated `setex` - replaced by `set(..., ex=ttl)` at all five call sites; engine suite rerun: 205 passed, 0 warnings; the platform's engine and phishing tests rerun: 29 passed |
+| Container image (Trivy, fixable high / critical) | first scan: 2 high (the base image's setuptools vendored `wheel` 0.45.1 and `jaraco.context` 5.3.0); after upgrading pip: 4 high in pip's own vendored libraries (`msgpack`, `urllib3`, `setuptools`). Fixed: setuptools upgraded to the locked version, pip removed from the runtime image. **Final: 0**; the container starts, runs as the non-root user and `/health` reports ok |
+| Lint / bandit / pip-audit (lock) / scan of tracked files | clean / no issues / 0 known vulnerabilities / clean |
+
+## Round 23 (2026-10-14): the data handoff workbook's own estate, and what it exposed
 
 Aim: test the platform on data built to the organisation's data handoff workbook rules, not only on the presenter demo.
 A fourth test estate (`build_estate_variant.py --handoff`) carries the workbook's naming (`example.invalid`,
@@ -21,8 +41,11 @@ scenario's ground truth. Results on the final code:
 
 | Check | Result |
 |---|---|
-| Platform suite on SQLite | **706 passed**, 0 failed, 16 skipped (722 collected) |
-| Platform suite on PostgreSQL 16 | **706 passed**, 0 failed, 16 skipped |
+| Platform suite on SQLite | **707 passed**, 0 failed, 16 skipped (723 collected) |
+| Platform suite on PostgreSQL 16 | **707 passed**, 0 failed, 16 skipped |
+| Feature verification (`--browser --engine --live --llm`) | **108 of 108 features verified**; 240 mapped tests run, 0 failed; ML engine 205 passed; browser tour with the live LLM 0 problems (35 screenshots) |
+| Production run (scheduled jobs only, demo and workbook estate) | every job ok; the storyline's correlation rules fire, incl. consent after phishing on the workbook estate |
+| Configuration check / preflight `--all` / Compose | 0 errors, 0 warnings / 21 of 21 ready / valid (refuses to start without its passwords) |
 | Demo seed | unchanged: 7 phishing + 3 incident cases, 34 recommended actions, 6 open vulnerabilities |
 
 What the estate exposed, each fixed with a test:
@@ -33,6 +56,7 @@ What the estate exposed, each fixed with a test:
 | Defender for Identity had no look-up | its domain logons were never used as evidence | per-person / per-address look-up (`IdentityLogonEvents`, investigation window) |
 | RFC 5737 documentation addresses counted as "private" | an attacker address in a synthetic estate was never checked against threat intelligence | documentation ranges are outside addresses; real private ranges still withheld |
 | Switching estates in a test kept the learned record shapes | a shape learned on another estate's fixtures disabled type coercion for later tests | `estate_env` resets the shapes |
+| The look-alike detector read "1" only as "l" and never "l" as "i" | `m1crosoft-...` and `mlcrosoft-...` senders were not flagged as imitating a protected brand (the workbook estate's supplier-impersonation finding was missing) | every reading compared; corpus still 100 % detection / 0 % false positives; 30 common legitimate domains raise nothing |
 | The decay test compared two points in time strictly | it failed once the calendar passed 23 days after the fixture date (activity leaves the risk window) | a factor may leave only if its activity left the window |
 
 ## Round 22 (2026-10-12): the organisation's data handoff workbook, reconciled connector by connector

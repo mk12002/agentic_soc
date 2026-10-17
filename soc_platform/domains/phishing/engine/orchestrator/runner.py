@@ -364,7 +364,7 @@ class OrchestratorWorker:
 
                     # --- Atomic write (fails if key was modified since WATCH) ---
                     pipe.multi()
-                    pipe.setex(key, settings.orchestrator_cache_ttl_seconds, json.dumps(state))
+                    pipe.set(key, json.dumps(state), ex=settings.orchestrator_cache_ttl_seconds)
                     pipe.execute()
 
                     return filtered, first_seen_ts
@@ -396,7 +396,7 @@ class OrchestratorWorker:
         filtered = [entry for entry in items if entry.get("agent_name") != incoming.get("agent_name")]
         filtered.append(incoming)
         state = {"first_seen_ts": first_seen_ts, "results": filtered}
-        self.redis_client.setex(key, settings.orchestrator_cache_ttl_seconds, json.dumps(state))
+        self.redis_client.set(key, json.dumps(state), ex=settings.orchestrator_cache_ttl_seconds)
         return filtered, first_seen_ts
 
     def _is_complete(self, agent_results: list[dict[str, Any]]) -> bool:

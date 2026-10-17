@@ -36,6 +36,9 @@ class MockRedis:
         
     def setex(self, key, ttl, value):
         self.data[key] = value
+
+    def set(self, key, value, ex=None):
+        self.data[key] = value
         
     def delete(self, key):
         if key in self.data:

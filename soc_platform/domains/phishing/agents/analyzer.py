@@ -91,17 +91,19 @@ class AnalysisResult:
 def lookalike(domain: str, protected: list[str]) -> tuple[str, str] | None:
     """Return (protected domain, how) if ``domain`` imitates it: homoglyph/edit-distance or brand embedding."""
     base = domain.split(".")[-2] if domain.count(".") >= 1 else domain
-    norm = base.replace("0", "o").replace("1", "l").replace("3", "e").replace("5", "s").replace("rn", "m")
+    folded = base.replace("0", "o").replace("3", "e").replace("5", "s").replace("rn", "m")
+    # "1" stands for "l" (paypa1) as often as for "i" (m1crosoft), and "l" for "i" (mlcrosoft): every reading is compared
+    norms = [folded.replace("1", "l"), folded.replace("1", "i"), folded.replace("1", "i").replace("l", "i")]
     best: tuple[str, str, int] | None = None
     for p in protected:
         pb = p.split(".")[0]
         if domain == p or domain.endswith("." + p):
             return None
         d = Levenshtein.distance(base, pb)
-        if norm == pb or (0 < d <= 2 and len(pb) >= 5):
-            how, rank = (f"character substitution ({base} vs {pb})" if norm == pb and base != pb
+        if pb in norms or (0 < d <= 2 and len(pb) >= 5):
+            how, rank = (f"character substitution ({base} vs {pb})" if pb in norms and base != pb
                          else f"edit distance {d}"), d
-        elif len(pb) >= 5 and pb in norm:
+        elif len(pb) >= 5 and any(pb in n for n in norms):
             how, rank = (f"embeds brand '{pb}'" + (" with look-alike characters" if pb not in base else "")), 5
         else:
             continue

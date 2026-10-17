@@ -219,7 +219,7 @@ class DeduplicationCache:
             result_copy["dedup_cache_hit_count"] = 0
             
             result_json = json.dumps(result_copy)
-            redis.setex(cache_key, self.ttl_seconds, result_json)
+            redis.set(cache_key, result_json, ex=self.ttl_seconds)
             
             logger.debug(
                 "Cached analysis result",

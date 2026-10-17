@@ -1,0 +1,128 @@
+# Every push and pull request runs the same gates the project runs before a commit (CLAUDE.md §9), plus a container
+# image scan. A failing gate fails the run; protect the main branch so merges need a green run.
+# Repository secret BANNED_NAMES_REGEX holds the confidential-name pattern (never committed).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  SOC_LOG_CONFIGURE: "0"
+
+jobs:
+  quality:
+    name: lint, security analysis, dependency audit, secrets, SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libzbar0
+          pip install -r requirements/platform.txt -c requirements/platform.lock -r requirements/dev.txt
+          pip install --no-deps -e .
+      - name: Lint (ruff)
+        run: ruff check . --exclude .venv,node_modules
+      - name: Static security analysis (bandit)
+        run: bandit -r soc_platform scripts -ll -x "soc_platform/tests,scripts/ui_tour/node_modules,soc_platform/domains/phishing/tests"
+      - name: Dependency vulnerabilities (pip-audit on the lock)
+        run: python -m pip_audit -r requirements/platform.lock --no-deps --disable-pip
+      - name: Lock matches the requirements
+        run: python scripts/supply_chain.py check
+      - name: Console JavaScript parses
+        run: for f in soc_platform/api/static/*.js; do node --check "$f"; done
+      - name: Secrets and confidential names in tracked files
+        env:
+          SOC_BANNED_NAMES_REGEX: ${{ secrets.BANNED_NAMES_REGEX }}
+        run: python scripts/precommit_scan.py --all
+      - name: Secrets in the git history (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Software bill of materials (CycloneDX)
+        run: python scripts/supply_chain.py sbom
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/platform.cdx.json
+
+  tests-sqlite:
+    name: platform tests (SQLite, PostgreSQL rules enforced)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libzbar0
+          pip install -r requirements/platform.txt -c requirements/platform.lock -r requirements/dev.txt
+          pip install --no-deps -e .
+      - name: pytest
+        run: python -m pytest soc_platform/tests -q -p no:cacheprovider
+
+  tests-postgres:
+    name: platform tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libzbar0
+          pip install -r requirements/platform.txt -c requirements/platform.lock -r requirements/dev.txt
+          pip install --no-deps -e .
+      - name: pytest on PostgreSQL
+        env:
+          SOC_TEST_POSTGRES: postgresql://postgres:postgres@localhost:5432/postgres
+        run: python -m pytest soc_platform/tests -q -p no:cacheprovider
+
+  image:
+    name: container image build and vulnerability scan (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -f deploy/Dockerfile -t soc-platform:ci .
+      - name: Scan (fail on fixable high / critical)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: soc-platform:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
