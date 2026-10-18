@@ -136,7 +136,7 @@ own parsers (`python scripts/estate_profile.py OUT/fixtures example.invalid`): *
 | Rule | Platform |
 |---|---|
 | Fictional data only | workbook estate: organisation `example.invalid`, people `analyst.demo`, `other.demo` ..., devices `demo-laptop-01` ..., every outside domain under `.invalid`, every address private or RFC 5737 - checked over all its fixtures (`test_every_address_and_mailbox_is_reserved_for_testing`). The presenter demo stays the fictional Acme organisation |
-| ISO 8601 UTC canonical times; vendor formats kept raw | canonical times are aware UTC; raw payloads are stored encrypted as received; odd vendor times are read or treated as absent |
+| ISO 8601 UTC canonical times; vendor formats kept raw | canonical times are aware UTC; the original payloads can be kept encrypted as received (`SOC_STORE_RAW_PAYLOADS`); odd vendor times are read or treated as absent |
 | Canonical ids separate from vendor ids | section 4 |
 | Multi-key correlation, never IP / host name / CVE alone | section 3 |
 | ≥ 1,000 events; 80-95 % benign | workbook estate: 1,279 events, 89.5 % benign (browsing, sign-ins incl. failed logons, DNS threat categories blocked) - `test_the_estate_carries_the_workbook_volume_benign_share_and_replays` |

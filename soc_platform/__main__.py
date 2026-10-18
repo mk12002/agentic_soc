@@ -13,6 +13,9 @@
   preflight   [NAME ... | --all] [--by EMAIL]   run every check a tool must pass before it goes live
   connector   new NAME --category CAT [--tool "Vendor Product"] [--vendor V]  |  check NAME
               scaffold a new connector that already follows the platform's rules, then prove it conforms
+  blobs       check [--sample N]  |  migrate [--delete-files]
+              stored e-mails and reports: check every reference resolves; move file-store blobs into the database
+              (before switching to SOC_BLOB_STORE=database for several hosts)
 """
 
 from __future__ import annotations
@@ -405,6 +408,45 @@ def cmd_connector(*args: str) -> None:
               f"`python -m soc_platform connector check {a.name}`")
         return
     sys.exit(devkit.check(a.name))
+
+
+def cmd_blobs(*args: str) -> None:
+    import argparse
+    import json
+
+    from soc_platform.core.audit import AuditLog
+    from soc_platform.core.blobstore import check_references, migrate_to_database
+
+    ap = argparse.ArgumentParser(prog="python -m soc_platform blobs")
+    sub = ap.add_subparsers(dest="action", required=True)
+    c = sub.add_parser("check", help="every stored e-mail and report reference resolves from this host")
+    c.add_argument("--sample", type=int, default=None)
+    m = sub.add_parser("migrate", help="move file-store blobs into the database (idempotent)")
+    m.add_argument("--delete-files", action="store_true", help="remove each file once its row is committed")
+    a = ap.parse_args(list(args))
+    db = _db()
+    db.create_all()
+    with db.session() as s:
+        if a.action == "check":
+            out = check_references(s, sample=a.sample)
+            print(json.dumps({**out, "unreadable": out["unreadable"][:50]}, indent=1))
+            if out["unreadable"]:
+                sys.exit(1)
+            return
+        out = migrate_to_database(s)
+        AuditLog(s).append(actor_type="human", actor_id=_cli_principal(None).id, event_type="blobs.migrated",
+                           subject_type="blobs", subject_id="all",
+                           payload={"moved": out["moved"], "already": out["already"], "missing": len(out["missing"])})
+    if a.delete_files:          # only now that the rows and the repointed records are committed
+        out["deleted_files"] = 0
+        for f in out["files"]:
+            if Path(f).is_file():
+                Path(f).unlink()
+                out["deleted_files"] += 1
+    out.pop("files", None)
+    print(json.dumps({**out, "missing": out["missing"][:50]}, indent=1))
+    if out["missing"]:
+        sys.exit(1)
 
 
 def main(argv: list[str]) -> None:

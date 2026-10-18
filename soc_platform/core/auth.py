@@ -193,7 +193,12 @@ def _has_mfa(claims: dict, settings: Settings) -> bool:
 
 @lru_cache(maxsize=4)
 def _jwks_client(tenant_id: str) -> jwt.PyJWKClient:
-    return jwt.PyJWKClient(f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys")
+    """The tenant's signing keys. A key already seen stays cached in the process (``cache_keys``): if Microsoft's key
+    endpoint is unreachable, tokens signed with a known key keep validating - signed-in analysts keep working - and
+    only a new key id (Microsoft's rotation) needs a fetch. Without it the key set expired after five minutes and an
+    Entra outage rejected every analyst already signed in."""
+    return jwt.PyJWKClient(f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys", cache_keys=True,
+                           max_cached_keys=32)
 
 
 def principal_from_token(token: str, settings: Settings) -> Principal:

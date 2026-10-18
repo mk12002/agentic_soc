@@ -30,23 +30,34 @@ class RawStore:
 
     Payloads are encrypted at rest when ``SOC_DATA_KEY`` is configured (mandatory in prod)."""
 
-    def __init__(self, root: str | Path, cipher: Any = "auto") -> None:
+    def __init__(self, root: str | Path, cipher: Any = "auto", session: Session | None = None) -> None:
         from soc_platform.core.crypto import get_cipher
 
         self.root = Path(root)
         self.cipher = get_cipher() if cipher == "auto" else cipher
+        self.session = session              # given: the configured blob store (SOC_BLOB_STORE) holds the payloads
 
     def put(self, tool: str, source_type: str, source_id: str, payload: dict[str, Any]) -> str:
         from soc_platform.core.crypto import write_protected
 
         digest = hashlib.sha256(f"{tool}|{source_type}|{source_id}".encode()).hexdigest()[:32]
-        path = self.root / _safe(tool) / _safe(source_type) / f"{digest}.json"
-        write_protected(path, json.dumps(payload, default=str, indent=1).encode("utf-8"), self.cipher)
-        return str(path)
+        rel = f"{_safe(tool)}/{_safe(source_type)}/{digest}.json"
+        data = json.dumps(payload, default=str, indent=1).encode("utf-8")
+        if self.session is not None:
+            from soc_platform.core.blobstore import BlobStore
+
+            return BlobStore(self.session, cipher=self.cipher).put(self.root / rel, f"raw/{rel}", data)
+        write_protected(self.root / rel, data, self.cipher)
+        return str(self.root / rel)
 
     def get(self, ref: str) -> dict[str, Any]:
+        from soc_platform.core.blobstore import BlobStore, is_db_ref
         from soc_platform.core.crypto import read_protected
 
+        if is_db_ref(ref):
+            if self.session is None or not ref.startswith("db:raw/"):
+                raise PermissionError("raw reference outside the raw store")
+            return json.loads(BlobStore(self.session, cipher=self.cipher).get(ref).decode("utf-8"))
         p = Path(ref).resolve()
         if self.root.resolve() not in p.parents:
             raise PermissionError("raw reference outside the raw store")
@@ -64,6 +75,18 @@ class ContextStore:
         self.s = session
         self.raw = raw_store
         self.resolver = resolver or EntityResolver(session)
+
+    def _raw_store(self) -> RawStore | None:
+        """The store for original vendor payloads: the one given, else - when SOC_STORE_RAW_PAYLOADS is on - the
+        configured blob store (database or files), created on first use. Off by default: the normalised record and
+        the vendor deep link are kept; originals add a write per record and grow with event volume."""
+        if self.raw is None:
+            from soc_platform.config import get_settings
+
+            st = get_settings()
+            if st.store_raw_payloads:
+                self.raw = RawStore(Path(st.raw_payload_dir) / "vendor", session=self.s)
+        return self.raw
 
     # ------------------------------------------------------------------ ingest
 
@@ -89,8 +112,8 @@ class ContextStore:
         src.last_seen = observed
         src.fetched_at = utcnow()
         src.deep_link = rec.deep_link
-        if rec.raw is not None and self.raw is not None:
-            src.raw_ref = self.raw.put(rec.tool, rec.source_type, rec.source_id, rec.raw)
+        if rec.raw is not None and (raw := self._raw_store()) is not None:
+            src.raw_ref = raw.put(rec.tool, rec.source_type, rec.source_id, rec.raw)
         self.s.flush()
 
         if rec.is_entity:

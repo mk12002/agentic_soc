@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from soc_platform import jobs
 from soc_platform.core.db import Database
 from soc_platform.core.models import JobRun, SystemFlag, utcnow
@@ -76,4 +78,79 @@ def test_every_scheduled_job_runs_end_to_end_on_fixtures(tmp_path, monkeypatch):
         {n: r.error for n, r in first.items() if r.status != "ok"}
     again = jobs.run_job("incident", db=db, sleep=lambda _: None)
     assert again.status == "ok" and again.summary["new_incidents"] == 0   # replay does not duplicate incidents
+    get_settings.cache_clear()
+
+
+def _job_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOC_REPORT_OUTPUT_DIR", str(tmp_path / "rep"))
+    from soc_platform.config import get_settings
+    from soc_platform.core import db as dbm
+
+    get_settings.cache_clear()
+    db = _db()
+    monkeypatch.setattr(dbm, "_default", db)
+    from soc_platform.api import app as appmod
+
+    appmod.registry.cache_clear()
+    return db
+
+
+def test_one_failing_email_never_holds_up_the_others_and_is_retried_then_left_to_an_analyst(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from soc_platform.config import get_settings
+    from soc_platform.connectors.registry import ConnectorRegistry
+    from soc_platform.core.audit import AuditLog
+    from soc_platform.domains.phishing.models import Submission
+    from soc_platform.domains.phishing.service import PhishingService
+
+    db = _job_env(tmp_path, monkeypatch)
+    corpus = sorted((Path(__file__).resolve().parents[2] / "artifacts" / "phishing" / "corpus").glob("*.eml"))
+    with db.session() as s:                         # a submission a stopped run left waiting
+        left = PhishingService(s, ConnectorRegistry.all_fake(), org_domains=["acme-demo.com"],
+                               raw_dir=tmp_path / "raw").submit_raw(corpus[0].read_bytes(), source="upload").id
+    real = PhishingService.process
+
+    def poisoned(self, sid, **kw):
+        if self.s.get(Submission, sid).source == "defender_office365":
+            raise RuntimeError("unexpected structure")
+        return real(self, sid, **kw)
+
+    monkeypatch.setattr(PhishingService, "process", poisoned)
+    run = jobs.run_job("phishing", db=db, sleep=lambda _: None)
+    assert run.status == "ok" and run.summary["processed"] == 1 and run.summary["failed"] == 1   # the batch went on
+    with db.session() as s:
+        assert s.get(Submission, left).case_id is not None                                   # the left-over one too
+        bad = s.execute(select(Submission).where(Submission.status == "failed")).scalars().one()
+        assert bad.analysis["processing_failure"]["attempts"] == 1
+        assert AuditLog(s).query(event_type="phishing.processing_failed", subject_id=bad.id)
+    for _ in range(4):                                                                       # retried, then left
+        jobs.run_job("phishing", db=db, sleep=lambda _: None)
+    with db.session() as s:
+        assert s.get(Submission, bad.id).analysis["processing_failure"]["attempts"] == jobs.ITEM_ATTEMPTS
+    get_settings.cache_clear()
+
+
+def test_one_failing_incident_never_holds_up_the_others_and_a_later_success_clears_it(tmp_path, monkeypatch):
+    from soc_platform.config import get_settings
+    from soc_platform.core.models import Case
+    from soc_platform.domains.incident.service import IncidentService
+
+    db = _job_env(tmp_path, monkeypatch)
+    real, seen = IncidentService.investigate, []
+
+    def flaky(self, cid, **kw):
+        seen.append(cid)
+        if len(seen) == 1:
+            raise RuntimeError("unexpected structure")
+        return real(self, cid, **kw)
+
+    monkeypatch.setattr(IncidentService, "investigate", flaky)
+    run = jobs.run_job("incident", db=db, sleep=lambda _: None)
+    assert run.status == "ok" and run.summary["failed"] == 1 and run.summary["investigated"] >= 1
+    with db.session() as s:
+        assert s.get(Case, seen[0]).assessment["processing_failure"]["attempts"] == 1
+    jobs.run_job("incident", db=db, sleep=lambda _: None)                                    # retried and succeeds
+    with db.session() as s:
+        assert "processing_failure" not in (s.get(Case, seen[0]).assessment or {})
     get_settings.cache_clear()

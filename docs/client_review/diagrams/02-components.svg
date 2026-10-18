@@ -82,5 +82,5 @@
   <rect x="20" y="768" width="1160" height="72" rx="10" class="layer"/>
   <text x="34" y="790" class="L">Persistence</text>
   <rect x="160" y="778" width="420" height="52" rx="7" class="box"/><text x="172" y="800" class="t">PostgreSQL 16 (production) / SQLite (development)</text><text x="172" y="818" class="s">all records, audit chain, access log, model-call log</text>
-  <rect x="600" y="778" width="420" height="52" rx="7" class="box"/><text x="612" y="800" class="t">Encrypted file store (volume or blob mount)</text><text x="612" y="818" class="s">raw payloads, reported e-mail, reports, evidence packs</text>
+  <rect x="600" y="778" width="420" height="52" rx="7" class="box"/><text x="612" y="800" class="t">Encrypted blob store (PostgreSQL or volume)</text><text x="612" y="818" class="s">raw payloads, reported e-mail, reports, evidence packs</text>
 </svg>

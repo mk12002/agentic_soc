@@ -1,0 +1,26 @@
+# Agentic SOC platform - Kubernetes base (no single point of failure in the application tier).
+# Render:  kubectl kustomize deploy/kubernetes/overlays/azure   (or overlays/onprem)
+# Apply:   kubectl apply -k deploy/kubernetes/overlays/<azure|onprem>
+# Before applying: create the secrets (docs/HIGH_AVAILABILITY.md section 4) and set the image in the overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agentic-soc
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: agentic-soc
+    includeSelectors: false
+    includeTemplates: true          # pod labels too: the egress policy selects on it
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - api.yaml
+  - scheduler.yaml
+  - service.yaml
+  - pdb.yaml
+  - hpa.yaml
+  - networkpolicy.yaml
+images:
+  - name: soc-platform
+    newName: soc-platform          # overlays point this at the client's registry, pinned by digest
+    newTag: latest

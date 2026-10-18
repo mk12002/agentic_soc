@@ -23,6 +23,7 @@ import os
 import threading
 import time
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
@@ -131,11 +132,26 @@ class Scheduler:
     def _heartbeat_loop(self) -> None:
         while not self.stop.is_set():
             self.last_attempt = time.monotonic()
+            self._touch_liveness()
             try:
                 self._beat()
             except Exception:
                 log.warning("scheduler heartbeat could not be written", exc_info=True)
             self.stop.wait(self.heartbeat)
+
+    def _touch_liveness(self) -> None:
+        """For an orchestrator's liveness probe on a scheduler-only process (no HTTP endpoint): touch a local file
+        while the supervisor and the job thread are alive. Local on purpose - a probe that asked the database would
+        restart every scheduler during a database outage. ``SOC_SCHEDULER_LIVENESS_FILE``; unset = off."""
+        path = os.environ.get("SOC_SCHEDULER_LIVENESS_FILE")
+        jobs_thread = self._workers.get("jobs")
+        if not path or not (self._threads and self._threads[0].is_alive() and jobs_thread is not None
+                            and jobs_thread.is_alive()):
+            return
+        try:
+            Path(path).touch()
+        except OSError:
+            log.warning("scheduler liveness file %s could not be written", path, exc_info=True)
 
     # ------------------------------------------------------------------ work
     def run_due(self) -> list[dict[str, Any]]:
@@ -242,7 +258,7 @@ def status(s: Any) -> dict[str, Any]:
         out["state"], out["heartbeat_write_delayed"] = "running", True   # alive here; its database write is waiting
     elif age > stale_after:
         out["state"] = "stale"
-    elif loop_at is not None and (now - loop_at).total_seconds() > jobs.LEASE_SECONDS and b.get("job"):
+    elif loop_at is not None and (now - loop_at).total_seconds() > jobs.stuck_seconds() and b.get("job"):
         out["state"], out["stuck_job"] = "stuck", b.get("job")
     else:
         out["state"] = "running"

@@ -12,8 +12,9 @@ const caseLink = (id, name) => `<a href="#/cases/${encodeURIComponent(id)}">${es
 // ================================================================= Overview
 async function Overview() {
   const __g = GEN;
-  const [o, conns, dr, top] = await Promise.all([api('/api/v1/dashboard/overview?days=14'), api('/api/v1/dashboard/connectors'),
-    api('/api/v1/metrics/drift'), inDomain('*') ? api('/api/v1/intelligence/risk/top?limit=6') : Promise.resolve([])]);
+  const [o, conns, dr, top, val] = await Promise.all([api('/api/v1/dashboard/overview?days=14'), api('/api/v1/dashboard/connectors'),
+    api('/api/v1/metrics/drift'), inDomain('*') ? api('/api/v1/intelligence/risk/top?limit=6') : Promise.resolve([]),
+    api('/api/v1/value/scorecard?days=30')]);
   const c = o.cases, a = o.actions, vm = o.vulnerability || {}, ctx = o.context;
   const bad = conns.filter(x => x.enabled && ['error', 'stale', 'misconfigured'].includes(x.state));
   const perf = o.performance.investigation_enrichment_ms;
@@ -27,6 +28,7 @@ async function Overview() {
       ${kpi('Open insights', nf(o.insights.open), Object.entries(o.insights.by_severity).map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || 'none')}
       ${vm.open_findings != null ? kpi('Open vulnerabilities', nf(vm.open_findings), `${nf(vm.sla_breached)} past SLA · ${nf(vm.internet_exposed)} exposed`, vm.sla_breached > 0) : ''}
     </div>
+    <div class="mt">${valueCard(val)}</div>
     <div class="grid g-2 mt">
       ${card('New cases per day', stackedBars(o.trend, ['phishing', 'incident', 'vulnerability']), {sub: 'by domain'})}
       ${card('Open cases by severity', donut(c.open_by_severity))}
@@ -47,6 +49,35 @@ async function Overview() {
       ${card('Verdict quality', Object.entries(dr.domains).map(([d, x]) => `<div class="list-row"><span class="grow">${esc(cap(d))}</span>${status(x.status === 'stable' ? 'ok' : x.status === 'drift' ? 'critical' : 'info', x.status === 'insufficient_data' ? 'Needs more dispositions' : cap(x.status))}</div>
         ${x.reasons.map(r => `<div class="small muted">${esc(r)}</div>`).join('')}`).join(''), {sub: `recent ${dr.window.recent_days} d vs ${dr.window.baseline_days} d`})}
     </div>`));
+}
+
+// The benefits the platform is deployed for, against the organisation's baseline (reporting/value.py). Every figure
+// is computed by the server; a lead enters what software cannot measure (baselines, targets, time-study effort).
+const VALUE_STATUS = {met: ['ok', 'On target'], improving: ['info', 'Improving'], not_improved: ['high', 'Not improved'],
+  no_baseline: ['info', 'Awaiting baseline'], no_data: ['info', 'No data yet']};
+const VALUE_SOURCE = {platform: 'measured by the platform', time_study: 'time study', derived: 'derived'};
+function valueCard(v) {
+  const fmt = (x, u) => x == null ? '–' : `${nf(x)}${u === '%' ? ' %' : ' ' + esc(u)}`;
+  const rows = v.kpis.map(k => `<tr><td><div class="t-title">${esc(k.label)}</div><div class="t-sub">${esc(VALUE_SOURCE[k.source] || k.source)} · ${esc(k.measured_from)}</div></td>
+    <td class="num">${fmt(k.baseline, k.unit)}</td><td class="num strong">${fmt(k.current, k.unit)}</td><td class="num">${fmt(k.target, k.unit)}</td>
+    <td>${status(...(VALUE_STATUS[k.status] || ['info', k.status]))}</td></tr>`);
+  const keys = [...v.kpis.map(k => [k.id, k.label]), ...Object.entries(v.inputs || {}).map(([k, x]) => [k, x.label])];
+  const form = can('approve_policy') && inDomain('*') ? `<details class="mt"><summary>Enter a baseline, target or time-study figure</summary>
+    <div class="inline mt" style="flex-wrap:wrap;gap:8px">
+      <select id="vkpi" aria-label="KPI">${keys.map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join('')}</select>
+      <select id="vkind" aria-label="Kind">${['baseline', 'target', 'measured'].map(o => `<option value="${o}">${cap(o)}</option>`).join('')}</select>
+      <input class="input" id="vval" type="number" min="0" step="any" style="width:120px" aria-label="Value" placeholder="Value">
+      <input class="input" id="vnote" maxlength="500" style="flex:1;min-width:220px" aria-label="Source" placeholder="Source, e.g. ServiceNow tickets Jan-Mar">
+      ${btn('Save', 'saveValueInput', [], 'primary')}</div></details>` : '';
+  const gate = v.automation_gate_open == null ? '' : `<div class="small muted mt">Automation quality gate (agreement ≥ 90 %, missed threats ≤ 2 %): <b>${v.automation_gate_open ? 'open' : 'not yet met'}</b></div>`;
+  return card('Value scorecard', table(['KPI', {h: 'Baseline', num: true}, {h: 'Now', num: true}, {h: 'Target', num: true}, 'Status'], rows,
+    {empty: 'No KPIs in your scope'}) + gate + form, {sub: `last ${v.period_days} days against the organisation's baseline`});
+}
+async function saveValueInput() {
+  const value = parseFloat($('#vval').value);
+  if (!Number.isFinite(value)) { toast('Enter a number', true); return; }
+  await api('/api/v1/value/inputs', {method: 'PUT', body: JSON.stringify({kpi: $('#vkpi').value, kind: $('#vkind').value, value, note: $('#vnote').value.trim()})});
+  toast('Saved'); Overview();
 }
 
 // ================================================================= Intelligence
@@ -262,7 +293,12 @@ async function Approvals() {
     api('/api/v1/actions/summary?status=recommended,pending_approval')]);
   const doms = Object.keys(sm.by_domain).sort();
   const total = APPROVAL_FILTER === 'all' ? sm.total : (sm.by_domain[APPROVAL_FILTER] || 0);
+  const types = Object.entries(sm.by_type || {}).slice(0, 8);
   setMainG(__g, page('Approvals', 'Actions the platform recommends. Nothing here runs until someone with the right role approves it; four-eyes actions need a second person.', '',
+    `<div class="grid g-2">
+      ${card('Waiting by domain', donut(sm.by_domain), {sub: `${nf(sm.total)} actions awaiting a decision`})}
+      ${card('Waiting by action type', hbars(types.map(([t, n]) => ({label: t, values: {actions: n}})), ['actions'], {label: 'actions by type', empty: 'Nothing is waiting'}))}
+    </div><div class="mt"></div>` +
     card(null, `<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="seg">${['all', ...doms].map(f =>
       `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}">${esc(cap(f))} <span class="muted">${f === 'all' ? sm.total : (sm.by_domain[f] || 0)}</span></button>`).join('')}</div></div>` +
       table(['Action', 'Targets', 'Rationale', 'Policy', ''], xs.map(x => `<tr>
@@ -288,9 +324,17 @@ async function Phishing() {
       ${kpi('Time to containment', m.time_to_containment_minutes && m.time_to_containment_minutes.median != null ? Math.round(m.time_to_containment_minutes.median) + ' min' : '–', m.time_to_containment_minutes && m.time_to_containment_minutes.median != null ? 'median, report to first containment' : 'no containment executed yet')}</div>
     <div class="grid g-3 mt">
       ${card('Verdict mix', donut(m.verdict_mix, {malicious: 'var(--c-critical)', suspicious: 'var(--c-high)', spam: 'var(--c-medium)', safe: 'var(--c-low)'}))}
-      ${card('Users who clicked', clickers.map(([u, n]) => `<div class="list-row"><span class="grow">${esc(u)}</span>${n >= 2 ? chip('repeat', 'plain') : ''}<span class="score">${n}</span></div>`).join('') || empty('No clicks recorded'))}
+      ${card('Users who clicked', hbars(clickers.slice(0, 8).map(([u, n]) => ({label: u, values: {clicks: n}})), ['clicks'],
+        {label: 'clicks per user', empty: 'No clicks recorded'}), {sub: (m.repeat_clickers || []).length ? `${(m.repeat_clickers || []).length} clicked more than one campaign` : 'campaigns clicked per user'})}
       ${can('investigate') ? card('Analyse a message', `<div class="stack" style="gap:10px"><input type="file" id="eml" aria-label="Email file to analyse (.eml)" accept=".eml,message/rfc822" class="input" style="padding:5px">
         ${btn('Analyse', 'upload', [], 'primary')}<div class="small muted">The original is stored encrypted; the verdict, evidence and recommended actions open as a case.</div></div>`) : ''}
+    </div>
+    <div class="grid g-2 mt">
+      ${card('Most active reporters', hbars((m.top_reporters || []).map(([u, n]) => ({label: u, values: {reports: n}})), ['reports'],
+        {label: 'reports per person', empty: 'No reports yet'}), {sub: 'people who report suspicious e-mail - worth recognising'})}
+      ${card('How reports were handled', hbars([{label: 'Closed automatically (QA-sampled)', values: {safe: m.auto_closed || 0}},
+        {label: 'Analysed by the platform', values: {reports: Math.max(0, (m.reported || 0) - (m.auto_closed || 0))}},
+        {label: 'Part of a campaign', values: {suspicious: m.campaigns || 0}}], ['safe', 'reports', 'suspicious'], {label: 'report handling'}))}
     </div>`));
 }
 async function upload() {
@@ -312,6 +356,8 @@ async function Suppliers() {
 }
 
 // ================================================================= Vulnerabilities
+// a list a person can take in at real-tenant volume: the count, the first few, how many more (the rest on hover)
+const names = (xs, n = 6) => !xs || !xs.length ? 'none' : `<b>${nf(xs.length)}</b> · ${esc(xs.slice(0, n).join(', '))}${xs.length > n ? ` <span class="muted" title="${esc(xs.slice(n).join(', '))}">and ${nf(xs.length - n)} more</span>` : ''}`;
 async function Vulnerabilities() {
   const __g = GEN;
   const [m, f, cov] = await Promise.all([api('/api/v1/vm/metrics'), api('/api/v1/vm/findings'), api('/api/v1/vm/coverage')]);
@@ -319,9 +365,17 @@ async function Vulnerabilities() {
   setMainG(__g, page('Vulnerabilities', 'Rapid7, CrowdStrike, Wiz and Defender findings resolved to one record per asset and CVE, prioritised on exploitability and exposure.', acts,
     `<div class="grid g-kpi">${kpi('Open findings', nf(m.open))}${kpi('CISA KEV', nf(m.kev_open), 'known exploited', m.kev_open > 0)}
       ${kpi('Internet-exposed', nf(m.internet_exposed_open))}${kpi('Past SLA', nf(m.sla_breached), '', m.sla_breached > 0)}${kpi('Asset match rate', pct(m.asset_match_rate, 1), 'across scanners')}</div>
+    <div class="grid g-3 mt">
+      ${card('Open by priority', donut(m.by_priority, CHART_COLOR), {sub: 'exploitability, exposure, criticality'})}
+      ${card('Open findings by team', hbars(Object.entries(m.per_team || {}).filter(([, v]) => v.open).sort((a, b) => b[1].open - a[1].open)
+        .map(([t, v]) => ({label: t, values: {'past SLA': v.sla_breached || 0, 'within SLA': (v.open || 0) - (v.sla_breached || 0)}})), ['past SLA', 'within SLA'],
+        {label: 'open findings by team', empty: 'No open findings'}))}
+      ${card('Age of open findings', columns(['0-7', '8-30', '31-90', '90+'].map((k, i) => ({label: k + ' d', value: (m.ageing || {})[k] || 0,
+        color: ['var(--c-low)', 'var(--c-medium)', 'var(--c-high)', 'var(--c-critical)'][i]})), {label: 'open findings by age'}), {sub: 'days since first seen'})}
+    </div>
     <div class="grid g-2 mt">
       ${card('Ask about exposure', `<div class="inline"><input class="input" style="flex:1;min-width:260px" id="vq" data-enter="vmAsk" placeholder="e.g. which internet-facing hosts have KEV vulnerabilities?">${btn('Query', 'vmAsk', [], 'primary')}</div><div id="vqa"></div>`)}
-      ${card('Coverage gaps', `<dl class="kv"><dt>No EDR</dt><dd>${esc(cov.missing_edr.join(', ') || 'none')}</dd><dt>Not in CMDB</dt><dd>${esc(cov.not_in_cmdb.join(', ') || 'none')}</dd><dt>Resolution queue</dt><dd>${nf(cov.unresolved_queue)}</dd></dl>`)}
+      ${card('Coverage gaps', `<dl class="kv"><dt>No EDR</dt><dd>${names(cov.missing_edr)}</dd><dt>Not in CMDB</dt><dd>${names(cov.not_in_cmdb)}</dd><dt>Resolution queue</dt><dd>${nf(cov.unresolved_queue)}</dd></dl>`)}
     </div>
     <div class="mt">${card(`Findings <span class="muted">(${f.length})</span>`, table(['Priority', 'CVE', 'Asset', 'Owner', 'SLA due', 'Seen by', 'Status', ''], f.map(x => `<tr>
       <td>${pchip(x.priority)}</td><td class="mono">${esc(x.cve)}</td><td><div class="t-title">${esc(x.asset)}</div>${x.internet_exposed ? '<div class="t-sub">internet-exposed</div>' : ''}</td>
@@ -345,6 +399,12 @@ async function Cloud() {
     can('request_action') ? btn('Route to owners', 'misRoute', [], 'primary') : '',
     `<div class="grid g-kpi">${kpi('Open', nf(m.open))}${kpi('Past SLA', nf(m.overdue), '', m.overdue > 0)}${kpi('False closures', nf(m.false_closures), 'fix claimed, Wiz still reports it', m.false_closures > 0)}
       ${kpi('Teams involved', nf(Object.keys(m.by_team).length))}</div>
+    <div class="grid g-2 mt">
+      ${card('Open by severity', donut(r.items.reduce((a, x) => (a[x.severity] = (a[x.severity] || 0) + 1, a), {})))}
+      ${card('Open by owner', hbars(Object.entries(r.items.reduce((a, x) => { const k = x.owner || 'unassigned'; a[k] = a[k] || {overdue: 0, 'on time': 0};
+          a[k][x.sla_due && new Date(x.sla_due) < new Date() ? 'overdue' : 'on time'] += 1; return a; }, {})).map(([k, v]) => ({label: k, values: v})),
+        ['overdue', 'on time'], {label: 'misconfigurations by owner', empty: 'No open misconfiguration'}))}
+    </div>
     <div class="mt">${card('Misconfigurations', table(['Severity', 'Rule', 'Resource', 'Owner', 'Status', 'SLA due', ''], r.items.map(x => `<tr>
       <td>${chip(x.severity)}</td><td class="small">${esc(x.rule)}</td><td><div class="t-title">${esc(x.resource)}</div><div class="t-sub">${esc(x.resource_type)} · ${esc(x.cloud)} ${esc(x.subscription)}</div></td>
       <td class="small">${esc(x.platform_team || 'Unknown owner')}</td><td class="nowrap">${esc(cap(x.status))}${x.reopened ? ` ${chip('reopened ' + x.reopened, 'high plain')}` : ''}</td>
@@ -926,6 +986,6 @@ async function approveBundle(id) {
 window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
-Object.assign(ALLOWED, {casePage, approvalPage, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
   rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, loadCalls, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});

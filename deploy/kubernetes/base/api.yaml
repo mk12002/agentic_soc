@@ -1,0 +1,86 @@
+# API + console. Stateless: any replica serves any request (sign-in tokens are verified per request, revocations,
+# kill switch, stored files and job state are in PostgreSQL). Losing a pod or a node loses no data and no session.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soc-api
+  labels: {app.kubernetes.io/name: soc-api, app.kubernetes.io/component: api}
+spec:
+  replicas: 2                                  # never one: a single replica is a single point of failure
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}   # a deploy never drops below the current capacity
+  selector:
+    matchLabels: {app.kubernetes.io/name: soc-api}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: soc-api, app.kubernetes.io/component: api}
+    spec:
+      serviceAccountName: soc-platform
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40        # > preStop (10) + SOC_SHUTDOWN_GRACE_SECONDS (20)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:               # replicas on different nodes and zones (overlays make these strict)
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app.kubernetes.io/name: soc-api}}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app.kubernetes.io/name: soc-api}}
+      initContainers:
+        - name: init-db                        # creates / extends the schema (idempotent; serialised by an advisory lock)
+          image: soc-platform
+          command: ["python", "-m", "soc_platform", "init-db"]
+          envFrom:
+            - configMapRef: {name: soc-platform-settings}
+            - secretRef: {name: soc-platform-secrets}
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 512Mi}}
+          volumeMounts: [{name: tmp, mountPath: /tmp}, {name: data, mountPath: /app/data}]
+      containers:
+        - name: api
+          image: soc-platform
+          command: ["python", "-m", "soc_platform", "serve"]
+          ports: [{name: http, containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: soc-platform-settings}
+            - secretRef: {name: soc-platform-secrets}
+            - secretRef: {name: soc-connector-secrets, optional: true}   # ${VAR} references in connectors.yaml
+          securityContext: *restricted
+          # sized for 2-vCPU nodes: one worker process per pod. Measured: one process served 43 requests/s; four
+          # served 100 analysts at 150 requests/s (OPERATIONS.md). Confirm with scripts/load_test.py at go-live.
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {memory: 2Gi}
+          startupProbe:                        # the process is up (model warm-up and imports may take a while)
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:                       # never depends on the database: an outage must not restart every pod
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:                      # out of the load balancer while its database is unreachable
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 2
+          lifecycle:
+            preStop:                           # let the load balancer stop routing here before SIGTERM
+              exec: {command: ["python", "-c", "import time; time.sleep(10)"]}
+          volumeMounts: [{name: tmp, mountPath: /tmp}, {name: data, mountPath: /app/data}]
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+        - {name: data, emptyDir: {sizeLimit: 2Gi}}   # report scratch only: finished files go to the database

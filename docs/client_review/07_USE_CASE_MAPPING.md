@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Document** | Use-case mapping - Agentic SOC platform |
-| **Version** | 1.1 - 2026-10-13 |
+| **Version** | 1.2 - 2026-10-17 |
 | **Audience** | SOC leadership, SOC analysts, security management |
 
 ## About the platform
@@ -31,8 +31,24 @@ The challenge is not a lack of security tools or data; it is the manual effort t
 together and turn it into timely, actionable decisions. Time goes on **search, gather, consolidate, correlate,
 document and follow up** - the steps the platform is planned to take over, leaving the decision with the analyst.
 
-Reductions in manual effort are not estimated here: they will be measured in the pilot against a baseline agreed with
-the SOC (time per case and per report today vs. with the platform, on the same work).
+### What the organisation gains, and how it is measured
+
+The benefits are proposed as **targets**, each confirmed against a baseline measured before the pilot and then
+reported on a value scorecard (console overview, CISO weekly brief, monthly board pack). Figures are computed in code
+from tool and case timestamps; analyst effort, which software cannot see, comes from a short time study.
+
+| Benefit | KPI | Proposed target |
+|---|---|---|
+| Efficiency | Phishing handling time per reported e-mail (received -> closed) | -50 % |
+| Efficiency | Incident: alert to analyst decision | -40 % |
+| Efficiency | Analyst hours on the recurring reports per week | -70 % |
+| Capacity | Tier-1 analyst effort freed (effort saved per case x case volume) | >= 30 % |
+| Threat reduction | Time to contain a clicked phishing e-mail | -50 % |
+| Threat reduction | Time to a validated fix for critical / known-exploited vulnerabilities | -30 % |
+| Threat reduction | Critical findings past SLA (known-exploited or internet-exposed) | -50 % |
+| Quality gate | Agreement with analyst decisions in shadow mode; missed threats | >= 90 %; <= 2 % |
+
+No benefit is claimed until it is measured against the agreed baseline.
 
 ## 2 Challenge 1 - Vulnerability management (Vulnerability Assistant)
 
@@ -100,4 +116,4 @@ scope and the right remediation instead of repeating the same checks.
 
 1. Does this mapping match each workflow as the SOC runs it today? Are any steps missing?
 2. Which assistant should the demonstration focus on first?
-3. Who will agree the productivity baseline (which cases and reports, which measures)?
+3. Who will agree the baseline and the targets above (which cases and reports, which measures), and run the time study?

@@ -56,8 +56,8 @@
 
   <!-- stores -->
   <rect x="270" y="380" width="290" height="160" rx="10" class="store"/>
-  <text x="284" y="404" class="t">Encrypted file store</text>
-  <text x="284" y="426" class="s">Raw vendor payloads - Fernet, 180 days</text>
+  <text x="284" y="404" class="t">Encrypted blob store (database)</text>
+  <text x="284" y="426" class="s">Original payloads (opt-in) - 180 days</text>
   <text x="284" y="444" class="s">Reported e-mails - Fernet; 180 days</text>
   <text x="284" y="460" class="s">after the case closes (open = legal hold)</text>
   <text x="284" y="478" class="s">Reports, evidence packs - Fernet,</text>

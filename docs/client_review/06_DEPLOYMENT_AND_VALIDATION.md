@@ -138,7 +138,7 @@ immediately (section 6).
 |---|---|
 | Performance | `scripts/load_test.py` against the target environment with the expected analyst count; `scripts/measure_scale.py` with production-like volume |
 | Security | The organisation's own penetration test of the deployed instance (the platform's own suite runs on every build); configuration review against the production hardening checklist (section 7) |
-| Resilience | A tool made unreachable (evidence shown as unavailable, workflows continue); LLM endpoint unreachable; scheduler stopped (banner and `/health`); database failover if the managed service supports it |
+| Resilience | A tool made unreachable (evidence shown as unavailable, workflows continue); LLM endpoint unreachable; scheduler stopped (banner and `/health`); failover drill - an API pod deleted mid-session, the scheduler running a job deleted (taken over within 120 s, one run recorded), a node drained, the database failed over (503 + Retry-After during the switch, no data lost) |
 | Recovery | Restore drill from backup; `GET /api/v1/audit/verify` clean on the restored copy |
 | Governance | Four-eyes on a connector change and a policy change; self-approval refused; with the kill switch on, an action the policy would run autonomously waits for approval; a paused tool's actions become manual steps; break-glass use raises a critical finding |
 
@@ -146,7 +146,7 @@ immediately (section 6).
 
 | Activity | Result at the time of writing |
 |---|---|
-| Platform test suite on SQLite and PostgreSQL 16 | 713 tests passing on each |
+| Platform test suite on SQLite and PostgreSQL 16 | 772 tests passing on each |
 | Phishing ML engine tests | 205 passing |
 | Feature verification (including a real-browser tour, live public feeds and a live LLM) | 108 of 108 features verified |
 | Penetration suite, input fuzzing, static analysis, dependency audit | No open findings |
@@ -187,7 +187,7 @@ the result is objective.
 | **An autonomy-policy change was wrong** | Propose the previous policy version (every version is kept) | Automation admin proposes, lead approves | The previous behaviour returns on approval; the kill switch covers the interval |
 | **The AI misbehaves** | Switch the feature off on the AI usage screen, or the whole LLM (`SOC_LLM_PROVIDER=none`) | Admin (AI usage screen) / operator (setting) | Deterministic, cited text immediately; no figure or decision changes |
 | **A release has a defect** | Redeploy the previous image tag | Operator | Schema changes are additive (new tables, new nullable columns, wider text columns), so the previous image runs on the upgraded database. A release needing a scripted migration must ship and rehearse its rollback script before it is deployed |
-| **Data corruption or loss** | Restore the database (point-in-time) and the file-store volume | Operator | `GET /api/v1/audit/verify` proves the restored audit chain intact |
+| **Data corruption or loss** | Restore the database (point-in-time; with the database blob store it holds stored e-mails and reports too) | Operator | `GET /api/v1/audit/verify` proves the restored audit chain intact; `python -m soc_platform blobs check` that every stored file resolves |
 | **Withdraw the platform** | Switch every tool off; remove write scopes and disable the tools' service identities; export the audit chain for retention; stop the services; delete data per the organisation's retention policy | Organisation | No residual access to any tool; the audit record is preserved |
 
 ## 7 Production hardening checklist

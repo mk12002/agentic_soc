@@ -1,0 +1,40 @@
+# The database URL comes from the operator-generated Secret, pointed at the pooler (which follows failovers). A
+# strategic-merge patch: env entries merge by name, so each container keeps its own (an explicit env entry also takes
+# precedence over the same name from envFrom). If the password contains URL-reserved characters (@ / : ?), put the
+# whole, percent-encoded SOC_DATABASE_URL in soc-platform-secrets instead and drop this patch.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soc-api
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: init-db
+          env:
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: soc-pg-app, key: password}}
+            - name: SOC_DATABASE_URL
+              value: postgresql+psycopg2://soc:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform
+      containers:
+        - name: api
+          env:
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: soc-pg-app, key: password}}
+            - name: SOC_DATABASE_URL
+              value: postgresql+psycopg2://soc:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soc-scheduler
+spec:
+  template:
+    spec:
+      containers:
+        - name: scheduler
+          env:
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: soc-pg-app, key: password}}
+            - name: SOC_DATABASE_URL
+              value: postgresql+psycopg2://soc:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform

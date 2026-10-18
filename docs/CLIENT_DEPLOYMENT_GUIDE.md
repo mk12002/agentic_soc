@@ -65,8 +65,11 @@ called out where they apply, with the file to change.
   the platform process).
 - **Windows hosts** are supported (the platform is developed and fully tested on Windows 11 with SQLite and
   PostgreSQL); containers on Linux are the recommended production shape.
-- **Scaling:** the API is stateless (any number of replicas behind the proxy) and schedulers take database leases,
-  so several are safe. The image runs `SOC_API_WORKERS=4` processes; give one per CPU core and keep
+- **High availability and scaling:** the API is stateless (any number of replicas behind the proxy) and schedulers
+  take renewed database leases, so several are safe and a dead one's job is taken over within two minutes. Set
+  `SOC_BLOB_STORE=database` so stored e-mails and reports are in PostgreSQL, readable by every replica. The
+  Kubernetes package (`deploy/kubernetes`, Azure and on-prem overlays), the reference topologies, the connection budget,
+  recovery targets and the failover drill are in `docs/HIGH_AVAILABILITY.md`. The image runs `SOC_API_WORKERS=4` processes; give one per CPU core and keep
   `workers x (SOC_DB_POOL_SIZE + SOC_DB_MAX_OVERFLOW)` under PostgreSQL's `max_connections`. Measured on a laptop
   (`docs/OPERATIONS.md` - Server and database under load, Connector sync and volume): four processes served 100
   concurrent analysts at 150 requests/s with no error; sync stores about 146 records/s on SQLite and about 75 on a
@@ -140,7 +143,8 @@ SOC_CONNECTORS_CONFIG=/app/config/connectors.yaml
 SOC_PUBLIC_URL=https://soc.client.com     # links in notifications
 SOC_TRUSTED_PROXIES=10.0.0.5              # the reverse proxy's address (X-Forwarded-For is trusted only from it)
 SOC_BREAKGLASS_SHA256_FILE=/run/secrets/breakglass_sha256
-SOC_RAW_PAYLOAD_DIR=/data/raw             # persistent volume, encrypted
+SOC_BLOB_STORE=database                   # stored e-mails and reports in PostgreSQL (several hosts; HIGH_AVAILABILITY.md)
+SOC_RAW_PAYLOAD_DIR=/data/raw             # scratch with the database store; the store itself with SOC_BLOB_STORE=file
 SOC_REPORT_OUTPUT_DIR=/data/reports
 SSL_CERT_FILE=/etc/ssl/certs/client-ca-bundle.pem   # only if internal consoles or the LLM gateway use a corporate CA
 # identity: section 3; connectors: section 4; LLM: section 5

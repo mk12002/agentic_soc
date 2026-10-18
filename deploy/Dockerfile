@@ -34,6 +34,7 @@ USER soc
 ENV SOC_CONNECTORS_CONFIG=/app/config/connectors.yaml SOC_RAW_PAYLOAD_DIR=/app/data/raw \
     SOC_REPORT_OUTPUT_DIR=/app/data/reports SOC_PHISHING_HOME=/app/artifacts/phishing PYTHONUNBUFFERED=1     SOC_HOST=0.0.0.0 SOC_PORT=8080 SOC_API_WORKERS=4
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 CMD curl -fs http://localhost:8080/health || exit 1
+# readiness: the process answers and its database does (/health/live is the liveness check, /health the full status)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 CMD curl -fs http://localhost:8080/health/ready || exit 1
 # workers: one per CPU core given to the container (SOC_API_WORKERS); X-Forwarded-For is handled by the app
 CMD ["python", "-m", "soc_platform", "serve"]

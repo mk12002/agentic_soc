@@ -87,23 +87,23 @@
 <rect x="340" y="70" width="1300" height="1610" rx="12" class="zoneb"/>
 <text x="354" y="90" class="z">Agentic SOC platform (Python 3.11) - Docker images, non-root uid 1001</text>
 <rect x="352.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
-<text x="362.0" y="118" class="t">soc-api container</text>
+<text x="362.0" y="118" class="t">soc-api (2+ replicas)</text>
 <text x="362.0" y="136" class="s">python -m soc_platform serve</text>
 <text x="362.0" y="151" class="s">uvicorn, SOC_API_WORKERS processes</text>
 <text x="362.0" y="166" class="s">FastAPI / Starlette, port 8080</text>
-<text x="362.0" y="181" class="s">config check refuses bad settings</text>
+<text x="362.0" y="181" class="s">probes /health/live, /health/ready</text>
 <rect x="674.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
-<text x="684.0" y="118" class="t">soc-scheduler container</text>
+<text x="684.0" y="118" class="t">soc-scheduler (2 replicas)</text>
 <text x="684.0" y="136" class="s">python -m soc_platform scheduler</text>
 <text x="684.0" y="151" class="s">scheduler.py + jobs.py JOBS</text>
-<text x="684.0" y="166" class="s">DB leases (system_flags), retries,</text>
-<text x="684.0" y="181" class="s">heartbeat for /health</text>
+<text x="684.0" y="166" class="s">leases renewed while running;</text>
+<text x="684.0" y="181" class="s">dead one taken over in 120 s</text>
 <rect x="996.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
-<text x="1006.0" y="118" class="t">postgres:16 container</text>
-<text x="1006.0" y="136" class="s">SQLAlchemy 2 + psycopg2</text>
-<text x="1006.0" y="151" class="s">pool per worker; PG column widening</text>
-<text x="1006.0" y="166" class="s">SQLite for dev / tests</text>
-<text x="1006.0" y="181" class="s">(PostgreSQL rules enforced)</text>
+<text x="1006.0" y="118" class="t">PostgreSQL 16 (HA)</text>
+<text x="1006.0" y="136" class="s">managed zone-redundant / 3-node</text>
+<text x="1006.0" y="151" class="s">SQLAlchemy 2 + psycopg2, pre-ping</text>
+<text x="1006.0" y="166" class="s">pool per worker; column widening</text>
+<text x="1006.0" y="181" class="s">SQLite for dev (PG rules enforced)</text>
 <rect x="1318.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
 <text x="1328.0" y="118" class="t">Build and supply chain</text>
 <text x="1328.0" y="136" class="s">deploy/Dockerfile (multi-stage)</text>
@@ -192,12 +192,12 @@
 <text x="1134.8000000000002" y="510" class="s">shadow_it.py, drift.py (PSI)</text>
 <rect x="1382.4" y="384" width="245.6" height="124" rx="7" class="key"/>
 <text x="1392.4" y="402" class="t">reporting/</text>
-<text x="1392.4" y="420" class="s">builder.py: 16 sources,</text>
+<text x="1392.4" y="420" class="s">builder.py: 17 sources,</text>
 <text x="1392.4" y="435" class="s">7 standard reports, planner</text>
 <text x="1392.4" y="450" class="s">reports.py: python-docx,</text>
 <text x="1392.4" y="465" class="s">python-pptx, charts</text>
 <text x="1392.4" y="480" class="s">compliance.py: evidence pack</text>
-<text x="1392.4" y="495" class="s">Jinja2 templates</text>
+<text x="1392.4" y="495" class="s">value.py: KPI scorecard</text>
 <circle cx="591.6" cy="388" r="11" fill="#2563eb"/>
 <text x="591.6" y="392" class="n" text-anchor="middle">5</text>
 <circle cx="849.2" cy="388" r="11" fill="#2563eb"/>
@@ -305,14 +305,14 @@
 <text x="362" y="1176" class="s">Actions and governance: action_requests, policy_versions, connector_config_versions, access grants, api keys</text>
 <text x="362" y="1191" class="s">Audit and logs: audit_log (hash chain), access_log, llm_calls / usage, job_runs, system_flags (leases, kill switch)</text>
 <text x="362" y="1206" class="s">Phishing: ph_submissions (unique source_ref) | Vulnerability: vm_findings, campaigns, action plans,</text>
-<text x="362" y="1221" class="s">vuln_exceptions, risk register, vuln_intel | Intelligence: insights, briefs | notifications</text>
+<text x="362" y="1221" class="s">vuln_exceptions, risk register, vuln_intel | Intelligence: insights, briefs | notifications | blobs (stored files)</text>
 <rect x="1124" y="1110" width="252" height="109" rx="7" class="box"/>
-<text x="1134" y="1128" class="t">Encrypted file store</text>
-<text x="1134" y="1146" class="s">SOC_RAW_PAYLOAD_DIR: raw vendor</text>
-<text x="1134" y="1161" class="s">payloads, reported .eml</text>
-<text x="1134" y="1176" class="s">SOC_REPORT_OUTPUT_DIR: Word /</text>
-<text x="1134" y="1191" class="s">PowerPoint reports, evidence packs</text>
-<text x="1134" y="1206" class="s">Fernet (SOC_DATA_KEY), 0600</text>
+<text x="1134" y="1128" class="t">Encrypted blob store</text>
+<text x="1134" y="1146" class="s">SOC_BLOB_STORE=database: blobs</text>
+<text x="1134" y="1161" class="s">table, every replica reads it</text>
+<text x="1134" y="1176" class="s">(or a volume: SOC_RAW_PAYLOAD_DIR,</text>
+<text x="1134" y="1191" class="s">SOC_REPORT_OUTPUT_DIR)</text>
+<text x="1134" y="1206" class="s">Fernet (SOC_DATA_KEY), SHA-256</text>
 <rect x="1388" y="1110" width="240" height="109" rx="7" class="box"/>
 <text x="1398" y="1128" class="t">Configuration + artefacts</text>
 <text x="1398" y="1146" class="s">config/connectors.yaml (${VAR}</text>

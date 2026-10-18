@@ -1,0 +1,26 @@
+# Replicas on different nodes, strictly: one node failing never takes both API or both scheduler replicas.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soc-api
+spec:
+  template:
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector: {matchLabels: {app.kubernetes.io/name: soc-api}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soc-scheduler
+spec:
+  template:
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector: {matchLabels: {app.kubernetes.io/name: soc-scheduler}}

@@ -1,0 +1,18 @@
+# Node drains and cluster upgrades never take the last API or scheduler replica away.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: soc-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: soc-api}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: soc-scheduler
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: soc-scheduler}

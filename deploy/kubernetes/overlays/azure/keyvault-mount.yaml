@@ -1,0 +1,15 @@
+# The CSI driver syncs Key Vault into the Secret only while a pod mounts the volume: every Deployment mounts it.
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: keyvault
+    csi:
+      driver: secrets-store.csi.k8s.io
+      readOnly: true
+      volumeAttributes: {secretProviderClass: soc-keyvault}
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value: {name: keyvault, mountPath: /mnt/secrets, readOnly: true}
+- op: add
+  path: /spec/template/metadata/labels/azure.workload.identity~1use
+  value: "true"

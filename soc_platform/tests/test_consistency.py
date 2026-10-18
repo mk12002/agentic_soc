@@ -212,12 +212,18 @@ def test_every_figure_agrees_across_every_surface(api):
     vmr = J(c.post("/api/v1/reports/build", headers=lead, json={"template_id": "vm_weekly"}))
     assert dict(vmr["sections"][0]["facts"])["Open findings"] == str(vmm["open"])
     doc = Document(io.BytesIO(c.get(f"/api/v1/reports/{vmr['id']}/download", headers=lead).content))
-    assert f"Open findings: {vmm['open']}" in "\n".join(p.text for p in doc.paragraphs)
+    every_cell = [cell.text for tb in doc.tables for row in tb.rows for cell in row.cells]
+    assert f"Open findings: {vmm['open']}" in "\n".join(every_cell)                 # the evidence table cites it
     dex = J(c.post("/api/v1/reports/daily_exposure", headers=lead))
     ddoc = Document(io.BytesIO(c.get(f"/api/v1/reports/{dex['id']}/download", headers=lead).content))
-    cells = {row.cells[0].text: row.cells[1].text for t in ddoc.tables for row in t.rows if len(row.cells) >= 2}
-    assert cells.get("Open findings") == str(vmm["open"]) and cells.get("KEV-listed open") == str(vmm["kev_open"])
-    assert cells.get("Past SLA") == str(vmm["sla_breached"])
+    tiles = {}                                                                         # headline tiles: value, then label
+    for tb in ddoc.tables:
+        for cell in tb.rows[0].cells:
+            lines = [x.text for x in cell.paragraphs]
+            if len(lines) == 2:
+                tiles[lines[1]] = lines[0]
+    assert tiles.get("Open findings") == str(vmm["open"]) and tiles.get("Known-exploited (KEV)") == str(vmm["kev_open"])
+    assert tiles.get("Past SLA") == str(vmm["sla_breached"])
     sh = J(c.post("/api/v1/reports/build", headers=lead, json={"spec": {"title": "s", "sections": [{"source": "shadow_it"}]}}))
     assert dict(sh["sections"][0]["facts"])["Unsanctioned services"] == str(shadow["summary"]["unsanctioned_services"])
     comp = J(c.post("/api/v1/reports/compliance", headers=aud))

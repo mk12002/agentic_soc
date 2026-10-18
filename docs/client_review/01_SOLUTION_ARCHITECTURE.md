@@ -53,7 +53,7 @@ every layer works - with identical figures and decisions - when it is switched o
 | Core services | Context store and entity resolution; cases and evidence; enrichment orchestrator; action layer; autonomy policy; audit chain; access management; encryption and retention; jobs and scheduler; connector configuration store; self-check | The governed foundation every workflow uses |
 | Connector SDK | 21 connectors | Uniform, rate-limited, resumable access to each tool; fixture mode for testing with the same parsing code |
 | LLM gateway (optional) | Providers for OpenAI-compatible gateways, Azure OpenAI / AI Foundry and the Claude Messages API | Usage policy, pseudonymisation, approved-endpoint enforcement, grounding and numeric guardrails, circuit breaker, call log |
-| Persistence | PostgreSQL 16; encrypted file store | All records; raw payloads, reported e-mail and generated reports encrypted before they are written |
+| Persistence | PostgreSQL 16; encrypted blob store (in PostgreSQL with `SOC_BLOB_STORE=database`, or a volume) | All records; reported e-mail, generated reports and - when switched on - original vendor payloads, encrypted before they are written |
 
 **Request path.** Every API call passes, in order: a 30 MB body limit enforced on the byte stream; a security
 middleware (NUL characters refused, size checked, per-client rate limit 20 requests/s with a burst of 120); token or
@@ -73,7 +73,7 @@ rate a vendor allows.
 | Where | The organisation's environment: a container platform (Kubernetes / AKS, Docker hosts) or VMs; Linux containers recommended; Windows supported |
 | Who operates | The organisation (or its appointed operator); the platform needs no inbound access for its developers |
 | Tenancy | Single organisation per deployment; no shared multi-tenant components |
-| Image | Multi-stage build on `python:3.11-slim`; runs as a non-root user (uid 1001); health check on `/health`; the phishing ML engine is included by a build argument |
+| Image | Multi-stage build on `python:3.11-slim`; runs as a non-root user (uid 1001); health check on `/health/ready`; the phishing ML engine is included by a build argument |
 | Configuration | Environment variables plus `config/connectors.yaml`; secrets as files mounted from the vault (`<NAME>_FILE`); every setting is validated at start-up and a wrong value refuses the start with the fix |
 | Upgrades | New image tag; start-up creates new tables, adds new nullable columns and widens text columns automatically; a change needing a scripted migration is announced with its script |
 
@@ -82,7 +82,7 @@ rate a vendor allows.
 | Service | Purpose | Notes |
 |---|---|---|
 | `platform-api` | API and console | 4 worker processes by default (`SOC_API_WORKERS`, one per CPU core given); stateless - any number of replicas behind the proxy; graceful shutdown lets requests in flight finish |
-| `platform-scheduler` | Scheduled jobs (ingestion, investigation, correlation, retention, self-check, reports, notifications) | Several replicas are safe: the database decides what is due and a per-job lease prevents concurrent runs; stops between jobs on SIGTERM |
+| `platform-scheduler` | Scheduled jobs (ingestion, investigation, correlation, retention, self-check, reports, notifications) | Several replicas are safe: the database decides what is due and a per-job lease, renewed while the job runs, prevents concurrent runs; a dead replica's job is taken over within 120 s; stops between jobs on SIGTERM |
 | `postgres` | PostgreSQL 16 | In production a managed service with TLS, backups and point-in-time recovery |
 | Volume | Encrypted file store | Persistent volume or blob mount |
 
@@ -95,7 +95,7 @@ RabbitMQ and Redis). **It is not needed**: the platform runs the trained models 
 |---|---|---|
 | Container runtime / orchestrator | Docker or Kubernetes able to run Linux containers; CPU cores per API replica = worker count | Organisation |
 | PostgreSQL 16 | Dedicated database and login; TLS; backups with a tested restore; `max_connections` above `workers x (SOC_DB_POOL_SIZE + SOC_DB_MAX_OVERFLOW)` (defaults 20 + 20 per process) | Organisation |
-| Persistent storage | Volume / blob for encrypted raw payloads, reported e-mail and reports | Organisation |
+| Persistent storage | None beyond PostgreSQL with `SOC_BLOB_STORE=database` (recommended for several hosts); otherwise a volume for the encrypted reported e-mail and reports | Organisation |
 | Secrets vault | Azure Key Vault or equivalent, mounted as files into the containers | Organisation |
 | TLS reverse proxy / WAF | Terminates TLS (443) in front of the API; its address is listed in `SOC_TRUSTED_PROXIES` | Organisation |
 | Identity provider | Microsoft Entra ID: one app registration (API + console), app roles, Conditional Access requiring MFA | Organisation |
@@ -167,15 +167,18 @@ supplying the organisation's CA bundle (`SSL_CERT_FILE`, `SOC_LLM_CA_BUNDLE`), n
 
 | Concern | Design | Status |
 |---|---|---|
-| API availability | Stateless replicas behind the proxy; container health check; graceful shutdown | Implemented |
-| Scheduler availability | Runs inside the API by default or as its own service; any number of replicas; heartbeat on `/health`; a "scheduler stopped / stuck" banner on every screen | Implemented |
+| API availability | Stateless replicas behind the proxy, spread across nodes and zones; liveness (`/health/live`, no database) and readiness (`/health/ready`) probes; rolling updates that keep capacity; graceful shutdown | Implemented |
+| No state on a host | Stored e-mails and reports in PostgreSQL (`SOC_BLOB_STORE=database`), encrypted and checksummed; any replica serves any request | Implemented |
+| Deployment package | Kubernetes base + Azure (three zones, managed PostgreSQL HA, Key Vault, Application Gateway - WAF v2 when internet-facing) and on-prem (three-instance PostgreSQL cluster, pooler, backups) overlays; restricted pod security; default-deny network policy | Implemented |
+| Scheduler availability | Runs inside the API by default or as its own service; any number of replicas; renewed job leases (a dead replica's job is taken over within 120 s); heartbeat on `/health`; a "scheduler stopped / stuck" banner on every screen | Implemented |
+| One bad item | Each reported e-mail and incident runs in its own savepoint: a failure rolls back alone, is retried on the next three runs, then handed to an analyst | Implemented |
 | Job failures | Retries with back-off; dead letter after 3 failed runs raises a finding; replay from the console | Implemented |
 | A tool down | That tool's evidence is shown as *unavailable* by name; workflows continue; a verdict is never silently changed | Implemented |
 | A tool misconfigured | Isolated from every workflow with the reason; all other tools keep working | Implemented |
 | LLM down | Circuit breaker; deterministic text immediately; no figure or decision changes | Implemented |
 | Database saturation / failover | Connection pool with pre-ping and recycling; 503 with `Retry-After`; optional statement timeout | Implemented |
-| Backup and restore | Database point-in-time backups plus the file-store volume; after restore `GET /api/v1/audit/verify` proves the audit chain intact | Configured at deployment |
-| Recovery targets (RPO / RTO) | Determined by the organisation's database backup policy and orchestration | Configured at deployment |
+| Backup and restore | Database point-in-time backups (with the database blob store, the only thing to back up); `SOC_DATA_KEY` escrowed in two places; after restore `GET /api/v1/audit/verify` proves the audit chain intact and `blobs check` that every stored file resolves | Configured at deployment |
+| Recovery targets (RPO / RTO) | Set by the organisation; what each layer contributes and the failover drill are in the HA reference (replica or node loss: nothing lost; synchronous database failover: no committed transaction lost) | Configured at deployment |
 
 ## 8 Technology stack
 

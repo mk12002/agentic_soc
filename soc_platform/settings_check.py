@@ -48,6 +48,7 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_ENVIRONMENT": ("choice", ("dev", "test", "prod")),
     "SOC_AUTH_MODE": ("choice", ("dev", "entra")),
     "SOC_CONNECTOR_MODE": ("choice", ("fake", "live")),
+    "SOC_BLOB_STORE": ("choice", ("file", "database")),
     "SOC_LLM_PROVIDER": ("choice", ("none", "azure_openai", "azure_foundry", "anthropic", "openai_compatible")),
     "SOC_LOG_LEVEL": ("choice", ("debug", "info", "warning", "error", "critical")),
     "SOC_LOG_FORMAT": ("choice", ("json", "text")),
@@ -81,18 +82,21 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_RATE_LIMIT_RPS": ("float", (0.1, 1_000_000)),
     "SOC_RATE_LIMIT_BURST": ("int", (1, 1_000_000)),
     "SOC_SYNC_MAX_PAGES": ("int", (1, 10_000_000)),
+    "SOC_SYNC_LOCK_WAIT_SECONDS": ("float", (0, 3_600)),
     "SOC_WATERMARK_OVERLAP_MINUTES": ("float", (0, 10_080)),
     "SOC_RESOLUTION_AUTO_THRESHOLD": ("float", (0.6, 1.0)),
     "SOC_RECORD_MAX_CALLS": ("int", (1, 1_000_000)),
     "SOC_SCHEDULER_START_DELAY": ("float", (0, 864_000)),
     "SOC_SCHEDULER_STALE_SECONDS": ("int", (10, 864_000)),
+    "SOC_SCHEDULER_STUCK_SECONDS": ("int", (60, 864_000)),
+    "SOC_JOB_LEASE_SECONDS": ("int", (30, 86_400)),
     "SOC_SELF_CHECK_CONFIRM_SECONDS": ("float", (0, 3_600)),
     "SOC_VM_FOLLOWUP_DAYS": ("int", (1, 365)),
     "SOC_LOG_FILE_MAX_MB": ("float", (0.1, 100_000)),
     "SOC_LOG_FILE_BACKUPS": ("int", (0, 1_000)),
     "SOC_CLOCK_OFFSET_SECONDS": ("float", (-10**10, 10**10)),
     "SOC_KILL_SWITCH": ("bool", None), "SOC_REQUIRE_MFA": ("bool", None), "SOC_LLM_REDACT_PII": ("bool", None),
-    "SOC_EMBEDDED_SCHEDULER": ("bool", None), "SOC_DEV_TOKENS_REMOTE": ("bool", None),
+    "SOC_EMBEDDED_SCHEDULER": ("bool", None), "SOC_STORE_RAW_PAYLOADS": ("bool", None), "SOC_DEV_TOKENS_REMOTE": ("bool", None),
     "SOC_LLM_EXPLAIN_AUTO_CLOSED": ("bool", None), "SOC_LLM_JSON_MODE": ("bool", None),
     "SOC_LLM_SERVER_FALLBACK": ("bool", None), "SOC_LOG_CONFIGURE": ("bool", None),
     "SOC_REQUIRE_MODEL_MANIFEST": ("bool", None), "SOC_PHISHING_SANDBOX": ("bool", None),
@@ -113,7 +117,7 @@ TEXT = {"SOC_HOST", "SOC_ENTRA_TENANT_ID", "SOC_ENTRA_AUDIENCE", "SOC_ENTRA_SCOP
         "SOC_DEV_JWT_SECRET", "SOC_MFA_AUTH_CONTEXT", "SOC_RAW_PAYLOAD_DIR", "SOC_REPORT_OUTPUT_DIR",
         "SOC_LLM_API_KEY", "SOC_LLM_API_VERSION", "SOC_LLM_AUTH_HEADER", "SOC_LLM_AUTH_PREFIX", "SOC_LLM_DEPLOYMENT",
         "SOC_LLM_DEPLOYMENT_SMALL", "SOC_LLM_MODEL_VERSION", "SOC_NOTIFY_WEBHOOKS", "SOC_RECORD_FIXTURES_DIR",
-        "SOC_RECORD_SALT", "SOC_LOG_FILE", "SOC_PHISHING_HOME", "SOC_PHISHING_ENGINE_LOG_LEVEL", "SOC_ENV_FILE",
+        "SOC_RECORD_SALT", "SOC_LOG_FILE", "SOC_SCHEDULER_LIVENESS_FILE", "SOC_PHISHING_HOME", "SOC_PHISHING_ENGINE_LOG_LEVEL", "SOC_ENV_FILE",
         "SOC_JOB_DAILY_REPORT_SECONDS", "SOC_JOB_FOLLOWUP_SECONDS", "SOC_JOB_INCIDENT_SECONDS",
         "SOC_JOB_INTELLIGENCE_SECONDS", "SOC_JOB_NOTIFY_SECONDS", "SOC_JOB_PHISHING_SECONDS",
         "SOC_JOB_RETENTION_SECONDS", "SOC_JOB_SELF_CHECK_SECONDS", "SOC_JOB_VM_SECONDS", "SOC_JOB_WEEKLY_REPORTS_SECONDS"}
@@ -255,4 +259,8 @@ def check_environment(env: Mapping[str, str] | None = None) -> list[SettingProbl
         if (env.get("SOC_DATABASE_URL") or "sqlite").startswith("sqlite"):
             out.append(SettingProblem("warning", "SOC_DATABASE_URL", "production on SQLite",
                                       "use PostgreSQL (CLIENT_DEPLOYMENT_GUIDE.md section 2.1)"))
+        if lower.get("SOC_BLOB_STORE", "file") == "file":
+            out.append(SettingProblem("warning", "SOC_BLOB_STORE", "stored e-mails and reports are on this host's disk: "
+                                      "safe only with one host or a volume every replica shares",
+                                      "set SOC_BLOB_STORE=database for several hosts (HIGH_AVAILABILITY.md)"))
     return out

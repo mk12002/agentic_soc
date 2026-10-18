@@ -517,16 +517,21 @@ def _services(s: Session):
                                         raw_dir=Path(st.raw_payload_dir) / "phishing")}
 
 
-def _protected_file(path: str):
-    """Serve a generated file, decrypting it if it is encrypted at rest."""
+def _protected_file(s: Session, ref: str):
+    """Serve a stored file (file store or database), decrypting it if it is encrypted at rest. A reference that
+    resolves to nothing - retention removed it, or a file store another host cannot see - answers 404, not 500."""
     import mimetypes
 
     from fastapi.responses import Response as RawResponse
 
-    from soc_platform.core.crypto import read_protected
+    from soc_platform.core.blobstore import BlobMissing, BlobStore, ref_name
 
-    name = Path(path).name
-    return RawResponse(read_protected(path), media_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+    name = ref_name(ref)
+    try:
+        data = BlobStore(s).get(ref)
+    except BlobMissing as exc:
+        raise HTTPException(404, "file no longer available") from exc
+    return RawResponse(data, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
@@ -558,6 +563,30 @@ def health(s: Session = Depends(db_session, scope="function")) -> dict[str, Any]
     return {"status": "ok", "version": __version__, "audit_chain": _CHAIN_CACHE["ok"],
             "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings()),
             "scheduler": _scheduler_heartbeat(s)}
+
+
+@app.get("/health/live", include_in_schema=False)
+def health_live() -> dict[str, Any]:
+    """Liveness: this process answers. Deliberately touches nothing else - an orchestrator restarts a container whose
+    liveness fails, and restarting every replica because the database is briefly away would turn an outage into a
+    restart storm."""
+    return {"status": "alive", "version": __version__}
+
+
+@app.get("/health/ready", include_in_schema=False)
+def health_ready() -> JSONResponse:
+    """Readiness: this replica can serve - its database answers. A load balancer stops sending it traffic while it
+    cannot (503 + Retry-After), and sends traffic again as soon as it can; the process keeps running meanwhile."""
+    from sqlalchemy import text
+
+    try:
+        with get_database().session() as s:
+            s.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        event("health.not_ready", 30, reason=type(exc).__name__)
+        return JSONResponse({"status": "not_ready", "reason": "database unreachable"}, status_code=503,
+                            headers={"Retry-After": "5"})
+    return JSONResponse({"status": "ready", "version": __version__})
 
 
 def _scheduler_heartbeat(s: Session) -> dict[str, Any]:
@@ -1016,7 +1045,13 @@ def actions_summary(status: str | None = None, p: Principal = Depends(need(Perm.
     if "*" not in p.domains:
         q = q.where(ActionRequest.domain.in_(sorted(p.domains)))
     by = {d: n for d, n in s.execute(q).all()}
-    return {"total": sum(by.values()), "by_domain": by, "list_limit": 500}
+    qt = select(ActionRequest.action_type, func.count()).group_by(ActionRequest.action_type)
+    if status:
+        qt = qt.where(ActionRequest.status.in_(status.split(",")))
+    if "*" not in p.domains:
+        qt = qt.where(ActionRequest.domain.in_(sorted(p.domains)))
+    by_type = dict(sorted(((t, n) for t, n in s.execute(qt).all()), key=lambda x: (-x[1], x[0])))
+    return {"total": sum(by.values()), "by_domain": by, "by_type": by_type, "list_limit": 500}
 
 
 def _action(a: ActionRequest) -> dict[str, Any]:
@@ -1446,7 +1481,7 @@ def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = 
     from soc_platform.reporting.reports import ReportService
 
     run = ReportService(s, get_settings().report_output_dir, llm=llm(s, p)).investigation_report(CaseService(s).view(cid), by=p.id)
-    return _protected_file(run.path)
+    return _protected_file(s, run.path)
 
 
 class BundleBody(BaseModel):
@@ -2028,10 +2063,14 @@ def download_report(rid: str, p: Principal = Depends(need(Perm.READ)), s: Sessio
             raise HTTPException(404, "unknown report")
     elif not _report_allowed(p, run.kind):
         raise HTTPException(404, "unknown report")
+    from soc_platform.core.blobstore import is_db_ref
+
     root = Path(get_settings().report_output_dir).resolve()
-    if root not in Path(run.path).resolve().parents:
+    if is_db_ref(run.path) and not run.path.startswith("db:reports/"):
         raise HTTPException(404, "unknown report")
-    return _protected_file(run.path)
+    if not is_db_ref(run.path) and root not in Path(run.path).resolve().parents:
+        raise HTTPException(404, "unknown report")
+    return _protected_file(s, run.path)
 
 
 # ----------------------------------------------------------------------------- dashboards
@@ -2175,3 +2214,35 @@ def intel_ask(body: AskBody, p: Principal = Depends(need(Perm.READ, "*")), s: Se
 @app.get("/api/v1/intelligence/brief")
 def intel_brief(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
     return _intel(s).analyst.brief()
+
+
+# ----------------------------------------------------------------------------- value scorecard
+
+
+class ValueInputBody(BaseModel):
+    kpi: str = Field(min_length=1, max_length=64)
+    kind: str = Field(pattern=r"^(baseline|target|measured)$")
+    value: float
+    note: str = Field(default="", max_length=500)
+
+
+@app.get("/api/v1/value/scorecard")
+def value_scorecard(days: int = Query(30, ge=1, le=365), p: Principal = Depends(need(Perm.READ)),
+                    s: Session = Depends(db_session, scope="function")):
+    """The benefits measured against the organisation's baseline. A domain-scoped person sees their domain's KPIs;
+    the cross-domain ones (capacity, agreement) and the entered inputs need all-domain scope."""
+    from soc_platform.reporting.value import scorecard
+
+    return scorecard(s, days=days, domains=p.domains)
+
+
+@app.put("/api/v1/value/inputs")
+def value_input(body: ValueInputBody, p: Principal = Depends(need(Perm.APPROVE_POLICY, "*")),
+                s: Session = Depends(db_session, scope="function")):
+    """A lead records a baseline, a target or a time-study measurement (human only, step-up MFA, audited)."""
+    from soc_platform.reporting.value import ValueInputError, set_input
+
+    try:
+        return set_input(s, body.kpi, body.kind, body.value, note=body.note, by=p.id)
+    except ValueInputError as exc:
+        raise HTTPException(400, str(exc)) from exc

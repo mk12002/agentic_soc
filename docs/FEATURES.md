@@ -63,6 +63,11 @@ Design details: strict Content-Security-Policy (no inline scripts, no third-part
 role-aware UI (buttons a user cannot use are hidden - the server enforces the same rules), navigation-race
 protection (a slow page can never paint over the page you moved to), accessible focus states, responsive layout.
 
+* **Charts on the working screens** - Vulnerabilities: open findings by priority, by team (past / within SLA) and
+  by age; Phishing: who clicked, most active reporters, how reports were handled; Approvals: waiting by domain and by
+  action type; Cloud posture: by severity and by owner (overdue / on time). Inline SVG and CSS bars coloured by
+  meaning (critical red, safe green), following light and dark themes, labels wrapped never cut.
+
 ### 1.2 Shared context store and entity resolution
 
 All tools feed one canonical model: `NormalizedRecord` → entities (assets, identities, indicators) + events
@@ -388,6 +393,49 @@ sanctioned-service lists. One misconfigured tool is isolated with the reason; th
 |---|---|
 | ![](screenshots/19-compliance-pack.png) | ![](screenshots/16-reports.png) |
 
+### 7.0 Value scorecard (benefits against baseline)
+
+The benefits the platform is deployed for, measured - on the **Overview** screen, in the monthly board pack and the
+CISO weekly brief, and at `GET /api/v1/value/scorecard`.
+
+| KPI | Measured from | Default target |
+|---|---|---|
+| Phishing handling time per reported e-mail | the platform: e-mail received -> case closed (median) | -50 % of baseline |
+| Time to contain a clicked phishing e-mail | the platform: received -> first containment action executed (median) | -50 % |
+| Incident: alert to analyst decision | the platform: case created -> first disposition or closure (median) | -40 % |
+| Time to validated fix, critical / known-exploited | the platform: first seen -> remediation validated by a scan (P1 or KEV) | -30 % |
+| Critical findings past SLA (KEV or internet-exposed) | the platform: open findings past their SLA date (now) | -50 % |
+| Analyst hours on recurring reports per week | time study (the platform counts the reports it drafted) | -70 % |
+| Tier-1 analyst capacity freed | derived: effort saved per case (time study) x case volume (platform) + report hours saved, over tier-1 hours | 30 % |
+| Agreement with analyst decisions | the platform: verdict vs recorded disposition; missed threats alongside | 90 %, missed <= 2 % |
+
+* Each KPI shows its baseline, current value, target and status (*on target*, *improving*, *not improved*,
+  *awaiting baseline*, *no data yet*). Nothing is claimed without data.
+* A **lead** enters what software cannot measure - the baseline from before the pilot, a target agreed with the SOC,
+  and time-study effort figures - on the Overview card or `PUT /api/v1/value/inputs` (human only, step-up MFA,
+  audited as `value.input_set` with the previous value).
+* Analyst *effort* is not elapsed time, so effort per case comes from a time study; the platform supplies the volumes.
+* The automation quality gate (agreement >= 90 % and missed threats <= 2 %) is shown with the agreement KPI.
+* Domain-scoped people see their domain's KPIs; capacity, agreement and the entered inputs need all-domain scope.
+* Every figure is computed in code (`reporting/value.py`); the model never produces or changes one.
+
+### 7.0.1 How reports look
+
+Every generated report shares one house style (`reporting/design.py`), so it can be sent as it is:
+
+* **Word**: a cover band (report, period, sources), headline figures as colour-coded tiles, charts next to the tables
+  (priority donut, findings by team within / past SLA, age of open findings), tables with a repeating navy header,
+  alternating rows and status in colour, a running header with the classification and a footer with *page X of Y*.
+* **PowerPoint**: 16:9 slides with a title band, KPI tiles, native editable charts (doughnuts by severity, verdict and
+  priority, stacked bars by team) with whole-number axes in steps a reader expects (1, 2, 5, 10, 20...), styled tables
+  and a footer on every slide.
+* **Recurring reports, rebuilt around what to do**: the daily exposure report opens with an *Act today* list (P1,
+  known-exploited or overdue, with SLA "57 d late", team and the tools that see it), then the day's changes, team
+  standing, ageing and coverage; the weekly VM report adds SLA compliance per team, campaigns and expiring
+  exceptions; the weekly management deck runs *week in numbers -> exposure -> priority vulnerabilities -> incidents ->
+  phishing -> value scorecard -> decisions needed*.
+* Missing values read "not yet measured", never "None" or "n/a". `test_report_design.py` pins all of this.
+
 ### 7.1 AI report builder
 
 * **Standard reports, preconfigured** - board monthly (PowerPoint), CISO weekly, vulnerability weekly, phishing
@@ -398,7 +446,7 @@ sanctioned-service lists. One misconfigured tool is isolated with the reason; th
   never sees or shapes chart data.
 * **Any other report, described in words** - e.g. *"a one-page board brief on phishing and supplier risk this
   quarter, as slides"*. A planner (the LLM when configured, keyword rules otherwise) turns the request into sections,
-  audience, format and period, using **only** the 16 sources in the data catalogue. You review the plan, then
+  audience, format and period, using **only** the 17 sources in the data catalogue. You review the plan, then
   generate it, and can save it as a reusable template.
 * **Figures are always computed in code** from the platform's records. The LLM writes each section's narrative
   from that section's figures (F#); a sentence that does not cite a figure, or cites one that does not exist, is

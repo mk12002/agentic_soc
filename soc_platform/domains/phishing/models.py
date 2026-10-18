@@ -25,7 +25,7 @@ class Submission(Base):
     sender: Mapped[str | None] = mapped_column(BoundedText(512), nullable=True)
     mime_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     raw_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="new", index=True)  # new|analysed|auto_closed|escalated|closed
+    status: Mapped[str] = mapped_column(String(32), default="new", index=True)  # new|analysed|auto_closed|escalated|closed|failed
     verdict: Mapped[str | None] = mapped_column(String(32), nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     case_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)

@@ -84,12 +84,12 @@ def test_health_states_running_stale_stuck_never(db, monkeypatch):
         st = sched.status(s)
         assert st["state"] == "running" and st["mode"] == "embedded" and st["schedulers"] == 1
     sc._beat(loop=True, job="vulnerability")                                        # a job starts...
-    monkeypatch.setenv("SOC_CLOCK_OFFSET_SECONDS", str(jobs.LEASE_SECONDS + 60))
+    monkeypatch.setenv("SOC_CLOCK_OFFSET_SECONDS", str(jobs.STUCK_SECONDS + 60))
     sc._beat()                                                                      # ...process alive, job not done
     with db.session() as s:
         st = sched.status(s)
         assert st["state"] == "stuck" and st["stuck_job"] == "vulnerability"
-    monkeypatch.setenv("SOC_CLOCK_OFFSET_SECONDS", str(jobs.LEASE_SECONDS + 3600))  # no heartbeat for an hour
+    monkeypatch.setenv("SOC_CLOCK_OFFSET_SECONDS", str(jobs.STUCK_SECONDS + 3600))  # no heartbeat for an hour
     with db.session() as s:
         assert sched.status(s)["state"] == "stale"
 

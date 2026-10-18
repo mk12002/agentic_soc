@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import delete, or_, select, update
@@ -52,17 +51,11 @@ EVENT_KINDS = ("signin", "dns", "mail_event", "secret_access", "elevation")
 PRUNE_BATCH = 500           # ids per delete statement: bounded statements and parameter lists on both engines
 
 
-def _unlink(path: str | None) -> bool:
-    if not path:
-        return False
-    p = Path(path)
-    try:
-        if p.is_file():
-            p.unlink()
-            return True
-    except OSError:
-        return False
-    return False
+def _unlink(session: Session, ref: str | None) -> bool:
+    """Delete a stored blob (a file, or a ``blobs`` row in the same transaction as the record that loses it)."""
+    from soc_platform.core.blobstore import BlobStore
+
+    return BlobStore(session).delete(ref)
 
 
 def run_retention(session: Session, settings: Settings, *, actor: str = "system:retention",
@@ -80,7 +73,7 @@ def run_retention(session: Session, settings: Settings, *, actor: str = "system:
                                                           SourceRecord.fetched_at < raw_cut)).scalars():
         report["raw_payloads"] += 1
         if not dry_run:
-            _unlink(src.raw_ref)
+            _unlink(session, src.raw_ref)
             src.raw_ref = None
 
     try:
@@ -96,7 +89,7 @@ def run_retention(session: Session, settings: Settings, *, actor: str = "system:
                 continue
             report["emails"] += 1
             if not dry_run:
-                _unlink(sub.raw_path)
+                _unlink(session, sub.raw_path)
                 sub.raw_path = None
 
     n = session.execute(select(LLMCall.id).where(LLMCall.ts < llm_cut, LLMCall.prompt_redacted != "[purged]")).all()

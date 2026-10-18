@@ -74,8 +74,8 @@
   <text x="344" y="342" class="s">internal Docker network only</text>
   <text x="344" y="358" class="s">port 5432 not published</text>
   <rect x="536" y="300" width="196" height="76" rx="8" class="ctr"/>
-  <text x="548" y="323" class="t">Encrypted file store</text>
-  <text x="548" y="342" class="s">raw payloads, reports</text>
+  <text x="548" y="323" class="t">Encrypted blob store</text>
+  <text x="548" y="342" class="s">e-mails, reports: database</text>
   <text x="548" y="358" class="s">Fernet (AES-128 + HMAC)</text>
   <rect x="332" y="388" width="400" height="56" rx="8" class="box"/>
   <text x="344" y="410" class="t">21 connectors in fake mode</text>

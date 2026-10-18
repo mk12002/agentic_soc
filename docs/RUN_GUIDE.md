@@ -153,7 +153,10 @@ production. **There is no second window to open and nothing to remember.**
 - **An error in a job is recorded and retried, and the other jobs carry on.** If the scheduler thread itself ever
   stops, it is restarted automatically.
 - **Running a separate scheduler as well is safe** (`python -m soc_platform scheduler`). The database decides what is
-  due, and a lease stops any job from running twice.
+  due, and a lease - renewed while the job runs - stops any job from running twice; if the scheduler running a job
+  dies, another takes the job over within two minutes (`SOC_JOB_LEASE_SECONDS`).
+- **One reported e-mail or incident that fails never holds up the others.** It is marked, retried on the next three
+  runs, then left for an analyst (audit event `*.processing_failed`).
 
 To run the server **without** background jobs (for example, to keep every figure still while you present), start it
 with `$env:SOC_EMBEDDED_SCHEDULER = "0"`. The buttons in §6.4 still run any job on demand.
@@ -538,6 +541,7 @@ For a production-like run: API, scheduler and PostgreSQL in containers. It needs
 ```ini
 POSTGRES_PASSWORD=<a strong password>
 SOC_DEV_JWT_SECRET=<as in §3>
+RABBITMQ_PASSWORD=<a strong password>   # Compose checks it for every service, though only the ML-engine profile uses it
 ```
 
 ```powershell
@@ -548,10 +552,14 @@ docker compose -f deploy\docker-compose.yml logs -f platform-api                
 
 Open http://127.0.0.1:8080 as before (`SOC_API_PORT` changes the host port).
 
-What you should see (checked end to end on Docker Desktop 29 / Compose 5, 2026-10-07): `/health` reports
-`audit_chain: true` and the scheduler `running` in `service` mode; the scheduler's first pass runs the vulnerability
-job first, then incidents and phishing; after `demo` the figures are the same as on a laptop (7 phishing and 3
-incident cases, 34 actions awaiting approval, 6 open vulnerabilities), and they survive `docker compose restart`.
+What you should see (checked end to end on Docker Desktop 29 / Compose 5, 2026-10-17): the API container turns
+*healthy* on `/health/ready`; `/health` reports `audit_chain: true` and the scheduler `running` in `service` mode; the
+scheduler's first pass runs the vulnerability job first, then incidents and phishing. `demo` can run while the
+scheduler is syncing (the two take turns on each stream) and gives the same figures as on a laptop (7 phishing and 3
+incident cases, 34 actions awaiting approval, 6 open vulnerabilities). Reports are stored in PostgreSQL
+(`[REPORT] daily_exposure: db:reports/...`; Compose sets `SOC_BLOB_STORE=database`), so a report the scheduler
+container built downloads through the API container; `docker compose exec platform-api python -m soc_platform blobs
+check` lists every stored file as readable; and everything survives `docker compose restart`.
 
 **With the phishing ML models in the container:** add `WITH_PHISHING_ENGINE=true` to `.env` before `up --build`. The
 image then includes the model libraries (scikit-learn, XGBoost, LightGBM, LangGraph - no PyTorch; about 3.7 GB instead
@@ -639,7 +647,7 @@ analysts before go-live. To serve many analysts, start several processes: `$env:
 | Internal senders flagged as external, or look-alikes missed | `SOC_ORG_DOMAINS` isn't set. Set it to the organisation's domain. |
 | "deterministic" when you expected the LLM | See §8. |
 | "Scheduler stopped" banner | No heartbeat for 3 minutes. The server was started with `SOC_EMBEDDED_SCHEDULER=0` and no separate scheduler runs, or the process stopped. Restart `serve` normally. |
-| "Scheduler stuck (job)" banner | That job has run for more than 30 minutes, typically a tool that stopped answering. Check **Integrations** (job history and connector status); the job's lease expires and it is retried. |
+| "Scheduler stuck (job)" banner | That job has run for more than 30 minutes (`SOC_SCHEDULER_STUCK_SECONDS`), typically a tool that stopped answering. Check **Integrations** (job history and connector status); the job stops renewing its lease, so it can be retried. |
 | Notifications not arriving | Integrations → *Notifications*: "No channels configured" means `SOC_NOTIFY_WEBHOOKS` is not set in this window, or the entry was rejected (it must be `kind\|https://...`, kind `teams`, `slack` or `json`; the server log names the rejected entry). A *failed* row shows the channel's error; after 5 attempts it stops retrying. Only findings rated at or above `SOC_NOTIFY_MIN_SEVERITY` (default high) and still *new* are sent. |
 | A case says "the written explanation is being prepared" for long | The model is slow or unavailable; the next incident / phishing job run retries it. The verdict and recommendations are already final. Check `GET /api/v1/llm/status`. |
 | `reset-demo` says the server is running or the file is in use | Stop `serve` (Ctrl+C) - or the other program using the database - and run it again. Nothing was deleted. |

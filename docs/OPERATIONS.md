@@ -131,7 +131,13 @@ SOC_PUBLIC_URL=https://soc.example    # optional: messages link to the console
 | `SOC_VM_FOLLOWUP_DAYS` | 7 | At most one follow-up per remediation plan per this many days |
 | `SOC_EMBEDDED_SCHEDULER` | 1 | The API server runs the scheduler itself; 0 when a separate scheduler service runs the jobs |
 | `SOC_SCHEDULER_START_DELAY` | 5 | Seconds after start-up before the built-in scheduler begins |
-| `SOC_SCHEDULER_STALE_SECONDS` | 180 | No scheduler heartbeat for this long: `/health` reports `stale` and every screen shows "Scheduler stopped" (a job running past its 30-minute lease shows "Scheduler stuck") |
+| `SOC_SCHEDULER_STALE_SECONDS` | 180 | No scheduler heartbeat for this long: `/health` reports `stale` and every screen shows "Scheduler stopped" |
+| `SOC_SCHEDULER_LIVENESS_FILE` | unset | A scheduler-only process touches this file every 30 s while its threads are alive, for an orchestrator's liveness probe (the Kubernetes package uses `/tmp/soc-scheduler.alive`) |
+| `SOC_SCHEDULER_STUCK_SECONDS` | 1800 | A job running longer than this: `/health` reports `stuck` and every screen shows "Scheduler stuck (job)" |
+| `SOC_SYNC_LOCK_WAIT_SECONDS` | 120 | A sync of a tool stream that another replica is already syncing waits this long for it to finish, then continues from its checkpoint (or skips, saying so) |
+| `SOC_JOB_LEASE_SECONDS` | 120 | A job's lease, renewed every third of it while the job runs: how long a job whose scheduler died waits before another scheduler takes it (30-86400) |
+| `SOC_STORE_RAW_PAYLOADS` | 0 | Keep each record's original vendor payload, encrypted, in the blob store for `SOC_RAW_RETENTION_DAYS`. Off by default: the normalised record and the vendor deep link are kept; originals add a write per record and grow with event volume |
+| `SOC_BLOB_STORE` | file | Where reported e-mails and reports are stored: `file` (`SOC_RAW_PAYLOAD_DIR` / `SOC_REPORT_OUTPUT_DIR`; one host or a shared volume) or `database` (PostgreSQL; every replica, covered by the database's HA and backups). `config check` warns about `file` in production. Move existing files with `python -m soc_platform blobs migrate` (HIGH_AVAILABILITY.md section 5) |
 | `SOC_SELF_CHECK_CONFIRM_SECONDS` | 2 | The self-check re-runs a failing check before alerting |
 
 Failure behaviour for each dependency: [FAILURE_MODES.md](FAILURE_MODES.md). Cost and budget sizing:
@@ -176,6 +182,9 @@ failure raises a high-severity *Platform self-check* finding (resolved automatic
 demand: `GET /api/v1/admin/self-check` (auditor / admin, all-domain scope) or the card on the Integrations screen.
 
 ## Network edge (reverse proxy, rate limit)
+
+The application's rate limit is per process. With several replicas, set the shared limit at the ingress / WAF
+(both Kubernetes overlays do; HIGH_AVAILABILITY.md).
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -291,9 +300,20 @@ status `error`, `connector.http` errors, `connector.data_quality` (a tool sent f
 `server.start` / `server.stop` mark each process's life; `server.stop` reports `access_log_dropped` if any access-log
 rows could not be written.
 
+## Value scorecard
+
+`GET /api/v1/value/scorecard?days=30` (and the Overview card) measures the benefit KPIs against the baseline. Before
+the pilot, a lead records the baseline for each KPI - from ServiceNow and scanner history, and a short time study for
+analyst effort - with its source (`PUT /api/v1/value/inputs`, `{"kpi", "kind": "baseline" | "target" | "measured",
+"value", "note"}`). During the pilot, time-study figures are entered as `measured`; everything else is measured by the
+platform. The monthly board pack and the CISO weekly brief include the scorecard. Definitions: FEATURES.md 7.0.
+
 ## Monitoring
 
-* `/health` - DB, audit-chain verification, kill switch.
+* `/health` - DB, audit-chain verification, kill switch, scheduler state (`running` / `stuck` / `stale` / `never`,
+  number of live schedulers).
+* `/health/live` (liveness: the process answers, no database) and `/health/ready` (readiness: the database answers,
+  503 + Retry-After otherwise) - for load balancers and orchestrator probes.
 * `/metrics` - Prometheus: open cases, actions by status, insights, unresolved entities, per-stream sync age,
   kill switch. Scrape with an **all-domain auditor service-account key** (`X-API-Key`). It carries every domain's
   counts, so a domain-scoped key gets 403.
@@ -302,7 +322,8 @@ rows could not be written.
 * Overview - enrichment latency (median/p95 per domain and per tool) and verdict-quality drift.
 
 Alert on: `soc_connector_last_success_age_seconds` above the stream's cadence, any `dead_letter` job,
-`soc_kill_switch == 1`, `/health` audit chain false.
+`soc_kill_switch == 1`, `/health` audit chain false, `/health` scheduler state `stale` or `stuck`, audit events
+`*.processing_failed` with `final: true` (an item left to an analyst after its retries).
 
 ## Access management
 
@@ -347,8 +368,8 @@ write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` fo
 |---|---|---|
 | Cases, entities and relations, actions, findings, insights, jobs, policies, grants, saved report templates | Database (`SOC_DATABASE_URL`; PostgreSQL in prod) | DB access control; audit and access log append-only |
 | Audit chain, access log, LLM call log (redacted prompts + responses) | Database | Hash chain (audit); retention jobs for access / LLM logs |
-| Raw vendor payloads and reported emails | `SOC_RAW_PAYLOAD_DIR` | Encrypted (Fernet), retention with legal hold |
-| Generated reports, post-incident reports, compliance packs | `SOC_REPORT_OUTPUT_DIR` | Encrypted; decrypted only on an authorised, scope-checked download |
+| Reported emails (and raw vendor payloads when enabled) | `SOC_BLOB_STORE`: the `blobs` table, or `SOC_RAW_PAYLOAD_DIR` | Encrypted (Fernet), SHA-256 checked on read (database store), retention with legal hold |
+| Generated reports, post-incident reports, compliance packs | `SOC_BLOB_STORE`: the `blobs` table, or `SOC_REPORT_OUTPUT_DIR` (on the database store the folder is scratch only) | Encrypted; decrypted only on an authorised, scope-checked download |
 | Attack stories | Not stored - rebuilt from records on request; only the deep-analysis result is cached on the case | - |
 | Phishing ML engine stores (optional) | As configured in the engine deployment | See engine docs |
 
@@ -369,8 +390,11 @@ write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` fo
 
 ## Backups
 
-Back up the database (point-in-time), the raw payload volume and the report volume. The audit chain can be
-verified after restore with `GET /api/v1/audit/verify`.
+Back up the database (point-in-time). With `SOC_BLOB_STORE=database` that is everything; with the file store, also
+the raw payload and report folders. Escrow `SOC_DATA_KEY` in two places: without it stored e-mails and reports cannot
+be decrypted. After a restore: `GET /api/v1/audit/verify` (the chain is intact) and `python -m soc_platform blobs
+check` (every stored file resolves). Recovery targets, the failover drill and the reference HA deployments are in
+HIGH_AVAILABILITY.md.
 
 ## Connecting and changing tools
 

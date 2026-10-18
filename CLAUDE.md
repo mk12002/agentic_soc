@@ -87,6 +87,8 @@ python -m soc_platform token lena@acme-demo.com lead   # dev token (needs SOC_DE
 python -m soc_platform config check [FILE] [--no-env]  # every configuration problem with its fix; exit 1 on errors
 python -m soc_platform preflight NAME... | --all       # every check a tool must pass before it goes live
 python -m soc_platform connector new NAME --category CAT --tool "Vendor X"   # scaffold;  connector check NAME
+python -m soc_platform blobs check | migrate [--delete-files]   # stored files resolve; move file store -> database
+kubectl kustomize deploy/kubernetes/overlays/azure             # render the HA package (or overlays/onprem)
 # minimum env for a local run: SOC_DEV_JWT_SECRET=<long random>, SOC_ORG_DOMAINS=acme-demo.com
 
 # tests (full suite ~25 min SQLite, ~50 min PostgreSQL when both run at once; run the relevant files first)
@@ -161,7 +163,8 @@ soc_platform/
   core/schema.py         NormalizedRecord / EntityRef - the canonical schema every connector emits
   core/models.py         core ORM tables; utcnow() (THE clock); new_id() (uuid4 hex)
   core/db.py             Database, sessions, UTCDateTime, BoundedText, NUL stripping, SQLite pragmas, add missing
-                         nullable columns (both engines), PG column widening
+                         nullable columns (both engines), PG column widening; schema creation serialised across
+                         processes (PG advisory lock, SQLite retry; WAL switch retried)
   core/context_store.py  ingest(), neighbours, timelines, keys_of
   core/entity_resolution.py  deterministic keys -> scored fuzzy (0.85 auto, 0.1 margin, 0.55 review) -> queue
   core/identity.py       user_ref(): cross-tool user naming -> upn/sam keys; built-in accounts are not people
@@ -174,6 +177,9 @@ soc_platform/
   core/access.py         role grants, API keys, revocation, break-glass, kill switch
   core/audit.py          hash-chained append-only audit; _lock_chain serialises appends
   core/crypto.py         Fernet/MultiFernet, write_protected (atomic, 0600, Windows replace retry), read_protected
+  core/blobstore.py      BlobStore: stored e-mails / reports behind one reference - a path (file store) or
+                         `db:<key>` (`blobs` table, SOC_BLOB_STORE=database); reads follow the reference;
+                         store_generated, migrate_to_database, check_references (`blobs` CLI)
   core/retention.py      retention + legal hold;  core/selfcheck.py  cross-surface consistency proof
   core/connector_config.py  ConfigStore: console connector config + supplier / sanctioned lists over the files;
                          propose / approve (four-eyes) / reject / pause / restore / export / import; preflight gate
@@ -190,12 +196,16 @@ soc_platform/
                          store (admin-only, versioned, audited) and usage_report (cost, quality, tier advice)
   llm/redaction.py       pseudonymisation before any prompt leaves; restore after
   llm/providers/         openai_compatible (also azure_foundry), anthropic_provider
-  reporting/             builder.py (16 sources, 7 standard reports, planner), reports.py, compliance.py
+  reporting/             builder.py (17 sources, 7 standard reports, planner), reports.py, compliance.py,
+                         value.py (value scorecard: benefit KPIs vs baseline / target; ValueInput in models.py),
+                         design.py (house style for every .docx / .pptx: cover, tiles, tables, charts, header /
+                         footer with page X of Y), charts.py (PNG donut / stacked / columns / bars, nice axis steps)
   fixtures/              fake-mode vendor fixtures per connector
   tests/                 platform tests (conftest.py has PG mode, PG-rules enforcement, estates)
 config/                  connectors.yaml, suppliers.yaml, sanctioned_services.yaml
 artifacts/phishing/      labelled corpus (corpus/*.eml + labels.json), engine models/data
-deploy/                  Dockerfile (multi-stage, non-root), docker-compose.yml (postgres, api, scheduler, engine profile)
+deploy/                  Dockerfile (multi-stage, non-root), docker-compose.yml (postgres, api, scheduler, engine profile),
+                         kubernetes/ (Kustomize base + overlays/azure, overlays/onprem: the HA package)
 docs/                    see §8
 ```
 
@@ -352,12 +362,17 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   docs/DATA_HANDOFF_RECONCILIATION.md), `test_handoff_estate.py` (the workbook estate: volume, benign share, replays,
   reserved addresses only, every scenario's ground truth on the real pipelines), `test_connector_defender_identity.py` / `test_connector_rapid7.py`
   (per-connector paging and behaviour),
+  `test_high_availability.py` (database blob store, migration, lease renewal / takeover / stuck release, poison items,
+  schema race, liveness / readiness, Entra key outage, one sync per stream, raw payload opt-in),
+  `test_deployment_manifests.py` (the Kubernetes package: replicas, probes, pod security, secrets, overlays render),
+  `test_value_scorecard.py` (benefit KPIs, baselines, capacity, permissions), `test_report_design.py` (house style:
+  header / footer / page fields, charts, no 'None' / 'n/a', 16:9 decks),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 713 platform tests passing on SQLite and on PostgreSQL (729 collected, 16 skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, 1 database-specific check), 205
+- Current counts (keep docs in sync when they change): 772 platform tests passing on SQLite and on PostgreSQL (788 collected, 16 skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, 1 database-specific check), 205
   engine tests, 108/108 features verified.
 
 ---
@@ -405,6 +420,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 | `docs/CLIENT_DEPLOYMENT_GUIDE.md` | deploying into a client environment: hosting, Entra sign-in, every tool's permissions/settings/egress, the client's own LLM gateway, action rollout, go-live checklist |
 | `docs/DATA_HANDOFF_RECONCILIATION.md` | the platform against the organisation's data-types handoff workbook (scope, every payload type and field, correlation rules, scenarios, generation rules, open items) - update when a connector, stream or field changes |
 | `docs/DEV_VM_SETUP.md` | the internal development / demo VM: size, outbound allow-list, secret handling, CI gates, decommissioning |
+| `docs/INFRASTRUCTURE_AND_COSTS.md` | stakeholder view of infrastructure: per-tool hosting, data flow and normalisation, measured storage per record, retention, capacity, correlation rules, on-prem vs cloud, Azure / LLM cost tables with dated list prices - re-price and re-measure when components, prices or measurements change |
+| `docs/HIGH_AVAILABILITY.md` | no single point of failure: each component's redundancy and failure behaviour, the application's HA guarantees and their tests, Azure / on-prem reference deployments, the Kubernetes package, connection budget, file-store migration, backups, recovery targets, failover drill, limits - update when a component, setting or manifest changes |
 | `docs/client_review/` | the review pack for the client's security / architecture review: solution architecture, tool integrations, data flow and protection, AI / LLM security, risk and governance, deployment and validation (+ SVG diagrams; Word edition via `scripts/build_review_pack.py`) - keep in step with behaviour changes like the other docs |
 | `docs/TEST_REPORT.md` | test rounds, newest first ("Round N" at the top) |
 | `docs/FEATURE_VERIFICATION.md` | generated by `scripts/verify_features.py` - don't hand-edit |
@@ -565,6 +582,26 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `core/retention.py`, or pruning leaves a dangling reference.
 - **Risk "now"** is the latest observation in the data, not wall time; open exposures/incidents never decay
   (`STANDING_SIGNALS`); amplifiers fade with their triggers.
+- **Nothing durable on a host's disk or in one process.** A path saved by one replica could not be read by another
+  (a report built by the scheduler, downloaded via the API). New stored files go through `BlobStore`
+  (`core/blobstore.py`), never `write_protected` directly; new state goes in the database.
+- **Every process creates the schema on first use, and replicas start together.** Eight SQLite connections opening a
+  new file failed on the WAL switch ("database is locked" - busy_timeout does not cover it); both that and
+  `create_all` now retry / serialise. A test that builds `Database` objects in threads must construct them first
+  (the PostgreSQL test mapping in conftest is not thread-safe), then race only the work under test.
+- **Job leases are short and renewed** (`SOC_JOB_LEASE_SECONDS`, 120; `_LeaseKeeper`); "stuck" is a separate
+  threshold (`SOC_SCHEDULER_STUCK_SECONDS`, 1800) after which renewal stops so a hung job can be retried. The lease
+  holder includes the thread id: a renewal from another thread must pass the job thread's holder.
+- **One sync per stream at a time.** Job leases do not cover a manual sync, a refresh or `demo` against a scheduled
+  sync: `SyncRunner.sync` takes a per-(connector, stream) lease (`sync_lease:<hash>`), renews it per page, waits up
+  to `SOC_SYNC_LOCK_WAIT_SECONDS` for another holder. The first checkpoint insert tolerates a lost race. Callers
+  with `commit_pages=False` (tests, pushes inside a request) take no lease. Found by the Docker check, not a test.
+- **One item must not fail a job.** The incident and phishing jobs run each item in a savepoint (`jobs._isolated`):
+  failures are recorded on the item, retried `ITEM_ATTEMPTS` (3) runs, then left to an analyst.
+- **Liveness must not depend on the database** (`/health/live`); readiness does (`/health/ready`). Pointing a
+  liveness probe at `/health` restarts every pod during a database outage.
+- **Variable names in `submit_raw`**: `ref` is the de-duplication key (`source_ref`); the blob reference is
+  `blob_ref`. Reusing `ref` made every replayed report a new submission (caught by `test_phishing.py`).
 
 ---
 

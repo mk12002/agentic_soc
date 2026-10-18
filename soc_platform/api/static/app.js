@@ -143,6 +143,39 @@ function donut(counts, colors = {}) {
       <text x="${c}" y="${c + 5}" text-anchor="middle" style="fill:var(--text);font-size:18px;font-weight:650">${total}</text></svg>
     <div class="stack" style="gap:6px">${e.map(([k, v]) => `<div class="small"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:8px;background:${colors[k] || `var(--c-${k}, var(--c-other))`}"></i>${esc(cap(k))} <b>${v}</b></div>`).join('')}</div></div>`;
 }
+// colours by meaning, shared by every chart (severity, priority, SLA, verdict, domain)
+const CHART_COLOR = {P1: 'var(--c-critical)', P2: 'var(--c-high)', P3: 'var(--c-medium)', P4: 'var(--c-other)',
+  'past SLA': 'var(--c-critical)', 'within SLA': 'var(--c-phishing)', malicious: 'var(--c-critical)', suspicious: 'var(--c-high)',
+  spam: 'var(--c-medium)', safe: 'var(--c-low)', clicks: 'var(--c-high)', reports: 'var(--c-phishing)', overdue: 'var(--c-critical)',
+  'on time': 'var(--c-phishing)', actions: 'var(--c-vulnerability)'};
+const colorOf = (k, i = 0) => CHART_COLOR[k] || `var(--c-${k}, ${['var(--c-phishing)', 'var(--c-incident)', 'var(--c-vulnerability)', 'var(--c-other)'][i % 4]})`;
+// stacked horizontal bars: one row per label, segments per key, the total at the end
+function hbars(rows, keys, o = {}) {
+  const tot = r => keys.reduce((a, k) => a + (r.values[k] || 0), 0);
+  if (!rows.length || !rows.some(r => tot(r) > 0)) return empty(o.empty || 'No data in this window');
+  const max = Math.max(1, ...rows.map(tot));
+  const body = rows.map(r => `<div class="hbar-row"><div class="hbar-label" title="${esc(r.label)}">${esc(r.label).replace(/([._@])/g, '$1<wbr>')}</div>
+    <div class="hbar-track">${keys.map((k, i) => { const v = r.values[k] || 0; return v ? `<span style="width:${v / max * 100}%;background:${colorOf(k, i)}" title="${esc(cap(k))}: ${v}"></span>` : ''; }).join('')}</div>
+    <div class="hbar-total" title="${keys.map(k => `${esc(cap(k))}: ${r.values[k] || 0}`).join(' · ')}">${nf(tot(r))}${keys.length > 1 ? `<div class="hbar-split">${keys.map(k => nf(r.values[k] || 0)).join(' / ')}</div>` : ''}</div></div>`).join('');
+  const legend = keys.length > 1 ? `<div class="legend">${keys.map((k, i) => `<span><i style="background:${colorOf(k, i)}"></i>${esc(cap(k))}</span>`).join('')}<span class="muted">numbers: total, then ${keys.map(k => esc(k)).join(' / ')}</span></div>` : '';
+  return `<div class="hbars" role="img" aria-label="${esc(o.label || 'bar chart')}">${body}</div>${legend}`;
+}
+// vertical columns with whole-number gridlines (for example findings by age)
+function columns(items, o = {}) {
+  if (!items.some(x => x.value > 0)) return empty(o.empty || 'No data in this window');
+  const w = 360, h = 170, pad = 26, base = h - 24, max = Math.max(1, ...items.map(x => x.value));
+  const step = Math.max(1, [1, 2, 5, 10, 20, 25, 50, 100, 250, 500, 1000].find(s => max / s <= 4) || Math.ceil(max / 4));
+  const top = Math.ceil(max / step) * step, slot = (w - pad) / items.length, bw = slot * 0.56;
+  let g = '';
+  for (let v = 0; v <= top; v += step) { const y = base - v / top * (base - 14); g += `<line x1="${pad}" x2="${w}" y1="${y}" y2="${y}" style="stroke:var(--border)"/><text x="0" y="${y + 4}">${v}</text>`; }
+  items.forEach((x, i) => {
+    const bh = x.value / top * (base - 14), cx = pad + i * slot + (slot - bw) / 2;
+    if (x.value) g += `<rect x="${cx}" y="${base - bh}" width="${bw}" height="${bh}" rx="3" style="fill:${x.color || colorOf(o.key || 'actions', i)}"><title>${esc(x.label)}: ${x.value}</title></rect>
+      <text x="${cx + bw / 2}" y="${base - bh - 5}" text-anchor="middle" style="fill:var(--text);font-weight:600">${x.value}</text>`;
+    g += `<text x="${cx + bw / 2}" y="${h - 6}" text-anchor="middle">${esc(x.label)}</text>`;
+  });
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="${esc(o.label || 'column chart')}">${g}</svg>`;
+}
 const meter = (v, max = 100) => `<div class="bar"><span style="width:${Math.max(2, Math.min(100, v / max * 100))}%;background:${v >= 75 ? 'var(--c-critical)' : v >= 50 ? 'var(--c-high)' : v >= 25 ? 'var(--c-medium)' : 'var(--c-low)'}"></span></div>`;
 
 // ---------------------------------------------------------------- navigation model

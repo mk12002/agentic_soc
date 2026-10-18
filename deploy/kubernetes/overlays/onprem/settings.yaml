@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: soc-platform-settings
+data:
+  SOC_ORG_DOMAINS: CHANGE-ME.example
+  SOC_ENTRA_TENANT_ID: CHANGE-ME
+  SOC_ENTRA_AUDIENCE: CHANGE-ME
+  SOC_ENTRA_SPA_CLIENT_ID: CHANGE-ME
+  SOC_ENTRA_SCOPE: CHANGE-ME
+  SOC_TRUSTED_PROXIES: 10.0.0.0/24           # the ingress controller / load balancer addresses
+  SOC_LLM_PROVIDER: none                     # or the client's LLM gateway (CLIENT_DEPLOYMENT_GUIDE.md)

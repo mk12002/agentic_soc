@@ -1,0 +1,34 @@
+# Default deny, then only what the platform needs. Kubernetes policies filter by address and port, not host name:
+# restrict outbound HTTPS to the connector endpoints at the egress firewall (CLIENT_DEPLOYMENT_GUIDE.md egress list).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: soc-api-ingress
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: soc-api}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {soc-ingress: "true"}     # label the ingress controller's namespace with this
+      ports: [{port: 8080, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: soc-egress
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/part-of: agentic-soc}}
+  policyTypes: [Egress]
+  egress:
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]     # DNS
+    - ports: [{port: 5432, protocol: TCP}, {port: 6432, protocol: TCP}] # PostgreSQL / its connection pooler
+    - ports: [{port: 443, protocol: TCP}]                               # tool APIs, Entra, LLM gateway, feeds

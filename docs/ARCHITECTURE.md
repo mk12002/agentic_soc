@@ -37,7 +37,7 @@ Detailed technical view above (every layer, data store, trust boundary and exter
 ## Data flow
 
 1. **Ingest.** Connectors pull streams with cursors (or receive webhooks) and normalise each record into a
-   `NormalizedRecord` with `EntityRef`s (hosts, users, indicators). Raw payloads go to the encrypted raw store.
+   `NormalizedRecord` with `EntityRef`s (hosts, users, indicators). With `SOC_STORE_RAW_PAYLOADS` on, each original payload is also kept, encrypted, in the blob store.
 2. **Resolve.** `EntityResolver` maps every reference to one canonical entity:
    deterministic keys (vendor ids, serial, FQDN, UPN/SAM/aliases) → scored fuzzy match (hostname, IP-in-window,
    OS) → unresolved queue → analyst override. Vendor ids are *conflict keys*: two different CrowdStrike AIDs are
@@ -58,9 +58,12 @@ Detailed technical view above (every layer, data store, trust boundary and exter
 
 ## Deployment
 
-* `api` - stateless FastAPI app (scale horizontally behind TLS).
+* `api` - stateless FastAPI app (scale horizontally behind TLS; `/health/live` and `/health/ready` for probes).
 * `scheduler` - runs the jobs in `soc_platform/jobs.py` (`soc_platform/scheduler.py`). Built into the API server by default; can run as its own service. Any number is safe: the database decides what is due, a per-job lease stops concurrent runs, and a heartbeat feeds `/health`.
-* `postgres` - relational store (SQLite for dev). Raw payloads / reports on a volume or blob storage.
+* `postgres` - relational store (SQLite for dev). Stored e-mails and reports in its `blobs` table with
+  `SOC_BLOB_STORE=database` (or on a volume with the file store).
+* High availability: two or more of each, spread across nodes and zones, with HA PostgreSQL - the Kubernetes package
+  in `deploy/kubernetes` (Azure and on-prem overlays) and [HIGH_AVAILABILITY.md](HIGH_AVAILABILITY.md).
 * optional `engine` profile - phishing ML microservices; detonation on an isolated host / CAPEv2.
 
 ## Key design decisions

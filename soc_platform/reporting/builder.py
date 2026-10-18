@@ -14,18 +14,12 @@ A report is a **spec**: title, audience, format (docx | pptx) and sections. Each
 
 from __future__ import annotations
 
-import io
 import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from docx import Document
-from docx.shared import Inches as DInches
-from docx.shared import Pt, RGBColor
-from pptx import Presentation
 from pptx.util import Inches
-from pptx.util import Pt as PPt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -292,6 +286,24 @@ def src_connectors(c: Ctx) -> dict:
             "det": lambda f: f"{f['Enabled connectors']} connectors are enabled; {f['Connectors needing attention']} need attention."}
 
 
+def src_value(c: Ctx) -> dict:
+    """The value scorecard (reporting/value.py): each benefit KPI against its baseline and target."""
+    from soc_platform.reporting.value import scorecard
+
+    sc = scorecard(c.s, days=c.days, domains=c.domains)
+    fmt = lambda v, u: "-" if v is None else (f"{v:g} %" if u == "%" else f"{v:g} {u}")
+    rows = [[k["label"], fmt(k["baseline"], k["unit"]), fmt(k["current"], k["unit"]), fmt(k["target"], k["unit"]),
+             k["status"].replace("_", " ")] for k in sc["kpis"]]
+    st = sc["statuses"]
+    facts: Facts = [("KPIs on target", st["met"]), ("KPIs improving", st["improving"]),
+                    ("KPIs not improved", st["not_improved"]), ("KPIs awaiting a baseline", st["no_baseline"]),
+                    ("KPIs without data yet", st["no_data"]), ("Period (days)", sc["period_days"])]
+    return {"facts": facts, "table": {"header": ["KPI", "Baseline", "Now", "Target", "Status"], "rows": rows}, "domain": "*",
+            "det": lambda f: (f"Over the last {f['Period (days)']} days, {_n(f['KPIs on target'], 'KPI is', 'KPIs are')} on target "
+                              f"and {f['KPIs improving']} improving; {f['KPIs not improved']} not improved, "
+                              f"{f['KPIs awaiting a baseline']} awaiting a baseline and {f['KPIs without data yet']} without data yet.")}
+
+
 SOURCES: dict[str, tuple[str, str, Callable[[Ctx], dict]]] = {
     "overview": ("SOC overview", "cases, approvals, automation rate, trend", src_overview),
     "vulnerability_posture": ("Vulnerability posture", "open findings, KEV, exposure, SLA, per team", src_vm),
@@ -309,6 +321,7 @@ SOURCES: dict[str, tuple[str, str, Callable[[Ctx], dict]]] = {
     "compliance": ("Control evidence", "compliance control tests", src_compliance),
     "verdict_quality": ("Verdict quality", "agreement with analysts, drift", src_drift),
     "integrations": ("Integration health", "connector freshness", src_connectors),
+    "value": ("Value scorecard", "benefit KPIs against baseline and target", src_value),
 }
 
 STANDARD: dict[str, dict[str, Any]] = {
@@ -319,7 +332,8 @@ STANDARD: dict[str, dict[str, Any]] = {
                                    {"source": "vulnerability_posture", "instruction": "Summarise exposure and whether remediation is on track."},
                                    {"source": "phishing", "instruction": "Describe the phishing threat and user behaviour."},
                                    {"source": "supplier_risk", "instruction": "Flag any third-party risk the board should know about."},
-                                   {"source": "compliance", "instruction": "State control assurance in one or two sentences."}]},
+                                   {"source": "compliance", "instruction": "State control assurance in one or two sentences."},
+                                   {"source": "value", "instruction": "Report the benefits against baseline and target, plainly, including any not met."}]},
     "ciso_weekly": {"title": "CISO weekly brief", "audience": "CISO", "format": "docx", "days": 7,
                     "description": "What happened this week, what needs a decision, where we are exposed.",
                     "sections": [{"source": "overview", "instruction": "Lead with what changed and what needs a decision."},
@@ -327,7 +341,8 @@ STANDARD: dict[str, dict[str, Any]] = {
                                  {"source": "attack_stories", "instruction": "Summarise each attack story in two sentences."},
                                  {"source": "risk", "instruction": "Name who and what needs attention first and why."},
                                  {"source": "detection_coverage", "instruction": "Call out blind spots worth investing in."},
-                                 {"source": "integrations", "instruction": "Note any data-source problems affecting confidence."}]},
+                                 {"source": "integrations", "instruction": "Note any data-source problems affecting confidence."},
+                                 {"source": "value", "instruction": "State which benefit KPIs moved this week and any off track."}]},
     "vm_weekly": {"title": "Weekly vulnerability management report", "audience": "platform teams and IT leadership", "format": "docx", "days": 7,
                   "description": "Exposure, priorities, owners, SLA and cloud misconfigurations.",
                   "sections": [{"source": "vulnerability_posture", "instruction": "Summarise exposure and SLA performance."},
@@ -489,74 +504,72 @@ def _narrate(llm: LLMGateway | None, spec: dict, section: dict, data: dict) -> d
 
 
 # ---------------------------------------------------------------------------------------------- rendering
+def _short_facts(facts: list, limit: int = 4) -> list[tuple[str, Any, str]]:
+    """The facts that read well as tiles: short values (numbers, small counts), in the source's order."""
+    out = []
+    for k, v in facts:
+        s = str(v)
+        if len(s) <= 10 and len(k) <= 40:
+            out.append((k, v, "neutral"))
+        if len(out) == limit:
+            break
+    return out
+
+
 def _docx(path: Path, spec: dict, sections: list[dict], meta: dict) -> None:
-    d = Document()
-    d.styles["Normal"].font.name = "Calibri"
-    d.styles["Normal"].font.size = Pt(10.5)
-    d.add_heading(spec["title"], 0)
-    p = d.add_paragraph(f"Audience: {spec['audience']} · Period: last {spec['days']} day(s) · Generated {meta['at']} UTC")
-    p.runs[0].font.color.rgb = RGBColor(0x55, 0x5f, 0x6d)
+    from soc_platform.reporting import design as D
+
+    d = D.new_document(spec["title"])
+    D.cover(d, spec["title"], f"For the {spec['audience']}  ·  last {spec['days']} day(s)",
+            f"Generated {meta['at']} UTC  ·  narrative: {meta['writer']}  ·  every figure computed from the platform's records")
     for s in sections:
-        d.add_heading(s["title"], level=1)
-        d.add_paragraph(s["narrative"]["text"])
+        D.section(d, s["title"])
+        D.tiles(d, _short_facts(s["data"]["facts"]))
+        D.paragraph(d, s["narrative"]["text"])
         if charts.valid(s["data"].get("chart")):
-            d.add_picture(io.BytesIO(charts.to_png(s["data"]["chart"])), width=DInches(6.3))
+            D.picture(d, charts.to_png(s["data"]["chart"]), width_cm=15.5)
         tbl = s["data"]["table"]
         if tbl["header"] and tbl["rows"]:
-            t = d.add_table(rows=1, cols=len(tbl["header"]))
-            t.style = "Light Grid Accent 1"
-            for i, h in enumerate(tbl["header"]):
-                t.rows[0].cells[i].text = str(h)
-            for r in tbl["rows"][:25]:
-                cells = t.add_row().cells
-                for i, v in enumerate(r):
-                    cells[i].text = "" if v is None else str(v)
-    d.add_heading("Evidence", level=1)
-    for s in sections:
-        for e in s["narrative"]["evidence"]:
-            para = d.add_paragraph(f"{s['source']}·{e['id']}  {e['claim']}")
-            para.runs[0].font.size = Pt(8)
-    foot = d.add_paragraph(f"Figures are computed from the platform's records; narrative: {meta['writer']}. "
-                           "Every narrative sentence cites the facts above (F#).")
-    foot.runs[0].font.size = Pt(8)
+            D.table(d, [str(h) for h in tbl["header"]], tbl["rows"], max_rows=25)
+        rest = [(k, v) for k, v in s["data"]["facts"] if (k, v, "neutral") not in _short_facts(s["data"]["facts"])]
+        if rest:
+            D.table(d, ["Figure", "Value"], [[k, v] for k, v in rest], widths_cm=[7.5, 9.9])
+    D.section(d, "Evidence", "Each narrative sentence cites these computed facts (section, fact number).")
+    D.table(d, ["Ref", "Fact"], [[f"{s['source']} {e['id']}", e["claim"]] for s in sections for e in s["narrative"]["evidence"]],
+            widths_cm=[4.2, 13.2])
+    D.note(d, f"Figures are computed from the platform's records; narrative: {meta['writer']}.")
     d.save(path)
 
 
 def _pptx(path: Path, spec: dict, sections: list[dict], meta: dict) -> None:
-    prs = Presentation()
-    prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
-    title = prs.slides.add_slide(prs.slide_layouts[0])
-    title.shapes.title.text = spec["title"]
-    title.placeholders[1].text = f"{spec['audience']} · last {spec['days']} day(s) · {meta['at']} UTC"
+
+    from soc_platform.reporting import design as D
+
+    prs = D.new_deck()
+    D.title_slide(prs, spec["title"], f"For the {spec['audience']}  ·  last {spec['days']} day(s)",
+                  f"Generated {meta['at']} UTC  ·  every figure computed from the platform's records  ·  {D.CLASSIFICATION}")
+    n = 1
     for s in sections:
-        sl = prs.slides.add_slide(prs.slide_layouts[5])
-        sl.shapes.title.text = s["title"]
-        box = sl.shapes.add_textbox(Inches(0.6), Inches(1.4), Inches(6.2), Inches(5.4)).text_frame
-        box.word_wrap = True
-        box.text = s["narrative"]["text"]
-        for para in box.paragraphs:
-            for r in para.runs:
-                r.font.size = PPt(15)
-        facts = s["data"]["facts"][:7]
-        fb = sl.shapes.add_textbox(Inches(7.1), Inches(1.4), Inches(5.7), Inches(5.4)).text_frame
-        fb.word_wrap = True
-        fb.text = "Key figures"
-        fb.paragraphs[0].runs[0].font.bold = True
-        for k, v in facts:
-            para = fb.add_paragraph()
-            para.text = f"{k}: {v}"[:160]
-            for r in para.runs:
-                r.font.size = PPt(12)
-        if charts.valid(s["data"].get("chart")):
-            cs = prs.slides.add_slide(prs.slide_layouts[5])
-            cs.shapes.title.text = s["title"]
-            charts.add_pptx_chart(cs, s["data"]["chart"], Inches(0.8), Inches(1.4), Inches(11.7), Inches(5.6))
-    end = prs.slides.add_slide(prs.slide_layouts[5])
-    end.shapes.title.text = "About this report"
-    tb = end.shapes.add_textbox(Inches(0.6), Inches(1.5), Inches(12), Inches(3)).text_frame
-    tb.word_wrap = True
-    tb.text = (f"Figures computed from the SOC platform's records. Narrative: {meta['writer']}; every statement cites the "
-               "figures it rests on. Generated by the SOC platform.")
+        n += 1
+        sl = D.content_slide(prs, s["title"], spec["title"], n)
+        chart = s["data"].get("chart") if charts.valid(s["data"].get("chart")) else None
+        tbl = s["data"]["table"]
+        left_w = Inches(5.6) if (chart or (tbl["header"] and tbl["rows"])) else Inches(12.1)
+        tiles = _short_facts(s["data"]["facts"], limit=4)
+        y = Inches(1.5)
+        if tiles:
+            D.deck_tiles(sl, tiles, Inches(0.6), y, left_w, per_row=2, h=Inches(1.15))
+            y += Inches(1.35) * ((len(tiles) + 1) // 2)
+        D.deck_note(sl, s["narrative"]["text"][:700], Inches(0.6), y + Inches(0.1), left_w, Inches(6.8) - y, size=13)
+        if chart:
+            D.deck_chart(sl, chart, Inches(6.5), Inches(1.45), Inches(6.3), Inches(5.4))
+        elif tbl["header"] and tbl["rows"]:
+            D.deck_table(sl, [str(h) for h in tbl["header"]], tbl["rows"][:10], Inches(6.5), Inches(1.5), Inches(6.3), font=10)
+    n += 1
+    end = D.content_slide(prs, "About this report", spec["title"], n)
+    D.deck_note(end, (f"Every figure is computed from the SOC platform's records. Narrative: {meta['writer']}; each "
+                      "statement cites the figures it rests on. Generated by the SOC platform."),
+                Inches(0.6), Inches(1.6), Inches(12), Inches(2.0), size=16)
     prs.save(path)
 
 
@@ -565,7 +578,7 @@ def build_report(session: Session, registry: Any, spec: dict, out_dir: str | Pat
                  domains: frozenset[str] = frozenset({"*"}), case_id: str | None = None,
                  denied_sources: frozenset[str] = frozenset()) -> dict[str, Any]:
     from soc_platform.core.audit import AuditLog
-    from soc_platform.core.crypto import seal_file
+    from soc_platform.core.blobstore import BlobStore
     from soc_platform.domains.vulnerability.models import ReportRun
 
     ctx = Ctx(session, registry, days=int(spec.get("days") or 30), case_id=case_id, domains=domains)
@@ -610,8 +623,8 @@ def build_report(session: Session, registry: Any, spec: dict, out_dir: str | Pat
     slug = re.sub(r"[^a-z0-9]+", "_", spec["title"].lower()).strip("_")[:40] or "report"
     path = out / f"{slug}_{utcnow():%Y%m%d_%H%M%S}.{spec.get('format', 'docx')}"
     (_pptx if spec.get("format") == "pptx" else _docx)(path, spec, built, meta)
-    seal_file(path)
-    run = ReportRun(kind=f"custom:{spec.get('id') or slug}", path=str(path),
+    ref = BlobStore(session).store_generated(path, f"reports/{path.name}")
+    run = ReportRun(kind=f"custom:{spec.get('id') or slug}", path=ref,
                     metrics={"sections": len(built), "writer": meta["writer"], "skipped": skipped, "domains": sorted(used), "scope": sorted(domains),
                              "case_id": case_id, "title": spec["title"]}, generated_by=by)
     session.add(run)

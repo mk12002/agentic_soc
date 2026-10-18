@@ -74,7 +74,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Store | Content | Protection | Location |
 |---|---|---|---|
 | PostgreSQL | Entities and relations, normalised records, cases, evidence, actions, findings, insights, policies, access grants, connector configuration versions, audit chain, access log, model-call log | Organisation's database encryption at rest; TLS; a dedicated login; the audit table should be granted INSERT / SELECT only; the platform refuses UPDATE and DELETE on audit and access-log records | Organisation's data subnet |
-| Encrypted file store | Raw vendor payloads; reported e-mail files; generated reports, post-incident reports and compliance evidence packs | Encrypted by the platform before writing (Fernet: AES-128-CBC with HMAC-SHA256 authentication); written atomically with owner-only permissions; decrypted only for an authorised, scope-checked download | Organisation's volume / blob store |
+| Encrypted blob store (PostgreSQL `blobs` table with `SOC_BLOB_STORE=database`, or a volume) | Original vendor payloads (only with `SOC_STORE_RAW_PAYLOADS`); reported e-mail files; generated reports, post-incident reports and compliance evidence packs | Encrypted by the platform before writing (Fernet: AES-128-CBC with HMAC-SHA256 authentication); written atomically with owner-only permissions; decrypted only for an authorised, scope-checked download | Organisation's volume / blob store |
 | Recordings (deployment only) | Sanitised copies of live API responses, used as test fixtures during onboarding | Off unless a tool is in the Recording stage; sanitised as written (section 9) | A folder the organisation chooses |
 | Attack stories | Not stored - rebuilt from records on request; only a deep-analysis result is cached on the case | - | - |
 
@@ -88,7 +88,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Files at rest | Fernet via MultiFernet. `SOC_DATA_KEY` holds one or more keys: the first encrypts, all decrypt, so keys rotate without bulk re-encryption; mandatory in production (the platform refuses to start without it) | Implemented |
 | Database at rest | The organisation's database encryption (managed-service or disk encryption) | Configured at deployment |
 | Secrets | In the organisation's vault, mounted as files; never in configuration, the database or logs; the console shows *set / not set* only | Implemented |
-| Backups | Database point-in-time backups and the file-store volume (files remain Fernet-encrypted inside backups); keep the data keys in the vault, separate from backups | Configured at deployment |
+| Backups | Database point-in-time backups - with `SOC_BLOB_STORE=database` stored e-mails and reports are inside them, still Fernet-encrypted (with the file store, also the file volume); keep the data keys in the vault, separate from backups, escrowed in two places | Configured at deployment |
 
 ## 6 Retention and deletion
 
@@ -97,7 +97,7 @@ audit chain with what it removed.
 
 | Data class | Default | Setting | Rule |
 |---|---|---|---|
-| Raw vendor payloads | 180 days | `SOC_RAW_RETENTION_DAYS` | The normalised record stays (cases and figures are built from it) |
+| Raw vendor payloads (kept only with `SOC_STORE_RAW_PAYLOADS`) | 180 days | `SOC_RAW_RETENTION_DAYS` | The normalised record stays (cases and figures are built from it) |
 | Reported e-mail files | 180 days after the case is closed | `SOC_RAW_RETENTION_DAYS` | The file of any open case is kept (automatic legal hold) |
 | Telemetry events (sign-ins, DNS, mail events, secret accesses, elevations) | 400 days | `SOC_EVENT_RETENTION_DAYS` (0 = keep) | Kept while a case, evidence row, insight or analyst override refers to it; alerts, findings, assets, people and indicators are not pruned by this rule |
 | Model-call log: prompt and answer text | 180 days | `SOC_LLM_LOG_RETENTION_DAYS` | Token counts and metadata are kept for budget reporting |

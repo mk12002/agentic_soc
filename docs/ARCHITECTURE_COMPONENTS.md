@@ -43,7 +43,7 @@ platform and dev-VM technical diagrams), `ENGINEERING.md` (every design decision
 | Client LLM gateway | Azure OpenAI / AI Foundry, Anthropic or an OpenAI-compatible endpoint the client approves. | Optional. It is called only through `llm/gateway.py`, after pseudonymisation. Set with `SOC_LLM_PROVIDER` and `SOC_LLM_ENDPOINT`. |
 | SIEM (Microsoft Sentinel) | The client's SIEM. | Two directions. The client's log agent reads the containers' JSON logs (`SOC_LOG_FORMAT=json`) and the audit export. Optionally the SIEM pushes alerts in through `POST /api/v1/ingest/alerts`. |
 | Teams / Slack / JSON webhook | Chat or automation endpoints. | `core/notify.py` posts findings above a threshold to them. Only HTTPS endpoints are allowed, set in `SOC_NOTIFY_WEBHOOKS`. The URL is never stored, logged or returned; only `kind:host` is shown. |
-| Prometheus / monitoring | The client's monitoring. | Scrapes `GET /metrics` with an auditor API key. Uptime checks call `GET /health` (scheduler heartbeat, audit chain, self-check, kill switch). |
+| Prometheus / monitoring | The client's monitoring. | Scrapes `GET /metrics` with an auditor API key. Uptime checks call `GET /health` (scheduler heartbeat, audit chain, self-check, kill switch); load balancers and orchestrator probes use `GET /health/live` and `GET /health/ready`. |
 | GitHub + Actions CI | Source control and build. | Every change runs these gates: `ruff`, `bandit`, `pip-audit` against the lock, a lock check, `node --check`, `precommit_scan` + gitleaks (secrets and confidential names), pytest on SQLite and on PostgreSQL 16, a CycloneDX SBOM, and a Trivy scan of the image. |
 
 ### 2.2 Containers and build (centre, top row)
@@ -51,7 +51,7 @@ platform and dev-VM technical diagrams), `ENGINEERING.md` (every design decision
 | Component | Detail |
 |---|---|
 | `soc-api` container | `python -m soc_platform serve`: uvicorn with `SOC_API_WORKERS` processes running the FastAPI / Starlette app on port 8080. `config check` runs first, and a bad setting stops start-up. Runs as non-root user 1001. |
-| `soc-scheduler` container | `python -m soc_platform scheduler`: runs `jobs.py JOBS` in order. Each job run takes a database lease (a row in `system_flags`) and is retried up to 3 times; a job that keeps failing is dead-lettered. A heartbeat feeds `/health`. A small deployment can run the scheduler inside `serve` instead. |
+| `soc-scheduler` container | `python -m soc_platform scheduler`: runs `jobs.py JOBS` in order. Each job run takes a database lease (a row in `system_flags`, renewed while it runs) and is retried up to 3 times; a job that keeps failing is dead-lettered. Two replicas in production: a dead one's job is taken over within the lease (120 s). A heartbeat feeds `/health`. A small deployment can run the scheduler inside `serve` instead. |
 | `postgres:16` container | Accessed with SQLAlchemy 2 + psycopg2 (one pool per worker). On start-up the platform adds missing nullable columns and widens VARCHARs. SQLite is used only for development and tests, with PostgreSQL's rules enforced by listeners. |
 | Build and supply chain | Multi-stage `deploy/Dockerfile`; `requirements/platform.lock` constrains every package; `scripts/supply_chain.py` writes the SBOM. pip is removed from the runtime image. |
 
@@ -90,7 +90,7 @@ Every request passes through these stages in this order. Badge 3 walks through i
 | `domains/incident/` | `service.py`: ingest of `ALERT_STREAMS` + `AUDIT_STREAMS` (Entra audits), clustering by host or person, `investigate` (parallel enrichment), `_score` (deterministic severity), `_verdict_conflict` (two tools disagree), `_mitre`, `_recommendations`, `reassess_open`, deferred narration through `narrate_pending`. | Incident cases with severity, ATT&CK techniques, evidence and recommended actions. |
 | `domains/vulnerability/` | `service.py`: ingest from 4 scanners, `consolidate` (one finding per asset + CVE), `refresh_intel` (NVD, EPSS, KEV), priority P1-P4 with an SLA, owners, campaigns, `follow_up`, validation (`verify_finding`), exceptions (four-eyes, expiry, tool exceptions), risk register; `misconfig.py` (Wiz cloud issues). | Ranked findings, each with an owner, a campaign and a validated fix. |
 | `intelligence/` | `risk.py` (`RiskEngine`, cached, decay anchored to the data), `correlation.py` (13 rules), `story.py` (attack story), `deep_analysis.py`, `analyst.py` (Q&A and brief), `attack_coverage.py` (ATT&CK), `shadow_it.py`, `drift.py` (PSI). | Risk per user and host, cross-domain insights, kill-chain stories, coverage and blind spots. |
-| `reporting/` | `builder.py` (16 data sources, 7 standard reports, planner), `reports.py` (python-docx, python-pptx, charts), `compliance.py` (evidence pack), Jinja2 templates. | Word and PowerPoint reports. Every figure comes from code. |
+| `reporting/` | `builder.py` (17 data sources, 7 standard reports, planner), `value.py` (value scorecard: benefit KPIs against baseline and target), `reports.py` (python-docx, python-pptx, charts), `compliance.py` (evidence pack), Jinja2 templates. | Word and PowerPoint reports. Every figure comes from code. |
 
 ### 2.5 Core services (core/)
 
@@ -148,7 +148,7 @@ Rules every call follows:
 | Store | Contents |
 |---|---|
 | PostgreSQL 16 | **Context:**<br>- entities, entity_keys, entity_hints, relations, source_records;<br>- unresolved_items, resolution_overrides.<br>**Cases:** cases, evidence, case_entities, case_notes, decisions, dispositions.<br>**Actions and governance:** action_requests, policy_versions, connector_config_versions, access grants, API keys.<br>**Audit and logs:**<br>- audit_log (hash chain), access_log, llm_calls / usage;<br>- job_runs, system_flags (leases, heartbeats, kill switch).<br>**Domains:**<br>- phishing: ph_submissions (unique `source_ref`);<br>- vulnerability: vm_findings, campaigns, action plans, vuln_exceptions, risk register, vuln_intel;<br>- intelligence: insights, briefs, notifications. |
-| Encrypted file store | `SOC_RAW_PAYLOAD_DIR`: raw vendor payloads and reported `.eml` files. `SOC_REPORT_OUTPUT_DIR`: generated reports and evidence packs. Encrypted with Fernet (`SOC_DATA_KEY`), files written with 0600 permissions. |
+| Blob store (`core/blobstore.py`) | Reported `.eml` files, generated reports and evidence packs (raw vendor payloads when enabled). `SOC_BLOB_STORE=database`: rows in `blobs`, every replica reads them, covered by the database's HA and backups. `file`: `SOC_RAW_PAYLOAD_DIR` / `SOC_REPORT_OUTPUT_DIR`, files written with 0600 permissions. Encrypted with Fernet (`SOC_DATA_KEY`) either way. |
 | Configuration + artefacts | `config/connectors.yaml` (secrets only as `${VAR}` references), `suppliers.yaml`, `sanctioned_services.yaml`, and `artifacts/phishing/models/` (the trained models, used offline). |
 
 ### 2.9 The 21 connectors (right zone)
@@ -213,7 +213,9 @@ platform runs with no tenant access.
 
    Vulnerability runs first, so incidents are never scored without exposure data.
 2. Each job takes a lease in `system_flags` (a compare-and-swap), re-checks that the job is still due, runs, records
-   the run, then releases the lease. Two replicas never run the same job.
+   the run, then releases the lease. The lease is renewed while the job runs, so two replicas never run the same job,
+   and a job whose scheduler died is taken over one lease (120 s) later. Inside the phishing and incident jobs each
+   item runs in its own savepoint, so one that fails never holds up the others.
 3. `SyncRunner.sync_many` downloads all of a tool's streams **in parallel**. Each request:
    - goes through the tool's `TokenBucket`, so the tool's rate budget is never exceeded;
    - backs off on 429;
@@ -320,7 +322,7 @@ The access-log row and audit event carry the request's trace id (flow A).
    an approved story be recognised again.
 4. The notify job sends findings above the threshold to Teams, Slack or a webhook, once per (finding, severity,
    channel).
-5. Reports: `reporting/builder.py` takes figures from its 16 data sources. `reports.py` writes Word or PowerPoint
+5. Reports: `reporting/builder.py` takes figures from its 17 data sources. `reports.py` writes Word or PowerPoint
    (7 standard reports, daily and weekly jobs, or built on demand with `POST /api/v1/reports/build`). Generated files
    are encrypted and downloaded through `/api/v1/reports/{rid}/download`.
 

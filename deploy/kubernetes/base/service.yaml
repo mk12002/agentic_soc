@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: soc-api
+  labels: {app.kubernetes.io/name: soc-api}
+spec:
+  type: ClusterIP                              # reached only through the ingress / WAF (overlays)
+  selector: {app.kubernetes.io/name: soc-api}
+  ports:
+    - {name: http, port: 80, targetPort: http}

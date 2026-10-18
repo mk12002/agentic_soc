@@ -32,9 +32,9 @@ from soc_platform.connectors.tools._common import parse_ts
 from soc_platform.core.actions import ActionRegistry
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.auth import Principal
+from soc_platform.core.blobstore import BlobStore
 from soc_platform.core.cases import CaseService, Recommendation
 from soc_platform.core.context_store import ContextStore
-from soc_platform.core.crypto import read_protected, write_protected
 from soc_platform.core.enrichment import evidence_for_llm
 from soc_platform.core.models import ActionRequest, Case, Entity, Evidence, utcnow
 from soc_platform.core.policy import PolicyEngine
@@ -122,12 +122,12 @@ class PhishingService:
         existing = self.s.execute(select(Submission).where(Submission.source_ref == ref)).scalars().first()
         if existing:
             return existing  # replay-safe
-        path = self.raw_dir / f"{sha}.eml"
-        write_protected(path, raw)  # original message preserved intact (headers included); encrypted at rest
+        # original message preserved intact (headers included); encrypted at rest; on a shared store when configured
+        blob_ref = BlobStore(self.s).put(self.raw_dir / f"{sha}.eml", f"phishing/{sha}.eml", raw)
         em = decompose(raw)
         sub = Submission(source=source, source_ref=ref, reporter=(reporter or "").lower() or None,
                          internet_message_id=em.message_id, subject=em.subject, sender=em.sender, mime_sha256=sha,
-                         raw_path=str(path))
+                         raw_path=blob_ref)
         self.s.add(sub)
         self.s.flush()
         self.audit.append(actor_type="agent", actor_id=f"agent:{AGENT}", event_type="phishing.reported",
@@ -203,7 +203,7 @@ class PhishingService:
             return self.cases.view(sub.case_id)
         if not sub.raw_path:
             raise ValueError("original message no longer retained (retention policy)")
-        raw = read_protected(sub.raw_path)
+        raw = BlobStore(self.s).get(sub.raw_path)
         em = decompose(raw)
         result = (self.analyzer.analyze(em, raw, {"behavior": self._behavior_context(em, sub.reporter)})
                   if self.analyzer.engine is not None else self.analyzer.analyze(em, raw))

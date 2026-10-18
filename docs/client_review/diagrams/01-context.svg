@@ -42,7 +42,7 @@
   <rect x="300" y="450" width="215" height="70" rx="10" class="box"/>
   <text x="316" y="476" class="h">PostgreSQL 16</text><text x="316" y="495" class="s">cases, entities, audit chain,</text><text x="316" y="511" class="s">access log, model-call log</text>
   <rect x="535" y="450" width="215" height="70" rx="10" class="box"/>
-  <text x="551" y="476" class="h">Encrypted file store</text><text x="551" y="495" class="s">raw payloads, reported e-mail,</text><text x="551" y="511" class="s">reports (Fernet at rest)</text>
+  <text x="551" y="476" class="h">Encrypted blob store</text><text x="551" y="495" class="s">e-mail, reports - in PostgreSQL</text><text x="551" y="511" class="s">or a volume (Fernet at rest)</text>
   <rect x="50" y="450" width="200" height="70" rx="10" class="box"/>
   <text x="66" y="476" class="h">Key Vault / secrets</text><text x="66" y="495" class="s">mounted as files (*_FILE);</text><text x="66" y="511" class="s">never in config or console</text>
 

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: soc-platform-settings
+data:
+  SOC_ORG_DOMAINS: CHANGE-ME.example
+  SOC_ENTRA_TENANT_ID: CHANGE-ME
+  SOC_ENTRA_AUDIENCE: CHANGE-ME
+  SOC_ENTRA_SPA_CLIENT_ID: CHANGE-ME
+  SOC_ENTRA_SCOPE: CHANGE-ME
+  SOC_TRUSTED_PROXIES: 10.0.0.0/24           # the Application Gateway subnet: only its X-Forwarded-For is trusted
+  SOC_LLM_PROVIDER: azure_openai              # or none; the endpoint must be in SOC_LLM_APPROVED_ENDPOINTS
+  SOC_LLM_ENDPOINT: https://CHANGE-ME.openai.azure.com
+  SOC_LLM_APPROVED_ENDPOINTS: https://CHANGE-ME.openai.azure.com

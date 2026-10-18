@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentic-soc
+  labels:
+    # the platform's pods meet the "restricted" Pod Security Standard: non-root, no privilege escalation,
+    # every capability dropped, RuntimeDefault seccomp
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

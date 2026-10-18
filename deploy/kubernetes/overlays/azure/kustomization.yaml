@@ -1,0 +1,19 @@
+# Azure: AKS across three availability zones, Azure Database for PostgreSQL Flexible Server with zone-redundant HA
+# (outside the cluster), secrets from Key Vault (CSI driver), Application Gateway in front (WAF v2 when internet-facing).
+# Sized for three 2-vCPU nodes, one per zone (INFRASTRUCTURE_AND_COSTS.md section 10).
+# Render: kubectl kustomize deploy/kubernetes/overlays/azure
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - keyvault-secrets.yaml
+  - ingress.yaml
+images:
+  - name: soc-platform
+    newName: CHANGE-ME.azurecr.io/soc-platform     # the client's ACR; pin by digest for production
+    newTag: CHANGE-ME
+patches:
+  - path: zones.yaml
+  - path: settings.yaml
+  - target: {kind: Deployment}
+    path: keyvault-mount.yaml

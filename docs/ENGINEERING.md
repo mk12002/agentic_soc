@@ -124,13 +124,13 @@ The dependency direction is strictly downward:
 | `platform-api` (`python -m soc_platform serve` or `uvicorn soc_platform.api.app:app`) | HTTP API, the console, and by default the embedded scheduler | Stateless. Scale horizontally; every replica may also run a scheduler safely. |
 | `platform-scheduler` (`python -m soc_platform scheduler`), optional | The same scheduler code as a separate service | Any number (the database coordinates). |
 | PostgreSQL | All records | Managed service in production. |
-| File/blob store (`SOC_RAW_PAYLOAD_DIR`, `SOC_REPORT_OUTPUT_DIR`) | Encrypted raw payloads, reported e-mails, generated reports | A volume or blob mount. |
+| Blob store (`core/blobstore.py`, `SOC_BLOB_STORE`) | Encrypted reported e-mails and generated reports (raw vendor payloads when enabled) | `database`: rows in `blobs`, covered by the database's HA and backups - for several hosts. `file` (default): `SOC_RAW_PAYLOAD_DIR` / `SOC_REPORT_OUTPUT_DIR`, one host or a shared volume. |
 | Optional: phishing ML engine (RabbitMQ, Redis, agent workers) and an isolated detonation host | §21 | Separate compose profile. |
 
 ### 2.3 Data flow
 
 1. **Ingest.** A connector pulls a page, normalises each raw record into a `NormalizedRecord`, and the context store
-   ingests it: raw payload kept (encrypted), entities resolved, events linked.
+   ingests it: entities resolved, events linked (the original payload kept, encrypted, when `SOC_STORE_RAW_PAYLOADS` is on).
 2. **Investigate.** A domain service builds a case, fans out enrichment lookups in parallel, and stores evidence
    rows. It then computes the verdict, severity or priority deterministically. If an LLM is configured, it writes a
    cited narrative.
@@ -407,7 +407,8 @@ for built-in and machine accounts (SYSTEM, root, www-data, `HOST$`), so they nev
 ### 6.2 Context store (`core/context_store.py`)
 
 `ingest(rec)`:
-1. Stores a `SourceRecord` with full provenance, and writes the raw payload to the encrypted store.
+1. Stores a `SourceRecord` with full provenance; with `SOC_STORE_RAW_PAYLOADS` on (off by default: a write per record, growing
+   with event volume) it also writes the original payload to the encrypted blob store (`raw_ref`).
 2. Resolves each referenced entity (§7).
 3. Creates an event entity and `Relation` rows linking it to the resolved entities.
 
@@ -1053,7 +1054,13 @@ Ten jobs:
 Intervals are set by `SOC_JOB_*_SECONDS`.
 
 `run_job(name)`:
-1. **Lease:** `system_flags[job_lease:<name>]` with holder = `hostname:pid:thread-id` and a 30-minute expiry. If
+1. **Lease:** `system_flags[job_lease:<name>]` with holder = `hostname:pid:thread-id` and an expiry of
+   `SOC_JOB_LEASE_SECONDS` (120). A keeper thread renews it every third of that while the body runs (its own
+   connection, the job thread's holder), so a live job is never taken over and a dead scheduler's job is free again
+   one lease later; a renewal that finds the lease gone logs `job.lease_lost`. A job running past
+   `SOC_SCHEDULER_STUCK_SECONDS` stops being renewed (`job.lease_released_stuck`), so a hung job can still be
+   retried by another scheduler, as with the old fixed lease. (It was a fixed 30 minutes: a crashed
+   scheduler stalled even the 2-minute phishing job for half an hour.) If
    another holder has a live lease, skip. Taking it is atomic: an existing row is changed with a compare-and-swap
    (`UPDATE ... WHERE updated_at = <value read>`, one row changed or the lease is lost), and the first-ever lease is
    an insert that only one scheduler can win; the loser gets "not acquired", never an exception. (A first version
@@ -1062,6 +1069,10 @@ Intervals are set by `SOC_JOB_*_SECONDS`.
 2. **Check again once the lease is held** (`still_due`). If someone ran the job between the due check and the lease,
    skip.
 3. **Run** the body in its own session, retrying up to 3 attempts with exponential backoff (2ⁿ s, capped at 60 s).
+   Inside the incident and phishing bodies each case / reported e-mail runs in its own savepoint (`_isolated`): one
+   that raises rolls back alone, is marked (`processing_failure` with attempts and error; a submission becomes
+   `failed`), audited and logged, and is retried on the next `ITEM_ATTEMPTS` (3) runs before it is left to an analyst.
+   Submissions a stopped run left in `new` are picked up by the next run.
 4. **Record** a `JobRun` (start, end, attempts, status, error, JSON summary, strictly increasing ordinal).
    `dead_letter` after 3 failing runs in a row raises a `job_dead_letter` insight. It keeps being attempted on
    schedule, so it recovers on its own.
@@ -1113,7 +1124,8 @@ Important findings are pushed to Teams, Slack or any webhook by the `notify` job
   stale writer still matched (it showed once in a full run); a frozen-clock test reproduces that every time.
 - **`status()`** for `/health`:
   - `running`
-  - `stuck`: alive, but a job has run past its lease (30 min)
+  - `stuck`: alive, but a job has run longer than `SOC_SCHEDULER_STUCK_SECONDS` (1800 s; separate from the lease,
+    which is short and renewed)
   - `stale`: no heartbeat for `SOC_SCHEDULER_STALE_SECONDS`, default 180 s - unless the scheduler runs inside this
     server and its heartbeat thread is alive and still trying (`alive_here`): then `running` with
     `heartbeat_write_delayed`. On SQLite a long transaction (a slow LLM call in a demo) blocks the heartbeat write,
@@ -1187,7 +1199,9 @@ itself; durable kill switch; hostile-input hardening. The full table is in [FAIL
 | Access log | batched background writes (up to 500 rows per batch) | no per-request write latency |
 | Finding narratives | rewritten only when evidence or severity changes | token saving (LLM_TOKENS_AND_COST.md) |
 
-The API is stateless and scales horizontally. The scheduler coordinates through the database. Volume and request
+The API is stateless and scales horizontally. The scheduler coordinates through the database. With
+`SOC_BLOB_STORE=database` no state is on a host's disk either, so any replica on any node serves any request
+(HIGH_AVAILABILITY.md: components, reference deployments, Kubernetes package, disaster recovery). Volume and request
 load are measured with `scripts/measure_scale.py` (messy estates of growing size, statements per record, review
 queue) and `scripts/load_test.py` (a real multi-process server, concurrent analysts, jobs writing); figures in
 OPERATIONS.md. The client's own volume is measured during deployment (§26).
@@ -1530,7 +1544,7 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 ## 24. Deployment and operations
 
 - **Image** (`deploy/Dockerfile`): a multi-stage build on `python:3.11-slim`; build dependencies only in the builder
-  stage; a non-root `soc` user (uid 1001); `HEALTHCHECK` on `/health`; Uvicorn with 2 workers. The ML engine's
+  stage; a non-root `soc` user (uid 1001); `HEALTHCHECK` on `/health/ready`; Uvicorn with 4 workers (`SOC_API_WORKERS`). The ML engine's
   libraries come from the `WITH_PHISHING_ENGINE=true` build argument (scikit-learn, XGBoost, LightGBM, LangGraph; no
   PyTorch); compose sets `SOC_PHISHING_ENGINE=auto`, so an image built with them runs the models and one without uses
   the heuristic. `.dockerignore` keeps secrets, environments and local data out of the build context. Verified on
@@ -1552,7 +1566,9 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
     mounts the Docker socket; `docker-compose.dev.yml` does, for local development only.
   - The API binds to 127.0.0.1 by default; expose it through a TLS reverse proxy.
 - **Health:** `/health` reports status, version, audit-chain validity, connectors enabled, kill switch and scheduler
-  state (unauthenticated, so load balancers can use it).
+  state (unauthenticated). For orchestrators: `/health/live` (the process answers; never touches the database, so a
+  database outage cannot trigger a restart storm) and `/health/ready` (the database answers: 503 + Retry-After
+  otherwise, which takes the replica out of the load balancer).
 - **Metrics:** `/metrics` (Prometheus text): open cases by domain and severity, actions by status, open insights by severity, unresolved entities, seconds since each stream's last successful sync, and the kill switch.
 - **Backups:** PostgreSQL backups plus the encrypted file store; keep the data keys in the vault separately.
 - **Key rotation:** prepend a new `SOC_DATA_KEY`; old keys keep decrypting.
@@ -1647,6 +1663,16 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 80 | CI (GitHub Actions) runs the commit gates, both test suites, the SBOM and a Trivy image scan on every push | Gates on the developer's machine only | A gate that only runs locally can be skipped; a build record is evidence for security reviews | The confidential-name pattern is a repository secret, never in the workflow |
 | 81 | A `*_FILE` secret that points at a missing or empty file is a configuration error | Fall back to the plain variable silently | A mistyped vault mount left the secret empty with no message | Checked by `config check`, which `serve` runs before starting |
 | 82 | No pip in the runtime image; the base image's setuptools upgraded to the locked version | Ship the base image as is; upgrade pip | Trivy found fixable high CVEs in the base image's vendored copies (setuptools' wheel / jaraco.context) and then in pip's own vendored libraries; production installs nothing at run time | Debugging inside a running container cannot `pip install`; build a new image instead |
+| 83 | Stored e-mails and reports in PostgreSQL (`SOC_BLOB_STORE=database`) behind one reference string; reads follow the reference | A shared volume (NFS / Azure Files) or object storage (S3 / Blob) | A path saved on one host could not be read on another (a report built by the scheduler, downloaded through the API; an e-mail re-processed elsewhere). In the database the file is committed with its record, covered by the same HA, backups and point-in-time recovery, with nothing else to make redundant | Database size grows with e-mails and reports (retention prunes e-mails); object storage can be added as a third backend behind the same interface |
+| 84 | Short job lease (120 s) renewed while the job runs; "stuck" judged separately (1800 s) | A long fixed lease | A long lease bounded recovery from a crashed scheduler at half an hour; a short unrenewed one would let a second scheduler take a live long job | A renewal that cannot be written in time (SQLite holding its write lock) is retried; on PostgreSQL renewals do not block |
+| 85 | One savepoint per reported e-mail / incident in the jobs, with up to 3 retries then a hand-over to an analyst | Fail the batch; skip silently | One message that raised an unexpected error failed the whole phishing batch, which was retried, dead-lettered and blocked every other reported e-mail | Savepoints per item are bounded by the batch (tens), not per record of a sync |
+| 86 | Separate liveness (`/health/live`, no database) and readiness (`/health/ready`, database) | One `/health` for both | A liveness probe that needs the database restarts every replica during a database outage | `/health` keeps the full status for people and monitoring |
+| 87 | Schema creation serialised across processes (PostgreSQL advisory lock; retry on SQLite) and the SQLite WAL switch retried | Rely on one process starting first; an init job only | Every process creates the schema on first use and a deployment starts many at once; eight SQLite connections opening a new file together failed on the WAL switch | The PostgreSQL lock is a safeguard (the race did not reproduce there); Kubernetes also runs `init-db` as an init container |
+| 88 | Entra signing keys cached per process for their key id | PyJWT's default five-minute key-set cache | When Microsoft's key endpoint was unreachable for more than five minutes, every analyst already signed in was rejected | A key Microsoft withdraws stays trusted in a running process until restart; tokens still expire on time |
+| 89 | A Kubernetes package (Kustomize base + Azure and on-prem overlays) with at least two replicas of everything | Compose only; a Helm chart | Compose is one host by design; plain manifests render and test with `kubectl kustomize` alone and read like the cluster objects they create | Placeholders (`CHANGE-ME`) are the organisation's to fill; validated by `test_deployment_manifests.py` |
+| 90 | A value scorecard computed in code from the platform's own timestamps, with baselines, targets and time-study effort entered by a lead | Claim savings in the pitch; estimate effort from elapsed time | The customer's question is "what will we gain, in numbers, and how is it monitored"; elapsed time is not effort, so effort comes from a time study and the platform supplies volumes | Capacity is only as good as the time study; every input is audited with its source |
+| 91 | One sync per (connector, stream) at a time, by a database lease renewed per page; the second waits, then continues incrementally | Rely on job leases; catch the duplicate and carry on | Job leases stop the same job twice, not a manual sync or `demo` against a scheduled one; the Docker check showed the duplicate first checkpoint failing one of them | A sync that waits out `SOC_SYNC_LOCK_WAIT_SECONDS` skips and says so; a caller inside its own transaction (tests, a push) takes no lease |
+| 92 | One report house style (`reporting/design.py`) for every Word report and deck; recurring reports rebuilt around what the reader must act on | Office defaults per report; a client template only | Reports are the most repetitive work clients want automated; plain default documents were not fit to send. A client template still wins where supplied | Layout only: figures still come from the sources; `test_report_design.py` pins header, footer, page fields, charts, no 'None' / 'n/a' |
 ---
 
 ## 26. Known limitations and trade-offs

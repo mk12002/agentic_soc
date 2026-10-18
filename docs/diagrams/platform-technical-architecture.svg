@@ -184,11 +184,11 @@
   <text x="318" y="820" class="s">access and model-call logs;</text>
   <text x="318" y="836" class="s">encrypted volume / managed</text>
   <rect x="542" y="746" width="224" height="100" rx="8" class="box"/>
-  <text x="554" y="769" class="t">Encrypted file store</text>
-  <text x="554" y="788" class="s">raw vendor payloads, reported</text>
-  <text x="554" y="804" class="s">e-mail, reports and evidence</text>
-  <text x="554" y="820" class="s">packs (Fernet, SOC_DATA_KEY);</text>
-  <text x="554" y="836" class="s">atomic writes, mode 0600</text>
+  <text x="554" y="769" class="t">Encrypted blob store</text>
+  <text x="554" y="788" class="s">reported e-mail, reports, packs</text>
+  <text x="554" y="804" class="s">in PostgreSQL (or a volume)</text>
+  <text x="554" y="820" class="s">Fernet (SOC_DATA_KEY), checksum</text>
+  <text x="554" y="836" class="s">readable by every replica</text>
   <rect x="778" y="746" width="212" height="100" rx="8" class="box"/>
   <text x="790" y="769" class="t">Scheduler (container)</text>
   <text x="790" y="788" class="s">jobs: vulnerability, incident,</text>

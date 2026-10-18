@@ -1,0 +1,19 @@
+# On-prem: Kubernetes on three or more nodes, PostgreSQL as a three-instance CloudNativePG cluster (automatic
+# failover, synchronous replica, PgBouncer pooler, scheduled backups to an S3-compatible store such as MinIO),
+# nginx ingress behind the organisation's load balancer.
+# Prerequisites: the CloudNativePG operator and ingress-nginx installed in the cluster.
+# Render: kubectl kustomize deploy/kubernetes/overlays/onprem
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - postgres.yaml
+  - ingress.yaml
+images:
+  - name: soc-platform
+    newName: registry.CHANGE-ME.internal/soc-platform   # the internal registry; pin by digest for production
+    newTag: CHANGE-ME
+patches:
+  - path: nodes.yaml
+  - path: settings.yaml
+  - path: database-url.yaml

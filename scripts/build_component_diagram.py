@@ -83,9 +83,9 @@ X0, CW = 352, 1276
 # R1 runtime
 y = 100
 rt = [
-    ("soc-api container", ["python -m soc_platform serve", "uvicorn, SOC_API_WORKERS processes", "FastAPI / Starlette, port 8080", "config check refuses bad settings"]),
-    ("soc-scheduler container", ["python -m soc_platform scheduler", "scheduler.py + jobs.py JOBS", "DB leases (system_flags), retries,", "heartbeat for /health"]),
-    ("postgres:16 container", ["SQLAlchemy 2 + psycopg2", "pool per worker; PG column widening", "SQLite for dev / tests", "(PostgreSQL rules enforced)"]),
+    ("soc-api (2+ replicas)", ["python -m soc_platform serve", "uvicorn, SOC_API_WORKERS processes", "FastAPI / Starlette, port 8080", "probes /health/live, /health/ready"]),
+    ("soc-scheduler (2 replicas)", ["python -m soc_platform scheduler", "scheduler.py + jobs.py JOBS", "leases renewed while running;", "dead one taken over in 120 s"]),
+    ("PostgreSQL 16 (HA)", ["managed zone-redundant / 3-node", "SQLAlchemy 2 + psycopg2, pre-ping", "pool per worker; column widening", "SQLite for dev (PG rules enforced)"]),
     ("Build and supply chain", ["deploy/Dockerfile (multi-stage)", "requirements/platform.lock", "scripts/supply_chain.py (SBOM)", "no pip in the runtime image"]),
 ]
 bw = (CW - 3 * 12) / 4
@@ -119,7 +119,7 @@ dom = [
     ("domains/incident/", ["service.py: ingest ALERT_STREAMS", "+ AUDIT_STREAMS (Entra audits),", "cluster by host / person,", "investigate: enrichment, _score", "(deterministic severity), _mitre,", "_verdict_conflict (tools disagree),", "_recommendations, reassess_open,", "narrate_pending (deferred LLM)"]),
     ("domains/vulnerability/", ["service.py: ingest 4 scanners,", "consolidate (asset + CVE),", "refresh_intel (NVD/EPSS/KEV),", "prioritise P1-P4 + SLA, owners,", "campaigns, follow_up, validate", "(verify_finding), exceptions", "(four-eyes, expiry), risk register;", "misconfig.py (Wiz issues)"]),
     ("intelligence/", ["risk.py RiskEngine (cached,", "data-anchored decay)", "correlation.py (13 rules)", "story.py (attack story)", "deep_analysis.py, analyst.py", "attack_coverage.py (ATT&CK)", "shadow_it.py, drift.py (PSI)"]),
-    ("reporting/", ["builder.py: 16 sources,", "7 standard reports, planner", "reports.py: python-docx,", "python-pptx, charts", "compliance.py: evidence pack", "Jinja2 templates"]),
+    ("reporting/", ["builder.py: 17 sources,", "7 standard reports, planner", "reports.py: python-docx,", "python-pptx, charts", "compliance.py: evidence pack", "value.py: KPI scorecard"]),
 ]
 dw = (CW - 4 * 12) / 5
 for i, (t, ls) in enumerate(dom):
@@ -185,9 +185,9 @@ box(X0, y, 760, "PostgreSQL 16 - main table groups", [
     "Actions and governance: action_requests, policy_versions, connector_config_versions, access grants, api keys",
     "Audit and logs: audit_log (hash chain), access_log, llm_calls / usage, job_runs, system_flags (leases, kill switch)",
     "Phishing: ph_submissions (unique source_ref) | Vulnerability: vm_findings, campaigns, action plans,",
-    "vuln_exceptions, risk register, vuln_intel | Intelligence: insights, briefs | notifications",
+    "vuln_exceptions, risk register, vuln_intel | Intelligence: insights, briefs | notifications | blobs (stored files)",
 ], "box")
-box(X0 + 772, y, 252, "Encrypted file store", ["SOC_RAW_PAYLOAD_DIR: raw vendor", "payloads, reported .eml", "SOC_REPORT_OUTPUT_DIR: Word /", "PowerPoint reports, evidence packs", "Fernet (SOC_DATA_KEY), 0600"])
+box(X0 + 772, y, 252, "Encrypted blob store", ["SOC_BLOB_STORE=database: blobs", "table, every replica reads it", "(or a volume: SOC_RAW_PAYLOAD_DIR,", "SOC_REPORT_OUTPUT_DIR)", "Fernet (SOC_DATA_KEY), SHA-256"])
 box(X0 + 1036, y, CW - 1036, "Configuration + artefacts", ["config/connectors.yaml (${VAR}", "refs only), suppliers.yaml,", "sanctioned_services.yaml;", "artifacts/phishing/models/", "(trained models, offline)"])
 
 # flow legend inside the platform zone

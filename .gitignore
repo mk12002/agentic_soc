@@ -60,3 +60,5 @@ Security Preliminary Assessment*.xlsx
 
 # generated per build (scripts/supply_chain.py sbom; a CI artefact)
 sbom/
+*.db-shm
+*.db-wal

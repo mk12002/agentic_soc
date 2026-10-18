@@ -1,0 +1,56 @@
+# PostgreSQL with no single point of failure: three instances on three nodes, one synchronous replica (a committed
+# transaction survives the loss of the primary), automatic failover by the operator, a PgBouncer pooler in front
+# (two replicas) so a failover only changes where the pooler connects, and base backups + WAL archiving to an
+# S3-compatible store for point-in-time recovery.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: soc-pg
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
+  primaryUpdateStrategy: unsupervised
+  bootstrap:
+    initdb: {database: soc_platform, owner: soc}     # the operator writes the soc-pg-app Secret (uri, password)
+  postgresql:
+    parameters:
+      max_connections: "300"     # API pods x workers x (pool + overflow) + schedulers must fit (HIGH_AVAILABILITY.md)
+  storage:
+    size: 100Gi
+    storageClass: CHANGE-ME      # replicated or local SSD storage class
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+  backup:
+    retentionPolicy: 30d
+    barmanObjectStore:
+      destinationPath: s3://CHANGE-ME-soc-backups/
+      endpointURL: https://minio.CHANGE-ME.internal
+      s3Credentials:
+        accessKeyId: {name: soc-backup-store, key: ACCESS_KEY_ID}
+        secretAccessKey: {name: soc-backup-store, key: ACCESS_SECRET_KEY}
+      wal: {compression: gzip}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: soc-pg-daily
+spec:
+  schedule: "0 0 2 * * *"        # daily base backup at 02:00; WAL is archived continuously in between
+  backupOwnerReference: self
+  cluster: {name: soc-pg}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: soc-pg-pooler
+spec:
+  cluster: {name: soc-pg}
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: session            # the platform uses session features (advisory lock at start-up)
+    parameters: {max_client_conn: "1000", default_pool_size: "100"}

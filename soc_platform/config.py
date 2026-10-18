@@ -34,6 +34,8 @@ class Settings(BaseModel):
     database_url: str = "sqlite:///./soc_platform.db"
     raw_payload_dir: str = "./data/raw"
     report_output_dir: str = "./data/reports"
+    blob_store: str = "file"              # file | database (core/blobstore.py): database for several hosts
+    store_raw_payloads: bool = False      # keep each record's original vendor payload (encrypted, raw retention)
 
     # Auth (NFR-09). "dev" accepts HS256 tokens signed with dev_jwt_secret;
     # "entra" validates RS256 tokens against the tenant JWKS.
@@ -97,6 +99,8 @@ def _read_settings() -> Settings:
         database_url=secret("SOC_DATABASE_URL") or "sqlite:///./soc_platform.db",   # carries a password: _FILE too
         raw_payload_dir=env.get("SOC_RAW_PAYLOAD_DIR", "./data/raw"),
         report_output_dir=env.get("SOC_REPORT_OUTPUT_DIR", "./data/reports"),
+        blob_store=(env.get("SOC_BLOB_STORE", "file").strip().lower() or "file"),
+        store_raw_payloads=_env_bool("SOC_STORE_RAW_PAYLOADS", False),
         auth_mode=env.get("SOC_AUTH_MODE", "dev"),
         entra_tenant_id=env.get("SOC_ENTRA_TENANT_ID"),
         entra_audience=env.get("SOC_ENTRA_AUDIENCE"),

@@ -17,7 +17,7 @@ import time
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Self
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -41,7 +41,17 @@ JOBS: dict[str, tuple[str, int]] = {
 }
 RETRIES = 3
 DEAD_LETTER_AFTER = 3
-LEASE_SECONDS = 1800
+LEASE_SECONDS = 120         # default lease (SOC_JOB_LEASE_SECONDS): renewed while the job runs, so it bounds only how
+#                             long a crashed scheduler's job waits before another scheduler takes it over
+STUCK_SECONDS = 1800        # a job running this long is reported "stuck" on /health (SOC_SCHEDULER_STUCK_SECONDS)
+
+
+def lease_seconds() -> int:
+    return max(30, int(os.environ.get("SOC_JOB_LEASE_SECONDS", LEASE_SECONDS) or LEASE_SECONDS))
+
+
+def stuck_seconds() -> int:
+    return max(60, int(os.environ.get("SOC_SCHEDULER_STUCK_SECONDS", STUCK_SECONDS) or STUCK_SECONDS))
 HOLDER = f"{socket.gethostname()}:{os.getpid()}"
 
 
@@ -57,20 +67,37 @@ def _body(name: str, s: Session) -> dict[str, Any]:
     if name == "incident":
         ing = sv["incident"].ingest()
         cases = sv["incident"].cluster()
-        done = [c.id for c in cases if c.status != "closed"]
-        for cid in done:
-            sv["incident"].investigate(cid, narrate=False)
-        reassessed = sv["incident"].reassess_open(exclude=set(done), narrate=False)   # new exposure on their hosts
+        todo = [c.id for c in cases if c.status != "closed"] + _retry_ids(s, "incident")
+        done, failed = [], []
+        for cid in dict.fromkeys(todo):
+            # one case that fails (an unexpected error, not a tool outage - those degrade) must not hold up the rest:
+            # its own savepoint, marked for a retry on the next runs, the others carry on
+            if _isolated(s, "incident", cid, lambda c=cid: sv["incident"].investigate(c, narrate=False)):
+                done.append(cid)
+            else:
+                failed.append(cid)
+        reassessed = sv["incident"].reassess_open(exclude=set(done) | set(failed), narrate=False)   # new exposure
         s.commit()          # the cases are visible and actionable now; the written explanations follow
         narrated = sv["incident"].narrate_pending(done + reassessed)
-        return {"synced": ing.synced, "new_incidents": len(cases), "investigated": len(done),
+        return {"synced": ing.synced, "new_incidents": len(cases), "investigated": len(done), "failed": len(failed),
                 "reassessed": len(reassessed), "narrated": narrated}
     if name == "phishing":
-        subs = [x for x in sv["phishing"].ingest_reported() if x.status == "new"]
-        case_ids = [sv["phishing"].process(sub.id, narrate=False)["case"]["id"] for sub in subs]
+        sv["phishing"].ingest_reported()
+        # every submission still waiting - this run's and any a stopped run left behind - plus failed ones due a retry
+        from soc_platform.domains.phishing.models import Submission
+
+        waiting = list(s.execute(select(Submission.id).where(Submission.status == "new")
+                                 .order_by(Submission.received_at).limit(500)).scalars())
+        case_ids, failed = [], []
+        for sid in dict.fromkeys(waiting + _retry_ids(s, "phishing")):
+            out: dict[str, Any] = {}
+            if _isolated(s, "phishing", sid, lambda x=sid, o=out: o.update(sv["phishing"].process(x, narrate=False))):
+                case_ids.append(out["case"]["id"])
+            else:
+                failed.append(sid)          # one unreadable or unexpected message never holds up the others
         s.commit()          # verdicts, evidence and recommendations are visible now; the explanations follow
         narrated = sv["phishing"].narrate_pending(case_ids)
-        return {"processed": len(subs), "narrated": narrated}
+        return {"processed": len(case_ids), "failed": len(failed), "narrated": narrated}
     if name == "vulnerability":
         out = sv["vulnerability"].refresh()
         mis = _misconfig(s).refresh()
@@ -144,6 +171,81 @@ def next_version(seen: datetime | None) -> datetime:
     return now if seen is None or now > _aware(seen) else _aware(seen) + timedelta(microseconds=1)
 
 
+ITEM_ATTEMPTS = 3          # a reported e-mail or incident that fails is retried on this many runs, then left to an analyst
+
+
+def _isolated(s: Session, domain: str, item_id: str, work: Callable[[], Any]) -> bool:
+    """Run one item's work in its own savepoint. On failure the item's changes roll back, the failure is recorded
+    on it (attempt count, error), audited and logged, and False is returned so the batch carries on."""
+    from soc_platform.core.audit import AuditLog
+    from soc_platform.core.observability import event
+
+    try:
+        with s.begin_nested():
+            work()
+        _clear_failure(s, domain, item_id)
+        return True
+    except Exception as exc:  # noqa: BLE001 - recorded on the item, audited, retried on later runs
+        error = f"{type(exc).__name__}: {exc}"[:500]
+        attempts = _record_failure(s, domain, item_id, error)
+        event("job.item_failed", 40, domain=domain, item=item_id, attempts=attempts, error=error)
+        AuditLog(s).append(actor_type="agent", actor_id=f"agent:{domain}", event_type=f"{domain}.processing_failed",
+                           subject_type="submission" if domain == "phishing" else "case", subject_id=item_id,
+                           payload={"attempts": attempts, "error": error, "final": attempts >= ITEM_ATTEMPTS})
+        return False
+
+
+def _record_failure(s: Session, domain: str, item_id: str, error: str) -> int:
+    from soc_platform.core.models import Case
+
+    if domain == "phishing":
+        from soc_platform.domains.phishing.models import Submission
+
+        row = s.get(Submission, item_id)
+        info = dict(row.analysis or {}) if row is not None else {}
+    else:
+        row = s.get(Case, item_id)
+        info = dict(row.assessment or {}) if row is not None else {}
+    if row is None:
+        return ITEM_ATTEMPTS
+    failure = dict(info.get("processing_failure") or {})
+    failure.update(attempts=int(failure.get("attempts", 0)) + 1, error=error, at=utcnow().isoformat())
+    info["processing_failure"] = failure
+    if domain == "phishing":
+        row.analysis, row.status = info, "failed"
+    else:
+        row.assessment = info
+    s.flush()
+    return failure["attempts"]
+
+
+def _clear_failure(s: Session, domain: str, item_id: str) -> None:
+    """A retry that succeeded: the item is no longer due another (phishing moves out of "failed" by itself)."""
+    if domain != "incident":
+        return
+    from soc_platform.core.models import Case
+
+    case = s.get(Case, item_id)
+    if case is not None and (case.assessment or {}).get("processing_failure"):
+        case.assessment = {k: v for k, v in case.assessment.items() if k != "processing_failure"}
+        s.flush()
+
+
+def _retry_ids(s: Session, domain: str) -> list[str]:
+    """Items whose last attempt failed and that have attempts left."""
+    from soc_platform.core.models import Case
+
+    if domain == "phishing":
+        from soc_platform.domains.phishing.models import Submission
+
+        rows = s.execute(select(Submission).where(Submission.status == "failed")).scalars()
+        return [r.id for r in rows if int(((r.analysis or {}).get("processing_failure") or {}).get("attempts", 0))
+                < ITEM_ATTEMPTS]
+    rows = s.execute(select(Case).where(Case.domain == "incident", Case.status != "closed")).scalars()
+    return [c.id for c in rows if (f := (c.assessment or {}).get("processing_failure"))
+            and int(f.get("attempts", 0)) < ITEM_ATTEMPTS]
+
+
 def _lease(db: Any, name: str, *, release: bool = False) -> bool:
     """Take (or release) a job's lease. Atomic across schedulers: the row is changed with a compare-and-swap on its
     ``updated_at``, and the first-ever lease is an insert that only one scheduler can win - the loser of either race
@@ -154,7 +256,7 @@ def _lease(db: Any, name: str, *, release: bool = False) -> bool:
     key = f"job_lease:{name}"
     me = _holder()
     now = utcnow()
-    mine = {"holder": me, "until": (now + timedelta(seconds=LEASE_SECONDS)).isoformat()}
+    mine = {"holder": me, "until": (now + timedelta(seconds=lease_seconds())).isoformat()}
     try:
         with db.session() as s:
             f = s.get(SystemFlag, key)
@@ -181,6 +283,69 @@ def _lease(db: Any, name: str, *, release: bool = False) -> bool:
         return False
 
 
+def _renew(db: Any, name: str, holder: str) -> bool:
+    """Extend a lease this run still holds (compare-and-swap, like taking it). False when it was lost - another
+    scheduler took it after a renewal could not be written in time - so the caller can say so."""
+    from sqlalchemy import update
+
+    key = f"job_lease:{name}"
+    with db.session() as s:
+        f = s.get(SystemFlag, key)
+        if f is None or (f.value or {}).get("holder") != holder:
+            return False
+        seen = f.updated_at
+        s.expunge(f)
+        until = (utcnow() + timedelta(seconds=lease_seconds())).isoformat()
+        return s.execute(update(SystemFlag).where(SystemFlag.name == key, SystemFlag.updated_at == seen)
+                         .values(value={"holder": holder, "until": until}, updated_by="scheduler",
+                                 updated_at=next_version(seen))).rowcount == 1
+
+
+class _LeaseKeeper:
+    """Renews a job's lease every third of its length while the job body runs, in its own thread and connection.
+    A short lease then recovers a crashed scheduler's job quickly, yet a long job is never taken over while alive."""
+
+    def __init__(self, db: Any, name: str, holder: str, trace: str) -> None:
+        import threading
+
+        self.db, self.name, self.holder, self.trace = db, name, holder, trace
+        self.stop = threading.Event()
+        self.lost = False
+        self.gave_up = False                 # stopped renewing: the job ran past SOC_SCHEDULER_STUCK_SECONDS
+        self.renewals = 0
+        self.thread = threading.Thread(target=self._loop, name=f"soc-lease-{name}", daemon=True)
+
+    def __enter__(self) -> Self:
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.stop.set()
+        self.thread.join(timeout=10)
+
+    def _loop(self) -> None:
+        from soc_platform.core.observability import event, traced
+
+        started = time.monotonic()
+        with traced(self.trace):
+            while not self.stop.wait(lease_seconds() / 3):
+                if time.monotonic() - started > stuck_seconds():
+                    # a job this long is stuck (a tool that never answers): let the lease lapse so another scheduler
+                    # can retry it, as before leases were renewed; /health reports it as stuck meanwhile
+                    self.gave_up = True
+                    event("job.lease_released_stuck", 40, job=self.name)
+                    return
+                try:
+                    if _renew(self.db, self.name, self.holder):
+                        self.renewals += 1
+                        continue
+                    self.lost = True
+                    event("job.lease_lost", 40, job=self.name)
+                    return
+                except Exception as exc:  # noqa: BLE001 - a missed renewal is retried next tick; logged, never raised
+                    event("job.lease_renew_failed", 30, job=self.name, error=f"{type(exc).__name__}: {exc}"[:300])
+
+
 def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Callable[[float], None] = time.sleep,
             body: Callable[[str, Session], dict[str, Any]] | None = None,
             still_due: Callable[[], bool] | None = None) -> JobRun | None:
@@ -196,7 +361,7 @@ def run_job(name: str, *, db: Any = None, trigger: str = "schedule", sleep: Call
         return None
     from soc_platform.core.observability import event, new_trace, traced
 
-    with traced(new_trace(f"job-{name}")) as trace:
+    with traced(new_trace(f"job-{name}")) as trace, _LeaseKeeper(db, name, _holder(), trace):
         return _run_traced(name, db, trigger, sleep, body, trace, event)
 
 

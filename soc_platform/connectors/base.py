@@ -255,6 +255,27 @@ class BaseConnector(ABC):
                 "write_scopes": list(self.write_scopes)}
 
 
+SYNC_LEASE_SECONDS = 300      # a sync's hold on its stream; renewed after every page, so it bounds only a crash
+
+
+def sync_lock_wait_seconds() -> float:
+    """How long a sync waits for another replica's sync of the same stream (SOC_SYNC_LOCK_WAIT_SECONDS)."""
+    return max(0.0, float(os.environ.get("SOC_SYNC_LOCK_WAIT_SECONDS", "120") or 120))
+
+
+def _lease_holder() -> str:
+    import socket
+
+    return f"{socket.gethostname()}:{os.getpid()}:{threading.get_ident()}"
+
+
+def _aware_iso(value: str):
+    from datetime import UTC, datetime
+
+    dt = datetime.fromisoformat(value)
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
+
+
 @dataclass
 class SyncReport:
     connector: str
@@ -268,6 +289,8 @@ class SyncReport:
     source_total: int | None = None
     truncated: bool = False   # page limit reached with more to read: the next sync continues
     coerced: dict[str, int] = field(default_factory=dict)   # malformed fields brought to the documented shape
+    waited_seconds: float = 0.0   # another replica was syncing this stream; this one waited for it to finish
+    skipped: str | None = None    # not run: another replica held the stream past SOC_SYNC_LOCK_WAIT_SECONDS
 
     @property
     def reconciled(self) -> bool:
@@ -288,11 +311,16 @@ class SyncRunner:
         self.commit_pages = commit_pages
 
     def _checkpoint(self, connector: BaseConnector, stream: str) -> ConnectorCheckpoint:
+        from sqlalchemy.exc import IntegrityError
+
         cp = self.s.get(ConnectorCheckpoint, (connector.name, stream))
         if cp is None:
-            cp = ConnectorCheckpoint(connector=connector.name, stream=stream)
-            self.s.add(cp)
-            self.s.flush()
+            try:
+                with self.s.begin_nested():               # a first sync elsewhere may create it at the same moment
+                    cp = ConnectorCheckpoint(connector=connector.name, stream=stream)
+                    self.s.add(cp)
+            except IntegrityError:
+                cp = self.s.get(ConnectorCheckpoint, (connector.name, stream), populate_existing=True)
         return cp
 
     @staticmethod
@@ -305,8 +333,104 @@ class SyncRunner:
             if not page.more:
                 return
 
+    # ------------------------------------------------------------------ one sync of a stream at a time
+    # The scheduled job, a manual sync, a refresh button and the demo command can all sync the same stream, on
+    # different replicas. Two at once raced on the stream's rows (a duplicate first checkpoint failed one of them).
+    # A lease per (connector, stream) in system_flags - taken with a compare-and-swap, renewed after every page,
+    # released at the end - makes them take turns; the second waits, then continues from the updated checkpoint.
+
+    @staticmethod
+    def _lease_key(connector: str, stream: str) -> str:
+        import hashlib
+
+        return "sync_lease:" + hashlib.sha256(f"{connector}|{stream}".encode()).hexdigest()[:40]
+
+    def _take_stream(self, key: str, holder: str) -> bool:
+        from datetime import timedelta
+
+        from sqlalchemy import select, update
+        from sqlalchemy.exc import IntegrityError
+
+        from soc_platform.core.models import SystemFlag
+
+        now = utcnow()
+        mine = {"holder": holder, "until": (now + timedelta(seconds=SYNC_LEASE_SECONDS)).isoformat()}
+        f = self.s.execute(select(SystemFlag).where(SystemFlag.name == key)
+                           .execution_options(populate_existing=True)).scalars().first()
+        # every "not acquired" path ends this session's transaction: a waiter must not sit on a lock (SQLite kept the
+        # write lock of a failed insert, so the holder could not write its checkpoint) or an old snapshot
+        if f is None:
+            try:
+                with self.s.begin_nested():
+                    self.s.add(SystemFlag(name=key, value=mine, updated_by="sync", updated_at=now))
+            except IntegrityError:
+                self.s.commit()
+                return False                              # another sync inserted it first: it holds the stream
+            self.s.commit()
+            return True
+        v, seen = f.value or {}, f.updated_at
+        held = v.get("holder") not in (None, holder) and v.get("until") and _aware_iso(v["until"]) > now
+        if held:
+            self.s.commit()
+            return False
+        from soc_platform.jobs import next_version
+
+        won = self.s.execute(update(SystemFlag).where(SystemFlag.name == key, SystemFlag.updated_at == seen)
+                             .values(value=mine, updated_by="sync", updated_at=next_version(seen))).rowcount == 1
+        self.s.commit()
+        return won
+
+    def _renew_stream(self, key: str, holder: str) -> None:
+        from datetime import timedelta
+
+        from sqlalchemy import update
+
+        from soc_platform.core.models import SystemFlag
+
+        until = (utcnow() + timedelta(seconds=SYNC_LEASE_SECONDS)).isoformat()
+        self.s.execute(update(SystemFlag).where(SystemFlag.name == key)
+                       .values(value={"holder": holder, "until": until}, updated_at=utcnow()))
+
+    def _release_stream(self, key: str, holder: str) -> None:
+        from sqlalchemy import select
+
+        from soc_platform.core.models import SystemFlag
+
+        f = self.s.execute(select(SystemFlag).where(SystemFlag.name == key)
+                           .execution_options(populate_existing=True)).scalars().first()
+        if f is not None and (f.value or {}).get("holder") == holder:
+            f.value = {"holder": None, "until": utcnow().isoformat()}
+            f.updated_at = utcnow()
+            self.s.commit()
+
     def sync(self, connector: BaseConnector, stream: str, *, full_backfill: bool = False,
              max_pages: int | None = None, pages: Iterator[Page] | None = None) -> SyncReport:
+        if not self.commit_pages or self.s.in_nested_transaction():
+            # the caller owns the transaction (tests, a push inside a request): no lease, nothing committed here
+            return self._sync(connector, stream, full_backfill=full_backfill, max_pages=max_pages, pages=pages)
+        from soc_platform.core.models import new_id
+
+        key, holder = self._lease_key(connector.name, stream), f"{_lease_holder()}:{new_id()[:8]}"
+        started = time.monotonic()
+        while not self._take_stream(key, holder):
+            if time.monotonic() - started >= sync_lock_wait_seconds():
+                report = SyncReport(connector.name, stream, skipped="another sync of this stream is still running",
+                                    waited_seconds=round(time.monotonic() - started, 1))
+                log.warning("%s.%s: skipped - another sync of this stream is still running", connector.name, stream)
+                return report
+            time.sleep(0.5)
+        waited = round(time.monotonic() - started, 1)
+        try:
+            report = self._sync(connector, stream, full_backfill=full_backfill, max_pages=max_pages, pages=pages,
+                                on_page=lambda: self._renew_stream(key, holder))
+        finally:
+            self._release_stream(key, holder)
+        report.waited_seconds = waited
+        return report
+
+    def _sync(self, connector: BaseConnector, stream: str, *, full_backfill: bool = False,
+              max_pages: int | None = None, pages: Iterator[Page] | None = None,
+              on_page: Callable[[], None] | None = None) -> SyncReport:
         max_pages = max_pages or max_pages_per_sync()
         cp = self._checkpoint(connector, stream)
         cursor = None if full_backfill else cp.cursor
@@ -324,6 +448,8 @@ class SyncRunner:
                 # Checkpoint after every page so an interrupted backfill resumes, not restarts.
                 cursor = page.next_cursor if page.reset else (page.next_cursor or cursor)
                 cp.cursor = cursor
+                if on_page is not None:
+                    on_page()                             # renew this stream's lease with the page
                 self.s.flush()
                 if self.commit_pages and not self.s.in_nested_transaction():
                     self.s.commit()

@@ -9,9 +9,11 @@ from typing import Any
 
 from sqlalchemy import DateTime, String, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
+SCHEMA_LOCK_KEY = 0x50C5C4E3A  # pg_advisory_lock key that serialises schema creation across processes
 
 class Base(DeclarativeBase):
     pass
@@ -82,6 +84,7 @@ class Database:
         self._factory = sessionmaker(bind=self.engine, expire_on_commit=False, future=True)
 
     def create_all(self) -> None:
+        from soc_platform.core import blobstore as _blobs  # noqa: F401
         from soc_platform.core import models  # noqa: F401  (register tables)
         from soc_platform.core import notify as _notify  # noqa: F401
         from soc_platform.domains.phishing import models as _ph  # noqa: F401
@@ -90,6 +93,29 @@ class Database:
         from soc_platform.llm import usage_policy as _llm_policy  # noqa: F401
         from soc_platform.reporting import models as _rep  # noqa: F401
 
+        # Every process creates the schema on first use, and a fresh deployment starts many at once (replicas x
+        # workers). Unserialised, they race on CREATE / ALTER TABLE ("already exists", a failed first request).
+        # PostgreSQL: one session-level advisory lock, so they take turns and the later ones find nothing to do.
+        # Other engines (SQLite, one host): a lost race is retried, and the retry finds the tables in place.
+        if self.engine.dialect.name == "postgresql":
+            with self.engine.connect() as lock:
+                lock.execute(text("SELECT pg_advisory_lock(:k)"), {"k": SCHEMA_LOCK_KEY})
+                try:
+                    self._create_schema()
+                finally:
+                    lock.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": SCHEMA_LOCK_KEY})
+                    lock.commit()
+            return
+        for attempt in range(5):
+            try:
+                self._create_schema()
+                return
+            except SQLAlchemyError as exc:
+                if "already exists" not in str(exc).lower() or attempt == 4:
+                    raise
+                __import__("time").sleep(0.1 * (attempt + 1))
+
+    def _create_schema(self) -> None:
         Base.metadata.create_all(self.engine)
         self._add_missing_columns()
         self._add_missing_indexes()
@@ -223,7 +249,19 @@ def _sqlite_pragmas(dbapi_conn, _record) -> None:
     # The server runs the scheduler alongside requests: let readers work during a write (WAL) and make a writer wait
     # for a busy database instead of failing at once. In-memory databases do not support WAL and ignore it.
     cur.execute("PRAGMA busy_timeout=30000")
-    cur.execute("PRAGMA journal_mode=WAL")
+    # Switching a new file to WAL ignores busy_timeout: several workers opening a fresh database together got
+    # "database is locked" here. The mode is stored in the file, so retry until one connection has switched it.
+    import sqlite3
+    import time
+
+    for attempt in range(100):
+        try:
+            cur.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == 99:
+                raise
+            time.sleep(0.05)
     cur.close()
 
 

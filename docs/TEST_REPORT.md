@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-15 (rounds 15-24; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-17 (rounds 15-25; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,38 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 24 (2026-10-15) - latest results: supply chain, build pipeline and dev-VM security
+## 0. Round 25 (2026-10-17) - latest results: no single point of failure, and the value scorecard
+
+Aim: make the platform run with no single point of failure, on premises or in the cloud, and measure the benefits the
+customer is promised. Each row is something found and fixed; the tests named fail without the fix.
+
+| Found | Now | Evidence |
+|---|---|---|
+| Reported e-mails and reports were saved on one host's disk; another replica could not read them (a report the scheduler built could not be downloaded through the API) | `SOC_BLOB_STORE=database`: rows in `blobs`, encrypted, checksummed, committed with their record; `blobs migrate` moves existing files; reads follow each record's reference | `test_high_availability.py`; Docker: a report built by the scheduler container downloaded through the API container |
+| Job leases were a fixed 30 minutes: a crashed scheduler stalled even the 2-minute phishing job for half an hour | 120-second lease renewed every 40 s while the job runs; taken over within one lease; stops renewing past the stuck threshold so a hung job can be retried | `test_a_job_whose_scheduler_died_is_taken_over_after_one_lease`, `test_a_running_job_keeps_its_lease_...`, `test_a_job_that_runs_past_the_stuck_threshold_...` |
+| One reported e-mail or incident that raised an unexpected error failed its whole job, which was dead-lettered and held up every other e-mail | Each item in its own savepoint; recorded, audited, retried on the next 3 runs, then left to an analyst; waiting submissions picked up next run | `test_one_failing_email_never_holds_up_the_others_...`, `test_one_failing_incident_...` |
+| Eight connections opening a new SQLite file together failed on the WAL switch; every process creates the schema on first use | WAL switch retried; schema creation serialised (PostgreSQL advisory lock, a safeguard - the race did not reproduce there) | `test_many_processes_creating_the_schema_at_once_all_succeed` (both engines) |
+| A liveness probe on `/health` would restart every pod during a database outage | `/health/live` (no database) and `/health/ready` (database, 503 + Retry-After); scheduler pods get a local liveness file | `test_liveness_never_depends_on_the_database_and_readiness_does`, `test_the_scheduler_touches_its_liveness_file_...` |
+| Signed-in analysts were rejected five minutes into an Entra key-endpoint outage | Signing keys kept per process by key id | `test_signed_in_analysts_keep_working_when_the_entra_key_endpoint_is_unreachable` |
+| The Docker check: `demo` and the scheduler synced one stream together and one failed on a duplicate first checkpoint | A per-stream sync lease (wait, then continue from the checkpoint; or skip and say so); the first checkpoint insert tolerates a lost race | `test_two_syncs_of_one_stream_at_once_take_turns_and_both_complete`, `test_a_stream_held_by_another_replica_...`; Docker: `demo` during the scheduler's first pass |
+| The docs said raw vendor payloads were stored; production never stored them | Opt-in `SOC_STORE_RAW_PAYLOADS` through the blob store, under raw retention; docs corrected | `test_switched_on_original_payloads_go_to_the_blob_store_...`, `test_original_vendor_payloads_are_not_kept_unless_switched_on` |
+| Only a single-host Compose file existed | Kubernetes package: base (2+ replicas of everything, zone / node spread, probes, disruption budgets, autoscaling, restricted pod security, default-deny network policy, init-db) + Azure and on-prem overlays | `test_deployment_manifests.py` (overlays rendered with kubectl) |
+| The customer deck promised benefit KPIs "measured and reported"; nothing computed them against a baseline | Value scorecard: 8 KPIs against baseline and target (Overview card, board monthly and CISO weekly reports, `GET /api/v1/value/scorecard`); lead-entered baselines and time-study figures, audited | `test_value_scorecard.py` (exact figures from controlled timestamps, statuses, capacity, permissions, the board report) |
+| The recurring reports were correct but plain: default Office styling, an empty second page, "n/a" shown, chart axes in steps of 0.5, a management deck of near-empty slides, and no "what to do today" | One house style for every report (`reporting/design.py`): cover, colour-coded tiles, charts beside the tables, styled tables, header with classification, footer with page X of Y; the daily report opens with *Act today*; the weekly deck runs from the week in numbers to the decisions needed; reports described in words (planned by the LLM, figures from code) get the same look | `test_report_design.py`; every page rendered through Word and PowerPoint and reviewed |
+| Run on a messy estate 20 times the demo (179 findings, 253 assets, real-tenant disorder), the reports listed every host without EDR or CMDB entry in one cell (100+ names), the changes table showed 10 rows under a tile of 94 with no "more" note, and the same host lists filled the console card; in dark mode the bar charts' white numbers failed contrast | Lists show the count, the first names and "N more"; every capped table says how many more; bar charts carry no text on colour (totals and the split beside them, exact values on hover) | Reports re-rendered from the messy estate; browser tour on the messy estate: 0 problems |
+| The working screens were mostly tables | Charts on Vulnerabilities (priority, team past / within SLA, age), Phishing (who clicked, reporters, handling), Approvals (by domain, by action type) and Cloud posture (severity, owner) | Browser tour at 4 widths, light and dark: 0 problems (it first caught chart labels cut with an ellipsis; they now wrap) |
+| RUN_GUIDE's Compose steps omitted `RABBITMQ_PASSWORD`, which Compose checks for every service | Added to the guide | Docker check |
+
+| Check | Result |
+|---|---|
+| Platform suite on SQLite | **772 passed**, 0 failed, 16 skipped (788 collected) |
+| Platform suite on PostgreSQL 16 | **772 passed**, 0 failed, 16 skipped |
+| Docker Compose (Docker Desktop 29) | API healthy on `/health/ready`; `demo` during the scheduler's first pass: 7 + 3 cases, 34 awaiting approval, 6 open vulnerabilities; 13 stored files all in the database and readable; a scheduler-built report downloaded through the API; everything survives a restart |
+| Browser tour | 34 screenshots at 4 widths, light and dark, 0 problems (the new scorecard and dashboard charts included) |
+| Feature verification | **108 of 108** with `--browser --engine --live --llm`: 240 mapped tests, 0 failed; browser tour with the live LLM 0 problems (35 screenshots); ML engine 205 passed; also a browser tour on a messy estate 20 times the demo: 0 problems |
+| Lint / bandit / lock / JavaScript | clean / no issues / matches / clean |
+
+## Round 24 (2026-10-15): supply chain, build pipeline and dev-VM security
 
 Aim: close the gaps raised by the internal security preliminary assessment for the development VM.
 

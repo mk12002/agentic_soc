@@ -16,6 +16,8 @@ x-platform-env: &platform-env
   SOC_ENTRA_SPA_CLIENT_ID: ${SOC_ENTRA_SPA_CLIENT_ID:-}
   SOC_ENTRA_SCOPE: ${SOC_ENTRA_SCOPE:-}
   SOC_CONNECTOR_MODE: ${SOC_CONNECTOR_MODE:-fake}
+  SOC_BLOB_STORE: ${SOC_BLOB_STORE:-database}         # stored e-mails and reports in PostgreSQL (HIGH_AVAILABILITY.md)
+  SOC_JOB_LEASE_SECONDS: ${SOC_JOB_LEASE_SECONDS:-120}
   SOC_ORG_DOMAINS: ${SOC_ORG_DOMAINS:-acme-demo.com}
   SOC_PHISHING_ENGINE: ${SOC_PHISHING_ENGINE:-auto}   # on when the image is built WITH_PHISHING_ENGINE=true
   SOC_LLM_PROVIDER: ${SOC_LLM_PROVIDER:-none}

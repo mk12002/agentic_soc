@@ -1,0 +1,22 @@
+# Application Gateway (zone-redundant) via the Application Gateway Ingress Controller. TLS terminates at the gateway
+# with a Key Vault certificate. Internal-only console: point it at the organisation's existing gateway. Internet-facing:
+# a WAF v2 gateway and policy are mandatory (INFRASTRUCTURE_AND_COSTS.md section 10.2, D5).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: soc-api
+  annotations:
+    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+    appgw.ingress.kubernetes.io/appgw-ssl-certificate: CHANGE-ME   # certificate name in the gateway
+    appgw.ingress.kubernetes.io/health-probe-path: /health/ready
+    appgw.ingress.kubernetes.io/waf-policy-for-path: CHANGE-ME     # WAF policy resource id (OWASP rules + rate limit)
+    appgw.ingress.kubernetes.io/request-timeout: "120"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - host: soc.CHANGE-ME.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: soc-api, port: {name: http}}}

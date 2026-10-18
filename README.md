@@ -65,6 +65,11 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build       
 docker compose -f deploy/docker-compose.yml --env-file .env --profile engine up -d   # + phishing ML microservices
 ```
 
+One host is a single point of failure by design (right for a demo or a pilot). For production with no single point
+of failure - two or more API and scheduler replicas across nodes and zones, highly available PostgreSQL holding every
+piece of state - use the Kubernetes package (`kubectl apply -k deploy/kubernetes/overlays/azure` or `.../onprem`); see
+[docs/HIGH_AVAILABILITY.md](docs/HIGH_AVAILABILITY.md).
+
 Requirements: Python 3.11+, SQLite (dev) or PostgreSQL 14+ (prod). The console is plain HTML/JS/CSS served by the
 API - no Node build step, no external CDNs - and works in current Chrome, Edge, Firefox and Safari.
 
@@ -162,6 +167,8 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | [docs/CONNECTORS.md](docs/CONNECTORS.md) | Per-tool setup, scopes, configuration (generated from the code) |
 | [docs/client_review/](docs/client_review/README.md) | Review pack for the client's security and architecture teams: solution architecture, tool integrations, data flow and protection, AI / LLM security, risk and governance, deployment and validation (Word edition: `python scripts/build_review_pack.py`) |
 | [docs/DATA_HANDOFF_RECONCILIATION.md](docs/DATA_HANDOFF_RECONCILIATION.md) | The platform against the client's data handoff workbook: connector scope, every payload type and field, correlation rules, acceptance scenarios, generation rules, open items |
+| [docs/INFRASTRUCTURE_AND_COSTS.md](docs/INFRASTRUCTURE_AND_COSTS.md) | Infrastructure for stakeholders: where every tool lives, how data is ingested, normalised, stored and retained, measured storage and capacity, the 13 correlation rules, on-premises versus cloud, Azure and LLM costs with sources |
+| [docs/HIGH_AVAILABILITY.md](docs/HIGH_AVAILABILITY.md) | No single point of failure: every component's redundancy and failure behaviour, Azure and on-prem reference deployments, the Kubernetes package, connection budget, backups, recovery targets and the failover drill |
 | [docs/ARCHITECTURE_COMPONENTS.md](docs/ARCHITECTURE_COMPONENTS.md) | Component architecture: every client service, container, module, table group and connector endpoint in one diagram, and every flow step by step |
 | [docs/ARCHITECTURE_WALKTHROUGH.md](docs/ARCHITECTURE_WALKTHROUGH.md) | What to say for each part of the platform and dev-VM technical diagrams, the six flows, and likely review questions |
 | [docs/DEV_VM_SETUP.md](docs/DEV_VM_SETUP.md) | The internal development / demo VM: size, outbound allow-list, secrets, CI gates, decommissioning |

@@ -1,0 +1,69 @@
+# Scheduled jobs (ingestion, investigation, correlation, reports, retention, self-check, notifications).
+# Two replicas: the database decides what is due and a renewed lease stops a job running twice, so either replica
+# runs any job, and a job whose replica dies is taken over within SOC_JOB_LEASE_SECONDS. /health on the API reports
+# the scheduler as running / stuck / stale from its database heartbeat.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soc-scheduler
+  labels: {app.kubernetes.io/name: soc-scheduler, app.kubernetes.io/component: scheduler}
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/name: soc-scheduler}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: soc-scheduler, app.kubernetes.io/component: scheduler}
+    spec:
+      serviceAccountName: soc-platform
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60        # the job in hand finishes; SIGTERM stops the loop between jobs
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app.kubernetes.io/name: soc-scheduler}}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app.kubernetes.io/name: soc-scheduler}}
+      containers:
+        - name: scheduler
+          image: soc-platform
+          command: ["python", "-m", "soc_platform", "scheduler"]
+          envFrom:
+            - configMapRef: {name: soc-platform-settings}
+            - secretRef: {name: soc-platform-secrets}
+            - secretRef: {name: soc-connector-secrets, optional: true}
+          env:
+            - {name: SOC_SCHEDULER_LIVENESS_FILE, value: /tmp/soc-scheduler.alive}
+          # liveness without the database: the heartbeat thread touches the file every 30 s while the scheduler's
+          # threads are alive; three minutes without it and the pod is restarted (a database outage restarts nothing)
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import os,sys,time; p='/tmp/soc-scheduler.alive'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 180 else 1)"]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:                           # mostly waiting on tools' APIs and the database
+            requests: {cpu: 250m, memory: 1Gi}
+            limits: {memory: 2Gi}
+          volumeMounts: [{name: tmp, mountPath: /tmp}, {name: data, mountPath: /app/data}]
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+        - {name: data, emptyDir: {sizeLimit: 2Gi}}

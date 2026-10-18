@@ -1,0 +1,29 @@
+# Non-secret settings shared by the API and the scheduler. Secrets come from the Secret "soc-platform-secrets"
+# (database URL, SOC_DATA_KEY, LLM key, connector credentials) - never put a secret value here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: soc-platform-settings
+data:
+  SOC_ENVIRONMENT: prod
+  SOC_AUTH_MODE: entra
+  SOC_CONNECTOR_MODE: live
+  # stored e-mails and reports live in PostgreSQL: every replica on every node reads them, and the database's
+  # own HA, backups and point-in-time recovery cover them (no shared volume to make highly available)
+  SOC_BLOB_STORE: database
+  SOC_EMBEDDED_SCHEDULER: "0"            # the soc-scheduler Deployment runs the jobs
+  SOC_HOST: 0.0.0.0
+  SOC_PORT: "8080"
+  SOC_API_WORKERS: "1"                   # processes per pod: equal to the pod's CPU request (1 vCPU, fits 2-vCPU nodes)
+  SOC_DB_POOL_SIZE: "10"                 # per process: pods x workers x (size + overflow) + schedulers < max_connections (4 x 1 x 20 + 2 x 20 = 120)
+  SOC_DB_MAX_OVERFLOW: "10"
+  SOC_JOB_LEASE_SECONDS: "120"           # a crashed scheduler's job is taken over within this long
+  SOC_SHUTDOWN_GRACE_SECONDS: "20"       # shorter than terminationGracePeriodSeconds
+  SOC_LOG_FORMAT: json                   # one JSON object per line on stdout for the log collector / SIEM
+  SOC_LOG_LEVEL: INFO
+  SOC_LOG_CONFIGURE: "1"
+  SOC_RAW_PAYLOAD_DIR: /app/data/raw     # scratch only (emptyDir) with the database blob store
+  SOC_REPORT_OUTPUT_DIR: /app/data/reports
+  PYTHONDONTWRITEBYTECODE: "1"           # read-only root filesystem
+  # set per organisation (overlay or kubectl edit): SOC_ORG_DOMAINS, SOC_ENTRA_TENANT_ID, SOC_ENTRA_AUDIENCE,
+  # SOC_ENTRA_SPA_CLIENT_ID, SOC_ENTRA_SCOPE, SOC_TRUSTED_PROXIES, SOC_LLM_PROVIDER, SOC_LLM_ENDPOINT, ...

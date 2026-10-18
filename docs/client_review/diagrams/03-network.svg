@@ -43,7 +43,7 @@
   <rect x="520" y="550" width="330" height="230" rx="12" class="zoned"/>
   <text x="534" y="574" class="z">Data subnet (private)</text>
   <rect x="540" y="590" width="290" height="80" rx="8" class="box"/><text x="552" y="616" class="t">PostgreSQL 16 (managed service)</text><text x="552" y="636" class="s">TCP 5432, TLS, dedicated login;</text><text x="552" y="652" class="s">audit table INSERT / SELECT only</text>
-  <rect x="540" y="686" width="290" height="80" rx="8" class="box"/><text x="552" y="712" class="t">Encrypted file store</text><text x="552" y="732" class="s">volume / blob mount; files are</text><text x="552" y="748" class="s">Fernet-encrypted before they land</text>
+  <rect x="540" y="686" width="290" height="80" rx="8" class="box"/><text x="552" y="712" class="t">Encrypted blob store</text><text x="552" y="732" class="s">in PostgreSQL (or a volume); files</text><text x="552" y="748" class="s">are Fernet-encrypted before they land</text>
 
   <!-- outbound targets -->
   <rect x="890" y="80" width="290" height="250" rx="12" class="ext"/>
