@@ -5,3 +5,6 @@ artifacts/phishing/models/**/*_xgb.json filter=lfs diff=lfs merge=lfs -text
 artifacts/phishing/data/*.db filter=lfs diff=lfs merge=lfs -text
 artifacts/phishing/datasets_processed/**/*.csv filter=lfs diff=lfs merge=lfs -text
 *.eml text eol=crlf
+
+# shell scripts run inside Linux containers
+*.sh text eol=lf

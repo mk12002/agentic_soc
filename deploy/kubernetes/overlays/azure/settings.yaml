@@ -3,12 +3,18 @@ kind: ConfigMap
 metadata:
   name: soc-platform-settings
 data:
-  SOC_ORG_DOMAINS: CHANGE-ME.example
+  SOC_ORG_DOMAINS: CHANGE-ME.example             # every mail domain, including the tenant's <name>.onmicrosoft.com
   SOC_ENTRA_TENANT_ID: CHANGE-ME
   SOC_ENTRA_AUDIENCE: CHANGE-ME
   SOC_ENTRA_SPA_CLIENT_ID: CHANGE-ME
   SOC_ENTRA_SCOPE: CHANGE-ME
   SOC_TRUSTED_PROXIES: 10.0.0.0/24           # the Application Gateway subnet: only its X-Forwarded-For is trusted
+  SOC_DB_RUNTIME_ROLE: soc_app               # granted by init-db: read / write, append-only audit log, no DDL
   SOC_LLM_PROVIDER: azure_openai              # or none; the endpoint must be in SOC_LLM_APPROVED_ENDPOINTS
   SOC_LLM_ENDPOINT: https://CHANGE-ME.openai.azure.com
   SOC_LLM_APPROVED_ENDPOINTS: https://CHANGE-ME.openai.azure.com
+  # secrets as Key Vault files (keyvault-secrets.yaml), never as environment values
+  SOC_DATABASE_URL_FILE: /mnt/secrets/soc-database-url
+  SOC_DATA_KEY_FILE: /mnt/secrets/soc-data-key
+  SOC_LLM_API_KEY_FILE: /mnt/secrets/soc-llm-api-key
+  SOC_BREAKGLASS_SHA256_FILE: /mnt/secrets/soc-breakglass-sha256

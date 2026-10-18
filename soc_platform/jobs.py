@@ -38,7 +38,9 @@ JOBS: dict[str, tuple[str, int]] = {
     "retention": ("SOC_JOB_RETENTION_SECONDS", 24 * 3600),
     "self_check": ("SOC_JOB_SELF_CHECK_SECONDS", 3600),
     "notify": ("SOC_JOB_NOTIFY_SECONDS", 60),
+    "actions": ("SOC_JOB_ACTIONS_SECONDS", 60),
 }
+ACTION_STUCK_SECONDS = 900   # an action "executing" this long lost its process: marked unverified (SOC_ACTION_STUCK_SECONDS)
 RETRIES = 3
 DEAD_LETTER_AFTER = 3
 LEASE_SECONDS = 120         # default lease (SOC_JOB_LEASE_SECONDS): renewed while the job runs, so it bounds only how
@@ -78,6 +80,7 @@ def _body(name: str, s: Session) -> dict[str, Any]:
                 failed.append(cid)
         reassessed = sv["incident"].reassess_open(exclude=set(done) | set(failed), narrate=False)   # new exposure
         s.commit()          # the cases are visible and actionable now; the written explanations follow
+        _run_pending_actions(s)   # autonomous actions approved inside the per-case savepoints
         narrated = sv["incident"].narrate_pending(done + reassessed)
         return {"synced": ing.synced, "new_incidents": len(cases), "investigated": len(done), "failed": len(failed),
                 "reassessed": len(reassessed), "narrated": narrated}
@@ -96,6 +99,7 @@ def _body(name: str, s: Session) -> dict[str, Any]:
             else:
                 failed.append(sid)          # one unreadable or unexpected message never holds up the others
         s.commit()          # verdicts, evidence and recommendations are visible now; the explanations follow
+        _run_pending_actions(s)
         narrated = sv["phishing"].narrate_pending(case_ids)
         return {"processed": len(case_ids), "failed": len(failed), "narrated": narrated}
     if name == "vulnerability":
@@ -141,9 +145,20 @@ def _body(name: str, s: Session) -> dict[str, Any]:
 
         return run_retention(s, get_settings())
     if name == "self_check":
+        from soc_platform.core.audit import AuditLog
         from soc_platform.core.selfcheck import confirm, llm_budget_alert, raise_or_resolve, run_self_check
 
-        result = confirm(s, run_self_check(s))            # alert only on checks that fail twice (no false alarms)
+        checked = run_self_check(s)
+        verified = checked.pop("_audit_verification")
+        AuditLog(s).save_checkpoint(verified)             # /health verifies only what is newer
+        if verified.get("ok"):
+            # the chain's head leaves the database every hour, into the log pipeline (SIEM / Log Analytics, kept
+            # write-once there): someone able to rewrite the whole table and recompute every hash still cannot
+            # match the heads already shipped. `python -m soc_platform audit verify --anchor SEQ:HASH` checks one.
+            from soc_platform.core.observability import event
+
+            event("audit.anchor", seq=verified.get("head_seq"), head=verified.get("head"))
+        result = confirm(s, checked)                      # alert only on checks that fail twice (no false alarms)
         raise_or_resolve(s, result)
         budget = llm_budget_alert(s, get_settings())
         return {"passed": result["passed"], "total": result["total"],
@@ -152,7 +167,26 @@ def _body(name: str, s: Session) -> dict[str, Any]:
         from soc_platform.core.notify import deliver
 
         return deliver(s)
+    if name == "actions":
+        from soc_platform.api.app import _action_service
+
+        svc = _action_service(s)
+        stuck = svc.reconcile_stuck(float(os.environ.get("SOC_ACTION_STUCK_SECONDS", ACTION_STUCK_SECONDS)
+                                          or ACTION_STUCK_SECONDS))
+        s.commit()
+        ran = svc.execute_pending()
+        return {"executed": sum(r.status == "executed" for r in ran), "failed": sum(r.status == "failed" for r in ran),
+                "held": sum(r.status in ("pending_approval", "blocked") for r in ran), "unverified": len(stuck)}
     raise KeyError(f"unknown job {name}")
+
+
+def _run_pending_actions(s: Session) -> None:
+    """Execute the actions a job approved inside its per-item savepoints, now that they are committed."""
+    if not s.info.get("soc_pending_actions"):
+        return
+    from soc_platform.api.app import _action_service
+
+    _action_service(s).execute_pending(list(s.info.get("soc_pending_actions", [])))
 
 
 def _holder() -> str:

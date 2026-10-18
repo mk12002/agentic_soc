@@ -130,6 +130,20 @@ class _Breaker:
                 cls.open_until = _time.monotonic() + float(os.environ.get("SOC_LLM_BREAKER_SECONDS", "60"))
 
 
+def check_endpoint(settings: Settings, endpoint: str) -> None:
+    """Prompts go only to an approved endpoint. In production the list is mandatory and https only: an empty list
+    used to mean "any address", so a mistyped or swapped endpoint received the prompts."""
+    approved = [a.rstrip("/") for a in settings.llm_approved_endpoints]
+    endpoint = (endpoint or "").rstrip("/")
+    if settings.environment == "prod":
+        if not approved:
+            raise ValueError("SOC_LLM_APPROVED_ENDPOINTS is required in production")
+        if not endpoint.lower().startswith("https://"):
+            raise ValueError(f"LLM endpoint {endpoint} must use https:// in production")
+    if approved and endpoint not in approved:
+        raise ValueError(f"LLM endpoint {endpoint} is not on the approved list")
+
+
 class Provider(ABC):
     name = "none"
 
@@ -156,9 +170,7 @@ class AzureOpenAIProvider(Provider):
             "small": os.environ.get("SOC_LLM_DEPLOYMENT_SMALL") or settings.llm_deployment or "",
         }
         self.key = secret("SOC_LLM_API_KEY")
-        approved = settings.llm_approved_endpoints
-        if approved and self.endpoint not in approved:
-            raise ValueError(f"LLM endpoint {self.endpoint} is not on the approved list")
+        check_endpoint(settings, self.endpoint)
 
     def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
         deployment = self.deployments.get(tier) or self.deployments["large"]

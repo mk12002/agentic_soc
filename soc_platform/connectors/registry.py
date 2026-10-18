@@ -234,6 +234,14 @@ def recordings_dir() -> str:
     return os.environ.get("SOC_RECORD_FIXTURES_DIR") or str(Path(get_settings().raw_payload_dir).parent / "recordings")
 
 
+def dev_sign_in_active() -> bool:
+    """Development sign-in is in force outside the automated test suite (SOC_ENVIRONMENT=test, set by its conftest)."""
+    from soc_platform.config import get_settings
+
+    st = get_settings()
+    return st.auth_mode == "dev" and st.environment != "test"
+
+
 class ConnectorRegistry:
     def __init__(self, config: dict[str, Any] | None = None, *, default_mode: str = "fake",
                  manifests: dict[str, ConnectorManifest] | None = None, version: int | None = None) -> None:
@@ -314,6 +322,11 @@ class ConnectorRegistry:
             out.append(f"{name}: mode '{e['mode']}' contradicts stage '{e['stage']}'")
         if e.get("settings") is not None and not isinstance(e["settings"], dict):
             out.append(f"{name}: settings must be a mapping")
+        if not out and self.mode_of(name) == "live" and dev_sign_in_active():
+            # dev sign-in lets whoever reaches the port mint any role: never in front of a real tool, however the
+            # tool was switched live (file, console version, SOC_CONNECTOR_MODE)
+            out.append(f"{name}: real tools need Entra sign-in - development sign-in (SOC_AUTH_MODE=dev) works with "
+                       "fixtures only; set SOC_AUTH_MODE=entra or put this tool in the fake stage")
         return out or self.validate(name)
 
     def stage_of(self, name: str) -> str:

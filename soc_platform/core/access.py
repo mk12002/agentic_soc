@@ -4,12 +4,16 @@ break-glass access and durable system flags.
 Everything here is audited. Rules that hold regardless of configuration:
 
 * nobody can grant, change or revoke *their own* access, or grant data scope they do not manage themselves
+* a privileged role (lead, admin, automation_admin) takes effect only when a *second* administrator approves it, and
+  is always time-bound (``MAX_PRIVILEGED_DAYS``): one administrator cannot give a second account of their own the
+  approver roles
 * a platform grant adds a role *with its own scope*: it never widens what the principal's other roles may do
 * API-key (service) principals never receive approval / policy / access-management permissions
   (``auth.HUMAN_ONLY_PERMS``) and their keys always expire (max 365 days)
 * only a SHA-256 of an API key secret is stored; the secret is shown exactly once
-* break-glass access needs a sealed secret whose hash is configured, and every use is audited
-  and raised as a critical insight
+* break-glass access needs a sealed secret whose hash is configured; it is exchanged once for a 15-minute session
+  token (the secret is not sent with every request), every use is audited and raised as a critical insight, and
+  failed attempts are throttled per client (so an unauthenticated caller cannot flood the audit chain)
 """
 
 from __future__ import annotations
@@ -32,7 +36,42 @@ from soc_platform.core.models import ApiKey, RoleAssignment, SystemFlag, TokenRe
 
 KEY_PREFIX = "sk_soc_"
 MAX_KEY_DAYS = 365
+BREAK_GLASS_PREFIX = "bg."
+BREAK_GLASS_TTL = 900                 # seconds a break-glass session lasts; exchange the sealed secret again after
+BREAK_GLASS_ATTEMPTS = 5              # failed attempts per client per 15 minutes (per process) before refusing unseen
+
+
+class _AttemptLimiter:
+    """Failed break-glass attempts per client. Beyond the budget an attempt is refused without checking or auditing
+    it: each audited failure takes the audit chain's lock, so unthrottled guessing was a write-amplification attack."""
+
+    def __init__(self, attempts: int, window: float) -> None:
+        import threading
+
+        self.attempts, self.window, self._lock, self._seen = attempts, window, threading.Lock(), {}
+
+    def blocked(self, client: str) -> bool:
+        import time
+
+        with self._lock:
+            now = time.monotonic()
+            recent = [t for t in self._seen.get(client, []) if now - t < self.window]
+            self._seen[client] = recent
+            if len(self._seen) > 10_000:
+                self._seen = {k: v for k, v in self._seen.items() if v}
+            return len(recent) >= self.attempts
+
+    def failed(self, client: str) -> None:
+        import time
+
+        with self._lock:
+            self._seen.setdefault(client, []).append(time.monotonic())
+
+
+_BG_ATTEMPTS = _AttemptLimiter(BREAK_GLASS_ATTEMPTS, 900.0)
 SERVICE_ROLES = {Role.ANALYST, Role.AUDITOR, Role.AUTOMATION_ADMIN}
+PRIVILEGED_ROLES = {Role.LEAD, Role.ADMIN, Role.AUTOMATION_ADMIN}
+MAX_PRIVILEGED_DAYS = 90
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -64,6 +103,7 @@ class AccessService:
         now = utcnow()
         grants = self.s.execute(select(RoleAssignment).where(
             RoleAssignment.principal_id == p.id, RoleAssignment.revoked_at.is_(None),
+            or_(RoleAssignment.status.is_(None), RoleAssignment.status == "active"),
             or_(RoleAssignment.expires_at.is_(None), RoleAssignment.expires_at > now))).scalars().all()
         if not grants:
             return p
@@ -114,14 +154,35 @@ class AccessService:
         if not reason.strip():
             raise ValueError("a justification is required")
         self._require_scope(by, _domains(domains))
+        privileged = r in PRIVILEGED_ROLES
+        if privileged and not (days and 1 <= days <= MAX_PRIVILEGED_DAYS):
+            raise ValueError(f"a {r.value} grant must be time-bound: 1..{MAX_PRIVILEGED_DAYS} days")
         ga = RoleAssignment(principal_id=principal_id.strip(), role=r.value, domains=_domains(domains),
-                            granted_by=by.id, reason=reason.strip(),
+                            granted_by=by.id, reason=reason.strip(), status="proposed" if privileged else "active",
                             expires_at=utcnow() + timedelta(days=days) if days else None)
         self.s.add(ga)
         self.s.flush()
+        self.audit.append(actor_type="human", actor_id=by.id,
+                          event_type="access.grant_proposed" if privileged else "access.grant",
+                          subject_type="principal", subject_id=principal_id,
+                          payload={"role": r.value, "domains": ga.domains, "days": days, "reason": reason,
+                                   "assignment": ga.id})
+        return ga
+
+    def approve_grant(self, by: Principal, assignment_id: str, note: str = "") -> RoleAssignment:
+        """The second administrator's approval of a privileged grant (four-eyes)."""
+        self._require(by)
+        ga = self.s.get(RoleAssignment, assignment_id)
+        if ga is None or ga.revoked_at is not None or ga.status != "proposed":
+            raise KeyError("no proposed grant with that id")
+        if by.id.strip().lower() in {ga.granted_by.strip().lower(), ga.principal_id.strip().lower()}:
+            raise PermissionError("a privileged grant needs a second administrator (not its proposer or recipient)")
+        self._require_scope(by, list(ga.domains or ["*"]))
+        ga.status, ga.approved_by, ga.approved_at = "active", by.id, utcnow()
+        self.s.flush()
         self.audit.append(actor_type="human", actor_id=by.id, event_type="access.grant", subject_type="principal",
-                          subject_id=principal_id, payload={"role": r.value, "domains": ga.domains, "days": days,
-                                                            "reason": reason, "assignment": ga.id})
+                          subject_id=ga.principal_id, payload={"role": ga.role, "domains": ga.domains, "note": note,
+                                                               "assignment": ga.id, "proposed_by": ga.granted_by})
         return ga
 
     def revoke_grant(self, by: Principal, assignment_id: str, reason: str = "") -> RoleAssignment:
@@ -141,11 +202,15 @@ class AccessService:
         now = utcnow()
         out = []
         for g in self.s.execute(q).scalars():
-            active = g.revoked_at is None and (g.expires_at is None or _aware(g.expires_at) > now)
-            if active or include_inactive:
+            active = (g.revoked_at is None and g.status in (None, "active")
+                      and (g.expires_at is None or _aware(g.expires_at) > now))
+            pending = g.revoked_at is None and g.status == "proposed"
+            if active or pending or include_inactive:
                 out.append({"id": g.id, "principal_id": g.principal_id, "role": g.role, "domains": g.domains,
                             "granted_by": g.granted_by, "reason": g.reason, "granted_at": g.granted_at.isoformat(),
-                            "expires_at": g.expires_at.isoformat() if g.expires_at else None, "active": active})
+                            "expires_at": g.expires_at.isoformat() if g.expires_at else None, "active": active,
+                            "status": "proposed" if pending else ("active" if active else "inactive"),
+                            "approved_by": g.approved_by})
         return out
 
     # ------------------------------------------------------------------ API keys (service accounts)
@@ -202,7 +267,9 @@ class AccessService:
             raise PermissionError("invalid api key")
         if key.revoked_at is not None or _aware(key.expires_at) <= utcnow():
             raise PermissionError("api key revoked or expired")
-        key.last_used_at = utcnow()
+        now = utcnow()
+        if key.last_used_at is None or (now - _aware(key.last_used_at)).total_seconds() > 300:
+            key.last_used_at = now          # at most every 5 minutes: a scraper's every read is not a write
         return Principal(id=f"svc:{key.id}", name=f"service:{key.name}",
                          roles=frozenset(Role(r) for r in key.roles if Role(r) in SERVICE_ROLES),
                          domains=frozenset(key.domains or ["*"]), is_service=True, mfa=False, auth_method="api_key")
@@ -231,7 +298,10 @@ class AccessService:
         expected = self.settings.break_glass_sha256
         if not expected:
             raise PermissionError("break-glass access is not enabled")
+        if _BG_ATTEMPTS.blocked(client):
+            raise PermissionError("too many failed break-glass attempts from this address; wait 15 minutes")
         if not hmac.compare_digest(hashlib.sha256(secret.encode()).hexdigest(), expected):
+            _BG_ATTEMPTS.failed(client)
             self.audit.append(actor_type="system", actor_id="auth", event_type="auth.break_glass_failed",
                               subject_type="principal", subject_id="break-glass", payload={"client": client, "path": path})
             raise PermissionError("invalid break-glass credential")
@@ -255,6 +325,42 @@ class AccessService:
             logging.getLogger(__name__).exception("break-glass use could not be raised as a finding; access still granted")
         return Principal(id="break-glass", name="Break-glass administrator",
                          roles=frozenset({Role.LEAD, Role.ADMIN}), mfa=True, break_glass=True, auth_method="break_glass")
+
+    def _session_key(self) -> bytes:
+        # every replica derives the same key from the sealed hash (itself a vault secret); rotating the break-glass
+        # secret ends every break-glass session at once
+        return hmac.new((self.settings.break_glass_sha256 or "").encode(), b"soc-break-glass-session",
+                        hashlib.sha256).digest()
+
+    def issue_break_glass_session(self) -> tuple[str, datetime]:
+        """A 15-minute session token for a verified break-glass use."""
+        import jwt
+
+        now = utcnow()
+        exp = now + timedelta(seconds=BREAK_GLASS_TTL)
+        token = jwt.encode({"sub": "break-glass", "typ": "break_glass", "iat": int(now.timestamp()),
+                            "exp": int(exp.timestamp()), "jti": secrets.token_hex(16)}, self._session_key(),
+                           algorithm="HS256")
+        return BREAK_GLASS_PREFIX + token, exp
+
+    def break_glass_session(self, token: str) -> Principal:
+        import jwt
+
+        if not self.settings.break_glass_sha256:
+            raise PermissionError("break-glass access is not enabled")
+        try:
+            claims = jwt.decode(token.removeprefix(BREAK_GLASS_PREFIX), self._session_key(), algorithms=["HS256"],
+                                options={"require": ["exp", "iat", "jti"]})
+        except jwt.PyJWTError as exc:
+            raise PermissionError(f"invalid break-glass session: {exc}") from exc
+        if claims.get("typ") != "break_glass":
+            raise PermissionError("invalid break-glass session")
+        p = Principal(id="break-glass", name="Break-glass administrator", roles=frozenset({Role.LEAD, Role.ADMIN}),
+                      mfa=True, break_glass=True, auth_method="break_glass", token_id=str(claims["jti"]),
+                      issued_at=int(claims["iat"]))
+        if self.is_revoked(p):
+            raise PermissionError("token revoked")
+        return p
 
     # ------------------------------------------------------------------ system flags
 

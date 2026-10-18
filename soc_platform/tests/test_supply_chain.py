@@ -45,10 +45,13 @@ def test_the_sbom_is_a_deterministic_cyclonedx_document_naming_every_component(t
 
 def test_the_container_build_is_constrained_by_the_lock():
     docker = (ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
-    assert "-r requirements/platform.txt -c requirements/platform.lock" in docker
-    # runtime image hardening (each was a Trivy finding): the base image's stale setuptools is upgraded to the locked
-    # version, and pip - whose vendored libraries carried known CVEs - is not shipped
-    assert "--upgrade setuptools -c /tmp/platform.lock" in docker
+    # hash-locked Linux locks, constrained by platform.lock (supply_chain.py check verifies they agree)
+    assert "--require-hashes" in docker and "requirements/image.lock" in docker and "requirements/image-engine.lock" in docker
+    sc = _load("supply_chain")
+    assert sc.image_lock_problems() == []
+    # runtime image hardening (each was a Trivy finding): the base image's stale setuptools is replaced by the locked
+    # one, and pip - whose vendored libraries carried known CVEs - is not shipped
+    assert "python -m pip uninstall -y setuptools wheel" in docker
     assert "python -m pip uninstall -y pip" in docker
 
 

@@ -1,7 +1,9 @@
-# The database URL comes from the operator-generated Secret, pointed at the pooler (which follows failovers). A
-# strategic-merge patch: env entries merge by name, so each container keeps its own (an explicit env entry also takes
-# precedence over the same name from envFrom). If the password contains URL-reserved characters (@ / : ?), put the
-# whole, percent-encoded SOC_DATABASE_URL in soc-platform-secrets instead and drop this patch.
+# Database credentials from the operator-generated Secrets, through the pooler (which follows failovers), over TLS
+# verified against the cluster's CA (CloudNativePG's soc-pg-ca, mounted at /etc/soc-pg-ca):
+#   init-db (schema owner "soc", Secret soc-pg-app)           creates / extends the schema, grants soc_runtime
+#   api / scheduler (role "soc_runtime", Secret soc-pg-runtime) read / write, append-only audit log, no DDL
+# A strategic-merge patch: env entries merge by name and an explicit env entry wins over envFrom. If a password
+# contains URL-reserved characters (@ / : ?), put the whole percent-encoded URL in a Secret instead.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,14 +17,21 @@ spec:
             - name: DB_PASSWORD
               valueFrom: {secretKeyRef: {name: soc-pg-app, key: password}}
             - name: SOC_DATABASE_URL
-              value: postgresql+psycopg2://soc:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform
+              value: postgresql+psycopg2://soc:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform?sslmode=verify-full&sslrootcert=/etc/soc-pg-ca/ca.crt
+          volumeMounts:
+            - {name: pg-ca, mountPath: /etc/soc-pg-ca, readOnly: true}
       containers:
         - name: api
           env:
             - name: DB_PASSWORD
-              valueFrom: {secretKeyRef: {name: soc-pg-app, key: password}}
+              valueFrom: {secretKeyRef: {name: soc-pg-runtime, key: password}}
             - name: SOC_DATABASE_URL
-              value: postgresql+psycopg2://soc:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform
+              value: postgresql+psycopg2://soc_runtime:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform?sslmode=verify-full&sslrootcert=/etc/soc-pg-ca/ca.crt
+          volumeMounts:
+            - {name: pg-ca, mountPath: /etc/soc-pg-ca, readOnly: true}
+      volumes:
+        - name: pg-ca
+          secret: {secretName: soc-pg-ca, items: [{key: ca.crt, path: ca.crt}]}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -35,6 +44,11 @@ spec:
         - name: scheduler
           env:
             - name: DB_PASSWORD
-              valueFrom: {secretKeyRef: {name: soc-pg-app, key: password}}
+              valueFrom: {secretKeyRef: {name: soc-pg-runtime, key: password}}
             - name: SOC_DATABASE_URL
-              value: postgresql+psycopg2://soc:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform
+              value: postgresql+psycopg2://soc_runtime:$(DB_PASSWORD)@soc-pg-pooler:5432/soc_platform?sslmode=verify-full&sslrootcert=/etc/soc-pg-ca/ca.crt
+          volumeMounts:
+            - {name: pg-ca, mountPath: /etc/soc-pg-ca, readOnly: true}
+      volumes:
+        - name: pg-ca
+          secret: {secretName: soc-pg-ca, items: [{key: ca.crt, path: ca.crt}]}

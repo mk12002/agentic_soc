@@ -213,10 +213,16 @@ def principal_from_token(token: str, settings: Settings) -> Principal:
                 algorithms=["RS256"],
                 options={"require": ["exp", "iat"]},
                 audience=settings.entra_audience,
-                issuer=f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0",
+                # v2 and v1 access tokens of this tenant only (an app registration issues v1 unless
+                # accessTokenAcceptedVersion is 2); a minute of leeway for clock skew between hosts
+                issuer=[f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0",
+                        f"https://sts.windows.net/{settings.entra_tenant_id}/"],
+                leeway=60,
             )
         except jwt.PyJWTError as exc:
             raise AuthError(f"invalid token: {exc}") from exc
+        if str(claims.get("tid") or settings.entra_tenant_id) != settings.entra_tenant_id:
+            raise AuthError("invalid token: another tenant")
     elif settings.auth_mode == "dev":
         if settings.environment == "prod":
             raise AuthError("dev auth mode is not permitted in prod")
@@ -235,7 +241,12 @@ def principal_from_token(token: str, settings: Settings) -> Principal:
         raise AuthError("token has no subject")
     name = claims.get("preferred_username") or claims.get("upn") or claims.get("name") or subject
     roles, domains, role_domains = _roles_from_claims(claims)
-    return Principal(id=str(subject), name=str(name), roles=roles, domains=domains, mfa=_has_mfa(claims, settings),
+    # an application's own token (client credentials: no delegated scope) is a service, never a person - it gets
+    # none of the human-only permissions (approve, policy, access) whatever app roles it was given
+    app_only = settings.auth_mode == "entra" and (claims.get("idtyp") == "app" or "scp" not in claims)
+    return Principal(id=str(subject), name=str(name), roles=roles, domains=domains,
+                     mfa=False if app_only else _has_mfa(claims, settings), is_service=app_only,
+                     auth_method="app_token" if app_only else "token",
                      role_domains=role_domains if len({ds for _, ds in role_domains}) > 1 else (),
                      token_id=str(claims.get("jti") or claims.get("uti") or "") or None,
                      issued_at=int(claims["iat"]) if str(claims.get("iat", "")).isdigit() else None)

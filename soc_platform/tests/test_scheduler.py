@@ -174,10 +174,13 @@ def test_the_server_runs_the_scheduler_itself(tmp_path, monkeypatch, calls):
             deadline = time.time() + WAIT
             while len(calls) < len(jobs.JOBS) and time.time() < deadline:
                 time.sleep(0.1)
+            from soc_platform.core.auth import issue_dev_token
+
+            aud = {"Authorization": "Bearer " + issue_dev_token("s" * 40, "aud", ["auditor"])}
             deadline = time.time() + WAIT
-            while c.get("/health").json()["scheduler"]["state"] != "running" and time.time() < deadline:
+            while c.get("/health", headers=aud).json()["scheduler"]["state"] != "running" and time.time() < deadline:
                 time.sleep(0.1)
-            h = c.get("/health").json()["scheduler"]
+            h = c.get("/health", headers=aud).json()["scheduler"]
             assert h["state"] == "running" and h["mode"] == "embedded"
             assert sorted(calls) == sorted(jobs.JOBS)
         live = [t for t in threading.enumerate() if t.name.startswith("soc-scheduler") and t.is_alive()]

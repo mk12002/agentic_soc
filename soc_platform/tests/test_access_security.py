@@ -84,6 +84,38 @@ def test_role_grants_are_audited_scoped_expiring_and_never_self_granted():
         assert {"access.grant", "access.revoke"} <= events
 
 
+def test_a_privileged_grant_needs_a_second_administrator_and_an_end_date():
+    """One administrator could make a second account of their own a lead (approve high-impact actions and policy)."""
+    admin2 = Principal("ivy", "ivy", frozenset({Role.ADMIN}))
+    db = _db()
+    with db.session() as s:
+        acc = AccessService(s, _st())
+        with pytest.raises(ValueError):
+            acc.grant(ADMIN, "alt-account", "lead", reason="cover")                 # no end date
+        with pytest.raises(ValueError):
+            acc.grant(ADMIN, "alt-account", "admin", days=365, reason="cover")       # longer than 90 days
+        g = acc.grant(ADMIN, "alt-account", "lead", days=7, reason="cover")
+        assert g.status == "proposed" and not acc.effective(Principal("alt-account", "alt")).roles
+        with pytest.raises(PermissionError):
+            acc.approve_grant(ADMIN, g.id)                                           # not the proposer
+        with pytest.raises(PermissionError):
+            acc.approve_grant(Principal("alt-account", "alt", frozenset({Role.ADMIN})), g.id)   # nor the recipient
+        acc.approve_grant(admin2, g.id, "confirmed with the SOC manager")
+        assert Role.LEAD in acc.effective(Principal("alt-account", "alt")).roles
+        assert [x["status"] for x in acc.list_grants()] == ["active"]
+        events = {r.event_type for r in __import__("soc_platform.core.audit", fromlist=["AuditLog"]).AuditLog(s).query()}
+        assert {"access.grant_proposed", "access.grant"} <= events
+        plain = acc.grant(ADMIN, "carl", "analyst", reason="cover")                 # not privileged: at once
+        assert plain.status == "active"
+
+
+def test_only_a_lead_turns_the_kill_switch_back_off(client):
+    admin = _h(client, "ops2", "admin")
+    assert client.post("/api/v1/kill-switch?on=true", headers=admin).json()["kill_switch"] is True
+    assert client.post("/api/v1/kill-switch?on=false", headers=admin).status_code == 403
+    assert client.post("/api/v1/kill-switch?on=false", headers=_h(client, "l3", "lead")).json()["kill_switch"] is False
+
+
 def test_service_account_keys_are_hashed_expiring_and_cannot_approve():
     db = _db()
     with db.session() as s:
@@ -137,6 +169,41 @@ def test_break_glass_requires_sealed_secret_and_is_audited_and_alerted():
         ev = [r.event_type for r in AuditLog(s).query()]
         assert "auth.break_glass_failed" in ev and "auth.break_glass_used" in ev
         assert s.query(Insight).filter(Insight.rule == "break_glass_used").count() == 1
+
+
+def test_break_glass_is_exchanged_for_a_short_session_and_guessing_is_throttled():
+    """The sealed secret used to travel with every request, never expired, and each wrong guess wrote an audit record
+    under the chain's lock (an unauthenticated write flood)."""
+    import jwt as pyjwt
+
+    from soc_platform.core import access as accmod
+    from soc_platform.core.audit import AuditLog
+
+    db = _db()
+    st = _st(break_glass_sha256=hashlib.sha256(b"sealed-envelope-secret").hexdigest())
+    with db.session() as s:
+        acc = AccessService(s, st)
+        acc.break_glass("sealed-envelope-secret", client="10.9.9.9", path="/api/v1/auth/break-glass")
+        token, exp = acc.issue_break_glass_session()
+        p = acc.break_glass_session(token)
+        assert p.break_glass and p.token_id and (exp - __import__("soc_platform.core.models", fromlist=["x"]).utcnow()).total_seconds() <= 900
+        expired = accmod.BREAK_GLASS_PREFIX + pyjwt.encode({"sub": "break-glass", "typ": "break_glass", "iat": 1, "exp": 2,
+                                                            "jti": "j"}, acc._session_key(), algorithm="HS256")
+        with pytest.raises(PermissionError):
+            acc.break_glass_session(expired)
+        with pytest.raises(PermissionError):                       # a session signed before the secret was rotated
+            AccessService(s, _st(break_glass_sha256=hashlib.sha256(b"rotated").hexdigest())).break_glass_session(token)
+        acc.revoke_token(p, p.token_id)
+        with pytest.raises(PermissionError):
+            acc.break_glass_session(token)                         # logout / revocation ends it
+        before = len(AuditLog(s).query(event_type="auth.break_glass_failed", limit=1000))
+        for _ in range(20):
+            with pytest.raises(PermissionError):
+                acc.break_glass("guess", client="10.7.7.7", path="/api/v1/auth/break-glass")
+        after = len(AuditLog(s).query(event_type="auth.break_glass_failed", limit=1000))
+        assert after - before == accmod.BREAK_GLASS_ATTEMPTS        # the rest refused unseen
+        with pytest.raises(PermissionError):                        # even the right secret, while throttled
+            acc.break_glass("sealed-envelope-secret", client="10.7.7.7", path="/x")
 
 
 def test_kill_switch_is_durable_and_permissioned():
@@ -281,7 +348,7 @@ def test_http_domain_scoping_mfa_keys_logout_access_log(client):
     assert client.post("/api/v1/auth/logout", headers=user).status_code == 200
     assert client.get("/api/v1/me", headers=user).status_code == 401
     assert client.post("/api/v1/kill-switch?on=true", headers=_h(client, "l", "lead")).json()["kill_switch"] is True
-    assert client.get("/health").json()["kill_switch"] is True
+    assert client.get("/health", headers=_h(client, "l", "lead")).json()["kill_switch"] is True
     client.post("/api/v1/kill-switch?on=false", headers=_h(client, "l", "lead"))
     log = client.get("/api/v1/admin/access-log?status_min=400", headers=_h(client, "aud", "auditor")).json()
     assert any(x["path"] == "/api/v1/vm/refresh" and x["status"] == 403 and x["auth"] == "api_key" for x in log)
@@ -309,7 +376,7 @@ def test_http_hardening_scope_body_limit_health_and_streams(client):
         yield b'{"question": "what is happening?"}'
     assert client.post("/api/v1/intelligence/ask", headers={**full, "Content-Type": "application/json"},
                        content=small()).status_code == 200
-    assert client.get("/health").json()["audit_chain"] is True
+    assert client.get("/health", headers=full).json()["audit_chain"] is True
     aa = _h(client, "ops", "automation_admin")
     assert client.post("/api/v1/connectors/wiz/sync?stream=../../etc", headers=aa).status_code == 400
     assert client.post("/api/v1/connectors/nope/sync?stream=x", headers=aa).status_code == 404
@@ -347,4 +414,41 @@ def test_health_verifies_the_audit_chain_even_right_after_boot(client, monkeypat
 
     monkeypatch.setitem(appmod._CHAIN_CACHE, "at", None)
     monkeypatch.setitem(appmod._CHAIN_CACHE, "ok", None)
-    assert client.get("/health").json()["audit_chain"] is True
+    monkeypatch.setitem(appmod._CHAIN_CACHE, "since", None)
+    assert client.get("/health", headers=_h(client, "aud2", "auditor")).json()["audit_chain"] is True
+
+
+def test_health_tells_anonymous_callers_only_that_it_is_up(client):
+    """Version, kill switch and scheduler state are not for anyone who can reach the port."""
+    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health", headers={"Authorization": "Bearer not-a-token"}).json() == {"status": "ok"}
+    assert client.get("/health/live").json() == {"status": "alive"}
+    full = client.get("/health", headers=_h(client, "aud3", "auditor")).json()
+    assert {"version", "kill_switch", "scheduler", "audit_chain"} <= set(full)
+
+
+def test_health_verifies_only_new_records_after_a_full_pass_and_keeps_a_failure(client, monkeypatch):
+    """The hourly self-check stores where its full pass reached; /health re-hashes only what is newer, and reports a
+    failed full pass until a later one succeeds."""
+    from soc_platform.api import app as appmod
+    from soc_platform.core import db as dbm
+    from soc_platform.core.audit import AuditLog
+
+    with dbm.get_database().session() as s:
+        log = AuditLog(s)
+        log.save_checkpoint(log.verify())
+        cp = log.checkpoint()
+        assert cp["ok"] and cp["seq"] > 0
+        log.append(actor_type="system", actor_id="t", event_type="t", subject_type="t", subject_id="1")
+    calls = []
+    real = AuditLog.verify
+    monkeypatch.setattr(AuditLog, "verify", lambda self, since=None: calls.append(since) or real(self, since=since))
+    for k, v in (("at", None), ("ok", None), ("since", None)):
+        monkeypatch.setitem(appmod._CHAIN_CACHE, k, v)
+    aud = _h(client, "aud4", "auditor")
+    assert client.get("/health", headers=aud).json()["audit_chain"] is True
+    assert calls and calls[0] is not None and calls[0][0] == cp["seq"]          # started at the checkpoint
+    with dbm.get_database().session() as s:
+        AuditLog(s).save_checkpoint({"ok": False, "first_bad_seq": 3})
+    monkeypatch.setitem(appmod._CHAIN_CACHE, "at", None)
+    assert client.get("/health", headers=aud).json()["audit_chain"] is False

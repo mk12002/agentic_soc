@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -196,6 +197,12 @@ def _log_call(method: str, url: str, status: int | None, started: float, error: 
           path=u.path[:200], status=status, latency_ms=round((time.perf_counter() - started) * 1000, 1), error=error)
 
 
+def _origin(url: str) -> tuple[str, str, int | None]:
+    u = urlsplit(url)
+    port = u.port or {"https": 443, "http": 80}.get(u.scheme.lower())
+    return u.scheme.lower(), (u.hostname or "").lower(), port
+
+
 class HttpTransport:
     def __init__(self, base_url: str, auth: Auth | None = None, *, timeout: float = 30.0, verify: bool = True,
                  default_headers: dict[str, str] | None = None) -> None:
@@ -205,7 +212,15 @@ class HttpTransport:
         self.default_headers = {"Accept": "application/json", **(default_headers or {})}
 
     def request(self, method, path, *, params=None, json=None, data=None, headers=None) -> Response:
-        url = path if path.startswith("http") else f"{self.base_url}/{path.lstrip('/')}"
+        if path.lower().startswith(("http://", "https://")):
+            # an absolute URL comes from a vendor's response (a next link): the credentials go only to the tool's
+            # own origin, never to whatever host a tampered or proxied response names
+            if _origin(path) != _origin(self.base_url):
+                raise ConnectorError(f"refused to follow {method} to {urlsplit(path).hostname or '?'}: not the "
+                                     f"connector's own host ({urlsplit(self.base_url).hostname})")
+            url = path
+        else:
+            url = f"{self.base_url}/{path.lstrip('/')}"
         hdrs = {**self.default_headers, **(headers or {})}
         prm = dict(params or {})
         self.auth.apply(hdrs, prm)

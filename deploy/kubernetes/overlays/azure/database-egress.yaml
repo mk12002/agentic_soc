@@ -1,0 +1,12 @@
+# The database only at its private subnet (Flexible Server with VNet integration or a private endpoint).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: soc-database-egress
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/part-of: agentic-soc}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: {cidr: 10.0.2.0/24}                     # CHANGE-ME: the PostgreSQL Flexible Server subnet
+      ports: [{port: 5432, protocol: TCP}, {port: 6432, protocol: TCP}]   # server / its built-in PgBouncer

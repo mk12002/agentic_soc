@@ -1,31 +1,45 @@
-# SOC platform deployment.
-#   docker compose -f deploy/docker-compose.yml --env-file .env up -d                  # platform only
-#   docker compose -f deploy/docker-compose.yml --env-file .env --profile engine up -d # + phishing ML microservices
-# The sandbox executor never mounts the Docker socket here (PH-T04); local detonation for
-# development is enabled only by deploy/docker-compose.dev.yml.
+# SOC platform on one host (Kubernetes is the highly available deployment: deploy/kubernetes, HIGH_AVAILABILITY.md).
+#   docker compose -f deploy/docker-compose.yml --env-file .env up -d                     # production, platform only
+#   ... --profile engine up -d                                                             # + phishing ML microservices
+#   ... --profile tls up -d                                                                # + TLS reverse proxy (Caddy)
+#   ... --profile backup up -d                                                             # + nightly database dumps
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --env-file .env up -d   # demo
+#
+# Production by default and fail closed: Entra sign-in, step-up MFA, encryption at rest and a verified TLS connection
+# to PostgreSQL are required (`serve` refuses to start without them). The demo override switches to dev sign-in and
+# fixtures. The sandbox executor never mounts the Docker socket here (PH-T04); local detonation for development is
+# enabled only by deploy/docker-compose.dev.yml. Every image is pinned by digest.
+#
+# Database roles (deploy/postgres/init-roles.sh): POSTGRES_USER owns the schema and is used only by the one-shot
+# platform-migrate service; the API and scheduler sign in as soc_app (no schema changes, append-only audit log); the
+# engine has its own database and role.
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "20m", max-file: "5"}            # bounded: container logs never fill the disk
 
 x-platform-env: &platform-env
-  SOC_ENVIRONMENT: ${SOC_ENVIRONMENT:-dev}
-  SOC_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-soc}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-soc_platform}
-  SOC_AUTH_MODE: ${SOC_AUTH_MODE:-dev}
+  SOC_ENVIRONMENT: ${SOC_ENVIRONMENT:-prod}
+  SOC_DATABASE_URL: postgresql+psycopg2://soc_app:${SOC_APP_DB_PASSWORD:?set SOC_APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-soc_platform}?sslmode=verify-full&sslrootcert=/certs/ca.crt
+  SOC_SCHEMA_MANAGE: "0"                               # platform-migrate (schema owner) creates the schema
+  SOC_AUTH_MODE: ${SOC_AUTH_MODE:-entra}
   # processes calling the tools at once (API workers + the scheduler service): each gets 1/N of a tool's rate budget
   SOC_CONNECTOR_RATE_SHARE: "${SOC_CONNECTOR_RATE_SHARE:-5}"
-  SOC_DEV_JWT_SECRET: ${SOC_DEV_JWT_SECRET:-}
   SOC_ENTRA_TENANT_ID: ${SOC_ENTRA_TENANT_ID:-}
   SOC_ENTRA_AUDIENCE: ${SOC_ENTRA_AUDIENCE:-}
   SOC_ENTRA_SPA_CLIENT_ID: ${SOC_ENTRA_SPA_CLIENT_ID:-}
   SOC_ENTRA_SCOPE: ${SOC_ENTRA_SCOPE:-}
   SOC_CONNECTOR_MODE: ${SOC_CONNECTOR_MODE:-fake}
-  SOC_BLOB_STORE: ${SOC_BLOB_STORE:-database}         # stored e-mails and reports in PostgreSQL (HIGH_AVAILABILITY.md)
+  SOC_BLOB_STORE: database                             # stored e-mails and reports in PostgreSQL (HIGH_AVAILABILITY.md)
   SOC_JOB_LEASE_SECONDS: ${SOC_JOB_LEASE_SECONDS:-120}
-  SOC_ORG_DOMAINS: ${SOC_ORG_DOMAINS:-acme-demo.com}
+  SOC_ORG_DOMAINS: ${SOC_ORG_DOMAINS:?set SOC_ORG_DOMAINS (the organisation's mail domains)}
   SOC_PHISHING_ENGINE: ${SOC_PHISHING_ENGINE:-auto}   # on when the image is built WITH_PHISHING_ENGINE=true
   SOC_LLM_PROVIDER: ${SOC_LLM_PROVIDER:-none}
   SOC_LLM_ENDPOINT: ${SOC_LLM_ENDPOINT:-}
   SOC_LLM_DEPLOYMENT: ${SOC_LLM_DEPLOYMENT:-}
   SOC_LLM_DEPLOYMENT_SMALL: ${SOC_LLM_DEPLOYMENT_SMALL:-}
   SOC_LLM_API_KEY: ${SOC_LLM_API_KEY:-}
-  SOC_LLM_APPROVED_ENDPOINTS: ${SOC_LLM_APPROVED_ENDPOINTS:-}
+  SOC_LLM_APPROVED_ENDPOINTS: ${SOC_LLM_APPROVED_ENDPOINTS:-}   # required (https) whenever a provider is set
   SOC_LLM_MODEL_VERSION: ${SOC_LLM_MODEL_VERSION:-}
   SOC_LLM_MONTHLY_TOKEN_BUDGET: ${SOC_LLM_MONTHLY_TOKEN_BUDGET:-50000000}
   SOC_LLM_AUTH_HEADER: ${SOC_LLM_AUTH_HEADER:-}         # organisation LLM gateway (docs/CLIENT_DEPLOYMENT_GUIDE.md)
@@ -40,10 +54,7 @@ x-platform-env: &platform-env
   SOC_REQUIRE_MFA: ${SOC_REQUIRE_MFA:-}                 # default: on in prod
   SOC_MFA_AUTH_CONTEXT: ${SOC_MFA_AUTH_CONTEXT:-}
   SOC_BREAKGLASS_SHA256: ${SOC_BREAKGLASS_SHA256:-}
-  SOC_TRUSTED_PROXIES: ${SOC_TRUSTED_PROXIES:-}
-  # dev sign-in reaches the container over the Docker bridge; the port below is bound to 127.0.0.1 only,
-  # and dev tokens are refused whenever SOC_ENVIRONMENT=prod regardless of this flag
-  SOC_DEV_TOKENS_REMOTE: ${SOC_DEV_TOKENS_REMOTE:-1}
+  SOC_TRUSTED_PROXIES: ${SOC_TRUSTED_PROXIES:-172.16.0.0/12}   # the Compose network (the tls profile's proxy)
   SOC_RAW_RETENTION_DAYS: ${SOC_RAW_RETENTION_DAYS:-180}
   SOC_ACCESS_LOG_RETENTION_DAYS: ${SOC_ACCESS_LOG_RETENTION_DAYS:-400}
   SOC_LLM_LOG_RETENTION_DAYS: ${SOC_LLM_LOG_RETENTION_DAYS:-180}
@@ -53,9 +64,12 @@ x-platform-env: &platform-env
   SOC_SUPPLIER_DOMAINS: ${SOC_SUPPLIER_DOMAINS:-}
 
 x-engine-env: &engine-env
-  APP_ENV: ${APP_ENV:-development}
-  DATABASE_URL: postgresql://${POSTGRES_USER:-soc}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-soc_platform}
-  REDIS_URL: redis://redis:6379/0
+  APP_ENV: ${APP_ENV:-production}
+  APP_SECRET_KEY: ${ENGINE_APP_SECRET_KEY:?set ENGINE_APP_SECRET_KEY}
+  API_AUTH_ENABLED: "true"
+  API_AUTH_KEY: ${ENGINE_API_KEY:?set ENGINE_API_KEY}
+  DATABASE_URL: postgresql://soc_engine:${SOC_ENGINE_DB_PASSWORD:-}@postgres:5432/soc_engine?sslmode=verify-full&sslrootcert=/certs/ca.crt
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
   RABBITMQ_HOST: rabbitmq
   RABBITMQ_PORT: 5672
   RABBITMQ_USER: ${RABBITMQ_USER:-soc}
@@ -69,61 +83,150 @@ x-engine-env: &engine-env
   SANDBOX_EXECUTOR_URL: ${SANDBOX_EXECUTOR_URL:-}
   SANDBOX_EXECUTOR_SHARED_TOKEN: ${SANDBOX_EXECUTOR_SHARED_TOKEN:-}
 
+x-platform: &platform
+  image: soc-platform:${SOC_IMAGE_TAG:-latest}
+  volumes: [platform_data:/app/data, dbcerts:/certs:ro]
+  logging: *logging
+  restart: unless-stopped
+  read_only: true                                      # writable: /app/data (volume) and /tmp only
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
 x-engine-agent: &engine-agent
   image: soc-platform:engine
   profiles: ["engine"]
   command: ["python", "-m", "soc_platform.domains.phishing.engine.agents.service_runner"]
-  volumes: [attachments:/mnt/attachments, platform_data:/app/data]
-  depends_on: {rabbitmq: {condition: service_healthy}}
+  volumes: [attachments:/mnt/attachments, engine_data:/app/data, dbcerts:/certs:ro]
+  depends_on: {rabbitmq: {condition: service_healthy}, redis: {condition: service_healthy}}
+  logging: *logging
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
   restart: unless-stopped
 
 services:
+  db-certs:                                            # one-shot: the database's private CA and server certificate
+    image: soc-platform:${SOC_IMAGE_TAG:-latest}
+    user: "0:0"                                        # writes the volume, then hands server.key (0600) to postgres
+    command: ["sh", "-c", "python scripts/gen_db_certs.py /certs --host postgres && chown 70:70 /certs/server.key"]
+    volumes: [dbcerts:/certs]
+    logging: *logging
+
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-soc}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-soc_platform}
-    volumes: [pgdata:/var/lib/postgresql/data]
-    # API workers x (pool size + overflow) + the scheduler must fit: 4 x 40 + 40 = 200 at the defaults (PostgreSQL's
-    # own default is 100). A managed server: set the same parameter there.
-    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-300}"]
+      SOC_APP_DB_PASSWORD: ${SOC_APP_DB_PASSWORD:?set SOC_APP_DB_PASSWORD}
+      SOC_ENGINE_DB_PASSWORD: ${SOC_ENGINE_DB_PASSWORD:-}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - dbcerts:/certs:ro
+      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    # API workers x (pool size + overflow) + the scheduler must fit: 4 x 40 + 40 = 200 at the defaults. Network
+    # connections must use TLS (init-roles.sh turns pg_hba's "host" lines into "hostssl").
+    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-300}", "-c", "ssl=on",
+              "-c", "ssl_cert_file=/certs/server.crt", "-c", "ssl_key_file=/certs/server.key",
+              "-c", "ssl_min_protocol_version=TLSv1.2", "-c", "password_encryption=scram-sha-256",
+              "-c", "log_connections=on"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"], interval: 10s, retries: 5}
+    depends_on: {db-certs: {condition: service_completed_successfully}}
+    deploy: {resources: {limits: {memory: 4g}}}
+    logging: *logging
     restart: unless-stopped
 
+  platform-migrate:                                    # one-shot: creates / extends the schema as its owner
+    <<: *platform
+    restart: "no"
+    command: ["python", "-m", "soc_platform", "init-db"]
+    environment:
+      <<: *platform-env
+      SOC_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-soc}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-soc_platform}?sslmode=verify-full&sslrootcert=/certs/ca.crt
+      SOC_DB_RUNTIME_ROLE: soc_app                     # granted read/write, append-only audit log, no DDL
+    depends_on: {postgres: {condition: service_healthy}}
+
   platform-api:
+    <<: *platform
     build: {context: .., dockerfile: deploy/Dockerfile, args: {WITH_PHISHING_ENGINE: "${WITH_PHISHING_ENGINE:-false}"}}
-    image: soc-platform:${SOC_IMAGE_TAG:-latest}
     environment:
       <<: *platform-env
       SOC_EMBEDDED_SCHEDULER: "0"        # platform-scheduler below runs the jobs; one scheduler service per deployment
       SOC_API_WORKERS: "${SOC_API_WORKERS:-4}"           # server processes: one per CPU core given to the container
       SOC_DB_POOL_SIZE: "${SOC_DB_POOL_SIZE:-20}"        # per process; keep workers x (size + overflow) < max_connections
       SOC_DB_MAX_OVERFLOW: "${SOC_DB_MAX_OVERFLOW:-20}"
-    ports: ["${SOC_API_BIND:-127.0.0.1}:${SOC_API_PORT:-8080}:8080"]   # expose via a TLS reverse proxy, not directly
-    volumes: [platform_data:/app/data]
-    depends_on: {postgres: {condition: service_healthy}}
-    restart: unless-stopped
+    ports: ["${SOC_API_BIND:-127.0.0.1}:${SOC_API_PORT:-8080}:8080"]   # loopback only: reach it through the tls proxy
+    depends_on: {platform-migrate: {condition: service_completed_successfully}}
+    deploy: {resources: {limits: {memory: 4g}}}
     stop_grace_period: 30s               # longer than SOC_SHUTDOWN_GRACE_SECONDS (20): requests in flight finish
 
   platform-scheduler:
-    image: soc-platform:${SOC_IMAGE_TAG:-latest}
+    <<: *platform
     command: ["python", "-m", "soc_platform", "scheduler"]
-    environment: *platform-env
-    volumes: [platform_data:/app/data]
-    depends_on: {platform-api: {condition: service_healthy}}
-    restart: unless-stopped
+    environment:
+      <<: *platform-env
+      SOC_SCHEDULER_LIVENESS_FILE: /tmp/soc-scheduler.alive
+    # no HTTP server here: healthy while the heartbeat thread touches its file (the image's check is for the API)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time; p='/tmp/soc-scheduler.alive'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 180 else 1)"]
+      interval: 30s
+      start_period: 90s
+      retries: 3
+    depends_on: {platform-migrate: {condition: service_completed_successfully}}
+    deploy: {resources: {limits: {memory: 2g}}}
     stop_grace_period: 30s               # the job in hand finishes (SIGTERM stops the scheduler between jobs)
+
+  # ---------------------------------------------------------------- TLS reverse proxy (profile: tls)
+  # Terminates HTTPS with the organisation's certificate (deploy/tls/cert.pem, key.pem) and forwards to the API.
+  proxy:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    profiles: ["tls"]
+    environment: {SOC_PUBLIC_HOST: "${SOC_PUBLIC_HOST:?set SOC_PUBLIC_HOST (the console's host name)}"}
+    ports: ["${SOC_HTTPS_BIND:-0.0.0.0}:443:443"]
+    volumes: [./tls/Caddyfile:/etc/caddy/Caddyfile:ro, ./tls:/tls:ro]
+    depends_on: [platform-api]
+    logging: *logging
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- nightly dumps (profile: backup)
+  # A logical dump a night, kept 14 days, in the pgbackups volume: copy it off the host (it holds personal data -
+  # store it encrypted). Kubernetes / managed PostgreSQL use point-in-time recovery instead (HIGH_AVAILABILITY.md).
+  backup:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    profiles: ["backup"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /certs/ca.crt
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        while true; do
+        pg_dump -h postgres -U ${POSTGRES_USER:-soc} -Fc ${POSTGRES_DB:-soc_platform} > /backups/soc-$$(date +%F).dump.tmp
+        && mv /backups/soc-$$(date +%F).dump.tmp /backups/soc-$$(date +%F).dump;
+        find /backups -name 'soc-*.dump' -mtime +14 -delete; sleep 86400; done
+    volumes: [pgbackups:/backups, dbcerts:/certs:ro]
+    depends_on: {postgres: {condition: service_healthy}}
+    logging: *logging
+    restart: unless-stopped
 
   # ---------------------------------------------------------------- phishing ML engine (profile: engine)
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:3-management@sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69
     profiles: ["engine"]
     environment: {RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-soc}", RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}"}
     healthcheck: {test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"], interval: 10s, retries: 5}
+    logging: *logging
+    restart: unless-stopped
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     profiles: ["engine"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}", "--appendonly", "no"]
+    healthcheck: {test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"], interval: 10s, retries: 5}
+    environment: {REDIS_PASSWORD: "${REDIS_PASSWORD}"}
+    logging: *logging
+    restart: unless-stopped
   engine-build:
     build: {context: .., dockerfile: deploy/Dockerfile, args: {WITH_PHISHING_ENGINE: "true"}}
     image: soc-platform:engine
@@ -167,5 +270,8 @@ services:
 
 volumes:
   pgdata:
+  pgbackups:
   platform_data:
+  engine_data:
   attachments:
+  dbcerts:

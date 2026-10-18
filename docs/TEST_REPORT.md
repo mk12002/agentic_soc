@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-17 (rounds 15-25; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-18 (rounds 15-26; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,42 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 25 (2026-10-17) - latest results: no single point of failure, and the value scorecard
+## 0. Round 26 (2026-10-18) - latest results: go-live review (architecture, infrastructure, security)
+
+Aim: a senior-architect review of everything that could fail or be abused in production, then fix every finding.
+The full list, with severities, is SECURITY.md "Go-live review"; each row here names its evidence. New tests:
+`test_go_live_hardening.py` and additions to the access, governance, pentest, HA, deployment-manifest, context
+and supply-chain files.
+
+| Found | Now | Evidence |
+|---|---|---|
+| A deployment without `SOC_ENVIRONMENT` ran as `dev`; Compose defaulted to dev sign-in with remote token minting - any role for anyone reaching the port, with live tools | Fails closed: image defaults to prod; settings check refuses dev + live, an unset environment with Entra / live tools, a dev secret < 32 characters; every live tool isolated while dev sign-in is on; the demo is an explicit Compose override | `test_a_real_deployment_that_forgot_its_environment_is_refused`, `test_development_sign_in_isolates_every_live_tool`; the image refused to start unconfigured |
+| Vendor write calls ran inside the open transaction holding the audit-chain lock; a failed commit after a successful call lost the action's record | Committed `executing` before the call, outcome after; deferred execution inside savepoints; `actions` job; stuck executions become `unverified` findings | `test_the_tool_call_runs_after_a_durable_executing_record_and_holds_no_lock` (a second connection reads `executing` and appends to the audit chain during the call), `test_an_action_left_executing_is_marked_unverified_never_rerun`, `test_an_action_approved_inside_a_savepoint_runs_after_the_commit`, `test_a_deferred_autonomous_action_is_held_when_the_kill_switch_comes_on` |
+| `SOC_TRUSTED_PROXIES` ranges (both overlays) never matched | CIDR support | `test_trusted_proxies_accept_a_gateway_subnet` |
+| The upload route blocked the event loop | Thread pool, narration after commit | `test_api.py` |
+| Rollback bypassed the policy; privileged grants single-person; kill switch released by an administrator | Rollback through the policy (release four-eyes); second-administrator approval and 90-day limit; release needs a lead | `test_l4_executes_autonomously_and_rollback_uses_reverse`, `test_rollback_goes_through_the_policy_and_cannot_skip_four_eyes`, `test_a_privileged_grant_needs_a_second_administrator_and_an_end_date`, `test_only_a_lead_turns_the_kill_switch_back_off` |
+| Credentials followed any absolute next link | Same origin only | `test_credentials_never_follow_a_next_link_to_another_host` |
+| Database: unverified TLS, no statement / idle limits, application role owned the schema | `verify-full` required in prod; 300 s / 600 s; owner / runtime split, append-only trigger and grants | `test_production_needs_a_verified_database_connection_...`, `test_audit_chain_verifies_and_detects_tampering` (trigger first refuses the edit); **live on PostgreSQL 16 (Compose)**: the runtime role was refused UPDATE on `audit_log` and CREATE TABLE, a non-TLS connection was refused by `pg_hba`, the triggers and six trigram indexes existed, and the whole `demo` workload ran as the runtime role with an intact chain |
+| LLM allow-list open when empty | Mandatory, https-only in prod | `test_prompts_go_only_to_an_approved_https_endpoint_in_production` |
+| Anonymous `/health` re-hashed the whole audit log and disclosed version and state | Minimal anonymous answer; incremental verification from the self-check's checkpoint; heads anchored hourly; `audit verify --anchor` | `test_health_tells_anonymous_callers_only_that_it_is_up`, `test_health_verifies_only_new_records_after_a_full_pass_and_keeps_a_failure`, `test_audit_verify_checks_heads_shipped_to_the_log_pipeline` |
+| Break-glass secret in every request; unthrottled audited failures | 15-minute session exchange; throttle | `test_break_glass_is_exchanged_for_a_short_session_and_guessing_is_throttled` |
+| Pseudonymisation missed accounts, host names, internal IPs; parallel narrations shared one pseudonym map | Covered; one map per call | `test_redaction_covers_accounts_internal_hosts_and_addresses_not_just_e_mail`, property tests (round trip, public indicators kept); hostile 200 KB inputs redacted in 0.02-0.15 s |
+| Entra v1 tokens refused, no skew, app tokens as people | Fixed | `test_entra_tokens_are_verified_strictly` |
+| Unsealed stored data accepted in prod; no rotation path | Refused; `blobs reencrypt` | `test_production_refuses_unsealed_blobs_and_reencrypt_seals_them_and_retires_a_key` |
+| Supply chain: engine dependencies unpinned and unscanned; tags everywhere; the CI image-scan action's tag no longer existed | Hashed Linux locks, digests and commit SHAs, both images scanned, signed releases | `test_images_and_packages_are_pinned_so_a_moved_tag_cannot_change_what_runs`, `test_the_container_build_is_constrained_by_the_lock`; pip-audit of both locks: no known vulnerabilities; Trivy of the built platform image: 0 fixable high / critical |
+| Kubernetes: Azure ingress policy would block AGIC; on-prem default-deny cut the database pods off; database egress to any address; Key Vault secrets synced into etcd; no workload-identity annotation | Fixed in the overlays | `test_azure_keeps_secrets_out_of_kubernetes_and_onprem_lets_the_database_talk`, `test_only_the_migration_step_holds_schema_rights`, both overlays rendered with kubectl |
+| Compose: no TLS proxy, Redis open, engine in development mode, unbounded logs, no limits or backups; the scheduler could never be healthy | Fixed; production stack run end to end | `test_production_compose_fails_closed_and_the_demo_is_an_explicit_override`; live run (above) |
+| No infrastructure as code, no external alerting | `deploy/azure/main.bicep` (compiles, no warnings), ServiceMonitor and alert rules, new metrics | `test_a_service_key_can_be_sent_as_bearer_for_scrapers_and_metrics_cover_what_alerts_watch`; `az bicep build` |
+
+**Counts:** 798 passed, 16 skipped (814 collected) on SQLite and on PostgreSQL 16 (embedded server, which lacks
+`pg_trgm`, so the search-index fallback ran there; the Compose PostgreSQL 16 has it and built all six indexes).
+Feature verification (offline, `scripts/verify_features.py`): 104 of 108 verified, 229 mapped tests run, 0 failed;
+the 4 not run are the opt-in live features (real LLM endpoint, public NVD / EPSS / KEV feeds), not re-run this round
+(`--live --llm` calls the paid model). Browser tour and ML engine suite not re-run this round either. Lint, bandit and the lock checks
+clean. **Not proved here** (go-live steps): a Bicep `what-if` in the client's subscription, the failover drill on the
+real cluster (CloudNativePG policies and pooler certificate), admission enforcement of signatures.
+
+## 0.1 Round 25 (2026-10-17): no single point of failure, and the value scorecard
 
 Aim: make the platform run with no single point of failure, on premises or in the cloud, and measure the benefits the
 customer is promised. Each row is something found and fixed; the tests named fail without the fix.
@@ -32,7 +67,7 @@ customer is promised. Each row is something found and fixed; the tests named fai
 
 | Check | Result |
 |---|---|
-| Platform suite on SQLite | **772 passed**, 0 failed, 16 skipped (788 collected) |
+| Platform suite on SQLite | **772 passed**, 0 failed, 16 skipped (788 collected) - round 25; round 26: 798 / 814 |
 | Platform suite on PostgreSQL 16 | **772 passed**, 0 failed, 16 skipped |
 | Docker Compose (Docker Desktop 29) | API healthy on `/health/ready`; `demo` during the scheduler's first pass: 7 + 3 cases, 34 awaiting approval, 6 open vulnerabilities; 13 stored files all in the database and readable; a scheduler-built report downloaded through the API; everything survives a restart |
 | Browser tour | 34 screenshots at 4 widths, light and dark, 0 problems (the new scorecard and dashboard charts included) |

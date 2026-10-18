@@ -147,6 +147,8 @@ class BlobStore:
         from soc_platform.core.crypto import MAGIC, DataProtectionError
 
         if not blob.startswith(MAGIC):
+            if self.cipher is not None and self.cipher.strict:
+                raise DataProtectionError(f"{ref} is not encrypted (run `python -m soc_platform blobs reencrypt`)")
             return blob
         if self.cipher is None:
             raise DataProtectionError(f"{ref} is encrypted but SOC_DATA_KEY is not set")
@@ -157,12 +159,13 @@ def migrate_to_database(session: Session, settings: Settings | None = None, *, b
     """Move every file-backed reference into ``blobs`` and repoint the record. Idempotent (database references are
     skipped) and safe: a file that cannot be read is reported, not lost, and no file is deleted here - ``files``
     lists the moved ones for the caller to remove once the transaction has committed."""
+    from soc_platform.core.crypto import get_cipher
     from soc_platform.core.models import SourceRecord
     from soc_platform.domains.phishing.models import Submission
     from soc_platform.domains.vulnerability.models import ReportRun
 
     st = (settings or get_settings()).model_copy(update={"blob_store": "database"})
-    store = BlobStore(session, st)
+    store = BlobStore(session, st, cipher=get_cipher(st, strict=False))   # legacy plaintext files move (and get sealed)
     out: dict[str, Any] = {"moved": 0, "missing": [], "already": 0, "files": []}
     targets = ((SourceRecord, "raw_ref", "raw"), (Submission, "raw_path", "phishing"), (ReportRun, "path", "reports"))
     for model, column, prefix in targets:
@@ -184,6 +187,48 @@ def migrate_to_database(session: Session, settings: Settings | None = None, *, b
             out["files"].append(ref)
             if i % batch == 0:
                 session.flush()
+    session.flush()
+    return out
+
+
+def reencrypt(session: Session, settings: Settings | None = None, *, batch: int = 200) -> dict[str, Any]:
+    """Seal every stored blob under the newest key (``SOC_DATA_KEY``'s first): legacy plaintext is encrypted and
+    data under an older key is re-encrypted, so the old key can then be retired. Idempotent; a blob that cannot be
+    read is reported, not changed."""
+    from soc_platform.core.crypto import MAGIC, DataProtectionError, get_cipher, write_protected
+    from soc_platform.core.models import SourceRecord
+    from soc_platform.domains.phishing.models import Submission
+    from soc_platform.domains.vulnerability.models import ReportRun
+
+    st = settings or get_settings()
+    cipher = get_cipher(st, strict=False)
+    if cipher is None:
+        raise DataProtectionError("SOC_DATA_KEY is not set: nothing to encrypt with")
+    out: dict[str, Any] = {"database": 0, "file": 0, "unreadable": []}
+    n = 0
+    for row in session.execute(select(Blob)).scalars():
+        raw = bytes(row.data)
+        try:
+            data = cipher.decrypt(raw)
+        except DataProtectionError:
+            out["unreadable"].append({"ref": DB_PREFIX + row.key})
+            continue
+        row.data = cipher.rotate(raw) if raw.startswith(MAGIC) else cipher.encrypt(data)
+        out["database"] += 1
+        n += 1
+        if n % batch == 0:
+            session.flush()
+    for model, column in ((SourceRecord, "raw_ref"), (Submission, "raw_path"), (ReportRun, "path")):
+        for (ref,) in session.execute(select(getattr(model, column)).where(getattr(model, column).is_not(None))):
+            if is_db_ref(ref) or not Path(ref).is_file():
+                continue
+            try:
+                raw = Path(ref).read_bytes()
+                data = cipher.decrypt(raw)
+                write_protected(ref, data, cipher)
+                out["file"] += 1
+            except (OSError, DataProtectionError):
+                out["unreadable"].append({"ref": ref})
     session.flush()
     return out
 

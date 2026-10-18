@@ -19,6 +19,7 @@ from soc_platform.core.db import Database
 _RUN_TMP = __import__("tempfile").mkdtemp(prefix="soc-tests-")
 __import__("tempfile").tempdir = _RUN_TMP
 __import__("atexit").register(__import__("shutil").rmtree, _RUN_TMP, True)
+__import__("os").environ.setdefault("SOC_ENVIRONMENT", "test")         # the suite drives live-mode connectors with dev tokens
 __import__("os").environ.setdefault("SOC_EMBEDDED_SCHEDULER", "0")     # tests drive jobs explicitly
 __import__("os").environ.setdefault("SOC_LOG_CONFIGURE", "0")          # pytest captures logs; test_observability.py configures them itself
 __import__("os").environ.setdefault("SOC_PHISHING_ENGINE", "0")        # heuristic by default; test_phishing_engine.py turns the ML engine on

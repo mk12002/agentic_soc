@@ -123,7 +123,8 @@ def test_database_url_comes_from_a_vault_file_and_init_db_never_prints_its_passw
     f.write_text("postgresql+psycopg2://soc:s3cret-Pa55@db.internal:5432/soc_platform\n", encoding="utf-8")
     monkeypatch.delenv("SOC_DATABASE_URL", raising=False)
     monkeypatch.setenv("SOC_DATABASE_URL_FILE", str(f))
-    monkeypatch.setattr(cli, "_db", lambda: SimpleNamespace(create_all=lambda: None))
+    monkeypatch.setattr(cli, "_schema_db", lambda: SimpleNamespace(create_all=lambda: None, grant_runtime=lambda r: [],
+                                                                   engine=SimpleNamespace(dispose=lambda: None)))
     get_settings.cache_clear()
     try:
         assert get_settings().database_url.endswith("@db.internal:5432/soc_platform")

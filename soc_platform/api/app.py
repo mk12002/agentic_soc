@@ -134,6 +134,30 @@ _limiter = _RateLimiter(float(__import__("os").environ.get("SOC_RATE_LIMIT_RPS",
 
 
 _TRUSTED_PROXIES = {x.strip() for x in __import__("os").environ.get("SOC_TRUSTED_PROXIES", "").split(",") if x.strip()}
+_PROXY_NETS: dict[frozenset[str], tuple[Any, ...]] = {}
+
+
+def _trusted(addr: str) -> bool:
+    """Is ``addr`` a configured proxy? Entries are addresses or CIDR ranges (a gateway subnet such as 10.0.0.0/24):
+    comparing strings alone never matched a range, so behind the gateway every analyst shared one rate-limit bucket
+    and the logs recorded the gateway instead of the client."""
+    import ipaddress
+
+    key = frozenset(_TRUSTED_PROXIES)
+    nets = _PROXY_NETS.get(key)
+    if nets is None:
+        parsed = []
+        for entry in key:
+            try:
+                parsed.append(ipaddress.ip_network(entry, strict=False))
+            except ValueError:
+                continue                 # settings_check reports it; an unparsable entry trusts nothing
+        nets = _PROXY_NETS[key] = tuple(parsed)
+    try:
+        ip = ipaddress.ip_address(addr.strip().strip("[]"))
+    except ValueError:
+        return False
+    return any(ip.version == n.version and ip in n for n in nets)
 
 
 def _client_ip(request: Request) -> str:
@@ -142,11 +166,11 @@ def _client_ip(request: Request) -> str:
     left-most entry is whatever the caller sent: trusting it let anyone pick their address (a fresh rate-limit
     bucket per request, or "127.0.0.1" to reach the loopback-only dev sign-in)."""
     peer = request.client.host if request.client else "unknown"
-    if peer not in _TRUSTED_PROXIES:
+    if not _trusted(peer):
         return peer
     hops = [h.strip() for h in ",".join(request.headers.getlist("x-forwarded-for")).split(",") if h.strip()]
     for hop in reversed(hops):
-        if hop not in _TRUSTED_PROXIES:
+        if not _trusted(hop):
             return hop[:64]
     return peer
 
@@ -156,7 +180,7 @@ def _is_https(request: Request) -> bool:
     if request.url.scheme == "https":
         return True
     peer = request.client.host if request.client else ""
-    return peer in _TRUSTED_PROXIES and (request.headers.get("x-forwarded-proto") or "").split(",")[-1].strip() == "https"
+    return _trusted(peer) and (request.headers.get("x-forwarded-proto") or "").split(",")[-1].strip() == "https"
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -432,15 +456,23 @@ def current_user(request: Request, authorization: str | None = Header(default=No
                  x_api_key: str | None = Header(default=None), x_break_glass: str | None = Header(default=None),
                  settings: Settings = Depends(get_settings), s: Session = Depends(db_session, scope="function")) -> Principal:
     """Bearer token (Entra / dev), service-account API key, or sealed break-glass credential."""
+    from soc_platform.core.access import BREAK_GLASS_PREFIX, KEY_PREFIX
+
     acc = AccessService(s, settings)
-    client = _client_ip(request)
     try:
         if x_break_glass:
-            p = acc.break_glass(x_break_glass, client=client, path=request.url.path)
-        elif x_api_key:
+            # the sealed secret is exchanged once (POST /api/v1/auth/break-glass), never sent with every request
+            raise PermissionError("exchange the break-glass credential at POST /api/v1/auth/break-glass first")
+        if x_api_key:
             p = acc.authenticate_api_key(x_api_key.strip())
         elif authorization and authorization.lower().startswith("bearer "):
-            p = acc.effective(principal_from_token(authorization.split(" ", 1)[1].strip(), settings))
+            raw = authorization.split(" ", 1)[1].strip()
+            if raw.startswith(BREAK_GLASS_PREFIX):
+                p = acc.break_glass_session(raw)
+            elif raw.startswith(KEY_PREFIX):     # a service key as Bearer (Prometheus can send no other header)
+                p = acc.authenticate_api_key(raw)
+            else:
+                p = acc.effective(principal_from_token(raw, settings))
         else:
             raise HTTPException(401, "authentication required (Bearer token or X-API-Key)")
     except (AuthError, PermissionError) as exc:
@@ -540,6 +572,14 @@ def _err(exc: Exception) -> HTTPException:
         return HTTPException(403, str(exc))
     if isinstance(exc, KeyError):
         return HTTPException(404, str(exc))
+    from soc_platform.connectors.base import ConnectorError
+
+    if isinstance(exc, ConnectorError):
+        # a tool's error text can carry its response body: logged with the trace id, not echoed to the caller
+        import logging
+
+        logging.getLogger(__name__).warning("tool call failed: %s", str(exc)[:500])
+        return HTTPException(502, f"the tool returned an error ({type(exc).__name__}); trace {TRACE.get() or '-'}")
     if isinstance(exc, (AttributeError, TypeError, NameError, IndexError, AssertionError)):
         # a bug, not a bad request: log it, and never echo interpreter internals to the caller
         import logging
@@ -552,15 +592,47 @@ def _err(exc: Exception) -> HTTPException:
 # ----------------------------------------------------------------------------- system
 
 
-_CHAIN_CACHE: dict[str, Any] = {"at": None, "ok": None}   # "at" None = never verified (monotonic time can be < 300 s after boot)
+_CHAIN_CACHE: dict[str, Any] = {"at": None, "ok": None, "since": None}   # "at" None = never verified this process
+
+
+def _audit_chain_ok(s: Session) -> bool | None:
+    """Whether the audit chain verifies, cheaply: from the checkpoint the hourly self-check stores after a full pass
+    (a failure there stays reported), only the records added since are re-hashed, at most once a minute per process.
+    The full pass on every call grew with the log - which is never pruned - and anyone could trigger it."""
+    now = __import__("time").monotonic()
+    if _CHAIN_CACHE["at"] is not None and now - _CHAIN_CACHE["at"] < 60:
+        return _CHAIN_CACHE["ok"]
+    log = AuditLog(s)
+    cp = log.checkpoint()
+    if cp is not None and cp.get("ok") is False:
+        ok = False
+    else:
+        since = _CHAIN_CACHE["since"]
+        if cp is not None and cp.get("ok") and (since is None or cp["seq"] > since[0]):
+            since = (int(cp["seq"]), str(cp["hash"]))
+        v = log.verify(since=since)
+        ok = bool(v["ok"])
+        if ok and v.get("head_seq"):
+            _CHAIN_CACHE["since"] = (v["head_seq"], v["head"])
+    _CHAIN_CACHE.update(at=now, ok=ok)
+    return ok
 
 
 @app.get("/health")
-def health(s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
-    now = __import__("time").monotonic()
-    if _CHAIN_CACHE["at"] is None or now - _CHAIN_CACHE["at"] > 300:  # at most every 5 min; /api/v1/audit/verify on demand
-        _CHAIN_CACHE.update(at=now, ok=AuditLog(s).verify()["ok"])
-    return {"status": "ok", "version": __version__, "audit_chain": _CHAIN_CACHE["ok"],
+def health(request: Request, authorization: str | None = Header(default=None),
+           x_api_key: str | None = Header(default=None), s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
+    """Unauthenticated: only "ok" (load balancers, uptime checks). Signed in with read access: the operational status
+    the console's banner shows - kill switch, scheduler, audit chain. Version and state are not given to anyone who
+    can reach the port."""
+    if not (authorization or x_api_key):
+        return {"status": "ok"}
+    try:
+        p = current_user(request, authorization, x_api_key, None, get_settings(), s)
+    except HTTPException:
+        return {"status": "ok"}
+    if not p.can(Perm.READ):
+        return {"status": "ok"}
+    return {"status": "ok", "version": __version__, "audit_chain": _audit_chain_ok(s),
             "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings()),
             "scheduler": _scheduler_heartbeat(s)}
 
@@ -570,7 +642,7 @@ def health_live() -> dict[str, Any]:
     """Liveness: this process answers. Deliberately touches nothing else - an orchestrator restarts a container whose
     liveness fails, and restarting every replica because the database is briefly away would turn an outage into a
     restart storm."""
-    return {"status": "alive", "version": __version__}
+    return {"status": "alive"}
 
 
 @app.get("/health/ready", include_in_schema=False)
@@ -586,7 +658,7 @@ def health_ready() -> JSONResponse:
         event("health.not_ready", 30, reason=type(exc).__name__)
         return JSONResponse({"status": "not_ready", "reason": "database unreachable"}, status_code=503,
                             headers={"Retry-After": "5"})
-    return JSONResponse({"status": "ready", "version": __version__})
+    return JSONResponse({"status": "ready"})
 
 
 def _scheduler_heartbeat(s: Session) -> dict[str, Any]:
@@ -627,6 +699,22 @@ def dev_token(request: Request, user: str = "analyst@acme-demo.com", roles: str 
         raise HTTPException(404, "not available")  # dev sign-in never served to other machines by default
     return {"token": issue_dev_token(st.dev_jwt_secret, user, [r.strip() for r in roles.split(",")], mfa=mfa,
                                      domains=[d.strip() for d in domains.split(",") if d.strip()] or None)}
+
+
+@app.post("/api/v1/auth/break-glass")
+def break_glass_session(request: Request, x_break_glass: str | None = Header(default=None),
+                        s: Session = Depends(db_session, scope="function")) -> dict[str, Any]:
+    """Exchange the sealed break-glass secret for a 15-minute session token (Bearer). Audited, raised as a critical
+    finding, and throttled per client address."""
+    acc = AccessService(s, get_settings())
+    try:
+        p = acc.break_glass(x_break_glass or "", client=_client_ip(request), path=request.url.path)
+    except PermissionError as exc:
+        s.commit()  # keep the audit trail of the failed attempt
+        raise HTTPException(401, str(exc)) from exc
+    token, exp = acc.issue_break_glass_session()
+    request.state.principal_id, request.state.auth_method, request.state.actor_type = p.id, p.auth_method, "human"
+    return {"token": token, "expires_at": exp.isoformat(), "token_type": "Bearer"}
 
 
 @app.get("/api/v1/me")
@@ -844,7 +932,22 @@ def admin_grant(body: GrantBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)
         g = _access(s).grant(p, body.principal_id, body.role, domains=body.domains, days=body.days, reason=body.reason)
     except Exception as exc:
         raise _err(exc) from exc
-    return {"id": g.id, "principal_id": g.principal_id, "role": g.role, "domains": g.domains}
+    return {"id": g.id, "principal_id": g.principal_id, "role": g.role, "domains": g.domains, "status": g.status}
+
+
+class GrantDecision(BaseModel):
+    note: str = Field(default="", max_length=1000)
+
+
+@app.post("/api/v1/admin/roles/{gid}/approve")
+def admin_grant_approve(gid: str, body: GrantDecision, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                        s: Session = Depends(db_session, scope="function")):
+    """Second administrator's approval of a privileged role grant (lead, admin, automation_admin)."""
+    try:
+        g = _access(s).approve_grant(p, gid, body.note)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"id": g.id, "principal_id": g.principal_id, "role": g.role, "status": g.status}
 
 
 @app.delete("/api/v1/admin/roles/{gid}")
@@ -996,7 +1099,11 @@ def approve_policy(vid: int, p: Principal = Depends(current_user), s: Session = 
 
 @app.post("/api/v1/kill-switch")
 def kill_switch(on: bool, p: Principal = Depends(need(Perm.KILL_SWITCH)), s: Session = Depends(db_session, scope="function")):
-    """Durable (DB-backed) so every API replica and the scheduler stop together, and it survives restarts."""
+    """Durable (DB-backed) so every API replica and the scheduler stop together, and it survives restarts. Anyone
+    with the permission may stop automation at once; starting it again re-enables autonomous actions, so it takes
+    someone who may approve the autonomy policy (a lead), not an administrator alone."""
+    if not on and not p.can(Perm.APPROVE_POLICY):
+        raise HTTPException(403, "turning the kill switch off needs a lead (approve_policy)")
     AccessService(s, get_settings()).set_flag(p, "kill_switch", bool(on), perm=Perm.KILL_SWITCH)
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="policy.kill_switch", subject_type="policy",
                        subject_id="kill_switch", payload={"on": on})
@@ -1214,7 +1321,9 @@ def self_check(_: Principal = Depends(need(Perm.READ_AUDIT, "*")), s: Session = 
     """The platform proves its own figures agree across every surface and its records are intact (see core.selfcheck)."""
     from soc_platform.core.selfcheck import run_self_check
 
-    return run_self_check(s)
+    out = run_self_check(s)
+    out.pop("_audit_verification", None)
+    return out
 
 
 @app.get("/api/v1/admin/notifications")
@@ -1521,11 +1630,12 @@ def story_approve(cid: str, body: BundleBody, p: Principal = Depends(need(Perm.A
         if not p.in_domain(ar.domain if ar.domain in {"phishing", "incident", "vulnerability"} else "*"):
             out.append({"id": aid, "ok": False, "error": "outside your data scope"})
             continue
+        s.commit()           # each approval stands alone: one that fails discards only its own changes
         try:
-            with s.begin_nested():
-                r = svc.approve(aid, p, note=body.note or "approved from attack story")
+            r = svc.approve(aid, p, note=body.note or "approved from attack story")
             out.append({"id": aid, "ok": True, "status": r.status})
         except Exception as exc:  # noqa: BLE001 - reported per action
+            s.rollback()
             out.append({"id": aid, "ok": False, "error": str(exc)[:200]})
     AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="story.bundle_approve", subject_type="case",
                        subject_id=cid, payload={"requested": len(body.action_ids), "approved": sum(1 for x in out if x["ok"])})
@@ -1547,6 +1657,7 @@ def deep_analysis(cid: str, body: DeepBody | None = None, p: Principal = Depends
     if not p.acting_in(case.domain).can(Perm.INVESTIGATE):
         raise HTTPException(403, f"investigate is not granted for {case.domain} data")
     story = story_for_case(s, cid, registry())
+    s.commit()                                   # nothing written so far stays locked while the model works
     gw = llm(s, p)
     return _with_notice(run_deep_analysis(s, story, gw, actor=p.id, force=bool(body and body.force),
                                           org_domains=get_settings().org_domains), gw)
@@ -1641,16 +1752,24 @@ def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVES
 
 
 @app.post("/api/v1/phishing/submit")
-async def phishing_submit(file: UploadFile = File(...), reporter: str | None = None, process: bool = True,
-                          p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session, scope="function")):
-    raw = await file.read(25 * 1024 * 1024 + 1)
+def phishing_submit(file: UploadFile = File(...), process: bool = True,
+                    p: Principal = Depends(need(Perm.INVESTIGATE, "phishing")), s: Session = Depends(db_session, scope="function")):
+    """A plain ``def``: parsing, look-ups, the ML engine and the model run in the request thread pool. As ``async def``
+    they ran on the event loop and froze every other request of the process (its liveness probe too) meanwhile.
+    The reporter is the person uploading: a caller-chosen name would let anyone attribute a report to someone else."""
+    raw = file.file.read(25 * 1024 * 1024 + 1)
     if len(raw) > 25 * 1024 * 1024:
         raise HTTPException(413, "message too large")
     if not raw.strip():
         raise HTTPException(400, "empty message")
     svc = _services(s)["phishing"]
-    sub = svc.submit_raw(raw, source="upload", reporter=reporter or p.name)
-    return svc.process(sub.id) if process and sub.status == "new" else {"submission": sub.id, "status": sub.status}
+    sub = svc.submit_raw(raw, source="upload", reporter=p.name)
+    if not (process and sub.status == "new"):
+        return {"submission": sub.id, "status": sub.status}
+    cid = svc.process(sub.id, narrate=False)["case"]["id"]
+    s.commit()                                   # the case is saved before the model writes: no lock held meanwhile
+    svc.narrate_pending([cid], backlog=False)
+    return svc.cases.view(cid)
 
 
 @app.get("/api/v1/phishing/suppliers")

@@ -13,9 +13,11 @@
   preflight   [NAME ... | --all] [--by EMAIL]   run every check a tool must pass before it goes live
   connector   new NAME --category CAT [--tool "Vendor Product"] [--vendor V]  |  check NAME
               scaffold a new connector that already follows the platform's rules, then prove it conforms
-  blobs       check [--sample N]  |  migrate [--delete-files]
+  audit       verify [--anchor SEQ:HASH ...]   recompute the audit hash chain; check heads shipped to the log pipeline
+  blobs       check [--sample N]  |  migrate [--delete-files]  |  reencrypt
               stored e-mails and reports: check every reference resolves; move file-store blobs into the database
-              (before switching to SOC_BLOB_STORE=database for several hosts)
+              (before switching to SOC_BLOB_STORE=database for several hosts); seal legacy plaintext and
+              re-encrypt everything under the newest SOC_DATA_KEY (then retire old keys)
 """
 
 from __future__ import annotations
@@ -34,12 +36,27 @@ def _db():
     return get_database()
 
 
+def _schema_db():
+    from soc_platform.config import get_settings
+    from soc_platform.core.db import Database
+
+    return Database(get_settings().database_url)
+
+
 def cmd_init_db() -> None:
-    _db().create_all()
+    """Create / extend the schema. Production runs this with the migration role (schema owner); with
+    SOC_DB_RUNTIME_ROLE set it then grants that role what the running platform needs - and no more."""
     from sqlalchemy.engine import make_url
 
     from soc_platform.config import get_settings
 
+    db = _schema_db()                                # always creates, whatever SOC_SCHEMA_MANAGE says
+    db.create_all()
+    role = os.environ.get("SOC_DB_RUNTIME_ROLE", "").strip()
+    if role:
+        db.grant_runtime(role)
+        print(f"granted runtime role {role}: read/write on tables, append-only on audit_log, no schema changes")
+    db.engine.dispose()
     print("database ready:", make_url(get_settings().database_url).render_as_string(hide_password=True))
 
 
@@ -410,12 +427,41 @@ def cmd_connector(*args: str) -> None:
     sys.exit(devkit.check(a.name))
 
 
+def cmd_audit(*args: str) -> None:
+    """Verify the audit log's hash chain, and that it still contains heads shipped earlier (audit.anchor log lines):
+    `audit verify [--anchor SEQ:HASH ...]`. Exit 1 on any mismatch."""
+    import argparse
+    import json
+
+    from sqlalchemy import select
+
+    from soc_platform.core.audit import AuditLog
+    from soc_platform.core.models import AuditRecord
+
+    ap = argparse.ArgumentParser(prog="python -m soc_platform audit")
+    sub = ap.add_subparsers(dest="action", required=True)
+    v = sub.add_parser("verify", help="recompute the chain; compare with anchored heads")
+    v.add_argument("--anchor", action="append", default=[], help="SEQ:HASH from an audit.anchor log line")
+    a = ap.parse_args(list(args))
+    with _db().session() as s:
+        out = AuditLog(s).verify()
+        anchors = []
+        for raw in a.anchor:
+            seq, _, want = raw.partition(":")
+            got = s.execute(select(AuditRecord.hash).where(AuditRecord.seq == int(seq))).scalar()
+            anchors.append({"seq": int(seq), "ok": got == want.strip().lower(), "found": got is not None})
+        out["anchors"] = anchors
+    print(json.dumps(out, indent=1))
+    if not out["ok"] or not all(x["ok"] for x in anchors):
+        sys.exit(1)
+
+
 def cmd_blobs(*args: str) -> None:
     import argparse
     import json
 
     from soc_platform.core.audit import AuditLog
-    from soc_platform.core.blobstore import check_references, migrate_to_database
+    from soc_platform.core.blobstore import check_references, migrate_to_database, reencrypt
 
     ap = argparse.ArgumentParser(prog="python -m soc_platform blobs")
     sub = ap.add_subparsers(dest="action", required=True)
@@ -423,12 +469,22 @@ def cmd_blobs(*args: str) -> None:
     c.add_argument("--sample", type=int, default=None)
     m = sub.add_parser("migrate", help="move file-store blobs into the database (idempotent)")
     m.add_argument("--delete-files", action="store_true", help="remove each file once its row is committed")
+    sub.add_parser("reencrypt", help="seal legacy plaintext and re-encrypt every blob under the newest data key")
     a = ap.parse_args(list(args))
     db = _db()
     db.create_all()
     with db.session() as s:
         if a.action == "check":
             out = check_references(s, sample=a.sample)
+            print(json.dumps({**out, "unreadable": out["unreadable"][:50]}, indent=1))
+            if out["unreadable"]:
+                sys.exit(1)
+            return
+        if a.action == "reencrypt":
+            out = reencrypt(s)
+            AuditLog(s).append(actor_type="human", actor_id=_cli_principal(None).id, event_type="blobs.reencrypted",
+                               subject_type="blobs", subject_id="all",
+                               payload={"database": out["database"], "file": out["file"], "unreadable": len(out["unreadable"])})
             print(json.dumps({**out, "unreadable": out["unreadable"][:50]}, indent=1))
             if out["unreadable"]:
                 sys.exit(1)

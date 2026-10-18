@@ -172,7 +172,7 @@ def test_full_client_demo(client, tmp_path):
     # 9. governance: policy, kill switch, audit chain, access admin, metrics
     ok(client.get("/api/v1/policy", headers=an))
     ok(client.post("/api/v1/kill-switch?on=true", headers=lead))
-    assert ok(client.get("/health")).json()["kill_switch"] is True
+    assert ok(client.get("/health", headers=an)).json()["kill_switch"] is True
     ok(client.post("/api/v1/kill-switch?on=false", headers=lead))
     assert ok(client.get("/api/v1/audit/verify", headers=aud)).json()["ok"]
     k = ok(client.post("/api/v1/admin/api-keys", headers=adm, json={"name": "prometheus", "roles": ["auditor"]})).json()

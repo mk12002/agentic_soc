@@ -147,7 +147,7 @@ The dependency direction is strictly downward:
 request
  -> BodyLimitMiddleware (byte-stream cap, 30 MB)
  -> SecurityMiddleware: reject NUL in path/query (400) -> Content-Length cap (413) -> per-client token bucket (429)
- -> route dependency: current_user (Bearer / X-API-Key / X-Break-Glass) -> revocation check -> need(permission, domain)
+ -> route dependency: current_user (Bearer: Entra / dev / service key / break-glass session; X-API-Key) -> revocation check -> need(permission, domain)
  -> handler: service calls inside one DB session (commit on success, rollback on error)
  -> response: security headers added; access-log row queued (written in batches by a background thread)
 exceptions: DataError -> 400; KeyError from services -> 404; PermissionError -> 403
@@ -507,6 +507,11 @@ unresolved, by design.
   the same way), and a failed commit would have been reported to the client as success. Guarded by
   `test_commit_before_response.py`: every route's session scope is checked, and a real server must show each
   upload in the next list.
+- **One service commits on its own: `ActionService` around a tool call.** It commits `executing` and its audit record
+  before calling the tool and the outcome after, so no transaction (and no audit-chain lock) is open while a vendor
+  answers, and an action that reached a tool is always on record. Inside a caller's savepoint (a job's per-item
+  isolation) it cannot commit, so the action stays `approved` and runs after the caller commits
+  (`execute_pending`). Every other service leaves the transaction to its caller.
 - **Exactly-once state transitions use conditional updates:** `UPDATE action_requests SET status=… WHERE id=… AND
   status IN (approvable)` and check `rowcount`. Six simultaneous approvals of one action execute it exactly once
   (tested).
@@ -526,6 +531,12 @@ unresolved, by design.
   is back, existing data is intact, and a second start is a no-op.
 - There is no migration framework yet (see §26). Additive changes (new tables, new optional columns, wider
   columns) are handled automatically; anything else needs a scripted migration.
+- **Who may change the schema.** In production only `init-db`, signed in as the schema owner (the `platform-migrate`
+  service / the `init-db` init container), creates or extends it; with `SOC_DB_RUNTIME_ROLE` it then grants the
+  runtime role read / write on every table and sequence, SELECT + INSERT only on `audit_log`, and revokes schema
+  creation. The platform's processes run as that role with `SOC_SCHEMA_MANAGE=0`: they only check the tables exist.
+  `_create_schema` also installs the audit log's append-only trigger (both engines) and, on PostgreSQL, the
+  `pg_trgm` indexes behind the search box (best effort: without the extension search scans).
 
 ### 8.5 SQLite specifics (dev and demo)
 
@@ -822,10 +833,14 @@ It is rebuilt on demand and never stored. An event not in the store cannot appea
   - refuses non-human principals
   - then performs a **conditional update** (`status IN approvable`, check `rowcount`), so concurrent approvals
     execute exactly once
-- **Execution** re-checks pre-conditions, calls the connector action and records the result or error (`failed` is a
-  recorded status, never swallowed).
-- **`rollback()`** creates a linked reverse action (`reverse_type`, e.g. `endpoint.isolate` → `endpoint.release`).
-  It needs `rollback_action`.
+- **Execution** re-checks pre-conditions, commits `executing` with its audit record, calls the connector action with
+  no transaction open, then commits the result or error (`failed` is a recorded status, never swallowed). An action
+  left `executing` (crash, failover) is marked `unverified` with a finding by the `actions` job - never re-run, since
+  a containment is not idempotent. Autonomous actions deferred inside a savepoint are held for a person if the kill
+  switch came on before they ran.
+- **`rollback()`** requests the reverse action (`reverse_type`, e.g. `endpoint.isolate` → `endpoint.release`)
+  through `request()`, so the policy, its four-eyes rule, the tool's stage and the pre-conditions apply as to any
+  action; the original becomes `rolled_back` when the reverse executes. It needs `rollback_action`.
 - **Per-case actions** (tickets, notifications, reporter feedback) are never merged across cases. Other identical
   requests for the same targets are shared.
 - Every transition is audited.
@@ -931,20 +946,27 @@ changes no number, verdict or action; the test suite proves it on three estates.
 
 ### 13.1 Authentication (`core/auth.py`, `api/app.py:current_user`)
 
-- **Production:** Entra ID. RS256 tokens verified against the tenant's JWKS (`PyJWKClient`), with audience and
-  issuer (`https://login.microsoftonline.com/<tenant>/v2.0`) enforced, and **`exp` and `iat` required**. Missing
-  tenant or audience configuration fails closed.
-- **Development:** HS256 tokens signed with `SOC_DEV_JWT_SECRET`, also requiring `exp`/`iat`.
-  - Refused entirely when `SOC_ENVIRONMENT=prod`.
+- **Production:** Entra ID. RS256 tokens verified against the tenant's JWKS (`PyJWKClient`), with audience, issuer
+  (the tenant's v2.0 `https://login.microsoftonline.com/<tenant>/v2.0` or v1 `https://sts.windows.net/<tenant>/`)
+  and tenant id enforced, **`exp` and `iat` required**, and one minute of clock-skew leeway. A token without a
+  delegated scope (`scp`) or with `idtyp=app` - an application's own - is a **service** principal: never approve,
+  policy or access. Missing tenant or audience configuration fails closed.
+- **Development:** HS256 tokens signed with `SOC_DEV_JWT_SECRET` (32+ characters), also requiring `exp`/`iat`.
+  - Refused entirely when `SOC_ENVIRONMENT=prod`; a deployment using Entra or live tools must set its environment.
   - `/api/v1/dev/token` answers only on loopback unless `SOC_DEV_TOKENS_REMOTE=1`.
+  - **Never in front of a real tool:** while dev sign-in is on (outside the test suite), every connector in a live
+    stage is isolated by the registry, however it was configured.
 - **Algorithms are pinned per mode.** `alg: none`, HS256 signed with the public key (algorithm confusion), HS512,
   other keys, wrong audience/issuer, expired and not-yet-valid tokens are all refused (tested).
-- **Service accounts:** `X-API-Key` of the form `sk_soc_<id>_<secret>`.
+- **Service accounts:** `X-API-Key` (or `Authorization: Bearer`, for scrapers) of the form `sk_soc_<id>_<secret>`.
   - Only SHA-256 of the secret is stored, and comparison is constant-time even for unknown ids.
   - Keys expire (at most 365 days).
   - They may hold only analyst, auditor or automation-admin roles.
-- **Break-glass:** the `X-Break-Glass` header. Only the credential's SHA-256 is configured (`SOC_BREAKGLASS_SHA256`),
-  compared in constant time. Every use and every failed attempt is audited, and a use raises a critical insight.
+- **Break-glass:** `POST /api/v1/auth/break-glass` with the `X-Break-Glass` header exchanges the sealed secret for a
+  15-minute HS256 session token (`bg.` prefix; key derived from the configured hash, so rotating the secret ends every
+  session; revocable by `jti`). The header is refused on every other route. Only the credential's SHA-256 is
+  configured (`SOC_BREAKGLASS_SHA256`), compared in constant time. Every use and every failed attempt is audited, a
+  use raises a critical insight, and five failures per address in 15 minutes (per process) are then refused unseen.
 - **Revocation:** per token (`jti`, used by logout) and per principal (`not_before`, "revoke all sessions").
 - **Step-up MFA:** `approve_action`, `approve_high_impact`, `approve_policy`, `kill_switch`, `manage_access` and
   `rollback_action` need `amr` containing `mfa`, or the configured Conditional Access auth context. It's on by
@@ -968,7 +990,10 @@ changes no number, verdict or action; the test suite proves it on three estates.
     requested on a case belongs to the case's domain; case-less actions are `platform` (all-domain roles only).
     Platform grants add a role with its own scope; a scoped administrator grants only their own domains.
 - **Separation of duties:** nobody approves their own action, policy, exception or access grant; the proposer of a
-  policy cannot approve it.
+  policy cannot approve it. A privileged platform grant (lead, admin, automation_admin) is `proposed` until a second
+  administrator - neither proposer nor recipient - approves it, and must end within 90 days. Turning the kill switch
+  off needs `approve_policy`. The default policy makes isolate / release, disable account, password reset, campaign
+  purge, secret rotation and domain block four-eyes.
 
 ### 13.3 Web and input hardening
 
@@ -981,9 +1006,11 @@ changes no number, verdict or action; the test suite proves it on three estates.
 - **No CORS grants.** The console is same-origin.
 - **Limits:**
   - body size 30 MB, enforced on the byte stream (chunked uploads without Content-Length too)
-  - per-client token bucket (20/s, burst 120). `X-Forwarded-For` is read only from `SOC_TRUSTED_PROXIES`, and the
-    client is its right-most hop that is not a proxy (the left-most is caller-controlled). Past 50,000 tracked
-    addresses, idle buckets are evicted.
+  - per-client token bucket (20/s, burst 120). `X-Forwarded-For` is read only from `SOC_TRUSTED_PROXIES` (addresses
+    or CIDR ranges), and the client is its right-most hop that is not a proxy (the left-most is caller-controlled).
+    Past 50,000 tracked addresses, idle buckets are evicted.
+  - no blocking work on the event loop: every route is a plain `def` (the thread pool), the upload route included -
+    as `async def` it froze its process for the length of an analysis
   - linear-time content parsing: every regex over e-mail content is bounded (§25 #36); unknown ids answer 404 and
     programming errors a generic 400, never interpreter internals
 - **Input handling:**
@@ -995,7 +1022,8 @@ changes no number, verdict or action; the test suite proves it on three estates.
   an allow-list (`ALLOWED`) of functions via `data-fn`, never `eval` or inline handlers. The stored-XSS probe (8
   screens, CSP disabled) executed nothing.
 - **No SSRF surface.** No code path fetches URLs taken from e-mail content; outbound calls go only to configured
-  vendor endpoints and configured notification webhooks (HTTPS only, from settings, never from data). The unwired visual-URL scaffold returns "unavailable" instead of a made-up verdict.
+  vendor endpoints and configured notification webhooks (HTTPS only, from settings, never from data). A vendor's
+  next link is followed with the connector's credentials only on the connector's own origin. The unwired visual-URL scaffold returns "unavailable" instead of a made-up verdict.
 - **No template injection.** No template engine renders user text.
 
 ### 13.4 Data protection
@@ -1003,7 +1031,8 @@ changes no number, verdict or action; the test suite proves it on three estates.
 - **Encryption at rest** (`core/crypto.py`): raw payloads, reported e-mails, generated reports and evidence packs.
   - Fernet (AES-128-CBC + HMAC-SHA256) via **MultiFernet**. `SOC_DATA_KEY` holds comma-separated keys: the first
     encrypts, all decrypt, so keys rotate without bulk re-encryption.
-  - Files carry a `SOCENC1:` prefix; legacy plaintext is still readable.
+  - Files carry a `SOCENC1:` prefix. Outside production legacy plaintext is still readable; in production it is
+    refused (`DataCipher(strict=True)`), and `blobs reencrypt` seals it and moves everything to the newest key.
   - `write_protected()` writes atomically with owner-only permissions (0600).
   - A key is mandatory in production.
 - **Retention** (`core/retention.py`), all configurable, each run audited:
@@ -1018,7 +1047,10 @@ changes no number, verdict or action; the test suite proves it on three estates.
   - **Concurrent appends are serialised** by updating a chain-head row first (`_lock_chain`): a row lock on
     PostgreSQL, the write lock on SQLite. This was found by a concurrency test: 8 simultaneous writers forked the
     chain on both databases before the fix.
-  - In production, grant the service role INSERT/SELECT only on `audit_log`.
+  - The database refuses UPDATE / DELETE / TRUNCATE on `audit_log` (trigger) and the runtime role holds INSERT /
+    SELECT only (`grant_runtime`). The hourly self-check re-hashes the whole chain, stores a checkpoint (head seq and
+    hash, or the failure) and logs `audit.anchor`; `/health` re-hashes only records after the checkpoint.
+    `audit verify --anchor SEQ:HASH` checks the chain against heads already shipped to the log platform.
 - **The access log** records every API request (principal, auth method, method, path, status, client IP, user
   agent, latency). Rows are queued and written in batches by a background thread, **bound to the database of the
   request that produced them**, which fixed rows landing in the wrong database when the default changed before a
@@ -1294,9 +1326,9 @@ immediately.
 - **CSP-compatible by construction:** no inline scripts or handlers. `data-fn` / `data-args` (JSON) are dispatched
   through the `ALLOWED` map, and `data-enter` handles Enter-to-submit.
 - **Data:** every screen reads the same API a script would use. Badges and tabs use summary endpoints. `/health` is
-  polled for the kill-switch and scheduler status pills.
-- **Auth in dev:** the sign-in form mints a dev token (loopback only) kept in `localStorage`. Production uses Entra
-  sign-in; see §26 on token storage.
+  polled, with the user's token, for the kill-switch and scheduler status pills.
+- **Auth:** the token (Entra, or a dev token minted on loopback in dev) is kept in `sessionStorage` - this tab only;
+  see §26 on token storage.
 - **Accessibility:** labelled controls, underlined in-text links, AA contrast. It passes axe-core WCAG 2.1 A/AA on
   every screen in both themes.
 - **Responsive:** audited at 1440, 1280, 1024 and 768 px (nothing clipped, overflowing or squeezed; no table needing
@@ -1543,8 +1575,11 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 
 ## 24. Deployment and operations
 
-- **Image** (`deploy/Dockerfile`): a multi-stage build on `python:3.11-slim`; build dependencies only in the builder
-  stage; a non-root `soc` user (uid 1001); `HEALTHCHECK` on `/health/ready`; Uvicorn with 4 workers (`SOC_API_WORKERS`). The ML engine's
+- **Image** (`deploy/Dockerfile`): a multi-stage build on `python:3.11-slim` pinned by digest; every package from a
+  hash-locked Linux lock (`requirements/image.lock`, `image-engine.lock`; `--require-hashes`); build dependencies only
+  in the builder stage; a non-root `soc` user (uid 1001) owning only `/app/data`; no curl or pip; production defaults
+  (`SOC_ENVIRONMENT=prod`, Entra, database blob store); a Python `HEALTHCHECK` on `/health/ready`; Uvicorn with 4
+  workers (`SOC_API_WORKERS`). The ML engine's
   libraries come from the `WITH_PHISHING_ENGINE=true` build argument (scikit-learn, XGBoost, LightGBM, LangGraph; no
   PyTorch); compose sets `SOC_PHISHING_ENGINE=auto`, so an image built with them runs the models and one without uses
   the heuristic. `.dockerignore` keeps secrets, environments and local data out of the build context. Verified on
@@ -1558,20 +1593,29 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 - **The in-platform engine ignores the developer's `.env`** for behaviour that changes verdicts: local QR/barcode
   decoding is pinned on in `OFFLINE_SETTINGS` (it was on in the laptop's `.env` and off in the container, and one
   e-mail scored 0.82 vs 0.92).
-- **Compose** (`deploy/docker-compose.yml`):
-  - `postgres`
-  - `platform-api` (built-in scheduler off)
-  - `platform-scheduler`
+- **Compose** (`deploy/docker-compose.yml`, production by default; `docker-compose.demo.yml` switches to dev sign-in
+  and fixtures):
+  - `db-certs` (one-shot: the database's private CA and server certificate), `postgres` (TLS required on the network,
+    SCRAM, the owner / `soc_app` / `soc_engine` roles from `deploy/postgres/init-roles.sh`)
+  - `platform-migrate` (one-shot `init-db` as the schema owner, granting `soc_app`)
+  - `platform-api` (built-in scheduler off) and `platform-scheduler` (liveness-file health check), both as `soc_app`
+    over `sslmode=verify-full`, read-only root, no capabilities, memory limits, rotated logs
+  - profiles `tls` (Caddy, TLS 1.2+), `backup` (nightly `pg_dump`, 14 days)
   - optional `--profile engine` services: RabbitMQ, Redis, engine agents, sandbox executor. The executor never
     mounts the Docker socket; `docker-compose.dev.yml` does, for local development only.
   - The API binds to 127.0.0.1 by default; expose it through a TLS reverse proxy.
-- **Health:** `/health` reports status, version, audit-chain validity, connectors enabled, kill switch and scheduler
-  state (unauthenticated). For orchestrators: `/health/live` (the process answers; never touches the database, so a
+- **Health:** `/health` answers `{"status": "ok"}` to anyone and, to a signed-in reader, version, audit-chain
+  validity (incremental from the self-check's checkpoint), connectors enabled, kill switch and scheduler state. For orchestrators: `/health/live` (the process answers; never touches the database, so a
   database outage cannot trigger a restart storm) and `/health/ready` (the database answers: 503 + Retry-After
   otherwise, which takes the replica out of the load balancer).
-- **Metrics:** `/metrics` (Prometheus text): open cases by domain and severity, actions by status, open insights by severity, unresolved entities, seconds since each stream's last successful sync, and the kill switch.
+- **Metrics:** `/metrics` (Prometheus text): open cases by domain and severity, actions by status, open insights by severity, unresolved entities, seconds since each stream's last successful sync, the kill switch, scheduler heartbeat age, the audit chain's last full verification, failing jobs and break-glass uses. `deploy/kubernetes/monitoring` adds the ServiceMonitor and alert rules.
+- **Kubernetes:** images by digest only and signed by the release workflow (admission policy in
+  `deploy/kubernetes/policy`); the schema owner's credentials only in the `init-db` init container; default-deny
+  network policies with egress to the cluster resolver, HTTPS and the database only, the database pods given what
+  replication, the operator and backups need; on Azure, Key Vault secrets mounted as files (nothing in etcd) through
+  workload identity; Azure resources as code in `deploy/azure/main.bicep`.
 - **Backups:** PostgreSQL backups plus the encrypted file store; keep the data keys in the vault separately.
-- **Key rotation:** prepend a new `SOC_DATA_KEY`; old keys keep decrypting.
+- **Key rotation:** prepend a new `SOC_DATA_KEY`, run `blobs reencrypt`, then remove the old key.
 
 Operations detail: [OPERATIONS.md](OPERATIONS.md).
 
@@ -1673,6 +1717,12 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 90 | A value scorecard computed in code from the platform's own timestamps, with baselines, targets and time-study effort entered by a lead | Claim savings in the pitch; estimate effort from elapsed time | The customer's question is "what will we gain, in numbers, and how is it monitored"; elapsed time is not effort, so effort comes from a time study and the platform supplies volumes | Capacity is only as good as the time study; every input is audited with its source |
 | 91 | One sync per (connector, stream) at a time, by a database lease renewed per page; the second waits, then continues incrementally | Rely on job leases; catch the duplicate and carry on | Job leases stop the same job twice, not a manual sync or `demo` against a scheduled one; the Docker check showed the duplicate first checkpoint failing one of them | A sync that waits out `SOC_SYNC_LOCK_WAIT_SECONDS` skips and says so; a caller inside its own transaction (tests, a push) takes no lease |
 | 92 | One report house style (`reporting/design.py`) for every Word report and deck; recurring reports rebuilt around what the reader must act on | Office defaults per report; a client template only | Reports are the most repetitive work clients want automated; plain default documents were not fit to send. A client template still wins where supplied | Layout only: figures still come from the sources; `test_report_design.py` pins header, footer, page fields, charts, no 'None' / 'n/a' |
+| 93 | A tool call runs between two commits (`executing`, then the outcome); a lost outcome becomes `unverified`, never re-run | An outbox table and a separate executor process; keep the call inside the request's transaction | Inside the transaction the call held the audit chain's lock (every audited write waited) and a failed commit lost the record of an executed containment; two commits keep the synchronous answer analysts see, and the actions job covers deferred and stuck actions | `ActionService` is the one service that commits; inside a savepoint execution waits for the caller's commit |
+| 94 | Production fails closed: the image defaults to `prod`; dev sign-in isolates every live tool; Entra / live deployments must set their environment | Rely on operators setting `SOC_ENVIRONMENT=prod` | A forgotten variable ran a deployment as `dev`, where `/api/v1/dev/token` mints any role | Local `python -m soc_platform serve` still defaults to dev on loopback |
+| 95 | Owner / runtime database roles; append-only trigger; audit heads anchored in the log platform | One application role owning the schema; trust the database | The hash chain alone cannot show tampering by someone who can rewrite the whole table; the runtime role cannot, the trigger refuses it, and shipped heads expose it | `init-db` must run with the owner's credentials before each release's pods |
+| 96 | `sslmode=verify-full` (or `verify-ca`) required in production | libpq's default `prefer` | `prefer` accepts an unencrypted or intercepted connection without warning | A managed server needs `sslrootcert=system`; a private CA its file |
+| 97 | Image dependencies hash-locked on Linux in the base image (`pip-compile --generate-hashes`), constrained by `platform.lock`; images and CI actions pinned by digest / commit; releases signed | Constraints by version only; tags | A version pin does not stop a changed file; a moved tag runs other code (the scan action's tag had been removed upstream) | `supply_chain.py image-lock` needs Docker; `check` keeps the locks in step |
+| 98 | Privileged platform grants need a second administrator and end within 90 days; rollback is a policy-governed action; turning the kill switch off needs a lead | Trust administrators; rollback as an immediate undo | One administrator could create a lead from a second account; one lead could release a host whose isolation needed two | Standing privileged access belongs in Entra PIM |
 ---
 
 ## 26. Known limitations and trade-offs
@@ -1692,8 +1742,12 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
   phishing jobs now commit their cases before the model is asked, which shortens this, but the explanation step
   still writes its call log as it goes. PostgreSQL (row locks) is unaffected; use it for anything beyond a laptop
   demo.
-- **The dev sign-in keeps its token in `localStorage`.** That is acceptable in dev behind a strict CSP; production
-  uses Entra sign-in (MSAL), where token handling follows Microsoft's guidance.
+- **The console keeps the access token in `sessionStorage`** (this tab only, gone when it closes). A backend-for-
+  frontend with an HttpOnly cookie would keep it out of script reach entirely; the strict CSP and escaping are the
+  mitigation meanwhile.
+- **Infrastructure proved by rendering and compiling, not yet by a real deployment.** The Bicep template compiles
+  without warnings, the overlays render and are tested, and the production Compose stack was run end to end; a
+  `what-if` in the client's subscription and the failover drill on the real cluster are go-live steps.
 - **Security testing is internal** (automated pentest, fuzzing, XSS probe). An independent third-party test is still
   needed before go-live.
 - **Accessibility is automated** (axe-core); a manual screen-reader review has not been done.
@@ -1714,8 +1768,9 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
   officer.
 - **Request rate limits and tool budgets are per process.** The API's per-client limit (20/s, burst 120) is held in
   each server process, so with N workers a client may reach N times it; tool budgets are divided by
-  `SOC_CONNECTOR_RATE_SHARE`. A shared limiter (Redis, or the database) would make both exact; put the API's
-  limit on the reverse proxy for a hard ceiling (OPERATIONS.md, "Network edge").
+  `SOC_CONNECTOR_RATE_SHARE`. A shared limiter (Redis, or the database) would make both exact; the shared limit is
+  at the edge (ingress-nginx `limit-rps`, the WAF's rate-limit rule). The break-glass guessing throttle is per process
+  too (each replica allows five failures per address per 15 minutes).
 - **Backup and restore have not been rehearsed.** The procedure is documented (OPERATIONS.md); a restore drill on the
   target environment, with the audit chain verified afterwards, belongs in the go-live checklist.
 

@@ -3,10 +3,11 @@ kind: ConfigMap
 metadata:
   name: soc-platform-settings
 data:
-  SOC_ORG_DOMAINS: CHANGE-ME.example
+  SOC_ORG_DOMAINS: CHANGE-ME.example             # every mail domain, including the tenant's onmicrosoft.com one
   SOC_ENTRA_TENANT_ID: CHANGE-ME
   SOC_ENTRA_AUDIENCE: CHANGE-ME
   SOC_ENTRA_SPA_CLIENT_ID: CHANGE-ME
   SOC_ENTRA_SCOPE: CHANGE-ME
   SOC_TRUSTED_PROXIES: 10.0.0.0/24           # the ingress controller / load balancer addresses
+  SOC_DB_RUNTIME_ROLE: soc_runtime          # granted by init-db: read / write, append-only audit log, no DDL
   SOC_LLM_PROVIDER: none                     # or the client's LLM gateway (CLIENT_DEPLOYMENT_GUIDE.md)

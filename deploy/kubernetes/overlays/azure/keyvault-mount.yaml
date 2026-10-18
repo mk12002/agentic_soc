@@ -1,4 +1,4 @@
-# The CSI driver syncs Key Vault into the Secret only while a pod mounts the volume: every Deployment mounts it.
+# Every Deployment mounts the Key Vault files (the CSI driver fetches them with the workload identity).
 - op: add
   path: /spec/template/spec/volumes/-
   value:

@@ -61,25 +61,25 @@ DEFAULT_POLICY: dict[str, Any] = {
         "email.banner": {"level": 2},
         "email.move_to_junk": {"level": 2},
         "email.soft_delete": {"level": 2, "max_targets": 50},
-        "email.campaign_purge": {"level": 2, "max_targets": 200},
+        "email.campaign_purge": {"level": 2, "max_targets": 200, "four_eyes": True},
         "email.block_sender": {"level": 2},
         "email.reporter_feedback": {"level": 2},
         "email.auto_close_report": {"level": 2},
         # Identity
         "identity.revoke_sessions": {"level": 2, "max_targets": 10},
         "identity.disable_account": {"level": 2, "max_targets": 3, "four_eyes": True},
-        "identity.reset_password": {"level": 2, "max_targets": 10},
+        "identity.reset_password": {"level": 2, "max_targets": 10, "four_eyes": True},
         # Endpoint
         "endpoint.isolate": {"level": 2, "max_targets": 5, "four_eyes": True},
-        "endpoint.release": {"level": 2},
+        "endpoint.release": {"level": 2, "four_eyes": True},  # undoes a four-eyes isolation
         "endpoint.scan": {"level": 2},
         "endpoint.collect_forensics": {"level": 2},
         # Network / DNS
-        "dns.block_domain": {"level": 2},
+        "dns.block_domain": {"level": 2, "four_eyes": True},
         "dns.unblock_domain": {"level": 2},
         "indicator.block": {"level": 2},
         # Privileged access
-        "pam.rotate_secret": {"level": 2, "max_targets": 5},
+        "pam.rotate_secret": {"level": 2, "max_targets": 5, "four_eyes": True},
         # Vulnerability management
         "notify.email": {"level": 2},
         "ticket.create": {"level": 2},

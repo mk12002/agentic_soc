@@ -1,0 +1,14 @@
+# AGIC sends traffic from the Application Gateway's own subnet straight to pod IPs - not from a namespace - so the
+# base rule (ingress controller pods) is replaced by that subnet. The database is reachable only at its private
+# subnet (database-egress.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: soc-api-ingress
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: soc-api}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock: {cidr: 10.0.0.0/24}                     # CHANGE-ME: the Application Gateway subnet
+      ports: [{port: 8080, protocol: TCP}]

@@ -7,7 +7,9 @@
 | API + console | `python -m soc_platform serve` (or the `api` container) |
 | Scheduled jobs | Built into `serve` (on by default). For a dedicated service set `SOC_EMBEDDED_SCHEDULER=0` on the API and run `python -m soc_platform scheduler` (the `platform-scheduler` container). Any number of schedulers is safe. |
 | Run every job once | `python -m soc_platform scheduler --once` |
-| Create schema | `python -m soc_platform init-db` |
+| Create schema | `python -m soc_platform init-db` - run with the **schema owner's** credentials (production: the `platform-migrate` service / the `init-db` init container). With `SOC_DB_RUNTIME_ROLE` set it then grants that role read / write, an append-only audit log and no schema rights; the running platform signs in as that role with `SOC_SCHEMA_MANAGE=0` (it only checks the tables exist) |
+| Verify the audit chain | `python -m soc_platform audit verify [--anchor SEQ:HASH ...]` - recompute the whole chain; each `--anchor` is a head shipped earlier to the log pipeline (`audit.anchor` lines) that must still be there; exit 1 on any mismatch |
+| Re-encrypt stored files | `python -m soc_platform blobs reencrypt` - seal legacy plaintext and re-encrypt every stored e-mail / report under the newest `SOC_DATA_KEY`, after which an old key can be removed |
 | Demo on fixtures | `python -m soc_platform demo` |
 | Start a demo again from nothing | `python -m soc_platform reset-demo [--yes]` (server stopped; refuses in prod; demo databases only - the audit log goes too) |
 | Check the settings and the connector configuration | `python -m soc_platform config check [FILE] [--no-env]` - every problem in the `SOC_*` settings and in the connector configuration, each with how to fix it; exit 1 on errors |
@@ -21,7 +23,13 @@ isolated and shown on Integrations, and every other tool works.
 
 They also refuse to start when a `SOC_*` setting cannot be read - a word where a number belongs (`SOC_API_WORKERS=four`),
 a value out of range, an unknown choice (`SOC_ENVIRONMENT=production`), a malformed URL, JSON, CIDR, domain or key -
-and in production when sign-in is not Entra, step-up MFA is off or there is no encryption key. The message lists every
+and in production when sign-in is not Entra, step-up MFA is off, there is no encryption key, the database is SQLite
+or its URL does not verify the server certificate (`sslmode=verify-full` or `verify-ca`), or a model provider is set
+without an approved https endpoint. An Entra or live-tool deployment that does not set `SOC_ENVIRONMENT` at all is
+refused too (it would otherwise run as `dev`, with those protections off); the container image defaults to `prod`.
+Development sign-in (`SOC_AUTH_MODE=dev`) is refused with `SOC_CONNECTOR_MODE=live`, and every tool switched live by
+any route is isolated while it is on: anyone who reaches the port can mint a token with any role, so it only ever
+drives fixtures. A `SOC_DEV_JWT_SECRET` shorter than 32 characters is refused. The message lists every
 problem with its fix; before, the first bad value stopped the start with a bare conversion error, and some were read
 only later, mid-request. A setting name the platform does not know is reported with the nearest real one
 (`SOC_RAW_RETENTON_DAYS` - did you mean `SOC_RAW_RETENTION_DAYS`?) instead of being ignored silently.
@@ -81,11 +89,20 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 | retention | 24 h | prune raw payloads / emails / prompts / access log / old telemetry events per policy |
 | self_check | 1 h | platform consistency checks (see below) |
 | notify | 1 min | send new findings at or above the threshold to the configured Teams / Slack / webhook channels; retry failures |
+| actions | 1 min | run approved actions still waiting (e.g. approved by policy inside a job item, or left by a stopped process); mark any action stuck in `executing` longer than `SOC_ACTION_STUCK_SECONDS` (900) as `unverified` with a high finding - never re-run it |
 
 When several jobs are due at once (first start) they run in this order, vulnerability first, so incidents are
-scored knowing which hosts are exposed. Intervals: `SOC_JOB_<NAME>_SECONDS` (`SOC_JOB_NOTIFY_SECONDS` for notify). Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
+scored knowing which hosts are exposed. Intervals: `SOC_JOB_<NAME>_SECONDS` (`SOC_JOB_NOTIFY_SECONDS` for notify, `SOC_JOB_ACTIONS_SECONDS` for actions). Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
 failing 3 runs in a row is marked **dead_letter** and raises a high insight; fix the cause and use
 *Run now* / `POST /api/v1/jobs/{name}/run`. Jobs are idempotent, so replays never duplicate incidents or actions.
+
+**How an action reaches a tool.** The tool call never runs inside an open database transaction: `executing` and its
+audit record are committed first, then the tool is called, then the outcome and its audit record are committed. So
+no lock (the audit chain's included) is held while a tool answers, and an action that reached a tool is always on
+record. If the process or the database fails during the call, the action stays `executing`; the actions job then
+marks it **unverified** and raises "Action outcome unknown" - check the target in the tool's own console and note
+the result on the case. Autonomous actions approved by the policy inside a job are run right after the job commits;
+if the kill switch came on in between, they go back to waiting for a person.
 
 **Deferred explanations.** The incident and phishing jobs decide verdict, severity, evidence and recommendations
 without the model, commit, and only then ask the model for the written explanations, all of a run's cases at once
@@ -188,7 +205,7 @@ The application's rate limit is per process. With several replicas, set the shar
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `SOC_TRUSTED_PROXIES` | empty | Comma-separated addresses of your reverse proxies / gateways. Only a request whose direct peer is listed has its `X-Forwarded-For` read, and then the client is the **right-most** hop that is not itself a listed proxy (proxies append to the header, so its left-most entries are whatever the caller sent). The same peers' `X-Forwarded-Proto: https` turns on HSTS. List only real proxies. |
+| `SOC_TRUSTED_PROXIES` | empty | Comma-separated addresses **or CIDR ranges** (`10.0.0.0/24`, the gateway subnet) of your reverse proxies / gateways. Before the go-live review a range never matched, so behind a gateway every analyst shared one rate-limit bucket and the logs held the gateway's address. Only a request whose direct peer is listed has its `X-Forwarded-For` read, and then the client is the **right-most** hop that is not itself a listed proxy (proxies append to the header, so its left-most entries are whatever the caller sent). The same peers' `X-Forwarded-Proto: https` turns on HSTS. List only real proxies. |
 | `SOC_RATE_LIMIT_RPS` / `SOC_RATE_LIMIT_BURST` | 20 / 120 | Per-client token bucket, in process. Put a gateway / WAF limit in front for several replicas. |
 
 ## Server and database under load
@@ -208,7 +225,11 @@ PostgreSQL in production.
 | `SOC_DB_POOL_SIZE` / `SOC_DB_MAX_OVERFLOW` | 20 / 20 | Database connections per process (request threads, scheduler, access-log writer). PostgreSQL: keep `workers x (size + overflow)` under its `max_connections` |
 | `SOC_DB_POOL_TIMEOUT` | 10 | Seconds a request waits for a connection; then it answers **503** with `Retry-After` (not a hang, not a 500). A locked SQLite database or an unreachable database also answers 503 |
 | `SOC_DB_POOL_RECYCLE` | 1800 | Seconds before a connection is replaced. Connections are also checked before use, so a database restart or failover, or a firewall dropping idle connections, does not surface as errors |
-| `SOC_DB_STATEMENT_TIMEOUT_SECONDS` | 0 (no limit) | PostgreSQL: the longest one SQL statement may run before the database cancels it, so a runaway query releases its connection and locks instead of holding them. 120 is a sensible production value; keep 0 for a first backfill of a very large tenant |
+| `SOC_DB_STATEMENT_TIMEOUT_SECONDS` | 300 in prod, else 0 (no limit) | PostgreSQL: the longest one SQL statement may run before the database cancels it, so a runaway query releases its connection and locks instead of holding them. Every statement is per page or per item, so a large backfill is never one statement. A production value of 0 is reported by `config check` |
+| `SOC_DB_IDLE_TX_TIMEOUT_SECONDS` | 600 in prod, else 0 | PostgreSQL `idle_in_transaction_session_timeout`: a transaction left open by a stuck process is ended, so it cannot hold the audit chain's lock (and with it every audited write) for ever |
+| `SOC_SCHEMA_MANAGE` | 1 | 0 = this process never changes the schema; it checks the tables exist and stops with "run init-db" otherwise. Production sets 0: the runtime role has no schema rights |
+| `SOC_DB_RUNTIME_ROLE` | unset | read by `init-db`: the PostgreSQL role the platform runs as, granted read / write on every table, SELECT + INSERT only on `audit_log`, no schema rights |
+| `SOC_ACTION_STUCK_SECONDS` | 900 | an action `executing` longer than this lost its process: marked `unverified` by the actions job |
 | `SOC_SHUTDOWN_GRACE_SECONDS` | 20 | On SIGTERM (a deploy, `docker stop`) requests in flight get this long to finish; the scheduler service finishes the job in hand. The server then writes its last access-log rows and stops. Keep it below the orchestrator's grace period (compose: `stop_grace_period: 30s`) |
 | `SOC_RISK_CACHE_SECONDS` | 300 | The user / host risk ranking (brief, Intelligence screen) is reused while the data it reads is unchanged - exact within a process, and this is the age limit for changes made by other processes. Ranking 22,000 entities took 9.4 s per request before; now 4.7 s once, then 20 ms |
 
@@ -310,31 +331,49 @@ platform. The monthly board pack and the CISO weekly brief include the scorecard
 
 ## Monitoring
 
-* `/health` - DB, audit-chain verification, kill switch, scheduler state (`running` / `stuck` / `stale` / `never`,
-  number of live schedulers).
+* `/health` - anonymous callers get `{"status": "ok"}` only. Signed in (any role with read, or an auditor
+  key): version, audit-chain state, kill switch, scheduler state (`running` / `stuck` / `stale` / `never`, number of
+  live schedulers). The audit chain is fully re-hashed by the hourly self-check, which stores where it reached;
+  `/health` re-hashes only the records added since, at most once a minute (the full pass on every call grew with
+  the log and anyone could trigger it). A failed full pass stays reported until a later one succeeds.
 * `/health/live` (liveness: the process answers, no database) and `/health/ready` (readiness: the database answers,
   503 + Retry-After otherwise) - for load balancers and orchestrator probes.
 * `/metrics` - Prometheus: open cases, actions by status, insights, unresolved entities, per-stream sync age,
-  kill switch. Scrape with an **all-domain auditor service-account key** (`X-API-Key`). It carries every domain's
-  counts, so a domain-scoped key gets 403.
+  kill switch, scheduler heartbeat age (`soc_scheduler_heartbeat_age_seconds`), audit chain
+  (`soc_audit_chain_ok`), failing jobs (`soc_job_failing{job_name}`), break-glass uses in 24 h. Scrape with an
+  **all-domain auditor service-account key**, as `X-API-Key` or as `Authorization: Bearer sk_soc_...` (what a
+  ServiceMonitor can send). It carries every domain's counts, so a domain-scoped key gets 403.
+* Kubernetes with the Prometheus Operator: `kubectl apply -k deploy/kubernetes/monitoring` adds the ServiceMonitor
+  and the alert rules below (create the Secret `soc-metrics-key`, key `token`, holding the auditor key first).
+* Every hour the self-check logs `audit.anchor` (the chain's head sequence and hash). Keep those lines in the log
+  pipeline's write-once retention (SIEM / Log Analytics): someone able to rewrite the whole audit table and every
+  hash still cannot match heads already shipped. Verify with `python -m soc_platform audit verify --anchor SEQ:HASH`.
 * Integrations screen - connector state (healthy / stale / error / misconfigured), freshness per stream against
   its expected cadence, reconciliation, job runs.
 * Overview - enrichment latency (median/p95 per domain and per tool) and verdict-quality drift.
 
-Alert on: `soc_connector_last_success_age_seconds` above the stream's cadence, any `dead_letter` job,
-`soc_kill_switch == 1`, `/health` audit chain false, `/health` scheduler state `stale` or `stuck`, audit events
-`*.processing_failed` with `final: true` (an item left to an analyst after its retries).
+Alert on (deploy/kubernetes/monitoring/alerts.yaml has these rules): an API replica down, scheduler heartbeat
+older than 10 minutes, `soc_audit_chain_ok == 0`, any break-glass use, `soc_kill_switch == 1` for 30 minutes, a job
+failing for 30 minutes, any action `unverified`, `soc_connector_last_success_age_seconds` above 6 hours; also audit
+events `*.processing_failed` with `final: true` (an item left to an analyst after its retries).
 
 ## Access management
 
 * **Console sign-in (production):** `SOC_AUTH_MODE=entra` with `SOC_ENTRA_TENANT_ID` and `SOC_ENTRA_AUDIENCE`
   (`api://<app-id>`). The console runs the Entra ID authorization-code flow with PKCE itself (SPA redirect URI =
   the console's origin + `/`); `SOC_ENTRA_SPA_CLIENT_ID` / `SOC_ENTRA_SCOPE` override the client id and scope when
-  the console has its own app registration. The API must issue v2.0 access tokens
-  (`requestedAccessTokenVersion: 2` in its manifest). Step-by-step: `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 3.
+  the console has its own app registration. v2.0 (`requestedAccessTokenVersion: 2`) and v1 access tokens of the
+  tenant are both accepted, with a minute of clock-skew leeway. An application's own token (client credentials: no
+  delegated `scp`, or `idtyp=app`) is treated as a **service** - it never gets approve, policy or access permissions
+  whatever app roles it holds. Step-by-step: `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 3.
+* The console keeps the access token for the browser tab only (sessionStorage): closing the tab ends it.
 * Roles come from Entra app roles `SOC.<Role>` or `SOC.<Role>.<Domain>` (Domain = Phishing | Incident |
   Vulnerability) plus platform grants (Access screen / `/api/v1/admin/roles`), which are time-bound and audited.
   Nobody can grant or revoke their own access, and a domain-scoped administrator can grant only their own domains.
+  A **privileged** grant (lead, admin, automation_admin) must end within 90 days and takes effect only when a
+  *second* administrator - not its proposer, not its recipient - approves it (Access screen *Approve* /
+  `POST /api/v1/admin/roles/{id}/approve`): one administrator cannot make a second account of their own a lead.
+  Prefer Entra PIM for standing privileged roles.
 * **Each role keeps its own scope.** A user *sees* every domain any of their roles covers, but a permission counts
   only where the role that grants it applies. For example, `SOC.Lead.Phishing` plus `SOC.Auditor` reads all domains
   but approves phishing actions only, and a platform grant of auditor on all domains never widens a scoped lead.
@@ -349,14 +388,21 @@ Alert on: `soc_connector_last_success_age_seconds` above the stream's cadence, a
 
 ## Break-glass
 
-For Entra outages only. Generate a long random secret, store it sealed (two custodians), and configure only its
-hash: `SOC_BREAKGLASS_SHA256=$(printf %s "$SECRET" | sha256sum | cut -d' ' -f1)`. Use it with the header
-`X-Break-Glass: <secret>`. Every use and every failed attempt is audited and raises a critical insight. After use:
-review the access log, rotate the secret, record the incident.
+For Entra outages only. Generate a long random secret (32+ characters: `python -c "import secrets;
+print(secrets.token_urlsafe(32))"`), store it sealed (two custodians), and configure only its hash:
+`SOC_BREAKGLASS_SHA256=$(printf %s "$SECRET" | sha256sum | cut -d' ' -f1)`. Exchange it once for a 15-minute session:
+`curl -X POST -H "X-Break-Glass: <secret>" https://<console>/api/v1/auth/break-glass` returns a Bearer token; use
+that token, and exchange again after it expires. The secret itself is accepted nowhere else, so it is not repeated in
+every request or proxy log. Every use and every failed attempt is audited and raises a critical insight (and the
+`SocBreakGlassUsed` alert); five failures from one address in 15 minutes and that address is refused unseen for the
+rest of the window. Rotating the secret ends every break-glass session. After use: review the access log, rotate the
+secret, record the incident.
 
 ## Kill switch
 
 Console *Policy* → kill switch, or `POST /api/v1/kill-switch?on=true` (lead / admin / automation admin, MFA).
+Turning it **off** again re-enables autonomous actions, so it needs a lead (`approve_policy`), not an administrator
+alone.
 It is stored in the database, so every API replica and the scheduler stop executing actions **autonomously**
 immediately, and it survives restarts: every action then waits for a person's approval (it caps the policy at L3), while
 recommendations continue. A human-approved action still executes - analysts may still need to contain. To stop every
@@ -366,8 +412,8 @@ write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` fo
 
 | Data | Store | Protection |
 |---|---|---|
-| Cases, entities and relations, actions, findings, insights, jobs, policies, grants, saved report templates | Database (`SOC_DATABASE_URL`; PostgreSQL in prod) | DB access control; audit and access log append-only |
-| Audit chain, access log, LLM call log (redacted prompts + responses) | Database | Hash chain (audit); retention jobs for access / LLM logs |
+| Cases, entities and relations, actions, findings, insights, jobs, policies, grants, saved report templates | Database (`SOC_DATABASE_URL`; PostgreSQL in prod) | DB access control (runtime role: no schema rights); verified TLS in transit; the database's own encryption at rest (Azure: always on; on-prem: encrypted volumes) |
+| Audit chain, access log, LLM call log (redacted prompts + responses) | Database | Hash chain (audit), refused UPDATE / DELETE / TRUNCATE by a database trigger and by the runtime role's grants, heads anchored hourly in the log pipeline; retention jobs for access / LLM logs |
 | Reported emails (and raw vendor payloads when enabled) | `SOC_BLOB_STORE`: the `blobs` table, or `SOC_RAW_PAYLOAD_DIR` | Encrypted (Fernet), SHA-256 checked on read (database store), retention with legal hold |
 | Generated reports, post-incident reports, compliance packs | `SOC_BLOB_STORE`: the `blobs` table, or `SOC_REPORT_OUTPUT_DIR` (on the database store the folder is scratch only) | Encrypted; decrypted only on an authorised, scope-checked download |
 | Attack stories | Not stored - rebuilt from records on request; only the deep-analysis result is cached on the case | - |
@@ -376,7 +422,14 @@ write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` fo
 ## Data protection
 
 * `SOC_DATA_KEY` (Fernet; comma-separated for rotation, first encrypts) encrypts raw payloads and reported
-  emails, generated reports and evidence packs at rest; mandatory in prod. Rotate: prepend a new key, keep the old one until retention has cycled.
+  emails, generated reports and evidence packs at rest; mandatory in prod. In prod a stored file without the
+  encryption marker is **refused** (it used to be returned as "legacy plaintext", so anyone able to write to the store
+  could substitute content). Rotate: prepend a new key, run `python -m soc_platform blobs reencrypt` (seals legacy
+  plaintext, re-encrypts everything under the new key), then remove the old key.
+* Before a model call, internal identities are pseudonymised: addresses in `SOC_ORG_DOMAINS` (include the tenant's
+  `<name>.onmicrosoft.com`), `DOMAIN\user` accounts, host names under the organisation's domains, the case's own
+  device names, and internal IP addresses (RFC 1918, carrier-grade NAT, link-local). Public IPs, external domains and
+  URLs stay - they are the evidence.
 * Retention: `SOC_RAW_RETENTION_DAYS` (180), `SOC_LLM_LOG_RETENTION_DAYS` (180), `SOC_ACCESS_LOG_RETENTION_DAYS`
   (400), `SOC_EVENT_RETENTION_DAYS` (400; 0 keeps everything). Emails of open cases are kept (legal hold). The audit
   log is never pruned by the platform.
@@ -390,7 +443,9 @@ write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` fo
 
 ## Backups
 
-Back up the database (point-in-time). With `SOC_BLOB_STORE=database` that is everything; with the file store, also
+Back up the database (point-in-time; Azure: 35 days, geo-redundant in deploy/azure/main.bicep; on-prem:
+CloudNativePG base backups + WAL, encrypted in the bucket; single host: `docker compose --profile backup` writes a
+nightly dump kept 14 days - copy it off the host, encrypted). With `SOC_BLOB_STORE=database` that is everything; with the file store, also
 the raw payload and report folders. Escrow `SOC_DATA_KEY` in two places: without it stored e-mails and reports cannot
 be decrypted. After a restore: `GET /api/v1/audit/verify` (the chain is intact) and `python -m soc_platform blobs
 check` (every stored file resolves). Recovery targets, the failover drill and the reference HA deployments are in

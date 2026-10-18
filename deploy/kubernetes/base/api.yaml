@@ -39,9 +39,12 @@ spec:
         - name: init-db                        # creates / extends the schema (idempotent; serialised by an advisory lock)
           image: soc-platform
           command: ["python", "-m", "soc_platform", "init-db"]
+          # the only container with the schema owner's credentials (soc-platform-migrator, last so it wins); it then
+          # grants SOC_DB_RUNTIME_ROLE read / write and an append-only audit log, and nothing that changes the schema
           envFrom:
             - configMapRef: {name: soc-platform-settings}
-            - secretRef: {name: soc-platform-secrets}
+            - secretRef: {name: soc-platform-secrets, optional: true}
+            - secretRef: {name: soc-platform-migrator, optional: true}
           securityContext: &restricted
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -53,9 +56,9 @@ spec:
           image: soc-platform
           command: ["python", "-m", "soc_platform", "serve"]
           ports: [{name: http, containerPort: 8080}]
-          envFrom:
+          envFrom:                             # the runtime role: no schema changes (SOC_SCHEMA_MANAGE=0)
             - configMapRef: {name: soc-platform-settings}
-            - secretRef: {name: soc-platform-secrets}
+            - secretRef: {name: soc-platform-secrets, optional: true}  # overlays may mount files instead (*_FILE)
             - secretRef: {name: soc-connector-secrets, optional: true}   # ${VAR} references in connectors.yaml
           securityContext: *restricted
           # sized for 2-vCPU nodes: one worker process per pod. Measured: one process served 43 requests/s; four

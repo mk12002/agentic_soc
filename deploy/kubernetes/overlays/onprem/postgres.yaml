@@ -1,19 +1,33 @@
 # PostgreSQL with no single point of failure: three instances on three nodes, one synchronous replica (a committed
 # transaction survives the loss of the primary), automatic failover by the operator, a PgBouncer pooler in front
 # (two replicas) so a failover only changes where the pooler connects, and base backups + WAL archiving to an
-# S3-compatible store for point-in-time recovery.
+# S3-compatible store for point-in-time recovery, encrypted in the bucket.
+# Roles: "soc" owns the schema (init-db only); "soc_runtime" is what the platform runs as. Create its Secret first:
+#   kubectl -n agentic-soc create secret generic soc-pg-runtime --type=kubernetes.io/basic-auth \
+#     --from-literal=username=soc_runtime --from-literal=password=<long random>
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: soc-pg
 spec:
   instances: 3
-  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  imageName: ghcr.io/cloudnative-pg/postgresql:16@sha256:34cd4159d07b3410a1b29da35072e2e927a0905e717a61afa3814624a2e8859a
   minSyncReplicas: 1
   maxSyncReplicas: 1
   primaryUpdateStrategy: unsupervised
   bootstrap:
     initdb: {database: soc_platform, owner: soc}     # the operator writes the soc-pg-app Secret (uri, password)
+  managed:
+    roles:
+      - name: soc_runtime                             # granted by init-db (SOC_DB_RUNTIME_ROLE): no DDL, append-only audit
+        ensure: present
+        login: true
+        passwordSecret: {name: soc-pg-runtime}
+  certificates:
+    serverAltDNSNames:                                # the pooler presents the cluster's certificate: verify-full works
+      - soc-pg-pooler
+      - soc-pg-pooler.agentic-soc
+      - soc-pg-pooler.agentic-soc.svc
   postgresql:
     parameters:
       max_connections: "300"     # API pods x workers x (pool + overflow) + schedulers must fit (HIGH_AVAILABILITY.md)
@@ -32,7 +46,8 @@ spec:
       s3Credentials:
         accessKeyId: {name: soc-backup-store, key: ACCESS_KEY_ID}
         secretAccessKey: {name: soc-backup-store, key: ACCESS_SECRET_KEY}
-      wal: {compression: gzip}
+      wal: {compression: gzip, encryption: AES256}
+      data: {encryption: AES256}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup

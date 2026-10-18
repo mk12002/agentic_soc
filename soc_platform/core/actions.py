@@ -106,6 +106,7 @@ class ActionService:
         evidence_ids: list[str] | None = None,
         key: str | None = None,
         ceiling: tuple[int, str] | None = None,
+        reverse_of: str | None = None,
     ) -> ActionRequest:
         spec = self.registry.get(action_type)
         params = params or {}
@@ -145,7 +146,7 @@ class ActionService:
             requested_by_type=requested_by.actor_type, idempotency_key=key,
             status=decision.outcome if decision.outcome != "execute" else "approved",
             autonomy_level=int(decision.effective_level), policy_reasons=decision.reasons,
-            precondition_failures=failures,
+            precondition_failures=failures, reverse_of=reverse_of,
         )
         req.result = {"high_impact": decision.high_impact, "four_eyes": decision.four_eyes}
         try:
@@ -223,6 +224,9 @@ class ActionService:
         return req
 
     def rollback(self, request_id: str, by: Principal, note: str = "") -> ActionRequest:
+        """Request the reverse of an executed action. It is an action like any other: the policy, its four-eyes rule,
+        the tool's rollout stage and pre-conditions apply (releasing an isolated host is as consequential as
+        isolating it). The original is marked ``rolled_back`` when the reverse executes."""
         req = self._get(request_id)
         if req.status != "executed":
             raise ValueError("only executed actions can be rolled back")
@@ -233,21 +237,11 @@ class ActionService:
         if rev is None or spec.reverse_type is None:
             raise ValueError(f"{req.action_type} has no reverse action on this platform")
         params, targets = rev
-        rev_spec = self.registry.get(spec.reverse_type)
-        rev_req = ActionRequest(
-            action_type=spec.reverse_type, params=params, targets=targets, case_id=req.case_id,
-            domain=req.domain, rationale=f"rollback of {req.id}: {note}", requested_by=by.id,
-            requested_by_type="human", idempotency_key=f"rollback:{req.id}", status="approved",
-            autonomy_level=3, approver=by.id, reverse_of=req.id, decided_at=utcnow(),
-        )
-        self.s.add(rev_req)
-        self.s.flush()
         self.audit.append(actor_type="human", actor_id=by.id, event_type="action.rollback_requested",
-                          subject_type="action", subject_id=req.id, payload={"reverse_action": rev_req.id, "note": note})
-        self._execute(rev_req, rev_spec, actor=by)
-        if rev_req.status == "executed":
-            req.status = "rolled_back"
-        return rev_req
+                          subject_type="action", subject_id=req.id, payload={"reverse_type": spec.reverse_type, "note": note})
+        return self.request(spec.reverse_type, params=params, targets=targets, requested_by=by, case_id=req.case_id,
+                            domain=req.domain, rationale=f"rollback of {req.id}: {note}", key=f"rollback:{req.id}",
+                            reverse_of=req.id)
 
     # ------------------------------------------------------------------ internals
 
@@ -255,13 +249,34 @@ class ActionService:
         return p.can(Perm.APPROVE_HIGH_IMPACT) if high_impact else p.can(Perm.APPROVE_ACTION)
 
     def _execute(self, req: ActionRequest, spec: ActionSpec, *, actor: Principal) -> ActionRequest:
+        """Change the outside world, durably. The tool call never runs inside an open transaction:
+
+        1. ``approved -> executing`` and its audit record are committed first, so an action that reaches the tool is
+           always on record, and no row or audit-chain lock is held while the tool answers (it may take 30 s);
+        2. the tool is called;
+        3. the outcome and its audit record are committed.
+
+        A crash or failover between 1 and 3 leaves ``executing``; ``reconcile_stuck`` turns that into ``unverified``
+        for a person to check in the tool - it is never run again blindly (a containment is not idempotent). Inside
+        a caller's savepoint (a job's per-item isolation) nothing can be committed, so the action stays ``approved``
+        and runs right after the caller commits (``execute_pending``; the ``actions`` job is the safety net)."""
+        if self.s.in_nested_transaction():
+            pending = self.s.info.setdefault("soc_pending_actions", [])
+            if req.id not in pending:
+                pending.append(req.id)
+            return req
         claimed = self.s.execute(
             update(ActionRequest).where(ActionRequest.id == req.id, ActionRequest.status == "approved")
-            .values(status="executing")
+            .values(status="executing", started_at=utcnow())
         ).rowcount
         if claimed != 1:
             self.s.refresh(req)
             return req
+        self.audit.append(actor_type=actor.actor_type, actor_id=actor.id, event_type="action.executing",
+                          subject_type="action", subject_id=req.id,
+                          payload={"action_type": req.action_type, "tool": spec.tool, "targets": req.targets,
+                                   "approver": req.approver})
+        self.s.commit()
         try:
             result = spec.execute(req.params, req.targets) or {}
             status = "executed"
@@ -269,7 +284,7 @@ class ActionService:
             result = {"error": f"{type(exc).__name__}: {exc}"}
             status = "failed"
         self.s.execute(
-            update(ActionRequest).where(ActionRequest.id == req.id)
+            update(ActionRequest).where(ActionRequest.id == req.id, ActionRequest.status == "executing")
             .values(status=status, result={**(req.result or {}), **result}, executed_at=utcnow())
         )
         self.s.refresh(req)
@@ -277,7 +292,69 @@ class ActionService:
                           subject_type="action", subject_id=req.id,
                           payload={"action_type": req.action_type, "tool": spec.tool, "result": result,
                                    "approver": req.approver})
+        if status == "executed" and req.reverse_of:
+            self.s.execute(update(ActionRequest).where(ActionRequest.id == req.reverse_of,
+                                                       ActionRequest.status == "executed").values(status="rolled_back"))
+        self.s.commit()
         return req
+
+    def execute_pending(self, ids: list[str] | None = None, *, kill_switch: bool | None = None,
+                        limit: int = 100) -> list[ActionRequest]:
+        """Run approved actions that are waiting for execution: those deferred inside a savepoint (this session's
+        list, or ``ids``) and - with ``ids=None`` - any other ``approved`` action (a process that stopped before
+        running one). Call only with no savepoint open. An autonomous (policy-approved) action is held for a person
+        if the kill switch was turned on in the meantime; one whose tool is now paused or switched off is blocked."""
+        from soc_platform.core.auth import agent_principal
+
+        wanted = list(dict.fromkeys((ids or []) + list(self.s.info.pop("soc_pending_actions", []))))
+        q = select(ActionRequest).where(ActionRequest.status == "approved").order_by(ActionRequest.created_at)
+        if ids is not None:
+            q = q.where(ActionRequest.id.in_(wanted or [""]))
+        rows = list(self.s.execute(q.limit(limit)).scalars())
+        out = []
+        for req in rows:
+            autonomous = (req.approver or "").startswith("policy:")
+            if autonomous and (kill_switch if kill_switch is not None else self.policy.kill_switch):
+                req.status = "pending_approval"
+                self.audit.append(actor_type="system", actor_id="kill_switch", event_type="action.held_kill_switch",
+                                  subject_type="action", subject_id=req.id, payload={"action_type": req.action_type})
+                self.s.commit()
+                out.append(req)
+                continue
+            try:
+                spec = self.registry.get(req.action_type)
+            except KeyError as exc:
+                req.status, req.precondition_failures = "blocked", [str(exc)[:300]]
+                self.audit.append(actor_type="system", actor_id="actions", event_type="action.blocked",
+                                  subject_type="action", subject_id=req.id, payload={"failures": req.precondition_failures})
+                self.s.commit()
+                out.append(req)
+                continue
+            actor = (agent_principal(req.requested_by.removeprefix("agent:")) if autonomous
+                     else Principal(id=req.approver or "unknown", name=req.approver or "unknown"))
+            out.append(self._execute(req, spec, actor=actor))
+        return out
+
+    def reconcile_stuck(self, older_than_seconds: float) -> list[ActionRequest]:
+        """Actions left ``executing`` (the process died or the database failed over during the tool call): the tool
+        may or may not have acted. Mark them ``unverified`` and raise a finding for a person to check in the tool."""
+        from datetime import timedelta
+
+        cutoff = utcnow() - timedelta(seconds=older_than_seconds)
+        rows = list(self.s.execute(select(ActionRequest).where(
+            ActionRequest.status == "executing", ActionRequest.started_at < cutoff)).scalars())
+        for req in rows:
+            claimed = self.s.execute(update(ActionRequest).where(
+                ActionRequest.id == req.id, ActionRequest.status == "executing").values(status="unverified")).rowcount
+            if claimed != 1:
+                continue
+            self.s.refresh(req)
+            self.audit.append(actor_type="system", actor_id="actions", event_type="action.outcome_unknown",
+                              subject_type="action", subject_id=req.id,
+                              payload={"action_type": req.action_type, "targets": req.targets,
+                                       "started_at": req.started_at.isoformat() if req.started_at else None})
+            _raise_unverified(self.s, req)
+        return rows
 
     def _get(self, request_id: str) -> ActionRequest:
         req = self.s.get(ActionRequest, request_id)
@@ -306,6 +383,24 @@ class ActionService:
 
 
 __all__ = ["ActionRegistry", "ActionService", "ActionSpec", "PolicyDecision", "idempotency_key"]
+
+
+def _raise_unverified(s: Session, req: ActionRequest) -> None:
+    """A finding a person sees: the action may have run in the tool, the platform cannot tell."""
+    from soc_platform.intelligence.models import Insight  # same pattern as break-glass (access.py)
+
+    key = f"action_unverified:{req.id}"
+    if s.execute(select(Insight.id).where(Insight.dedupe_key == key)).first() is not None:
+        return
+    s.add(Insight(rule="action_outcome_unknown", dedupe_key=key, severity="high", score=80.0,
+                  title=f"Action outcome unknown: {req.action_type}", domains=[req.domain] if req.domain else [],
+                  entity_ids=[], evidence=[{"action_id": req.id, "targets": req.targets}],
+                  narrative=(f"{req.action_type} was sent to the tool but its result was never recorded (the process "
+                             "stopped or the database failed over during the call). The tool may or may not have acted."),
+                  next_steps=["Check the target's state in the tool's own console",
+                              "Record what happened as a note on the case", "Request the action again only if it did not run"],
+                  requirement_refs=["NFR-03"]))
+    s.flush()
 
 
 _STRONG_TARGET_KEYS = ("crowdstrike_aid", "mde_device_id", "entra_object_id", "upn", "network_message_id", "wiz_id")

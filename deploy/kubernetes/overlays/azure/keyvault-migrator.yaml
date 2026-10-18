@@ -1,0 +1,8 @@
+# The init-db container reads the schema owner's URL; the API and scheduler never see it.
+- op: add
+  path: /spec/template/spec/initContainers/0/volumeMounts/-
+  value: {name: keyvault, mountPath: /mnt/secrets, readOnly: true}
+- op: add
+  path: /spec/template/spec/initContainers/0/env
+  value:
+    - {name: SOC_DATABASE_URL_FILE, value: /mnt/secrets/soc-database-migrator-url}

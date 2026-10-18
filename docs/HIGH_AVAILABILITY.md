@@ -42,6 +42,8 @@ of each and a highly available PostgreSQL.
 | Deploys and drains never drop capacity | Rolling updates with `maxUnavailable: 0`; disruption budgets; a `preStop` pause so the load balancer stops routing before shutdown; graceful shutdown finishes requests in flight and the job in hand | `test_deployment_manifests.py` |
 | Signed-in analysts keep working through an Entra outage | Signing keys already seen are kept per process; only a new key id needs Entra | `test_high_availability.py` |
 | A crash between the two steps of a job loses nothing | The incident and phishing jobs commit the cases, then write the model explanations; explanations still pending are picked up by the next run | `test_incident.py` |
+| A crash or failover during a tool call never re-runs or hides an action | `executing` and its audit record are committed before the tool is called, the outcome after; no transaction (or audit-chain lock) is open during the call. An action left `executing` is marked `unverified` with a finding by the actions job, never run again | `test_core_governance.py` |
+| A stuck process cannot hold locks for ever | Production defaults: `statement_timeout` 300 s, `idle_in_transaction_session_timeout` 600 s | `test_go_live_hardening.py` (settings), `OPERATIONS.md` |
 
 The PostgreSQL advisory lock is a safeguard: in testing, eight engines creating the schema at once on PostgreSQL
 succeeded with and without it, because PostgreSQL's own catalogue locking usually serialises them. The SQLite start-up
@@ -64,7 +66,7 @@ cost and the organisation's operating model - the application does not change.
  | soc-api            | soc-api            | soc-api            |  3 API replicas, one per zone (autoscaled to 4)
  | soc-scheduler      | soc-scheduler      |                    |  2 schedulers, different zones
  +--------------------+--------------------+--------------------+
-                                   | private endpoint
+                                   | private (VNet-integrated) access, TLS verify-full
  +--------------------------------------------------------------+
  | Azure Database for PostgreSQL Flexible Server                |
  | zone-redundant HA: synchronous standby in another            |
@@ -74,6 +76,15 @@ cost and the organisation's operating model - the application does not change.
  Key Vault (CSI driver + workload identity) | Azure Monitor / Prometheus | the client's ACR
 ```
 
+* The Azure resources themselves are code: `deploy/azure/main.bicep` (VNet with subnets for the gateway, AKS,
+  PostgreSQL and private endpoints; private AKS with Entra-only sign-in, workload identity, Key Vault CSI with
+  rotation, AGIC and Azure Policy; Flexible Server 16 zone-redundant with 35-day geo-redundant backup, TLS only,
+  `pg_trgm` allowed; Key Vault with purge protection and no public access; ACR; every resource's logs to one Log
+  Analytics workspace). SKUs follow INFRASTRUCTURE_AND_COSTS.md section 10. Internal console: AGIC drives the
+  organisation's existing Application Gateway (`existingAppGatewayId`; its owner grants the AGIC identity Contributor
+  on it). Internet-facing (`internetFacing=true`): a zone-redundant WAF v2 gateway in prevention mode (OWASP 3.2, bot
+  rules, a per-client rate limit shared across replicas, TLS 1.2+) is created - decision D5. The template compiles
+  with `az bicep build` (no warnings); run `what-if` against the subscription before the first deployment.
 * Stored files: in the database (`SOC_BLOB_STORE=database`) - no storage account to make redundant.
 * Disaster recovery to the paired region: geo-restore of the database (or a cross-region read replica promoted),
   the same manifests applied to a cluster there, DNS / gateway switched.
@@ -111,30 +122,48 @@ it is a single point of failure by design.
 
 ## 4. Deploying the Kubernetes package
 
-1. **Image**: build `deploy/Dockerfile`, push it to the organisation's registry, and set `images:` in the overlay
-   (pin by digest).
-2. **Secrets** (never in the manifests or a ConfigMap):
-   * Azure: put `soc-database-url`, `soc-data-key`, `soc-llm-api-key`, `soc-breakglass-sha256` in Key Vault and fill
-     `overlays/azure/keyvault-secrets.yaml` (vault name, tenant, workload identity client id).
-   * On-prem: the operator creates `soc-pg-app` (database password). Create the rest:
+1. **Image**: tag a release (`v*`): CI builds both images, pushes them to the registry and signs them by digest
+   (cosign, keyless). Set `images:` in the overlay to that **digest** (the overlays take only a digest), and enforce
+   the signature at admission (`deploy/kubernetes/policy/verify-images.yaml`, Kyverno; Azure Policy + Ratify is the
+   Azure-native alternative).
+2. **Database roles**: the platform runs as a role without schema rights; only the `init-db` init container signs in
+   as the schema owner, then grants the runtime role (`SOC_DB_RUNTIME_ROLE`) read / write and an append-only audit
+   log. Every connection verifies the server certificate (`sslmode=verify-full`).
+3. **Secrets** (never in the manifests or a ConfigMap):
+   * Azure: put `soc-database-url` (runtime role, `?sslmode=verify-full&sslrootcert=system`),
+     `soc-database-migrator-url` (schema owner), `soc-data-key`, `soc-llm-api-key`, `soc-breakglass-sha256` in Key
+     Vault and fill `overlays/azure/keyvault-secrets.yaml` and `serviceaccount.yaml` (vault name, tenant, workload
+     identity client id - outputs of `main.bicep`). They are mounted as files and read through `*_FILE` settings;
+     nothing is synced into a Kubernetes Secret.
+   * On-prem: the operator creates `soc-pg-app` (schema owner) and `soc-pg-ca` (the cluster's CA). Create the rest:
      ```bash
+     kubectl -n agentic-soc create secret generic soc-pg-runtime --type=kubernetes.io/basic-auth \
+       --from-literal=username=soc_runtime --from-literal=password="$(openssl rand -base64 33)"
      kubectl -n agentic-soc create secret generic soc-platform-secrets \
-       --from-literal=SOC_DATA_KEY="$(cat data-key.txt)" --from-literal=SOC_LLM_API_KEY=... 
+       --from-literal=SOC_DATA_KEY="$(cat data-key.txt)" --from-literal=SOC_LLM_API_KEY=...
      kubectl -n agentic-soc create secret generic soc-backup-store --from-literal=ACCESS_KEY_ID=... --from-literal=ACCESS_SECRET_KEY=...
      kubectl -n agentic-soc create secret tls soc-tls --cert=soc.crt --key=soc.key
      ```
+     Kubernetes Secrets are only base64 in etcd: switch on etcd encryption at rest (`EncryptionConfiguration`, KMS
+     provider where available).
    * Connector credentials (the `${VAR}` names in `config/connectors.yaml`) go in the optional Secret
-     `soc-connector-secrets`.
-3. **Settings**: replace every `CHANGE-ME` in the overlay's `settings.yaml` and `ingress.yaml`; label the ingress
-   controller's namespace `soc-ingress=true` (the network policy admits only it).
-4. **Check, then apply**:
+     `soc-connector-secrets` (on Azure: Key Vault objects mounted as files, `<VAR>_FILE` in the settings).
+4. **Settings and network**: replace every `CHANGE-ME` in the overlay (`settings.yaml`, `ingress.yaml`, Azure
+   `network.yaml` / `database-egress.yaml` subnets). On-prem, label the ingress controller's namespace
+   `soc-ingress=true` (the policy admits only the ingress-nginx pods there). Every pod in the namespace starts from
+   default-deny: the platform may reach DNS (the cluster resolver), HTTPS, and the database only (Azure: its subnet;
+   on-prem: the pooler); the CloudNativePG pods get their own policy (replication, operator, backups) - without it
+   default-deny would cut the database off.
+5. **Monitoring**: `kubectl apply -k deploy/kubernetes/monitoring` (Prometheus Operator) - ServiceMonitor and alert
+   rules (`OPERATIONS.md` - Monitoring).
+6. **Check, then apply**:
    ```bash
    kubectl kustomize deploy/kubernetes/overlays/azure | less        # review what will be applied
    kubectl apply -k deploy/kubernetes/overlays/azure
    kubectl -n agentic-soc rollout status deploy/soc-api deploy/soc-scheduler
    kubectl -n agentic-soc exec deploy/soc-api -- python -m soc_platform config check
    ```
-5. **Prove it** with the failover drill (section 7) before go-live.
+7. **Prove it** with the failover drill (section 7) before go-live.
 
 ### 4.1 Connection budget
 
@@ -178,10 +207,11 @@ are migrated. A file that cannot be read is listed, never dropped. The migration
 
 | What | How | Notes |
 |---|---|---|
-| Database (all state, including stored files) | Point-in-time recovery: managed backups (cloud) or base backups + continuous WAL archiving to a second location (on-prem) | The single thing to back up when `SOC_BLOB_STORE=database` |
+| Database (all state, including stored files) | Point-in-time recovery: managed backups (cloud: 35 days, geo-redundant in `main.bicep`) or base backups + continuous WAL archiving to a second location, AES-256 encrypted in the bucket (on-prem) | The single thing to back up when `SOC_BLOB_STORE=database` |
 | `SOC_DATA_KEY` | **Escrow it in two places** (the production vault and a sealed offline copy or a second vault) | Without it, stored e-mails and reports cannot be decrypted - a lost key is lost data. Rotation keeps old keys for reading (`OPERATIONS.md` - Data protection). |
 | Configuration | `config/` in source control; console changes are versioned in the database; `python -m soc_platform config export` | |
-| Image | The registry, pinned by digest | |
+| Image | The registry, pinned by digest and signed | |
+| Audit chain heads | `audit.anchor` log lines (hourly) in the log platform's write-once retention | After a restore, `python -m soc_platform audit verify --anchor SEQ:HASH` proves the restored history matches what was shipped |
 
 **After any restore**: `GET /api/v1/audit/verify` (the hash chain is intact), `python -m soc_platform blobs check`
 (every stored file resolves), `/health` (scheduler running, self-check passing).

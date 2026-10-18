@@ -58,10 +58,11 @@ The only secret on the VM is the Azure OpenAI key.
 ## 5. Every change is checked
 
 Locally before a commit (CLAUDE.md section 9) and again in CI (`.github/workflows/ci.yml`) on every push: lint,
-static security analysis (bandit), dependency audit of the lock (`requirements/platform.lock`), lock consistency, the
-full test suite on SQLite and on PostgreSQL, a secret and confidential-name scan, gitleaks over the history, a CycloneDX
-SBOM (`scripts/supply_chain.py sbom`, kept as a build artefact) and a container image scan (Trivy, fails on fixable
-high / critical findings).
+static security analysis (bandit), dependency audit of the locks (`requirements/platform.lock` and the engine image's
+hashed lock), lock consistency, the full test suite on SQLite and on PostgreSQL, a secret and confidential-name scan,
+gitleaks over the history, a CycloneDX SBOM (`scripts/supply_chain.py sbom`, kept as a build artefact) and scans of
+both container images (Trivy, fails on fixable high / critical findings). Every CI action is pinned to a commit SHA;
+a release tag also pushes and signs the images.
 
 ## 6. Decommissioning (end of the month)
 

@@ -1,0 +1,32 @@
+# Admission control (Kyverno): pods in agentic-soc run only images signed by this repository's release workflow
+# (keyless cosign signature, .github/workflows/ci.yml job "release"), referenced by digest. An image pushed by
+# anyone else - or a tag moved to other content - is refused before it starts.
+#   kubectl apply -f deploy/kubernetes/policy/verify-images.yaml        (Kyverno installed in the cluster)
+# Images mirrored into a private registry keep their signature when copied with `cosign copy`. Azure alternative:
+# Azure Policy for AKS with Ratify. Set CHANGE-ME to the GitHub organisation / repository and the registry.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: soc-verify-images
+spec:
+  validationFailureAction: Enforce
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: signed-by-the-release-workflow
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [agentic-soc]
+      verifyImages:
+        - imageReferences: ["CHANGE-ME-registry/soc-*"]
+          mutateDigest: false
+          verifyDigest: true                    # a tag alone is refused
+          required: true
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: https://token.actions.githubusercontent.com
+                    subject: "https://github.com/CHANGE-ME/CHANGE-ME/.github/workflows/ci.yml@refs/tags/v*"
+                    rekor: {url: https://rekor.sigstore.dev}

@@ -1,0 +1,47 @@
+# What an operator must hear about without opening the console. A stopped scheduler cannot raise a finding of its
+# own, so these rules watch it from outside. Route "critical" to the on-call channel.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: soc-platform
+spec:
+  groups:
+    - name: soc-platform
+      rules:
+        - alert: SocApiDown
+          expr: up{job=~".*soc-api.*"} == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "An API replica is not answering /metrics"}
+        - alert: SocSchedulerStopped
+          expr: max(soc_scheduler_heartbeat_age_seconds) > 600 or max(soc_scheduler_heartbeat_age_seconds) < 0
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "No scheduler heartbeat for 10 minutes: no ingestion, investigation or alerting runs"}
+        - alert: SocAuditChainBroken
+          expr: max(soc_audit_chain_ok) == 0
+          labels: {severity: critical}
+          annotations: {summary: "The audit log's hash chain failed verification: treat as possible tampering"}
+        - alert: SocBreakGlassUsed
+          expr: max(soc_break_glass_uses_24h) > 0
+          labels: {severity: critical}
+          annotations: {summary: "Emergency (break-glass) access was used in the last 24 hours"}
+        - alert: SocKillSwitchOn
+          expr: max(soc_kill_switch) == 1
+          for: 30m
+          labels: {severity: warning}
+          annotations: {summary: "Automated actions have been halted for 30 minutes"}
+        - alert: SocJobFailing
+          expr: max by (job_name) (soc_job_failing) == 1
+          for: 30m
+          labels: {severity: warning}
+          annotations: {summary: "Job {{ $labels.job_name }} keeps failing (see /api/v1/jobs)"}
+        - alert: SocActionOutcomeUnknown
+          expr: max(soc_actions{status="unverified"}) > 0
+          labels: {severity: critical}
+          annotations: {summary: "An action reached a tool but its result was not recorded: verify it in the tool"}
+        - alert: SocConnectorStale
+          expr: max by (connector, stream) (soc_connector_last_success_age_seconds) > 21600
+          for: 30m
+          labels: {severity: warning}
+          annotations: {summary: "{{ $labels.connector }}/{{ $labels.stream }} has not synced for 6 hours"}

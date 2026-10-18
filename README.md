@@ -61,7 +61,8 @@ pip install -r requirements/phishing.txt
 
 ```bash
 cp .env.example .env    # set POSTGRES_PASSWORD, SOC_DATA_KEY, and Entra settings (or SOC_DEV_JWT_SECRET for dev)
-docker compose -f deploy/docker-compose.yml --env-file .env up -d --build            # api + scheduler + postgres
+docker compose -f deploy/docker-compose.yml --env-file .env up -d --build            # production: api + scheduler + postgres (TLS, split roles)
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --env-file .env up -d --build   # demo (dev sign-in, fixtures)
 docker compose -f deploy/docker-compose.yml --env-file .env --profile engine up -d   # + phishing ML microservices
 ```
 

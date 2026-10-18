@@ -3,12 +3,19 @@
     python scripts/supply_chain.py lock   [--out requirements/platform.lock]
     python scripts/supply_chain.py sbom   [--out sbom/platform.cdx.json]
     python scripts/supply_chain.py check                        # the lock matches the environment and the requirements
+    python scripts/supply_chain.py image-lock                   # requirements/image*.lock: Linux, hash-pinned (Docker)
 
 Both are derived from the same thing: the direct requirements in requirements/platform.txt and their transitive
 dependencies as installed in the current environment (markers evaluated for this platform). ``lock`` writes every
 package with its exact version (used as pip constraints by the container build and audited by pip-audit in CI);
 ``sbom`` writes a CycloneDX 1.5 JSON document (component, version, package URL, licence, SHA-256 of the lock line set).
 Output is deterministic: the same environment gives byte-identical files.
+
+``image-lock`` resolves the container images' dependencies on Linux, inside the same pinned base image the Dockerfile
+uses, with a SHA-256 for every file (``requirements/image.lock`` for the platform, ``requirements/image-engine.lock``
+with the phishing ML engine). The Dockerfile installs them with ``--require-hashes``: a package that changed on the
+index after it was locked fails the build instead of reaching the image. The versions are constrained by
+``platform.lock``, so the image and the tested environment agree; ``check`` verifies that too.
 """
 
 from __future__ import annotations
@@ -23,6 +30,43 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = ROOT / "requirements" / "platform.txt"
+# the Dockerfile's base image (keep in step with its FROM lines)
+BASE_IMAGE = "python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce"
+PIP_TOOLS = "pip-tools==7.5.2"
+IMAGE_LOCKS = {"image.lock": ["platform.txt"], "image-engine.lock": ["platform.txt", "phishing.txt"]}
+
+
+def image_lock() -> int:
+    import subprocess  # nosec B404 - runs the fixed docker command below
+
+    req = ROOT / "requirements"
+    steps = [f"pip install -q {PIP_TOOLS}"]
+    for out, inputs in IMAGE_LOCKS.items():
+        steps.append("pip-compile -q --generate-hashes --allow-unsafe --strip-extras --no-header "
+                     f"--annotation-style=line -c platform.lock -o /tmp/{out} {' '.join(inputs)} && cp /tmp/{out} /req/{out}")
+    cmd = ["docker", "run", "--rm", "-v", f"{req.resolve()}:/req", "-w", "/req", BASE_IMAGE, "bash", "-c", " && ".join(steps)]
+    return subprocess.run(cmd, check=False).returncode  # nosec B603 - fixed arguments, no shell
+
+
+def image_lock_problems() -> list[str]:
+    """Every image lock line is hashed, and every package both locks name has the same version."""
+    locked = ROOT / "requirements" / "platform.lock"
+    pins = {_canon(x.split("==")[0]): x.split("==")[1].strip() for x in locked.read_text(encoding="utf-8").splitlines()
+            if "==" in x and not x.startswith("#")}
+    out = []
+    for name in IMAGE_LOCKS:
+        path = ROOT / "requirements" / name
+        if not path.is_file():
+            out.append(f"requirements/{name} is missing: run python scripts/supply_chain.py image-lock")
+            continue
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)", text, re.MULTILINE):
+            k, v = _canon(m.group(1)), m.group(2)
+            if k in pins and pins[k] != v:
+                out.append(f"{name}: {k} {v} but platform.lock has {pins[k]}")
+        if "--hash=sha256:" not in text:
+            out.append(f"{name}: no hashes")
+    return out
 
 
 def _canon(name: str) -> str:
@@ -124,9 +168,11 @@ def sbom(dists: dict[str, md.Distribution], direct: dict[str, set[str]]) -> dict
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["lock", "sbom", "check"])
+    ap.add_argument("command", choices=["lock", "sbom", "check", "image-lock"])
     ap.add_argument("--out")
     a = ap.parse_args(argv)
+    if a.command == "image-lock":
+        return image_lock()
     direct = direct_requirements()
     dists = closure(direct)
     if a.command == "lock":
@@ -150,7 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         if unlocked or drift:
             print(f"not locked: {unlocked}; version drift: {drift} - run python scripts/supply_chain.py lock")
             return 1
-        print(f"ok: {len(direct)} direct, {len(pins)} locked")
+        image = image_lock_problems()
+        if image:
+            print("image locks: " + "; ".join(image[:10]) + " - run python scripts/supply_chain.py image-lock")
+            return 1
+        print(f"ok: {len(direct)} direct, {len(pins)} locked; image locks hashed and in step")
         return 0
     print(f"{out}: {len(dists)} packages ({len(direct)} direct)")
     return 0

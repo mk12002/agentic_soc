@@ -1,0 +1,22 @@
+# DEMO / DEVELOPMENT ONLY - never in a client environment.
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --env-file .env up -d --build
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml exec platform-api python -m soc_platform demo
+# Development sign-in (any role from /api/v1/dev/token), fixture connectors only: the platform refuses to use a real
+# tool while dev sign-in is on, so this override cannot be pointed at a live tenant.
+x-demo-env: &demo-env
+  SOC_ENVIRONMENT: dev
+  SOC_AUTH_MODE: dev
+  SOC_CONNECTOR_MODE: fake
+  SOC_DEV_JWT_SECRET: ${SOC_DEV_JWT_SECRET:?set SOC_DEV_JWT_SECRET (32+ random characters)}
+  # the browser reaches the container over the Docker bridge, which is not loopback; the port stays bound to
+  # 127.0.0.1 on the host
+  SOC_DEV_TOKENS_REMOTE: "1"
+  SOC_ORG_DOMAINS: ${SOC_ORG_DOMAINS:-acme-demo.com}
+
+services:
+  platform-migrate:
+    environment: *demo-env
+  platform-api:
+    environment: *demo-env
+  platform-scheduler:
+    environment: *demo-env

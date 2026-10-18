@@ -341,7 +341,7 @@ async function visit(page, hash, name, full = true) {
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   const nav = await page.$$eval('[data-nav]', as => as.map(a => a.dataset.nav));
   if (nav.includes('vulnerabilities') || nav.includes('shadow-it') || !nav.includes('phishing')) problems.push('scoped sign-in: menu not limited - ' + nav.join(','));
-  const scopedCases = await page.evaluate(async () => (await (await fetch('/api/v1/cases', {headers: {Authorization: 'Bearer ' + localStorage.getItem('soc_token')}})).json()).map(c => c.domain));
+  const scopedCases = await page.evaluate(async () => (await (await fetch('/api/v1/cases', {headers: {Authorization: 'Bearer ' + sessionStorage.getItem('soc_token')}})).json()).map(c => c.domain));
   if (scopedCases.some(d => d !== 'phishing')) problems.push('scoped sign-in: non-phishing cases listed');
   for (const r of ['intelligence', 'vulnerabilities', 'shadow-it']) {      // typed-in addresses outside the scope
     await page.goto(`${BASE}/#/${r}`); await settle(page);

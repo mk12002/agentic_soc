@@ -714,7 +714,7 @@ async function saveLlmPolicy() {
 // ================================================================= Policy
 async function Policy() {
   const __g = GEN;
-  const [p, cat, h] = await Promise.all([api('/api/v1/policy'), api('/api/v1/actions/catalog'), (await fetch('/health')).json()]);
+  const [p, cat, h] = await Promise.all([api('/api/v1/policy'), api('/api/v1/actions/catalog'), api('/health')]);
   setMainG(__g, page('Automation policy', `Versioned autonomy policy (active version ${esc(p.active_version || 'default')}). L0 observe · L1 notify · L2 recommend · L3 approve · L4 autonomous. Destructive actions are never autonomous.`, '',
     `<div class="grid g-2">
       ${card('Actions', table(['Action', 'Executes via', 'Level', 'Properties'], cat.map(a => `<tr><td class="mono small">${esc(a.action_type)}</td><td class="small muted">${esc(a.tool)}</td>
@@ -809,10 +809,10 @@ async function Access() {
     <dt>Permissions</dt><dd>${me.permissions.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</dd></dl>`);
   if (!can('manage_access')) { setMainG(__g, page('Access', 'Access management requires the administrator role with MFA.', '', mine)); return; }
   const [grants, keys, perms] = await Promise.all([api('/api/v1/admin/roles'), api('/api/v1/admin/api-keys'), api('/api/v1/admin/permissions')]);
-  setMainG(__g, page('Access', 'Time-bound, domain-scoped role grants on top of Entra roles; service-account keys for integrations. Nobody can change their own access.', '',
+  setMainG(__g, page('Access', 'Time-bound, domain-scoped role grants on top of Entra roles; service-account keys for integrations. Nobody can change their own access; lead, admin and automation admin grants need a second administrator and at most 90 days.', '',
     `<div class="grid g-2e">
       ${card('Role assignments', table(['Principal', 'Role', 'Scope', 'Expires', ''], grants.map(g => `<tr><td><div class="t-title">${esc(g.principal_id)}</div><div class="t-sub">${esc(g.reason)} · by ${esc(g.granted_by)}</div></td>
-        <td>${esc(cap(g.role))}</td><td class="small">${esc(g.domains.includes('*') ? 'All domains' : g.domains.join(', '))}</td><td class="mono small">${day(g.expires_at) === '–' ? 'never' : day(g.expires_at)}</td><td>${btn('Revoke', 'revokeGrant', [g.id], 'sm danger')}</td></tr>`), {empty: 'No platform grants - roles come from Entra.'}) +
+        <td>${esc(cap(g.role))}</td><td class="small">${esc(g.domains.includes('*') ? 'All domains' : g.domains.join(', '))}</td><td class="mono small">${day(g.expires_at) === '–' ? 'never' : day(g.expires_at)}</td><td>${g.status === 'proposed' ? `<span class="tag">Awaiting a second admin</span>${g.granted_by !== me.id ? btn('Approve', 'approveGrant', [g.id], 'sm primary') : ''}` : ''}${btn('Revoke', 'revokeGrant', [g.id], 'sm danger')}</td></tr>`), {empty: 'No platform grants - roles come from Entra.'}) +
         `<div class="card-b" style="border-top:1px solid var(--border)"><div class="form-row">
           <input class="input" id="gp" placeholder="user@company.com"><select id="gr">${['analyst', 'lead', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${cap(r)}</option>`).join('')}</select>
           <select id="gd"><option value="*">All domains</option><option value="phishing">Phishing</option><option value="incident">Incident</option><option value="vulnerability">Vulnerability</option></select>
@@ -825,8 +825,9 @@ async function Access() {
 }
 async function grant() {
   await post('/api/v1/admin/roles', {principal_id: $('#gp').value.trim(), role: $('#gr').value, domains: [$('#gd').value], days: parseInt($('#gdays').value, 10) || null, reason: $('#greason').value.trim()});
-  toast('Access granted'); Access();
+  toast(['lead', 'admin', 'automation_admin'].includes($('#gr').value) ? 'Grant proposed - a second administrator must approve it' : 'Access granted'); Access();
 }
+async function approveGrant(id) { await post('/api/v1/admin/roles/' + id + '/approve', {note: ''}); toast('Grant approved'); Access(); }
 async function revokeGrant(id) { await api('/api/v1/admin/roles/' + id, {method: 'DELETE'}); toast('Grant revoked'); Access(); }
 async function revokeKey(id) { await api('/api/v1/admin/api-keys/' + id, {method: 'DELETE'}); toast('Key revoked'); Access(); }
 async function newKey() {
@@ -988,4 +989,4 @@ window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, 
   policy: Policy, reports: Reports, access: Access, audit: Audit};
 Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
-  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, loadCalls, kill, approvePolicy, report, compliancePack, grant, revokeGrant, revokeKey, newKey});
+  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey});

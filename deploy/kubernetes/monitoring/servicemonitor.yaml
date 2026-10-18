@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: soc-api
+  labels: {app.kubernetes.io/name: soc-api}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: soc-api}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
+      authorization:                          # the auditor key, sent as "Authorization: Bearer sk_soc_..."
+        type: Bearer
+        credentials: {name: soc-metrics-key, key: token}

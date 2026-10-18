@@ -74,16 +74,20 @@ class Database:
             kwargs["poolclass"] = StaticPool
         else:
             kwargs.update(pool_settings())
-        timeout = statement_timeout_ms()
-        if timeout and url.startswith("postgresql"):
-            # a runaway query releases its connection and locks instead of holding them until someone notices
-            kwargs["connect_args"] = {**kwargs.get("connect_args", {}), "options": f"-c statement_timeout={timeout}"}
+        timeout, idle = statement_timeout_ms(), idle_tx_timeout_ms()
+        if (timeout or idle) and url.startswith("postgresql"):
+            # a runaway query, or a transaction left open by a stuck caller, releases its connection and locks (the
+            # audit chain's head row among them) instead of holding them until someone notices
+            opts = " ".join(o for o in (f"-c statement_timeout={timeout}" if timeout else "",
+                                        f"-c idle_in_transaction_session_timeout={idle}" if idle else "") if o)
+            kwargs["connect_args"] = {**kwargs.get("connect_args", {}), "options": opts}
         self.engine: Engine = create_engine(url, **kwargs)
         if url.startswith("sqlite"):
             event.listen(self.engine, "connect", _sqlite_pragmas)
         self._factory = sessionmaker(bind=self.engine, expire_on_commit=False, future=True)
 
-    def create_all(self) -> None:
+    @staticmethod
+    def _register_models() -> None:
         from soc_platform.core import blobstore as _blobs  # noqa: F401
         from soc_platform.core import models  # noqa: F401  (register tables)
         from soc_platform.core import notify as _notify  # noqa: F401
@@ -92,6 +96,9 @@ class Database:
         from soc_platform.intelligence import models as _intel  # noqa: F401
         from soc_platform.llm import usage_policy as _llm_policy  # noqa: F401
         from soc_platform.reporting import models as _rep  # noqa: F401
+
+    def create_all(self) -> None:
+        self._register_models()
 
         # Every process creates the schema on first use, and a fresh deployment starts many at once (replicas x
         # workers). Unserialised, they race on CREATE / ALTER TABLE ("already exists", a failed first request).
@@ -119,8 +126,99 @@ class Database:
         Base.metadata.create_all(self.engine)
         self._add_missing_columns()
         self._add_missing_indexes()
+        self._audit_guards()
         if self.engine.dialect.name == "postgresql":
             self._widen_columns()
+            self._search_indexes()
+
+    def missing_tables(self) -> list[str]:
+        """Tables the code needs that the database lacks (a runtime role that may not create them checks this)."""
+        self._register_models()
+        have = set(inspect(self.engine).get_table_names())
+        return sorted(t for t in Base.metadata.tables if t not in have)
+
+    def verify_schema(self) -> None:
+        """For processes that do not manage the schema (SOC_SCHEMA_MANAGE=0, a runtime role without DDL rights):
+        stop at once with what to do, rather than fail on the first query that touches a missing table."""
+        missing = self.missing_tables()
+        if missing:
+            raise RuntimeError(f"the database lacks {len(missing)} table(s) ({', '.join(missing[:5])}...): run "
+                               "`python -m soc_platform init-db` with the migration credentials first")
+
+    def _audit_guards(self) -> None:
+        """The database itself refuses UPDATE, DELETE and TRUNCATE on the audit log, not only the ORM: a raw SQL
+        statement from the application's role is refused too. Only the schema owner (the migration role, which the
+        running platform does not hold) could drop the trigger - and that is itself a visible DDL change."""
+        if self.engine.dialect.name == "postgresql":
+            with self.engine.begin() as c:
+                c.execute(text(
+                    "CREATE OR REPLACE FUNCTION soc_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                    "BEGIN RAISE EXCEPTION 'audit_log is append-only'; END $$"))
+                c.execute(text("DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log"))
+                c.execute(text("CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE ON audit_log "
+                               "FOR EACH ROW EXECUTE FUNCTION soc_audit_append_only()"))
+                c.execute(text("DROP TRIGGER IF EXISTS audit_log_no_truncate ON audit_log"))
+                c.execute(text("CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON audit_log "
+                               "FOR EACH STATEMENT EXECUTE FUNCTION soc_audit_append_only()"))
+        elif self.engine.dialect.name == "sqlite":
+            with self.engine.begin() as c:
+                for op in ("UPDATE", "DELETE"):
+                    c.execute(text(f"CREATE TRIGGER IF NOT EXISTS audit_log_no_{op.lower()} BEFORE {op} ON audit_log "
+                                   "BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END"))
+
+    def grant_runtime(self, role: str) -> list[str]:
+        """PostgreSQL least privilege: give the role the running platform signs in with read / write on every table
+        and sequence, but on the audit log only SELECT and INSERT, and no right to change the schema. Run by
+        ``init-db`` (migration credentials) when SOC_DB_RUNTIME_ROLE is set; idempotent."""
+        import re
+
+        if self.engine.dialect.name != "postgresql":
+            return []
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", role):
+            raise ValueError(f"not a role name: {role!r}")
+        stmts = [f'GRANT USAGE ON SCHEMA public TO "{role}"',
+                 f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "{role}"',
+                 f'GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "{role}"',
+                 f'REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM "{role}"',
+                 f'REVOKE CREATE ON SCHEMA public FROM "{role}"']
+        with self.engine.begin() as c:
+            for s in stmts:
+                c.execute(text(s))     # nosec B608 - the role name is validated above; statements are fixed
+        return stmts
+
+    # (index name, table, column): the search box matches any part of these case-insensitively
+    SEARCH_INDEXES = (("ix_trgm_entity_keys_value", "entity_keys", "key_value"),
+                      ("ix_trgm_entities_display_name", "entities", "display_name"),
+                      ("ix_trgm_cases_title", "cases", "title"),
+                      ("ix_trgm_insights_title", "insights", "title"),
+                      ("ix_trgm_findings_asset", "vm_findings", "asset_name"),
+                      ("ix_trgm_findings_cve", "vm_findings", "cve"))
+
+    def _search_indexes(self) -> list[str]:
+        """Trigram indexes for the search box (PostgreSQL). ``lower(col) LIKE '%term%'`` cannot use a B-tree index,
+        so every search scanned the identifier table, which grows with the estate. Best effort: without the pg_trgm
+        extension (a managed server must allow-list it) search still works, by scanning, and a warning says so."""
+        import logging
+
+        made: list[str] = []
+        with self.engine.connect() as c:
+            try:
+                c.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+                c.commit()
+            except SQLAlchemyError as exc:
+                c.rollback()
+                logging.getLogger(__name__).warning("pg_trgm unavailable - search will scan tables (%s)",
+                                                    str(exc).splitlines()[0][:200])
+                return made
+            tables = set(inspect(self.engine).get_table_names())
+            for name, table, column in self.SEARCH_INDEXES:
+                if table not in tables:
+                    continue
+                c.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} "     # nosec B608 - fixed identifiers
+                               f"USING gin (lower({column}) gin_trgm_ops)"))
+                made.append(name)
+            c.commit()
+        return made
 
     def _add_missing_indexes(self) -> list[str]:
         """Like columns, an index the model gained after a table was created is never added by create_all. Indexes
@@ -214,15 +312,29 @@ def _strip_nul(session: Session, _ctx: Any, _instances: Any) -> None:
                 setattr(obj, attr.key, v.replace("\x00", ""))
 
 
-def statement_timeout_ms() -> int:
-    """SOC_DB_STATEMENT_TIMEOUT_SECONDS (PostgreSQL): the longest one SQL statement may run; 0 = no limit (default,
-    so a first backfill of a very large tenant is never cut short). 120 is a sensible production value."""
+def _seconds_ms(name: str, prod_default: float) -> int:
     import os
 
+    default = prod_default if os.environ.get("SOC_ENVIRONMENT", "dev") == "prod" else 0
+    raw = os.environ.get(name, "")
     try:
-        return max(0, int(float(os.environ.get("SOC_DB_STATEMENT_TIMEOUT_SECONDS", "0") or 0) * 1000))
+        return max(0, int(float(raw if raw.strip() else default) * 1000))
     except ValueError:
-        return 0
+        return int(default * 1000)
+
+
+def statement_timeout_ms() -> int:
+    """SOC_DB_STATEMENT_TIMEOUT_SECONDS (PostgreSQL): the longest one SQL statement may run; 0 = no limit. Production
+    default 300 s (every statement is per page or per item, so a large backfill is never one statement); elsewhere
+    no limit."""
+    return _seconds_ms("SOC_DB_STATEMENT_TIMEOUT_SECONDS", 300)
+
+
+def idle_tx_timeout_ms() -> int:
+    """SOC_DB_IDLE_TX_TIMEOUT_SECONDS (PostgreSQL): how long a transaction may sit idle before the server ends it.
+    Production default 600 s - far above any lookup or model deadline, low enough that a stuck process cannot hold
+    the audit chain's lock for ever; elsewhere no limit."""
+    return _seconds_ms("SOC_DB_IDLE_TX_TIMEOUT_SECONDS", 600)
 
 
 def pool_settings() -> dict[str, Any]:
@@ -277,10 +389,15 @@ def get_database() -> Database:
         return db
     with _init_lock:
         if _default is None:
+            import os
+
             from soc_platform.config import get_settings
 
             fresh = Database(get_settings().database_url)
-            fresh.create_all()
+            if os.environ.get("SOC_SCHEMA_MANAGE", "1").strip().lower() in {"0", "false", "no", "off"}:
+                fresh.verify_schema()        # a runtime role without DDL rights: init-db (migration role) made it
+            else:
+                fresh.create_all()
             _default = fresh  # published only once the schema exists
         return _default
 

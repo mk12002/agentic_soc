@@ -264,6 +264,7 @@ class ActionRequest(Base):
     reverse_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)   # the tool call began
     executed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
@@ -445,6 +446,10 @@ class RoleAssignment(Base):
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # privileged roles take effect only once a second administrator approves (None: a grant made before that rule)
+    status: Mapped[str | None] = mapped_column(String(16), nullable=True)    # proposed | active
+    approved_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class ApiKey(Base):

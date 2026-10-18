@@ -13,7 +13,9 @@ const dt = s => s ? String(s).slice(0, 16).replace('T', ' ') : '–';
 const day = s => s ? String(s).slice(0, 10) : '–';
 
 let TOKEN = '';
-try { TOKEN = localStorage.getItem('soc_token') || ''; } catch (e) { /* storage blocked */ }
+// the access token lives for this tab only (sessionStorage): it is gone when the tab closes, and a token left in
+// localStorage by an earlier version is removed
+try { TOKEN = sessionStorage.getItem('soc_token') || ''; localStorage.removeItem('soc_token'); } catch (e) { /* storage blocked */ }
 window.ME = null;
 
 // ---------------------------------------------------------------- feedback
@@ -229,7 +231,7 @@ function shell() {
 
 async function refreshStatus() {
   try {
-    const h = await (await fetch('/health')).json();
+    const h = await api('/health');   // the status details need the signed-in user's token
     const el = $('#kill-status');
     if (el) { el.className = 'status-pill' + (h.kill_switch ? ' halt' : ''); el.innerHTML = `<span class="dot"></span>${h.kill_switch ? 'Automation halted' : 'Automation active'}`; }
     const sch = $('#sched-status');   // a stopped scheduler cannot alert on its own: say so on every screen
@@ -308,7 +310,7 @@ async function finishEntra() {
   const body = await r.json().catch(() => ({}));
   if (!r.ok || !body.access_token) { toast('Sign-in failed: ' + (body.error_description || r.status), true); return false; }
   TOKEN = body.access_token;
-  try { localStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
+  try { sessionStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
   return true;
 }
 async function boot() {
@@ -349,14 +351,14 @@ async function signIn() {
   const r = await fetch(`/api/v1/dev/token?user=${encodeURIComponent(u)}&roles=${encodeURIComponent(role)}${scope ? '&domains=' + encodeURIComponent(scope) : ''}`);
   if (!r.ok) { toast('Development sign-in is disabled on this server. Use Entra ID SSO.', true); return; }
   TOKEN = (await r.json()).token;
-  try { localStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
+  try { sessionStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
   if (!location.hash) location.hash = '#/overview';
   boot();
 }
 async function signOut(expired = false) {
   if (!expired && TOKEN) { try { await fetch('/api/v1/auth/logout', {method: 'POST', headers: {Authorization: 'Bearer ' + TOKEN}}); } catch (e) { /* ignore */ } }
   TOKEN = '';
-  try { localStorage.removeItem('soc_token'); } catch (e) { /* ignore */ }
+  try { sessionStorage.removeItem('soc_token'); } catch (e) { /* ignore */ }
   if (!expired && AUTH && AUTH.mode === 'entra') {       // end the Entra session too, then come back here
     location.assign(`${entraBase()}/logout?post_logout_redirect_uri=${encodeURIComponent(redirectUri())}`);
     return;

@@ -1,5 +1,6 @@
 # Non-secret settings shared by the API and the scheduler. Secrets come from the Secret "soc-platform-secrets"
-# (database URL, SOC_DATA_KEY, LLM key, connector credentials) - never put a secret value here.
+# (database URL, SOC_DATA_KEY, LLM key, connector credentials) or, on Azure, from Key Vault files (*_FILE paths) -
+# never put a secret value here. The schema owner's database URL is in "soc-platform-migrator", read only by init-db.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,6 +13,7 @@ data:
   # own HA, backups and point-in-time recovery cover them (no shared volume to make highly available)
   SOC_BLOB_STORE: database
   SOC_EMBEDDED_SCHEDULER: "0"            # the soc-scheduler Deployment runs the jobs
+  SOC_SCHEMA_MANAGE: "0"                 # only the init-db container (migration role) changes the schema
   SOC_HOST: 0.0.0.0
   SOC_PORT: "8080"
   SOC_API_WORKERS: "1"                   # processes per pod: equal to the pod's CPU request (1 vCPU, fits 2-vCPU nodes)

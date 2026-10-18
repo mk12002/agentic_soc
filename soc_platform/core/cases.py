@@ -111,6 +111,13 @@ class CaseService:
 
     # ------------------------------------------------------------------ deferred narration
 
+    def _case_hosts(self, case_id: str) -> set[str]:
+        """The case's own device names, pseudonymised before a model sees them (laptop names often carry a person's
+        name, and carry no domain the redactor could recognise)."""
+        rows = self.s.execute(select(Entity.display_name).join(CaseEntity, CaseEntity.entity_id == Entity.id)
+                              .where(CaseEntity.case_id == case_id, Entity.kind == "asset")).scalars()
+        return {str(n).split(".")[0] for n in rows if n}
+
     @staticmethod
     def narration_request(workflow: str, question: str, ev_llm: list[dict[str, Any]], *, tier: str = "large") -> dict[str, Any]:
         """What a later model call needs: the exact evidence rows the case was assessed on (so the E-numbers match)."""
@@ -135,16 +142,23 @@ class CaseService:
             if not req:
                 continue
             rows = self.s.execute(select(Evidence).where(Evidence.id.in_(req["evidence_rows"]))).scalars().all()
-            todo.append((case, req, evidence_for_llm(rows)))
+            todo.append((case, req, evidence_for_llm(rows), self._case_hosts(case.id)))
         if not todo:
             return 0
 
-        def ask(item: tuple[Case, dict[str, Any], list[dict[str, Any]]]) -> dict[str, Any] | None:
-            _, req, ev = item
+        def ask(item: tuple[Case, dict[str, Any], list[dict[str, Any]], set[str]]) -> dict[str, Any] | None:
+            _, req, ev, hosts = item
             if llm is None:
                 return None
-            kw = {"redactor": redactor} if redactor is not None else {}
-            return llm.grounded(req["workflow"], req["question"], ev, tier=req.get("tier", "large"), **kw)
+            # one redactor per call: its token map is mutated while redacting, and the calls run in parallel - a
+            # shared one could hand two people the same token and restore the wrong name into a case
+            from soc_platform.llm.redaction import Redactor
+
+            base = redactor if redactor is not None else getattr(llm, "redactor_factory", lambda: None)()
+            red = Redactor(internal_domains=set(getattr(base, "internal_domains", set()) or set()),
+                           known_names=set(getattr(base, "known_names", set()) or set()),
+                           known_hosts=set(getattr(base, "known_hosts", set()) or set()) | hosts)
+            return llm.grounded(req["workflow"], req["question"], ev, tier=req.get("tier", "large"), redactor=red)
 
         if llm is not None and len(todo) > 1:
             from concurrent.futures import ThreadPoolExecutor
@@ -156,7 +170,7 @@ class CaseService:
         else:
             answers = [ask(t) for t in todo]
         improved = 0
-        for (case, _, ev), g in zip(todo, answers, strict=True):
+        for (case, _, ev, _hosts), g in zip(todo, answers, strict=True):
             assessment = {k: v for k, v in (case.assessment or {}).items() if k != "narration_pending"}
             if g is not None and g.get("source") == "llm":
                 case.summary = g["summary"]

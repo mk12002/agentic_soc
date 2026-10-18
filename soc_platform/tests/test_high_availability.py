@@ -519,3 +519,36 @@ def test_two_syncs_of_one_stream_at_once_take_turns_and_both_complete(tmp_path):
         assert s.query(ConnectorCheckpoint).filter_by(connector="rapid7", stream="assets").count() == 1
         ids = [r.source_id for r in s.query(SourceRecord).filter_by(tool="rapid7").all()]
         assert ids and len(ids) == len(set(ids))                           # no record stored twice
+
+
+def test_production_refuses_unsealed_blobs_and_reencrypt_seals_them_and_retires_a_key(tmp_path):
+    """Stored data without the encryption marker used to be returned as "legacy plaintext" - anyone able to write to
+    the store could swap a sealed report for their own. In production it is refused; `blobs reencrypt` seals it and
+    moves everything to the newest key, after which the old key can be removed."""
+    import hashlib
+
+    from cryptography.fernet import Fernet
+
+    from soc_platform.config import Settings
+    from soc_platform.core.blobstore import Blob, BlobStore, reencrypt
+    from soc_platform.core.crypto import DataProtectionError
+    from soc_platform.core.db import Database
+    from soc_platform.core.models import utcnow
+
+    old, new = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+    db = Database(f"sqlite:///{(tmp_path / 'b.db').as_posix()}")
+    db.create_all()
+    st = lambda keys: Settings(environment="prod", data_keys=keys, blob_store="database")
+    with db.session() as s:
+        BlobStore(s, st([old])).put("unused", "reports/a.docx", b"sealed report")
+        s.add(Blob(key="reports/legacy.docx", data=b"plain", size=5, sha256=hashlib.sha256(b"plain").hexdigest(),
+                   created_at=utcnow()))
+    with db.session() as s:
+        with pytest.raises(DataProtectionError):
+            BlobStore(s, st([old])).get("db:reports/legacy.docx")
+        out = reencrypt(s, st([new, old]))
+        assert out["database"] == 2 and not out["unreadable"]
+    with db.session() as s:
+        only_new = BlobStore(s, st([new]))
+        assert only_new.get("db:reports/a.docx") == b"sealed report"
+        assert only_new.get("db:reports/legacy.docx") == b"plain"

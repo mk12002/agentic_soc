@@ -43,7 +43,7 @@ spec:
           command: ["python", "-m", "soc_platform", "scheduler"]
           envFrom:
             - configMapRef: {name: soc-platform-settings}
-            - secretRef: {name: soc-platform-secrets}
+            - secretRef: {name: soc-platform-secrets, optional: true}
             - secretRef: {name: soc-connector-secrets, optional: true}
           env:
             - {name: SOC_SCHEDULER_LIVENESS_FILE, value: /tmp/soc-scheduler.alive}

@@ -65,6 +65,7 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_DB_POOL_RECYCLE": ("int", (0, 86_400 * 7)),
     "SOC_DB_POOL_TIMEOUT": ("float", (0.1, 3_600)),
     "SOC_DB_STATEMENT_TIMEOUT_SECONDS": ("float", (0, 86_400)),
+    "SOC_DB_IDLE_TX_TIMEOUT_SECONDS": ("float", (0, 86_400)),
     "SOC_RAW_RETENTION_DAYS": ("int", (1, 36_500)),
     "SOC_ACCESS_LOG_RETENTION_DAYS": ("int", (1, 36_500)),
     "SOC_LLM_LOG_RETENTION_DAYS": ("int", (1, 36_500)),
@@ -90,13 +91,14 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_SCHEDULER_STALE_SECONDS": ("int", (10, 864_000)),
     "SOC_SCHEDULER_STUCK_SECONDS": ("int", (60, 864_000)),
     "SOC_JOB_LEASE_SECONDS": ("int", (30, 86_400)),
+    "SOC_ACTION_STUCK_SECONDS": ("int", (60, 86_400)),
     "SOC_SELF_CHECK_CONFIRM_SECONDS": ("float", (0, 3_600)),
     "SOC_VM_FOLLOWUP_DAYS": ("int", (1, 365)),
     "SOC_LOG_FILE_MAX_MB": ("float", (0.1, 100_000)),
     "SOC_LOG_FILE_BACKUPS": ("int", (0, 1_000)),
     "SOC_CLOCK_OFFSET_SECONDS": ("float", (-10**10, 10**10)),
     "SOC_KILL_SWITCH": ("bool", None), "SOC_REQUIRE_MFA": ("bool", None), "SOC_LLM_REDACT_PII": ("bool", None),
-    "SOC_EMBEDDED_SCHEDULER": ("bool", None), "SOC_STORE_RAW_PAYLOADS": ("bool", None), "SOC_DEV_TOKENS_REMOTE": ("bool", None),
+    "SOC_EMBEDDED_SCHEDULER": ("bool", None), "SOC_SCHEMA_MANAGE": ("bool", None), "SOC_STORE_RAW_PAYLOADS": ("bool", None), "SOC_DEV_TOKENS_REMOTE": ("bool", None),
     "SOC_LLM_EXPLAIN_AUTO_CLOSED": ("bool", None), "SOC_LLM_JSON_MODE": ("bool", None),
     "SOC_LLM_SERVER_FALLBACK": ("bool", None), "SOC_LOG_CONFIGURE": ("bool", None),
     "SOC_REQUIRE_MODEL_MANIFEST": ("bool", None), "SOC_PHISHING_SANDBOX": ("bool", None),
@@ -113,12 +115,12 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_LLM_APPROVED_ENDPOINTS": ("urls", None),
 }
 # read by the platform, not checked beyond being set (names, ids, paths it creates, secrets)
-TEXT = {"SOC_HOST", "SOC_ENTRA_TENANT_ID", "SOC_ENTRA_AUDIENCE", "SOC_ENTRA_SCOPE", "SOC_ENTRA_SPA_CLIENT_ID",
+TEXT = {"SOC_HOST", "SOC_DB_RUNTIME_ROLE", "SOC_ENTRA_TENANT_ID", "SOC_ENTRA_AUDIENCE", "SOC_ENTRA_SCOPE", "SOC_ENTRA_SPA_CLIENT_ID",
         "SOC_DEV_JWT_SECRET", "SOC_MFA_AUTH_CONTEXT", "SOC_RAW_PAYLOAD_DIR", "SOC_REPORT_OUTPUT_DIR",
         "SOC_LLM_API_KEY", "SOC_LLM_API_VERSION", "SOC_LLM_AUTH_HEADER", "SOC_LLM_AUTH_PREFIX", "SOC_LLM_DEPLOYMENT",
         "SOC_LLM_DEPLOYMENT_SMALL", "SOC_LLM_MODEL_VERSION", "SOC_NOTIFY_WEBHOOKS", "SOC_RECORD_FIXTURES_DIR",
         "SOC_RECORD_SALT", "SOC_LOG_FILE", "SOC_SCHEDULER_LIVENESS_FILE", "SOC_PHISHING_HOME", "SOC_PHISHING_ENGINE_LOG_LEVEL", "SOC_ENV_FILE",
-        "SOC_JOB_DAILY_REPORT_SECONDS", "SOC_JOB_FOLLOWUP_SECONDS", "SOC_JOB_INCIDENT_SECONDS",
+        "SOC_JOB_ACTIONS_SECONDS", "SOC_JOB_DAILY_REPORT_SECONDS", "SOC_JOB_FOLLOWUP_SECONDS", "SOC_JOB_INCIDENT_SECONDS",
         "SOC_JOB_INTELLIGENCE_SECONDS", "SOC_JOB_NOTIFY_SECONDS", "SOC_JOB_PHISHING_SECONDS",
         "SOC_JOB_RETENTION_SECONDS", "SOC_JOB_SELF_CHECK_SECONDS", "SOC_JOB_VM_SECONDS", "SOC_JOB_WEEKLY_REPORTS_SECONDS"}
 JOB_SECONDS = {n for n in TEXT if n.startswith("SOC_JOB_")}
@@ -206,6 +208,25 @@ def _check_one(name: str, raw: str) -> list[SettingProblem]:
     return []
 
 
+def _setting_value(env: Mapping[str, str], name: str) -> str:
+    """A setting's value, from ``NAME`` or the vault-mounted file ``NAME_FILE``."""
+    if env.get(name):
+        return env[name].strip()
+    path = env.get(f"{name}_FILE")
+    if path and Path(path).is_file():
+        return Path(path).read_text(encoding="utf-8", errors="ignore").strip()
+    return ""
+
+
+def _sslmode(url: str) -> str:
+    from urllib.parse import parse_qs, urlsplit
+
+    try:
+        return (parse_qs(urlsplit(url).query).get("sslmode") or [""])[0].lower()
+    except ValueError:
+        return ""
+
+
 def _known(name: str) -> bool:
     base = name.removesuffix("_FILE")   # NAME_FILE: a vault-mounted secret for NAME
     return base in SPEC or base in TEXT or name in SPEC or name in TEXT
@@ -229,8 +250,12 @@ def check_environment(env: Mapping[str, str] | None = None) -> list[SettingProbl
             if not p.is_file():
                 out.append(SettingProblem("error", name, f"the secret file {raw.strip()} does not exist",
                                           "mount the secret there, or correct the path"))
-            elif not p.read_text(encoding="utf-8", errors="ignore").strip():
+            elif not (content := p.read_text(encoding="utf-8", errors="ignore").strip()):
                 out.append(SettingProblem("error", name, "the secret file is empty", "write the secret into the file"))
+            elif name.removesuffix("_FILE") in SPEC:
+                # the mounted value gets the same check as the plain setting (a malformed key fails here, not later)
+                out += [SettingProblem(p_.level, name, p_.message, p_.fix)
+                        for p_ in _check_one(name.removesuffix("_FILE"), content)]
             continue
         if raw.strip() == "" or name.endswith("_FILE"):
             continue
@@ -241,6 +266,23 @@ def check_environment(env: Mapping[str, str] | None = None) -> list[SettingProbl
     if mode == "entra" and not (env.get("SOC_ENTRA_TENANT_ID") and env.get("SOC_ENTRA_AUDIENCE")):
         out.append(SettingProblem("error", "SOC_AUTH_MODE", "Entra sign-in needs SOC_ENTRA_TENANT_ID and SOC_ENTRA_AUDIENCE",
                                   "set both (CLIENT_DEPLOYMENT_GUIDE.md section 3)"))
+    env_name = lower.get("SOC_ENVIRONMENT")
+    if not env_name and (mode == "entra" or lower.get("SOC_CONNECTOR_MODE") == "live"):
+        # a real deployment that forgot SOC_ENVIRONMENT ran as "dev": step-up MFA off, encryption optional
+        out.append(SettingProblem("error", "SOC_ENVIRONMENT", "not set, so the platform would run as 'dev' with "
+                                  "production protections off", "set SOC_ENVIRONMENT=prod (or dev / test on purpose)"))
+    if mode == "dev" and env_name != "test":
+        if lower.get("SOC_CONNECTOR_MODE") == "live":
+            out.append(SettingProblem("error", "SOC_CONNECTOR_MODE", "real tools with development sign-in: anyone who "
+                                      "reaches the port could sign in with any role", "set SOC_AUTH_MODE=entra"))
+        secret_len = len((env.get("SOC_DEV_JWT_SECRET") or "").strip())
+        if 0 < secret_len < 32:
+            out.append(SettingProblem("error", "SOC_DEV_JWT_SECRET", "shorter than 32 characters: tokens can be forged",
+                                      "use a long random value (python -c \"import secrets; print(secrets.token_urlsafe(48))\")"))
+        if lower.get("SOC_DEV_TOKENS_REMOTE") in {"1", "true", "yes", "on"}:
+            out.append(SettingProblem("warning", "SOC_DEV_TOKENS_REMOTE", "any machine that reaches the port can sign in "
+                                      "with any role (fixtures only: real tools are refused under dev sign-in)",
+                                      "leave it off outside a closed demo"))
     if prod:
         if mode != "entra":
             out.append(SettingProblem("error", "SOC_AUTH_MODE", "production requires Entra sign-in", "set SOC_AUTH_MODE=entra"))
@@ -250,15 +292,36 @@ def check_environment(env: Mapping[str, str] | None = None) -> list[SettingProbl
         if not (env.get("SOC_DATA_KEY") or env.get("SOC_DATA_KEY_FILE")):
             out.append(SettingProblem("error", "SOC_DATA_KEY", "production requires encryption at rest",
                                       "set SOC_DATA_KEY (or mount SOC_DATA_KEY_FILE)"))
+        domains = [d.strip() for d in lower.get("SOC_ORG_DOMAINS", "").split(",") if d.strip()]
+        if mode == "entra" and not any(d.endswith(".onmicrosoft.com") for d in domains):
+            out.append(SettingProblem("warning", "SOC_ORG_DOMAINS", "no <tenant>.onmicrosoft.com domain: people's "
+                                      "addresses in it are not pseudonymised before a model call",
+                                      "add the tenant's onmicrosoft.com domain"))
         if lower.get("SOC_LLM_REDACT_PII") in {"0", "false", "no", "off"}:
             out.append(SettingProblem("warning", "SOC_LLM_REDACT_PII", "identities are sent to the model unpseudonymised",
                                       "keep it on unless data protection has approved"))
         for n in ("SOC_DEV_JWT_SECRET", "SOC_DEV_TOKENS_REMOTE", "SOC_CLOCK_OFFSET_SECONDS", "SOC_CLOCK_FREEZE"):
             if env.get(n):
                 out.append(SettingProblem("warning", n, "set in production, where it is ignored", "remove it"))
-        if (env.get("SOC_DATABASE_URL") or "sqlite").startswith("sqlite"):
-            out.append(SettingProblem("warning", "SOC_DATABASE_URL", "production on SQLite",
-                                      "use PostgreSQL (CLIENT_DEPLOYMENT_GUIDE.md section 2.1)"))
+        db_url = _setting_value(env, "SOC_DATABASE_URL") or "sqlite"
+        if db_url.startswith("sqlite"):
+            out.append(SettingProblem("error", "SOC_DATABASE_URL", "production on SQLite (one host, no failover, no "
+                                      "point-in-time recovery)", "use PostgreSQL (CLIENT_DEPLOYMENT_GUIDE.md section 2.1)"))
+        elif _sslmode(db_url) not in {"verify-full", "verify-ca"}:
+            out.append(SettingProblem("error", "SOC_DATABASE_URL", "the database connection does not verify the "
+                                      "server's certificate (libpq's default 'prefer' can be downgraded or intercepted)",
+                                      "add ?sslmode=verify-full&sslrootcert=system (managed server) or "
+                                      "sslmode=verify-ca&sslrootcert=<cluster CA> (HIGH_AVAILABILITY.md section 4)"))
+        if lower.get("SOC_LLM_PROVIDER", "none") != "none":
+            approved = [u.strip() for u in (env.get("SOC_LLM_APPROVED_ENDPOINTS") or "").split(",") if u.strip()]
+            if not approved:
+                out.append(SettingProblem("error", "SOC_LLM_APPROVED_ENDPOINTS", "a model provider is set but no endpoint "
+                                          "is approved: prompts could go to any address", "list the approved endpoint(s)"))
+            if any(not u.lower().startswith("https://") for u in approved + [env.get("SOC_LLM_ENDPOINT") or "https://"]):
+                out.append(SettingProblem("error", "SOC_LLM_ENDPOINT", "model endpoints must use https://", ""))
+        if lower.get("SOC_DB_STATEMENT_TIMEOUT_SECONDS") in {"0", "0.0"}:
+            out.append(SettingProblem("warning", "SOC_DB_STATEMENT_TIMEOUT_SECONDS", "no limit on one SQL statement: a "
+                                      "hung statement holds its locks indefinitely", "leave unset (production default 300)"))
         if lower.get("SOC_BLOB_STORE", "file") == "file":
             out.append(SettingProblem("warning", "SOC_BLOB_STORE", "stored e-mails and reports are on this host's disk: "
                                       "safe only with one host or a volume every replica shares",

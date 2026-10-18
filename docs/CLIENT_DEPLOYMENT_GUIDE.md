@@ -94,22 +94,34 @@ called out where they apply, with the file to change.
 
 ### 2.1 Database
 
-PostgreSQL 16, a dedicated database and login:
+PostgreSQL 16, a dedicated database and **two** logins - one that owns the schema, one the platform runs as:
 
 ```sql
-CREATE ROLE soc LOGIN PASSWORD '<from vault>';
+CREATE ROLE soc LOGIN PASSWORD '<from vault>';            -- schema owner: used only by init-db
+CREATE ROLE soc_app LOGIN PASSWORD '<from vault>';        -- the running platform
 CREATE DATABASE soc_platform OWNER soc;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT CONNECT ON DATABASE soc_platform TO soc_app;
 ```
 
-`SOC_DATABASE_URL=postgresql+psycopg2://soc:<password>@<host>:5432/soc_platform`. The URL carries the password, so
-keep it in the vault and mount it: `SOC_DATABASE_URL_FILE=/run/secrets/db_url`. Then:
+Both URLs verify the server's certificate: `?sslmode=verify-full&sslrootcert=system` for a managed server with a
+public CA chain (Azure Flexible Server), or `sslrootcert=<path to the CA>` for your own. Production refuses any other
+`sslmode` (libpq's default `prefer` can be downgraded or intercepted). The URLs carry passwords, so keep them in the
+vault and mount them: `SOC_DATABASE_URL_FILE=/run/secrets/db_url` (runtime) for the platform, and the owner's URL only
+for the migration step:
 
 ```bash
-python -m soc_platform init-db        # creates tables; idempotent; widens columns on upgrade
+SOC_DATABASE_URL_FILE=/run/secrets/db_owner_url SOC_DB_RUNTIME_ROLE=soc_app python -m soc_platform init-db
+# creates / extends the tables, then grants soc_app read / write on every table, SELECT + INSERT only on audit_log
+# (a database trigger refuses UPDATE / DELETE / TRUNCATE on it too) and no schema rights
 ```
 
-Upgrades: start-up creates new tables, adds new *nullable* columns and widens text columns on existing databases
-automatically. There is no migration framework, so a release that adds a required column, renames or drops one will
+The platform's processes then run with `SOC_SCHEMA_MANAGE=0` (they only check the schema exists). Allow-list the
+`pg_trgm` extension (Azure: server parameter `azure.extensions`; deploy/azure/main.bicep does): it backs the search
+box's indexes, and without it search scans tables.
+
+Upgrades: `init-db` (the migration step, run before the new version's pods start) creates new tables, adds new
+*nullable* columns and widens text columns on existing databases. There is no migration framework, so a release that adds a required column, renames or drops one will
 say so and ship a scripted migration.
 
 ### 2.2 Secrets
@@ -128,6 +140,10 @@ python -c "import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdig
 
 Store the break-glass secret sealed (two-person), and give the platform only its SHA-256 (`SOC_BREAKGLASS_SHA256`).
 
+On Azure, keep every secret in Key Vault and mount it as a file (the overlay does this; nothing is synced into a
+Kubernetes Secret, so no secret value sits in etcd). Connector secrets the same way: add the object to
+`keyvault-secrets.yaml` and set `<ENV_NAME>_FILE=/mnt/secrets/<object>` in the settings ConfigMap.
+
 ### 2.3 Production settings
 
 The minimum production environment (all names are real settings; full list in `.env.example` and
@@ -135,13 +151,14 @@ The minimum production environment (all names are real settings; full list in `.
 
 ```bash
 SOC_ENVIRONMENT=prod                      # refuses dev tokens and time-travel test settings; requires SOC_DATA_KEY
-SOC_DATABASE_URL_FILE=/run/secrets/db_url
+SOC_DATABASE_URL_FILE=/run/secrets/db_url  # the runtime role, ?sslmode=verify-full&sslrootcert=...
+SOC_SCHEMA_MANAGE=0                       # init-db (schema owner) changes the schema; the platform never does
 SOC_DATA_KEY_FILE=/run/secrets/data_key   # encryption at rest for raw payloads and reported e-mails
-SOC_ORG_DOMAINS=client.com,client.co.in   # every internal mail domain: drives pseudonymisation and "internal" logic
+SOC_ORG_DOMAINS=client.com,client.co.in,client.onmicrosoft.com   # every internal mail domain incl. the tenant's
 SOC_CONNECTOR_MODE=live                   # default mode; each connector can still override in connectors.yaml
 SOC_CONNECTORS_CONFIG=/app/config/connectors.yaml
 SOC_PUBLIC_URL=https://soc.client.com     # links in notifications
-SOC_TRUSTED_PROXIES=10.0.0.5              # the reverse proxy's address (X-Forwarded-For is trusted only from it)
+SOC_TRUSTED_PROXIES=10.0.0.0/24          # the reverse proxy's address or subnet (X-Forwarded-For is trusted only from it)
 SOC_BREAKGLASS_SHA256_FILE=/run/secrets/breakglass_sha256
 SOC_BLOB_STORE=database                   # stored e-mails and reports in PostgreSQL (several hosts; HIGH_AVAILABILITY.md)
 SOC_RAW_PAYLOAD_DIR=/data/raw             # scratch with the database store; the store itself with SOC_BLOB_STORE=file
@@ -161,15 +178,19 @@ Organisation facts to replace (files under `config/`, mounted into the container
 
 ### 2.4 First start
 
+The packaged ways are the Kubernetes overlays (`deploy/kubernetes`, HIGH_AVAILABILITY.md; on Azure the resources come
+from `deploy/azure/main.bicep`) and, for one host, `deploy/docker-compose.yml` (production defaults; TLS to
+PostgreSQL, the role split, a TLS proxy and nightly dumps as profiles). By hand:
+
 ```bash
-python -m soc_platform init-db
+SOC_DATABASE_URL_FILE=/run/secrets/db_owner_url SOC_DB_RUNTIME_ROLE=soc_app python -m soc_platform init-db
 python -m soc_platform serve            # API + console + embedded scheduler, or:
 SOC_EMBEDDED_SCHEDULER=0 python -m soc_platform serve   &   python -m soc_platform scheduler
 ```
 
 - **Do not run `demo` or `reset-demo`** in the client environment (`reset-demo` refuses in prod anyway).
-- Check `GET /health` (database, audit chain, kill switch) and `GET /api/v1/admin/self-check` (cross-surface
-  consistency proof) after the first syncs.
+- Check `GET /health` signed in (database, audit chain, kill switch; anonymous callers only get "ok") and
+  `GET /api/v1/admin/self-check` (cross-surface consistency proof) after the first syncs.
 - The phishing ML engine is on automatically when the image was built with it (`SOC_PHISHING_ENGINE=auto`); it runs
   fully offline. `SOC_PHISHING_ENGINE=1` makes it mandatory (start-up fails if missing), `0` turns it off.
 
@@ -192,11 +213,14 @@ In the client's Entra admin centre → App registrations → New registration:
 2. **Expose an API:** set the Application ID URI to `api://<application-id>` (the default). Add a scope, e.g.
    `access_as_user` (admins and users can consent).
 3. **Manifest:** set `"requestedAccessTokenVersion": 2` (older portals: `accessTokenAcceptedVersion`). The platform
-   only accepts v2.0 tokens (issuer `https://login.microsoftonline.com/<tenant>/v2.0`).
+   accepts v2.0 tokens (issuer `https://login.microsoftonline.com/<tenant>/v2.0`) and the tenant's v1 tokens
+   (`https://sts.windows.net/<tenant>/`), with a minute of clock-skew leeway; any other tenant is refused.
 4. **Authentication → Add a platform → Single-page application:** redirect URI `https://soc.client.com/` (the
    console's origin followed by `/`). Also add it as the front-channel logout URL if desired.
 5. **API permissions:** add `SOC Platform → access_as_user` (delegated) and grant admin consent.
-6. **App roles** (Allowed member types: Users/Groups):
+6. **App roles** (Allowed member types: **Users/Groups** only - an application holding an app role is treated as a
+   service account by the platform anyway: a token without a delegated scope can never approve, change policy or
+   manage access):
 
 | App role value | Platform role | Scope |
 |---|---|---|
@@ -235,8 +259,11 @@ ends the Entra session too.
 - **API keys** (Access screen → API keys): for the Prometheus scraper (auditor, all domains), a SIEM pushing alerts
   (analyst, incident domain), automation. Keys are hashed, expire within 365 days, and can never approve actions,
   change policy or manage access.
-- **Break-glass:** `X-Break-Glass: <secret>` header, verified against `SOC_BREAKGLASS_SHA256`; every use is audited
-  and raises a finding. Test it once, then re-seal.
+- **Break-glass:** `POST /api/v1/auth/break-glass` with the header `X-Break-Glass: <secret>`, verified against
+  `SOC_BREAKGLASS_SHA256`, returns a 15-minute Bearer token (the secret is accepted nowhere else). Every use is
+  audited and raises a critical finding; failed guesses are throttled per address. Test it once, then re-seal.
+- **Privileged platform grants** (lead, admin, automation_admin on the Access screen) need a second administrator's
+  approval and expire within 90 days. Prefer Entra app-role assignments through PIM for standing access.
 
 ### 3.4 Day-one sign-in test
 
@@ -818,14 +845,22 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 ## 8. Production hardening checklist
 
 - [ ] `SOC_ENVIRONMENT=prod`, `SOC_AUTH_MODE=entra`, `SOC_REQUIRE_MFA=1`, `SOC_DEV_JWT_SECRET` unset.
-- [ ] `SOC_DATA_KEY` from the vault; a second key added before rotating (comma-separated: first encrypts, all decrypt).
-- [ ] TLS at the reverse proxy; `SOC_TRUSTED_PROXIES` set to the proxy only; port 8080 not reachable otherwise.
-- [ ] PostgreSQL: TLS, dedicated login, backups and a tested restore (`docs/OPERATIONS.md` - Backups).
+- [ ] `SOC_DATA_KEY` from the vault; rotation = prepend a new key, `python -m soc_platform blobs reencrypt`, remove the old.
+- [ ] TLS at the reverse proxy (TLS 1.2+); `SOC_TRUSTED_PROXIES` set to the proxy (address or subnet) only; port 8080
+  not reachable otherwise. Internet-facing: WAF in prevention mode with the rate-limit rule (deploy/azure/main.bicep,
+  `internetFacing=true`). Internal: the existing gateway's owner grants the AGIC identity Contributor on it.
+- [ ] PostgreSQL: `sslmode=verify-full`, the owner / runtime role split (`SOC_DB_RUNTIME_ROLE`, `SOC_SCHEMA_MANAGE=0`),
+  `pg_trgm` allowed, backups and a tested restore (`docs/OPERATIONS.md` - Backups).
+- [ ] Images: built by the release workflow, deployed **by digest**, signature verified at admission
+  (`deploy/kubernetes/policy/verify-images.yaml`: Kyverno; or Azure Policy with Ratify).
+- [ ] Network: default-deny policies applied; the database reachable only from the platform's pods (overlay
+  `soc-database-egress`); the ingress rule matches the real gateway (Azure: the Application Gateway subnet).
 - [ ] Every connector credential in the vault; least privilege as listed; write scopes only for approved actions.
 - [ ] Break-glass secret sealed; hash configured; tested once.
 - [ ] Outbound allow-list (4.18) enforced at the firewall/proxy.
 - [ ] LLM: approved endpoint set, budget set, redaction on, demo keys absent.
-- [ ] Monitoring: `/metrics` scraped with an auditor API key; alerts from `docs/OPERATIONS.md` - Monitoring.
+- [ ] Monitoring: `/metrics` scraped with an auditor API key (`kubectl apply -k deploy/kubernetes/monitoring`); the
+  alert rules routed to on-call; `audit.anchor` log lines kept in write-once retention in the log platform.
 - [ ] Logs: stdout of every container collected (`SOC_LOG_FORMAT=json`) into the client's log platform / SIEM;
   alerts on WARNING / ERROR lines, failed jobs and model-call errors (`docs/OPERATIONS.md` - Logs, traces and
   diagnostics). If the reverse proxy sets `X-Request-ID`, the same id appears in its logs and the platform's.
@@ -840,9 +875,13 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 - [ ] Capacity: `SOC_API_WORKERS` one per core; `workers x (SOC_DB_POOL_SIZE + SOC_DB_MAX_OVERFLOW)` below PostgreSQL's
   `max_connections`; `scripts/load_test.py` run against the target environment with the expected number of analysts.
 - [ ] `SOC_CONNECTOR_RATE_SHARE` = API workers + 1 (the scheduler service), so together the processes stay within each
-  tool's rate budget; `SOC_DB_STATEMENT_TIMEOUT_SECONDS=120` once the first backfill has finished;
+  tool's rate budget; statement and idle-transaction timeouts left at their production defaults (300 s / 600 s);
   `SOC_SHUTDOWN_GRACE_SECONDS` below the orchestrator's stop grace period.
-- [ ] A restore drill done on the target environment, and `GET /api/v1/audit/verify` clean on the restored copy.
+- [ ] A restore drill done on the target environment, and `GET /api/v1/audit/verify` clean on the restored copy;
+  `python -m soc_platform audit verify --anchor SEQ:HASH` with the latest anchored head from the log platform.
+- [ ] Separation of duties: the default policy's four-eyes actions reviewed with the client (isolate / release a host,
+  disable an account, reset passwords, campaign purge, rotate a privileged secret, block a domain); at least two
+  people hold the lead role, or four-eyes actions cannot be approved.
 
 ---
 

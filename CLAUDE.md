@@ -87,9 +87,12 @@ python -m soc_platform token lena@acme-demo.com lead   # dev token (needs SOC_DE
 python -m soc_platform config check [FILE] [--no-env]  # every configuration problem with its fix; exit 1 on errors
 python -m soc_platform preflight NAME... | --all       # every check a tool must pass before it goes live
 python -m soc_platform connector new NAME --category CAT --tool "Vendor X"   # scaffold;  connector check NAME
-python -m soc_platform blobs check | migrate [--delete-files]   # stored files resolve; move file store -> database
+python -m soc_platform blobs check | migrate [--delete-files] | reencrypt   # resolve; file store -> database; re-key
+python -m soc_platform audit verify [--anchor SEQ:HASH]        # recompute the chain; compare with heads shipped to logs
 kubectl kustomize deploy/kubernetes/overlays/azure             # render the HA package (or overlays/onprem)
-# minimum env for a local run: SOC_DEV_JWT_SECRET=<long random>, SOC_ORG_DOMAINS=acme-demo.com
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --env-file .env up -d --build  # demo stack
+# (the base compose file is PRODUCTION: Entra, TLS-verified PostgreSQL, owner / runtime roles; the demo is the override)
+# minimum env for a local run: SOC_DEV_JWT_SECRET=<32+ random chars>, SOC_ORG_DOMAINS=acme-demo.com
 
 # tests (full suite ~25 min SQLite, ~50 min PostgreSQL when both run at once; run the relevant files first)
 python -m pytest soc_platform/tests -q -p no:cacheprovider
@@ -107,13 +110,16 @@ python scripts/verify_features.py --browser --engine --live --llm # + browser to
 .venv/Scripts/ruff check . --exclude .venv,node_modules
 .venv/Scripts/bandit -r soc_platform scripts -ll -x "soc_platform/tests,scripts/ui_tour/node_modules,soc_platform/domains/phishing/tests"
 .venv/Scripts/python -m pip_audit
-.venv/Scripts/python scripts/supply_chain.py check           # the lock matches the environment (lock / sbom regenerate)
+.venv/Scripts/python scripts/supply_chain.py check           # locks match the environment; image locks hashed, in step
 .venv/Scripts/python scripts/precommit_scan.py --all         # no .env secret, no confidential name (--install = git hook)
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of these on every push, plus both test suites, the SBOM and a Trivy scan of
-the image. After adding or upgrading a dependency: `python scripts/supply_chain.py lock` and commit
-`requirements/platform.lock`.
+CI (`.github/workflows/ci.yml`) runs all of these on every push, plus both test suites, the SBOM and Trivy scans of
+both images (platform, engine); a `v*` tag also pushes and signs them. Every action is pinned to a commit SHA and every
+image to a digest (`test_deployment_manifests.py` fails otherwise). After adding or upgrading a dependency:
+`python scripts/supply_chain.py lock`, then `python scripts/supply_chain.py image-lock` (Docker: the hashed Linux
+locks `requirements/image.lock` / `image-engine.lock` the Dockerfile installs with `--require-hashes`), and commit all
+three. A new base-image digest goes in the Dockerfile and `supply_chain.BASE_IMAGE` together.
 
 **Embedded PostgreSQL for tests** (no server needed):
 `python -c "import pgserver; print(pgserver.get_server('D:/pgtest_soc', cleanup_mode=None).get_uri())"` → use the
@@ -171,12 +177,14 @@ soc_platform/
   core/cases.py          CaseService: cases, evidence, recommendations, decisions, actions_for_case, assign/add_note,
                          deferred narration (narration_request / pending_narration / narrate_pending)
   core/enrichment.py     EnrichmentOrchestrator: parallel lookups (16 workers, 20 s deadline, 30 min cache)
-  core/actions.py        ActionSpec/Registry/Service - the ONLY execution path; idempotency keys; conditional updates
+  core/actions.py        ActionSpec/Registry/Service - the ONLY execution path; idempotency keys; conditional updates;
+                         commits `executing` before a tool call and the outcome after; execute_pending, reconcile_stuck
   core/policy.py         L0-L4 levels, PolicyEngine.decide(), PolicyStore (propose/approve), DEFAULT_POLICY
   core/auth.py           roles/permissions, token validation (Entra RS256 / dev HS256, exp+iat required), dev tokens
   core/access.py         role grants, API keys, revocation, break-glass, kill switch
-  core/audit.py          hash-chained append-only audit; _lock_chain serialises appends
-  core/crypto.py         Fernet/MultiFernet, write_protected (atomic, 0600, Windows replace retry), read_protected
+  core/audit.py          hash-chained append-only audit; _lock_chain serialises appends; verify(since=checkpoint),
+                         save_checkpoint (self-check) - /health verifies incrementally
+  core/crypto.py         Fernet/MultiFernet (strict in prod: unsealed data refused), write_protected, read_protected
   core/blobstore.py      BlobStore: stored e-mails / reports behind one reference - a path (file store) or
                          `db:<key>` (`blobs` table, SOC_BLOB_STORE=database); reads follow the reference;
                          store_generated, migrate_to_database, check_references (`blobs` CLI)
@@ -204,8 +212,11 @@ soc_platform/
   tests/                 platform tests (conftest.py has PG mode, PG-rules enforcement, estates)
 config/                  connectors.yaml, suppliers.yaml, sanctioned_services.yaml
 artifacts/phishing/      labelled corpus (corpus/*.eml + labels.json), engine models/data
-deploy/                  Dockerfile (multi-stage, non-root), docker-compose.yml (postgres, api, scheduler, engine profile),
-                         kubernetes/ (Kustomize base + overlays/azure, overlays/onprem: the HA package)
+deploy/                  Dockerfile (digest-pinned, hash-locked, non-root, prod defaults), docker-compose.yml (production:
+                         db-certs, postgres with TLS + roles, platform-migrate, api, scheduler; tls / backup / engine
+                         profiles), docker-compose.demo.yml (dev override), postgres/init-roles.sh, tls/Caddyfile,
+                         kubernetes/ (Kustomize base + overlays/azure, overlays/onprem: the HA package; monitoring/:
+                         ServiceMonitor + alert rules; policy/: image-signature admission), azure/main.bicep (resources)
 docs/                    see §8
 ```
 
@@ -213,7 +224,8 @@ docs/                    see §8
 leaf any layer may call; everything must work without it.
 
 **Request path**: BodyLimitMiddleware (30 MB) → SecurityMiddleware (NUL in path/query → 400, Content-Length → 413,
-token bucket 20/s burst 120 → 429) → `current_user` (Bearer / X-API-Key / X-Break-Glass, revocation) →
+token bucket 20/s burst 120 → 429; `SOC_TRUSTED_PROXIES` takes CIDRs) → `current_user` (Bearer: Entra / dev / `sk_soc_` key /
+`bg.` break-glass session; X-API-Key; revocation) →
 `need(Perm.X, "domain")` → handler with one DB session (commit/rollback **before** the response - always
 `Depends(db_session, scope="function")`) → security headers + queued access-log row.
 `DataError` → 400, service `KeyError` → 404, `PermissionError` → 403. Out-of-scope records answer **404**.
@@ -230,7 +242,11 @@ token bucket 20/s burst 120 → 429) → `current_user` (Bearer / X-API-Key / X-
 - Ids are `uuid4().hex` (`new_id()`).
 
 **Persistence**
-- Services take a `Session` and **never commit**; the API request or job run owns the transaction.
+- Services take a `Session` and **never commit**; the API request or job run owns the transaction. The one exception
+  is `ActionService._execute`: it commits `executing` + audit before the tool call and the outcome after, so no lock is
+  held while a vendor answers and an executed action is always on record. Inside a savepoint it cannot commit: the
+  action stays `approved` and the caller runs `execute_pending()` after its commit (the jobs do; the `actions` job is
+  the safety net). Never wrap a request that may approve an action in `begin_nested()`.
 - Free text from vendors/people → `BoundedText(n)` (kept to width with "…", NUL stripped). **Identifiers** stay strict
   `String(n)` so a mismatch fails loudly. NUL is stripped from every text column by a `before_flush` listener.
 - Schema changes: `create_all` creates tables; `_add_missing_columns` then adds **nullable** columns the model defines
@@ -364,7 +380,10 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   (per-connector paging and behaviour),
   `test_high_availability.py` (database blob store, migration, lease renewal / takeover / stuck release, poison items,
   schema race, liveness / readiness, Entra key outage, one sync per stream, raw payload opt-in),
-  `test_deployment_manifests.py` (the Kubernetes package: replicas, probes, pod security, secrets, overlays render),
+  `test_deployment_manifests.py` (the Kubernetes package: replicas, probes, pod security, secrets, overlays render;
+  digests / commit SHAs everywhere; schema rights only in init-db; Compose production defaults),
+  `test_go_live_hardening.py` (fail-closed settings, dev sign-in never with live tools, LLM allow-list, credential
+  origin, Bearer service keys, alert metrics, audit anchors),
   `test_value_scorecard.py` (benefit KPIs, baselines, capacity, permissions), `test_report_design.py` (house style:
   header / footer / page fields, charts, no 'None' / 'n/a', 16:9 decks),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
@@ -372,8 +391,9 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 772 platform tests passing on SQLite and on PostgreSQL (788 collected, 16 skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, 1 database-specific check), 205
-  engine tests, 108/108 features verified.
+- Current counts (keep docs in sync when they change): 798 platform tests passing on SQLite and on PostgreSQL (814 collected, 16 skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, 1 database-specific check), 205
+  engine tests, 108/108 features verified with `--browser --engine --live --llm` (round 25); the go-live round's
+  offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
 ---
 
@@ -602,6 +622,28 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   liveness probe at `/health` restarts every pod during a database outage.
 - **Variable names in `submit_raw`**: `ref` is the de-duplication key (`source_ref`); the blob reference is
   `blob_ref`. Reusing `ref` made every replayed report a new submission (caught by `test_phishing.py`).
+- **Never call a vendor inside the open transaction.** `_execute` once called the tool after `action.approved` had
+  taken the audit chain's row lock: every audited write on the platform waited for the vendor, and a failed commit
+  lost the record of an executed containment. The same applies to any new code that calls out while holding writes.
+- **`async def` routes run on the event loop.** The upload route did parsing, look-ups, the ML engine and the model
+  there and froze its whole process (liveness included). Routes are plain `def` unless they truly await.
+- **A setting the deploy files use must work as written there.** `SOC_TRUSTED_PROXIES` was a CIDR in both overlays
+  while the code compared strings: nothing matched, and every analyst behind the gateway shared one rate-limit bucket.
+- **One `Redactor` per model call.** Its token map is mutated while redacting; a shared one across parallel
+  narrations could give two people the same token and restore the wrong name into a case.
+- **Dev sign-in mints any role** (`/api/v1/dev/token`): the registry isolates every live tool while it is on
+  (outside `SOC_ENVIRONMENT=test`, which the suite's conftest sets). Don't add a way around it.
+- **Default-deny applies to the database pods too** (on-prem CloudNativePG in the same namespace): their own network
+  policy lets replication, the operator, DNS and backups through. AGIC (Azure) sends from the gateway's subnet, not
+  from a namespace: the ingress policy uses an `ipBlock`.
+- **Upstream tags move or vanish.** The CI image-scan action's tag was deleted upstream (that step could no longer
+  run). Pin actions by commit SHA and images by digest; resolve them with `git ls-remote` / `docker buildx imagetools
+  inspect`, never by guessing.
+- **The scheduler container has no HTTP server**: it needs the liveness-file health check, not the image's HTTP one
+  (Compose had it unhealthy for ever).
+- **Patch files, not heredocs, for multi-line edits** - the Bash tool also mangled quotes in long Python heredocs
+  (`unexpected EOF`); the Write tool + a `.py` patch is reliable. The Write tool drops trailing spaces, so a patch
+  whose search text ends in a space will not match.
 
 ---
 

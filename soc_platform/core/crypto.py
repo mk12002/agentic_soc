@@ -6,6 +6,11 @@ anyone expects, so they are encrypted with Fernet (AES-128-CBC + HMAC-SHA256) wh
 rotated without re-encrypting everything at once). In ``prod`` a key is mandatory.
 
 Generate a key:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+In ``prod`` the cipher is *strict*: stored data without the encryption marker is refused instead of being returned
+as "legacy plaintext" - otherwise anyone able to write to the store could replace a sealed e-mail or report with
+content of their choosing. ``python -m soc_platform blobs reencrypt`` seals legacy data and re-encrypts everything
+under the newest key, so an old key can then be removed from ``SOC_DATA_KEY``.
 """
 
 from __future__ import annotations
@@ -27,7 +32,8 @@ class DataProtectionError(RuntimeError):
 
 
 class DataCipher:
-    def __init__(self, keys: list[str]) -> None:
+    def __init__(self, keys: list[str], *, strict: bool = False) -> None:
+        self.strict = strict
         if not keys:
             raise DataProtectionError("no data keys configured")
         try:
@@ -40,6 +46,8 @@ class DataCipher:
 
     def decrypt(self, blob: bytes) -> bytes:
         if not blob.startswith(MAGIC):
+            if self.strict:
+                raise DataProtectionError("stored data is not encrypted (run `python -m soc_platform blobs reencrypt`)")
             return blob  # legacy plaintext written before encryption was enabled
         try:
             return self._f.decrypt(blob[len(MAGIC):])
@@ -50,10 +58,10 @@ class DataCipher:
         return MAGIC + self._f.rotate(blob[len(MAGIC):]) if blob.startswith(MAGIC) else self.encrypt(blob)
 
 
-def get_cipher(settings: Settings | None = None) -> DataCipher | None:
+def get_cipher(settings: Settings | None = None, *, strict: bool | None = None) -> DataCipher | None:
     st = settings or get_settings()
     if st.data_keys:
-        return DataCipher(st.data_keys)
+        return DataCipher(st.data_keys, strict=st.environment == "prod" if strict is None else strict)
     if st.environment == "prod":
         raise DataProtectionError("SOC_DATA_KEY is required in prod (encryption at rest for raw payloads)")
     return None
@@ -97,9 +105,11 @@ def seal_file(path: str | Path, cipher: DataCipher | None = None) -> Path:
 
 def read_protected(path: str | Path, cipher: DataCipher | None = None) -> bytes:
     blob = Path(path).read_bytes()
-    if not blob.startswith(MAGIC):
-        return blob
     c = cipher if cipher is not None else get_cipher()
+    if not blob.startswith(MAGIC):
+        if c is not None and c.strict:
+            raise DataProtectionError(f"{path} is not encrypted (run `python -m soc_platform blobs reencrypt`)")
+        return blob
     if c is None:
         raise DataProtectionError(f"{path} is encrypted but SOC_DATA_KEY is not set")
     return c.decrypt(blob)

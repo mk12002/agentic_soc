@@ -1,0 +1,10 @@
+# Monitoring for clusters running the Prometheus Operator (kube-prometheus-stack, Azure Managed Prometheus):
+#   kubectl apply -k deploy/kubernetes/monitoring
+# Create first the Secret soc-metrics-key (key "token") holding an auditor service-account key
+# (Access screen -> Service accounts -> role auditor): /metrics answers only to it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agentic-soc
+resources:
+  - servicemonitor.yaml
+  - alerts.yaml

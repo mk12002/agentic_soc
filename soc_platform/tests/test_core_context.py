@@ -155,10 +155,23 @@ def test_backoff_retries_rate_limits():
 
 def test_redaction_pseudonymises_internal_people_but_keeps_iocs():
     r = Redactor(internal_domains={"acme.com"}, known_names={"Priya Sharma"})
-    text = "Priya Sharma (priya@acme.com, +91 98765 43210) clicked http://evil.io from 10.2.3.4, sender a@evil.io"
+    text = "Priya Sharma (priya@acme.com, +91 98765 43210) clicked http://evil.io from 203.0.113.9, sender a@evil.io"
     out = r.redact(text)
     assert "priya@acme.com" not in out and "Priya Sharma" not in out and "98765" not in out
-    assert "http://evil.io" in out and "10.2.3.4" in out and "a@evil.io" in out
+    assert "http://evil.io" in out and "203.0.113.9" in out and "a@evil.io" in out
+    assert r.restore(out) == text
+
+
+def test_redaction_covers_accounts_internal_hosts_and_addresses_not_just_e_mail():
+    """Down-level accounts, host names inside the organisation's domains, laptop names and internal IP addresses
+    identify a person or their device; they used to reach the model as they were."""
+    r = Redactor(internal_domains={"acme.com"}, known_hosts={"priya-lt07"})
+    text = (r"ACME\psharma signed in on priya-lt07 (web01.corp.acme.com, 10.20.3.4 / 172.16.9.9 / 192.168.1.5), "
+            "then 198.51.100.7 and the lookalike acme-c0rp.com")
+    out = r.redact(text)
+    for private in (r"ACME\psharma", "priya-lt07", "web01.corp.acme.com", "10.20.3.4", "172.16.9.9", "192.168.1.5"):
+        assert private not in out, private
+    assert "198.51.100.7" in out and "acme-c0rp.com" in out                 # attacker-side indicators stay evidence
     assert r.restore(out) == text
 
 

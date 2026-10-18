@@ -1,0 +1,22 @@
+# TLS in front of the API (docker compose --profile tls). Put the organisation's certificate and key for
+# SOC_PUBLIC_HOST in deploy/tls/cert.pem and deploy/tls/key.pem (never commit them: deploy/tls/*.pem is gitignored).
+{
+	auto_https off
+	admin off
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$SOC_PUBLIC_HOST}:443 {
+	tls /tls/cert.pem /tls/key.pem {
+		protocols tls1.2 tls1.3
+	}
+	request_body {
+		max_size 30MB
+	}
+	reverse_proxy platform-api:8080 {
+		header_up X-Forwarded-Proto https
+	}
+	header -Server
+}

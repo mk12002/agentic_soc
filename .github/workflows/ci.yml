@@ -1,6 +1,9 @@
-# Every push and pull request runs the same gates the project runs before a commit (CLAUDE.md §9), plus a container
-# image scan. A failing gate fails the run; protect the main branch so merges need a green run.
+# Every push and pull request runs the same gates the project runs before a commit (CLAUDE.md §9), plus scans of
+# both container images. A failing gate fails the run; protect the main branch so merges need a green run.
 # Repository secret BANNED_NAMES_REGEX holds the confidential-name pattern (never committed).
+# Every action is pinned to a commit SHA (a tag can be moved to other code - it has happened to a scanner action);
+# the comment names the release. tests/test_deployment_manifests.py fails on an unpinned action.
+# A tag v* also builds, pushes and signs the images (job "release"): deploy only images whose signature verifies.
 name: ci
 
 on:
@@ -24,14 +27,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.11"
           cache: pip
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: "20"
       - name: Install
@@ -43,9 +46,11 @@ jobs:
         run: ruff check . --exclude .venv,node_modules
       - name: Static security analysis (bandit)
         run: bandit -r soc_platform scripts -ll -x "soc_platform/tests,scripts/ui_tour/node_modules,soc_platform/domains/phishing/tests"
-      - name: Dependency vulnerabilities (pip-audit on the lock)
-        run: python -m pip_audit -r requirements/platform.lock --no-deps --disable-pip
-      - name: Lock matches the requirements
+      - name: Dependency vulnerabilities (pip-audit on the locks)
+        run: |
+          python -m pip_audit -r requirements/platform.lock --no-deps --disable-pip
+          python -m pip_audit -r requirements/image-engine.lock --no-deps --disable-pip
+      - name: Locks match the requirements, image locks hashed and in step
         run: python scripts/supply_chain.py check
       - name: Console JavaScript parses
         run: for f in soc_platform/api/static/*.js; do node --check "$f"; done
@@ -54,12 +59,12 @@ jobs:
           SOC_BANNED_NAMES_REGEX: ${{ secrets.BANNED_NAMES_REGEX }}
         run: python scripts/precommit_scan.py --all
       - name: Secrets in the git history (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Software bill of materials (CycloneDX)
         run: python scripts/supply_chain.py sbom
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: sbom
           path: sbom/platform.cdx.json
@@ -69,8 +74,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -88,15 +93,15 @@ jobs:
     timeout-minutes: 120
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_PASSWORD: postgres
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -111,18 +116,57 @@ jobs:
         run: python -m pytest soc_platform/tests -q -p no:cacheprovider
 
   image:
-    name: container image build and vulnerability scan (trivy)
+    name: container images build and vulnerability scan (trivy)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        variant: [platform, engine]
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: docker build -f deploy/Dockerfile -t soc-platform:ci .
-      - name: Scan (fail on fixable high / critical)
-        uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
-          image-ref: soc-platform:ci
+          lfs: true                                      # the engine's trained models
+      - name: Build
+        run: >-
+          docker build -f deploy/Dockerfile -t soc-platform:ci-${{ matrix.variant }}
+          --build-arg WITH_PHISHING_ENGINE=${{ matrix.variant == 'engine' && 'true' || 'false' }} .
+      - name: Scan (fail on fixable high / critical)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: soc-platform:ci-${{ matrix.variant }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
           format: table
+
+  release:
+    name: push and sign the images (tags v*)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [quality, tests-sqlite, tests-postgres, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write          # push to ghcr.io
+      id-token: write          # keyless signing: the signature names this workflow and commit
+    strategy:
+      matrix:
+        variant: [platform, engine]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          lfs: true
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5  # v3.10.1
+      - name: Build, push, sign by digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}/soc-${{ matrix.variant }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build -f deploy/Dockerfile -t "$IMAGE:${GITHUB_REF_NAME}" \
+            --build-arg WITH_PHISHING_ENGINE=${{ matrix.variant == 'engine' && 'true' || 'false' }} .
+          docker push "$IMAGE:${GITHUB_REF_NAME}"
+          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:${GITHUB_REF_NAME}")
+          cosign sign --yes "$DIGEST"
+          echo "signed $DIGEST" >> "$GITHUB_STEP_SUMMARY"

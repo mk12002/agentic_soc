@@ -63,7 +63,11 @@ Detailed technical view above (every layer, data store, trust boundary and exter
 * `postgres` - relational store (SQLite for dev). Stored e-mails and reports in its `blobs` table with
   `SOC_BLOB_STORE=database` (or on a volume with the file store).
 * High availability: two or more of each, spread across nodes and zones, with HA PostgreSQL - the Kubernetes package
-  in `deploy/kubernetes` (Azure and on-prem overlays) and [HIGH_AVAILABILITY.md](HIGH_AVAILABILITY.md).
+  in `deploy/kubernetes` (Azure and on-prem overlays; Azure resources in `deploy/azure/main.bicep`) and
+  [HIGH_AVAILABILITY.md](HIGH_AVAILABILITY.md).
+* Least privilege and integrity in deployment: the schema is created by a one-shot migration step as the database
+  owner; the platform runs as a role without schema rights over certificate-verified TLS; images are deployed by
+  digest and signed; production settings are required or the platform refuses to start.
 * optional `engine` profile - phishing ML microservices; detonation on an isolated host / CAPEv2.
 
 ## Key design decisions

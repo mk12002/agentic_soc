@@ -43,7 +43,7 @@ platform and dev-VM technical diagrams), `ENGINEERING.md` (every design decision
 | Client LLM gateway | Azure OpenAI / AI Foundry, Anthropic or an OpenAI-compatible endpoint the client approves. | Optional. It is called only through `llm/gateway.py`, after pseudonymisation. Set with `SOC_LLM_PROVIDER` and `SOC_LLM_ENDPOINT`. |
 | SIEM (Microsoft Sentinel) | The client's SIEM. | Two directions. The client's log agent reads the containers' JSON logs (`SOC_LOG_FORMAT=json`) and the audit export. Optionally the SIEM pushes alerts in through `POST /api/v1/ingest/alerts`. |
 | Teams / Slack / JSON webhook | Chat or automation endpoints. | `core/notify.py` posts findings above a threshold to them. Only HTTPS endpoints are allowed, set in `SOC_NOTIFY_WEBHOOKS`. The URL is never stored, logged or returned; only `kind:host` is shown. |
-| Prometheus / monitoring | The client's monitoring. | Scrapes `GET /metrics` with an auditor API key. Uptime checks call `GET /health` (scheduler heartbeat, audit chain, self-check, kill switch); load balancers and orchestrator probes use `GET /health/live` and `GET /health/ready`. |
+| Prometheus / monitoring | The client's monitoring. | Scrapes `GET /metrics` with an auditor API key (`X-API-Key` or `Bearer sk_soc_...`); the alert rules in `deploy/kubernetes/monitoring` watch the scheduler heartbeat, audit chain, failing jobs, unverified actions, break-glass use and sync age. `GET /health` answers "ok" to anyone and the details (scheduler heartbeat, audit chain, kill switch) to a signed-in caller; load balancers and orchestrator probes use `GET /health/live` and `GET /health/ready`. |
 | GitHub + Actions CI | Source control and build. | Every change runs these gates: `ruff`, `bandit`, `pip-audit` against the lock, a lock check, `node --check`, `precommit_scan` + gitleaks (secrets and confidential names), pytest on SQLite and on PostgreSQL 16, a CycloneDX SBOM, and a Trivy scan of the image. |
 
 ### 2.2 Containers and build (centre, top row)
@@ -65,9 +65,11 @@ Every request passes through these stages in this order. Badge 3 walks through i
    - a bad `Content-Length` returns 413;
    - a token bucket (20 requests per second, burst 120) returns 429 when exceeded.
 3. **current_user** (`core/auth.py`, `core/access.py`) accepts three credentials:
-   - an Entra RS256 token, or a dev HS256 token outside production (both must carry `exp` and `iat`);
-   - an `X-API-Key`;
-   - an `X-Break-Glass` credential.
+   - an Entra RS256 token (the tenant's v2.0 or v1 issuer; a token without a delegated scope is a service), or a dev
+     HS256 token outside production (both must carry `exp` and `iat`);
+   - a service-account key, as `X-API-Key` or `Bearer sk_soc_...`;
+   - a 15-minute break-glass session token (`Bearer bg....`), issued by `POST /api/v1/auth/break-glass` in exchange
+     for the sealed secret, which no other route accepts.
 
    It checks revocation for each.
 4. **need(Perm, domain)** checks that one of the caller's roles grants the permission in that domain:
@@ -209,7 +211,9 @@ platform runs with no tenant access.
 1. The scheduler finds the jobs that are due from the database (the last `job_runs`) and runs them in `JOBS` order:
    - vulnerability (6 h), incident (5 min), phishing (2 min);
    - follow-up and daily report (daily), weekly reports (weekly);
-   - intelligence (10 min), retention (daily), self-check (hourly), notify (1 min).
+   - intelligence (10 min), retention (daily), self-check (hourly; also stores the audit checkpoint and logs the
+     chain's head as `audit.anchor`), notify (1 min), actions (1 min: approved actions still waiting; executions
+     stuck past 15 minutes marked `unverified`).
 
    Vulnerability runs first, so incidents are never scored without exposure data.
 2. Each job takes a lease in `system_flags` (a compare-and-swap), re-checks that the job is still due, runs, records
@@ -350,11 +354,14 @@ The access-log row and audit event carry the request's trace id (flow A).
    - Approval counts only for roles whose scope covers the action's domain.
    - An analyst who requests an action they may approve is approving it, unless four-eyes applies; then a different
      person must approve, because the requester cannot approve their own action.
-6. On approval, `ActionService` re-judges the decision in the action's own domain, moves the status with a
-   conditional update (exactly once), and only then calls the connector's write method. Domains and the API never
-   call it directly.
-7. Reversible actions can be rolled back (`/rollback`) through their reverse action, for example release from
-   containment or restore an e-mail.
+6. On approval, `ActionService` re-judges the decision in the action's own domain, moves the status to `executing`
+   with a conditional update (exactly once), **commits it with its audit record**, and only then calls the
+   connector's write method, with no transaction open; the outcome and its audit record are committed after. An
+   action approved inside a job's per-item savepoint waits as `approved` and runs right after the job commits.
+   Domains and the API never call the write method directly.
+7. Reversible actions can be rolled back (`/rollback`): that requests the reverse action (for example release from
+   containment or restore an e-mail) through the same policy, four-eyes included; the original is marked
+   `rolled_back` when the reverse executes.
 8. Every step is in the audit log.
 9. The kill switch stops autonomous execution only. To stop every write to a tool, pause the tool in the console.
 
@@ -364,8 +371,9 @@ The access-log row and audit event carry the request's trace id (flow A).
    brief, or report text. It passes computed facts to `LLMGateway`, each with an evidence id.
 2. `usage_policy.py` checks the budget, the person's limits and the feature's switch and tier. A refusal raises
    `BudgetExceeded`, and the feature uses its deterministic text.
-3. `Redactor` replaces internal names, addresses and hosts with pseudonyms. The prompt goes to the client's own LLM
-   gateway.
+3. `Redactor` replaces internal names, addresses, `DOMAIN\\user` accounts, host names under the organisation's
+   domains, the case's own device names and internal IP addresses with pseudonyms - one map per call. The prompt goes
+   only to an approved (https, in production) endpoint: the client's own LLM gateway.
 4. The answer is untrusted input:
    - it is parsed with `model_list` / `model_choice` / `model_ids`;
    - each claim must cite evidence ids that were supplied;
@@ -379,8 +387,10 @@ The access-log row and audit event carry the request's trace id (flow A).
 - Each request, job run and CLI command gets a **trace id** (`observability.TRACE`), and every outbound call, model
   call, audit event and log line carries it. One id ties an analyst's click to the vendor call it caused.
 - **Audit:** `audit_log` is append-only and hash-chained. Each event includes the previous event's hash, so a
-  changed or deleted row breaks the chain. `/health` and the self-check verify it. Every successful write request is
-  audited.
+  changed or deleted row breaks the chain. The self-check re-hashes it hourly, stores where it reached, and logs
+  the head (`audit.anchor`) for the log platform; `/health` re-hashes only newer records. The database refuses
+  UPDATE / DELETE / TRUNCATE on it (trigger), and the runtime role holds INSERT / SELECT only. Every successful write
+  request is audited.
 - **Access log:** one row per request (who, route, status, time), without query strings or bodies.
 - **Logs:** structured JSON on stdout through `event()`, with secrets masked. The client's SIEM collects them.
 
@@ -395,7 +405,9 @@ The access-log row and audit event carry the request's trace id (flow A).
 | The model never decides | Figures and verdicts come from code; the gateway drops uncited claims and figures not in the evidence; identical behaviour with the model off |
 | Internal identities do not leave | `Redactor` pseudonymisation; threat-intel lookups withhold internal addresses and own domains; NVD gets CVE ids only |
 | No secrets in code or configuration | Key Vault files (`<NAME>_FILE`); `${VAR}` references only; pre-commit scan and gitleaks in CI |
-| Tamper evidence | Hash-chained `audit_log`, checked by `/health` and the self-check |
-| Data at rest | Fernet on raw payloads and reports; PostgreSQL storage encryption from the client's platform |
+| Tamper evidence | Hash-chained `audit_log`, checked by `/health` and the self-check; append-only trigger and grants; heads anchored in the log platform |
+| Data at rest | Fernet on raw payloads and reports (unsealed data refused in prod); PostgreSQL storage encryption from the client's platform |
+| Data in transit | TLS at the gateway (1.2+); `sslmode=verify-full` to PostgreSQL (required in prod); connector credentials only to the connector's own origin |
+| Least privilege in the database | The platform runs as a role without schema rights; only `init-db` holds the owner's credentials |
 | One tool's failure does not stop the rest | Registry isolation; jobs, screens and reports degrade to "unavailable" and keep last known values |
 | Supply chain | Locked dependencies, SBOM, pip-audit, Trivy, non-root image without pip |

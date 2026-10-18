@@ -539,21 +539,39 @@ behaviour. Re-running `demo` on the same database changes nothing; a fresh datab
 For a production-like run: API, scheduler and PostgreSQL in containers. It needs Docker Desktop. Add to `.env`:
 
 ```ini
-POSTGRES_PASSWORD=<a strong password>
-SOC_DEV_JWT_SECRET=<as in §3>
-RABBITMQ_PASSWORD=<a strong password>   # Compose checks it for every service, though only the ML-engine profile uses it
+POSTGRES_PASSWORD=<a strong password>        # the schema owner: used only by the one-shot platform-migrate service
+SOC_APP_DB_PASSWORD=<a strong password>      # the role the platform runs as (no schema rights, append-only audit log)
+SOC_ORG_DOMAINS=acme-demo.com
+SOC_DEV_JWT_SECRET=<as in §3, 32+ characters>
+# Compose checks these for every service, though only the ML-engine profile uses them:
+RABBITMQ_PASSWORD=<a strong password>
+REDIS_PASSWORD=<a strong password>
+ENGINE_APP_SECRET_KEY=<a long random value>
+ENGINE_API_KEY=<a long random value>
 ```
 
+The base file is **production** (Entra sign-in, step-up MFA, an encryption key required); the demo adds the override
+`deploy/docker-compose.demo.yml` (dev sign-in, fixtures only - the platform refuses a real tool while dev sign-in is
+on):
+
 ```powershell
-docker compose -f deploy\docker-compose.yml --env-file .env up -d --build        # api + scheduler + postgres
-docker compose -f deploy\docker-compose.yml --env-file .env exec platform-api python -m soc_platform demo
+docker compose -f deploy\docker-compose.yml -f deploy\docker-compose.demo.yml --env-file .env up -d --build
+docker compose -f deploy\docker-compose.yml -f deploy\docker-compose.demo.yml --env-file .env exec platform-api python -m soc_platform demo
 docker compose -f deploy\docker-compose.yml logs -f platform-api                  # watch the logs (Ctrl+C to stop watching)
 ```
 
+Start-up order: `db-certs` writes the database's private CA and certificate (once), `postgres` starts with TLS
+required for network connections, `platform-migrate` creates the schema as its owner and grants the runtime role,
+then the API and scheduler start as that role over `sslmode=verify-full`. Profiles add a TLS reverse proxy
+(`--profile tls`, Caddy with your certificate in `deploy/tls/`), nightly dumps (`--profile backup`) and the ML engine
+(`--profile engine`).
+
 Open http://127.0.0.1:8080 as before (`SOC_API_PORT` changes the host port).
 
-What you should see (checked end to end on Docker Desktop 29 / Compose 5, 2026-10-17): the API container turns
-*healthy* on `/health/ready`; `/health` reports `audit_chain: true` and the scheduler `running` in `service` mode; the
+What you should see (checked end to end on Docker Desktop 29 / Compose 5, 2026-10-17; the production stack with the
+split roles and verified TLS re-checked 2026-10-18): the API container turns *healthy* on `/health/ready`; `/health`
+signed in (anonymous callers get only `{"status": "ok"}`) reports `audit_chain: true` and the scheduler `running` in
+`service` mode; the
 scheduler's first pass runs the vulnerability job first, then incidents and phishing. `demo` can run while the
 scheduler is syncing (the two take turns on each stream) and gives the same figures as on a laptop (7 phishing and 3
 incident cases, 34 actions awaiting approval, 6 open vulnerabilities). Reports are stored in PostgreSQL
@@ -573,7 +591,7 @@ and documents out of it (about 480 MB is sent, almost all of it the trained mode
 
 ```powershell
 docker compose -f deploy\docker-compose.yml down        # stop (data kept)
-docker compose -f deploy\docker-compose.yml down -v     # stop and delete the database volume
+docker compose -f deploy\docker-compose.yml down -v     # stop and delete the database volume (and its certificates)
 ```
 
 Here the jobs run in their own `platform-scheduler` container, and the API container's built-in scheduler is
@@ -687,6 +705,6 @@ NEW TOOL     python -m soc_platform connector new <name> --category edr --tool "
 LLM?         Reports page callout, or GET /api/v1/llm/status
 RESET        stop server; python -m soc_platform reset-demo --yes ; serve
 OTHER ORG    python scripts\build_estate_variant.py out\veridian --seed 7  (then §9)
-DOCKER       docker compose -f deploy\docker-compose.yml --env-file .env up -d --build
+DOCKER       docker compose -f deploy\docker-compose.yml -f deploy\docker-compose.demo.yml --env-file .env up -d --build
 TESTS        python -m pytest soc_platform\tests -q ; python scripts\verify_features.py
 ```

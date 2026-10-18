@@ -305,9 +305,10 @@ class PhishingService:
         self._apply_auto_close(case, sub, result, camp, impact, rec)
         return self.cases.view(case.id)
 
-    def narrate_pending(self, case_ids: list[str] | None = None) -> int:
-        """Add the model's written explanation to reports processed with ``narrate=False`` (parallel model calls)."""
-        ids = list(dict.fromkeys((case_ids or []) + self.cases.pending_narration("phishing")))
+    def narrate_pending(self, case_ids: list[str] | None = None, *, backlog: bool = True) -> int:
+        """Add the model's written explanation to reports processed with ``narrate=False`` (parallel model calls).
+        ``backlog=False`` narrates only ``case_ids`` (one upload must not wait for every other pending report)."""
+        ids = list(dict.fromkeys((case_ids or []) + (self.cases.pending_narration("phishing") if backlog else [])))
         return self.cases.narrate_pending(ids, self.llm, redactor=Redactor(internal_domains=set(self.org_domains)),
                                           actor=f"agent:{AGENT}")
 

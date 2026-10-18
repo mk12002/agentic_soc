@@ -9,10 +9,11 @@ resources:
   - ../../base
   - postgres.yaml
   - ingress.yaml
+  - network.yaml
 images:
   - name: soc-platform
-    newName: registry.CHANGE-ME.internal/soc-platform   # the internal registry; pin by digest for production
-    newTag: CHANGE-ME
+    newName: registry.CHANGE-ME.internal/soc-platform   # the internal registry
+    digest: sha256:CHANGE-ME                            # the signed image's digest (never a tag: tags can be moved)
 patches:
   - path: nodes.yaml
   - path: settings.yaml

@@ -19,7 +19,7 @@ import anthropic
 import httpx
 
 from soc_platform.config import Settings, secret
-from soc_platform.llm.gateway import Completion, Provider, llm_extra_headers, llm_verify
+from soc_platform.llm.gateway import Completion, Provider, check_endpoint, llm_extra_headers, llm_verify
 
 JSON_RULE = ("\n\nOutput format: reply with a single JSON object only - no prose before or after it, "
              "no markdown fences.")
@@ -33,9 +33,7 @@ class AnthropicProvider(Provider):
         self.models = {"large": settings.llm_deployment or "claude-opus-5",
                        "small": os.environ.get("SOC_LLM_DEPLOYMENT_SMALL") or "claude-haiku-4-5"}
         base_url = (settings.llm_endpoint or "").rstrip("/") or None
-        approved = settings.llm_approved_endpoints
-        if approved and (base_url or "https://api.anthropic.com") not in approved:
-            raise ValueError(f"LLM endpoint {base_url or 'https://api.anthropic.com'} is not on the approved list")
+        check_endpoint(settings, base_url or "https://api.anthropic.com")
         key = secret("SOC_LLM_API_KEY")
         # None for either falls back to the SDK's own resolution (ANTHROPIC_API_KEY / profile, public endpoint)
         # an organisation's own gateway may need fixed headers and a corporate CA (SOC_LLM_EXTRA_HEADERS / _CA_BUNDLE)

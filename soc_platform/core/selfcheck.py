@@ -97,7 +97,7 @@ def run_self_check(s: Session) -> dict[str, Any]:
     checks.append({"check": "audit chain verifies", "ok": bool(v.get("ok")), "detail": {k: v.get(k) for k in ("records", "first_bad_seq")}})
 
     return {"ok": all(c["ok"] for c in checks), "passed": sum(c["ok"] for c in checks), "total": len(checks),
-            "generated_at": utcnow().isoformat(), "checks": checks}
+            "generated_at": utcnow().isoformat(), "checks": checks, "_audit_verification": v}
 
 
 def raise_or_resolve(s: Session, result: dict[str, Any]) -> None:

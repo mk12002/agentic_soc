@@ -124,11 +124,13 @@ and a unified cross-tool timeline.
 * **Autonomy levels L0-L4 per action type** (observe, notify, recommend, approve, autonomous). Default: every
   action is L2 - the platform recommends, a person decides.
 * **Gates:** destructive actions are never autonomous; VIP / critical assets and blast radius force approval;
-  hard blast-radius limits block; **four-eyes** actions need a second person.
+  hard blast-radius limits block; **four-eyes** actions need a second person (by default: isolate and release a
+  host, disable an account, reset passwords, purge a campaign, rotate a privileged secret, block a domain).
 * **Action layer:** pre-conditions re-checked at execution, idempotency keys (replays never duplicate
-  containment), multi-vendor routing (e.g. isolate via CrowdStrike *or* Defender), reverse actions / rollback,
-  execution records. The same containment recommended by two cases is **one approval**, visible from both.
-* **Durable kill switch** - halts all autonomous actions on every replica immediately (every action then needs a person's approval), survives restarts. Pausing a tool stops every write to it.
+  containment), multi-vendor routing (e.g. isolate via CrowdStrike *or* Defender), reverse actions / rollback
+  (itself an action under the policy), execution records written before and after the tool call (a call whose
+  result never came back is flagged "verify in the tool", never repeated). The same containment recommended by two cases is **one approval**, visible from both.
+* **Durable kill switch** - halts all autonomous actions on every replica immediately (every action then needs a person's approval), survives restarts; switching it back off needs a lead. Pausing a tool stops every write to it.
 * **Versioned policy** with propose / approve separation (the proposer cannot approve).
 
 | Approvals | Automation policy |
@@ -137,17 +139,21 @@ and a unified cross-tool timeline.
 
 ### 1.6 Security and access control
 
-* **Authentication:** Microsoft Entra ID (RS256 via tenant JWKS, issuer + audience checked); dev tokens only in
-  dev mode and only to the local machine; **service-account API keys** (hashed, expiring ≤ 365 days, shown once);
-  **break-glass** access with a sealed secret (only its hash is configured; every use and failed attempt audited
-  and raised as a critical insight).
+* **Authentication:** Microsoft Entra ID (RS256 via tenant JWKS, issuer + audience + tenant checked; an
+  application's own token is a service account); dev tokens only in dev mode, only to the local machine, and never
+  with a real tool connected; **service-account API keys** (hashed, expiring ≤ 365 days, shown once);
+  **break-glass** access with a sealed secret (only its hash is configured; exchanged for a 15-minute session; every
+  use and failed attempt audited and raised as a critical insight; guesses throttled). The console keeps its token
+  for the browser tab only.
 * **Authorisation:** RBAC (analyst, lead, admin, automation admin, auditor) + **domain scoping** (a user can be
   limited to phishing, incident or vulnerability data; cross-domain views need all-domain access; each role acts
   only inside its own scope, so a phishing lead who is also an all-domain auditor approves phishing actions only) + **step-up
   MFA** for approvals, policy, kill switch and access management + separation of duties everywhere (no
   self-approval of four-eyes actions, policies, exceptions or access grants). Service accounts can never approve.
 * **Session control:** per-token revocation (log out) and revoke-all-sessions per user.
-* **Platform grants:** time-bound, justified, domain-scoped role assignments on top of Entra roles.
+* **Platform grants:** time-bound, justified, domain-scoped role assignments on top of Entra roles. A lead, admin
+  or automation-admin grant is *proposed* until a second administrator approves it on the Access screen, and ends
+  within 90 days.
 * **Diagnostics**: every request and job run has a trace id (returned as `X-Request-ID`); the *Audit log* links each
   event to its **trace** - the request, all its audit events, each model call with its prompt, answer and the
   statements the evidence check removed (and why), and the job run. *AI usage -> Recent model calls* filters calls by

@@ -74,7 +74,10 @@ def test_all_three_domains_over_http(client, seeded):
     r = client.post(f"/api/v1/actions/{iso['id']}/approve", headers=lead, json={"note": "confirmed"}).json()
     assert r["status"] == "executed"
     rb = client.post(f"/api/v1/actions/{r['id']}/rollback", headers=lead, json={"note": "test"}).json()
-    assert rb["status"] == "executed"
+    assert rb["status"] == "recommended" and rb["action_type"] == "endpoint.release"   # releasing needs four eyes too
+    lead2 = tok(client, "lars", "lead")
+    assert client.post(f"/api/v1/actions/{rb['id']}/approve", headers=lead2, json={"note": "ok"}).json()["status"] == "executed"
+    assert next(x for x in client.get("/api/v1/actions", headers=a).json() if x["id"] == r["id"])["status"] == "rolled_back"
     # VM workflow
     c = client.post("/api/v1/vm/campaigns", headers=a, json={"cve": "CVE-2021-44228", "notify_via": "ticket"}).json()
     assert client.post(f"/api/v1/vm/campaigns/{c['campaign_id']}/validate", headers=a).json()["results"]
@@ -108,7 +111,7 @@ def test_policy_change_control_and_kill_switch(client):
     assert client.post(f"/api/v1/policy/proposals/{pid}/approve", headers=admin).status_code == 403
     assert client.post(f"/api/v1/policy/proposals/{pid}/approve", headers=lead).json()["status"] == "active"
     assert client.post("/api/v1/kill-switch?on=true", headers=lead).json()["kill_switch"]
-    assert client.get("/health").json()["kill_switch"] is True
+    assert client.get("/health", headers=lead).json()["kill_switch"] is True
     client.post("/api/v1/kill-switch?on=false", headers=lead)
 
 
@@ -186,16 +189,17 @@ def test_health_reports_a_stopped_scheduler(client):
     with dbm.get_database().session() as s:
         s.query(JobRun).delete()
         s.query(SystemFlag).filter(SystemFlag.name.like(KEY_PREFIX + "%")).delete(synchronize_session=False)
-    assert client.get("/health").json()["scheduler"]["state"] == "never"
+    aud = tok(client, "audrey", "auditor")
+    assert client.get("/health", headers=aud).json()["scheduler"]["state"] == "never"
     with dbm.get_database().session() as s:                                        # jobs ran once, then nothing
         s.add(JobRun(job="intelligence", trigger="schedule", status="ok", attempts=1, ordinal=1,
                      started_at=utcnow() - timedelta(hours=3), finished_at=utcnow() - timedelta(hours=3)))
-    h = client.get("/health").json()["scheduler"]
+    h = client.get("/health", headers=aud).json()["scheduler"]
     assert h["state"] == "stale" and h["age_seconds"] > 3600
     with dbm.get_database().session() as s:                                        # a live scheduler's heartbeat
         s.add(SystemFlag(name=KEY_PREFIX + "test", value={"holder": "h", "mode": "embedded", "at": utcnow().isoformat()},
                          updated_by="scheduler"))
-    assert client.get("/health").json()["scheduler"]["state"] == "running"
+    assert client.get("/health", headers=aud).json()["scheduler"]["state"] == "running"
 
 
 def test_input_postgresql_would_reject_never_crashes_a_request(client, seeded):

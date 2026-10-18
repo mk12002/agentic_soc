@@ -56,11 +56,16 @@ def test_no_internal_identity_or_card_number_leaves(text):
 @FAST
 @given(document)
 def test_attacker_indicators_are_kept_as_evidence(text):
-    out = Redactor(internal_domains={ORG}).redact(text)
+    from soc_platform.llm.redaction import _internal_ip
+
+    r = Redactor(internal_domains={ORG})
+    out = r.redact(text)
     for e in re.findall(r"[a-z]+@evil[a-z]*\.example", text):
         assert e in out
     for addr in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text):
-        assert addr in out
+        # public addresses are evidence; internal ones identify a person's device and are pseudonymised
+        assert (addr not in out) if _internal_ip(addr) else (addr in out), addr
+    assert r.restore(out) == text
 
 
 @FAST

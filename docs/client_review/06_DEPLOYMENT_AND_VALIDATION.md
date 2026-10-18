@@ -146,7 +146,7 @@ immediately (section 6).
 
 | Activity | Result at the time of writing |
 |---|---|
-| Platform test suite on SQLite and PostgreSQL 16 | 772 tests passing on each |
+| Platform test suite on SQLite and PostgreSQL 16 | 798 tests passing on each |
 | Phishing ML engine tests | 205 passing |
 | Feature verification (including a real-browser tour, live public feeds and a live LLM) | 108 of 108 features verified |
 | Penetration suite, input fuzzing, static analysis, dependency audit | No open findings |
@@ -196,17 +196,23 @@ Confirmed before the platform is promoted beyond the read-only stage:
 
 - [ ] Production mode: `SOC_ENVIRONMENT=prod`, Entra sign-in (`SOC_AUTH_MODE=entra`), step-up MFA on, no development
   sign-in secret configured.
-- [ ] Data-encryption key (`SOC_DATA_KEY`) from the vault; a second key added before any rotation.
-- [ ] TLS at the reverse proxy; the proxy listed as the only trusted proxy; port 8080 reachable only from it.
-- [ ] PostgreSQL: TLS, dedicated login, backups and a tested restore; the platform's login has INSERT / SELECT only on
-  the audit table.
+- [ ] Data-encryption key (`SOC_DATA_KEY`) from the vault; rotation by adding a new key, re-encrypting
+  (`blobs reencrypt`) and retiring the old one.
+- [ ] TLS at the reverse proxy (1.2+); the proxy (address or subnet) listed as the only trusted proxy; port 8080
+  reachable only from it; a WAF in prevention mode if the console is internet-facing.
+- [ ] PostgreSQL: certificate-verified TLS (`sslmode=verify-full`), the schema owner used only by the migration step
+  and the platform running as a role without schema rights and with INSERT / SELECT only on the audit table; backups
+  and a tested restore.
+- [ ] Images deployed by digest, signed by the release pipeline and verified at admission; default-deny network
+  policies in place.
 - [ ] Every connector credential in the vault; least privilege per tool; write permissions only for approved action
   types; certificate credentials for Microsoft app registrations.
 - [ ] Break-glass secret sealed with two custodians; only its hash configured; tested once.
 - [ ] Outbound allow-list enforced at the firewall / proxy.
 - [ ] LLM (if used): approved endpoint set, budgets set, pseudonymisation on, no demonstration keys present.
-- [ ] Monitoring: `/metrics` scraped with an auditor API key; alerts on stale connectors, dead-lettered jobs, the kill
-  switch and audit-chain validity.
+- [ ] Monitoring: `/metrics` scraped with an auditor API key; the delivered alert rules routed to on-call (scheduler
+  stopped, audit chain broken, break-glass used, action outcome unknown, failing jobs, stale connectors, kill switch);
+  the hourly audit-chain heads kept in write-once retention in the log platform.
 - [ ] Logs: container stdout (JSON) collected into the organisation's log platform / SIEM; alerts on warnings, errors,
   failed jobs and model-call errors.
 - [ ] Retention periods and the legal-hold process agreed and configured.
@@ -217,7 +223,8 @@ Confirmed before the platform is promoted beyond the read-only stage:
 - [ ] Recording off for every tool after onboarding; recordings reviewed and kept only where approved.
 - [ ] Capacity checked: worker processes per CPU core, database connections within the server's limit, a load test
   run with the expected number of analysts.
-- [ ] A restore drill completed and the audit chain verified on the restored copy.
+- [ ] A restore drill completed and the audit chain verified on the restored copy, against the latest shipped head.
+- [ ] At least two people hold the lead role (four-eyes actions and privileged grants need a second person).
 
 ## 8 Decisions requested from the organisation
 

@@ -22,7 +22,14 @@ import os
 import httpx  # noqa: F401 - kept importable here: tests patch httpx.post through this module
 
 from soc_platform.config import Settings, secret
-from soc_platform.llm.gateway import Completion, Provider, llm_extra_headers, max_tokens_field, post_with_retry
+from soc_platform.llm.gateway import (
+    Completion,
+    Provider,
+    check_endpoint,
+    llm_extra_headers,
+    max_tokens_field,
+    post_with_retry,
+)
 
 JSON_RULE = ("\n\nOutput format: reply with a single JSON object only - no prose before or after it, "
              "no markdown fences.")
@@ -37,9 +44,7 @@ class OpenAICompatibleProvider(Provider):
         self.models = {"large": settings.llm_deployment or "",
                        "small": os.environ.get("SOC_LLM_DEPLOYMENT_SMALL") or settings.llm_deployment or ""}
         self.key = secret("SOC_LLM_API_KEY")
-        approved = settings.llm_approved_endpoints
-        if approved and self.base not in approved:
-            raise ValueError(f"LLM endpoint {self.base} is not on the approved list")
+        check_endpoint(settings, self.base)
 
     def _headers(self) -> dict[str, str]:
         name = os.environ.get("SOC_LLM_AUTH_HEADER", "").strip() or "Authorization"

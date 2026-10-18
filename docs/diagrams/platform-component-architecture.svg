@@ -71,9 +71,9 @@
 <text x="42" y="799" class="s">kind|url; label kind:host only</text>
 <rect x="32" y="826" width="276" height="79" rx="7" class="box"/>
 <text x="42" y="844" class="t">Prometheus / monitoring</text>
-<text x="42" y="862" class="s">GET /metrics (auditor API key)</text>
-<text x="42" y="877" class="s">GET /health: scheduler, audit chain,</text>
-<text x="42" y="892" class="s">self-check, kill switch</text>
+<text x="42" y="862" class="s">GET /metrics (auditor key) + alert</text>
+<text x="42" y="877" class="s">rules; GET /health details when</text>
+<text x="42" y="892" class="s">signed in: scheduler, audit chain</text>
 <rect x="32" y="919" width="276" height="94" rx="7" class="box"/>
 <text x="42" y="937" class="t">GitHub + Actions CI</text>
 <text x="42" y="955" class="s">ruff, bandit, pip-audit (lock),</text>

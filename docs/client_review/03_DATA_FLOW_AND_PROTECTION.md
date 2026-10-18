@@ -84,7 +84,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 |---|---|---|
 | Browser to platform | TLS at the organisation's reverse proxy; HSTS; strict security headers | Configured at deployment (proxy), implemented (headers) |
 | Platform to tools, feeds, LLM gateway, webhooks | HTTPS with certificate verification; corporate CA bundles supported; verification is never disabled for the gateway | Implemented |
-| Platform to database | TLS to PostgreSQL | Configured at deployment |
+| Platform to database | TLS to PostgreSQL with the server certificate verified (`sslmode=verify-full`); production refuses anything weaker | Implemented (enforced), configured at deployment |
 | Files at rest | Fernet via MultiFernet. `SOC_DATA_KEY` holds one or more keys: the first encrypts, all decrypt, so keys rotate without bulk re-encryption; mandatory in production (the platform refuses to start without it) | Implemented |
 | Database at rest | The organisation's database encryption (managed-service or disk encryption) | Configured at deployment |
 | Secrets | In the organisation's vault, mounted as files; never in configuration, the database or logs; the console shows *set / not set* only | Implemented |
@@ -118,7 +118,7 @@ set the periods above to its own security-evidence retention policy before go-li
 | The organisation's security tools (vendor clouds) | API queries; for approved actions, the action and its targets | Read data; perform approved responses | Per-tool least-privilege identity; writes only through approved action requests |
 | NIST NVD, FIRST EPSS, CISA KEV | CVE identifiers (or nothing - the KEV catalogue is downloaded whole) | Vulnerability scores and exploitation status | No organisation data beyond CVE ids |
 | Approved threat-intelligence sources (opt-in per source) | External indicators: public IP addresses, external domains and URLs, file hashes | Reputation of indicators in alerts and reported e-mail | Used only for sources whose key the organisation configures. **Private, loopback, link-local and reserved addresses (documentation ranges excepted: they belong to no organisation), single-label and private-suffix host names, and anything under the organisation's own domains are never sent** (they are marked "not checked"). E-mail bodies, user names and internal host names are never sent |
-| The organisation's LLM gateway (in-house) | The evidence of one item, pseudonymised (internal e-mail addresses, known names, phone numbers, national identifiers and card numbers replaced by tokens) | Explanatory narrative | Approved-endpoint allow-list; usage policy; nothing is sent when the LLM is off |
+| The organisation's LLM gateway (in-house) | The evidence of one item, pseudonymised (internal e-mail addresses, `DOMAIN\\user` accounts, known names, internal host names and the case's own device names, internal IP addresses, phone numbers, national identifiers and card numbers replaced by tokens) | Explanatory narrative | Approved-endpoint allow-list; usage policy; nothing is sent when the LLM is off |
 | Teams / Slack / webhook (optional) | Finding title, severity, up to three next steps and a link to the console | Alerting | Destinations only from configuration and HTTPS-only. **Finding titles can name a user or host** (for example "Phishing led to compromise of <user>"): route them to channels approved for that information |
 | The organisation's SIEM / log platform | Structured logs; audit export | Monitoring and archiving | Logs carry no secrets, query strings or request bodies |
 

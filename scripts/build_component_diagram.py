@@ -69,7 +69,7 @@ left = [
     ("Client LLM gateway", ["Azure OpenAI / AI Foundry, or", "Anthropic / OpenAI-compatible", "endpoint approved by the client", "(SOC_LLM_PROVIDER, _ENDPOINT)"]),
     ("SIEM (Microsoft Sentinel)", ["Log agent reads container stdout", "(SOC_LOG_FORMAT=json) + audit", "export; optional push to", "POST /api/v1/ingest/alerts"]),
     ("Teams / Slack / JSON webhook", ["SOC_NOTIFY_WEBHOOKS (HTTPS only)", "kind|url; label kind:host only"]),
-    ("Prometheus / monitoring", ["GET /metrics (auditor API key)", "GET /health: scheduler, audit chain,", "self-check, kill switch"]),
+    ("Prometheus / monitoring", ["GET /metrics (auditor key) + alert", "rules; GET /health details when", "signed in: scheduler, audit chain"]),
     ("GitHub + Actions CI", ["ruff, bandit, pip-audit (lock),", "pytest SQLite + PostgreSQL 16,", "precommit_scan, gitleaks,", "CycloneDX SBOM, Trivy image scan"]),
 ]
 for title, lines in left:

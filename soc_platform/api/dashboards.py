@@ -241,4 +241,26 @@ def prometheus(s: Session, registry: Any) -> str:
 
     g("soc_kill_switch", "1 when all automated actions are halted", [({}, 1.0 if kill_switch_on(s, get_settings()) else 0.0)])
     g("soc_connectors_enabled", "Enabled connectors", [({}, len(registry.enabled_names()))])
+    # what the alert rules (deploy/kubernetes/monitoring) watch: a stopped scheduler cannot alert on its own
+    from datetime import timedelta
+
+    from soc_platform import scheduler as sched
+    from soc_platform.core.audit import AuditLog
+    from soc_platform.core.models import AuditRecord, JobRun
+
+    st = sched.status(s)
+    age = st.get("heartbeat_age_seconds", st.get("age_seconds"))
+    g("soc_scheduler_heartbeat_age_seconds", "Seconds since the scheduler's last heartbeat (-1: never ran)",
+      [({"state": str(st.get("state"))}, float(age) if age is not None else -1.0)])
+    cp = AuditLog(s).checkpoint()
+    g("soc_audit_chain_ok", "1 when the last full audit-chain verification passed, 0 when it failed, -1 not yet run",
+      [({}, -1.0 if cp is None else (1.0 if cp.get("ok") else 0.0))])
+    latest: dict[str, str] = {}
+    for job, status in s.execute(select(JobRun.job, JobRun.status).order_by(JobRun.started_at)):
+        latest[job] = status
+    g("soc_job_failing", "1 for a job whose latest run failed (error or dead letter)",
+      [({"job_name": j, "status": v}, 1.0 if v in ("error", "dead_letter") else 0.0) for j, v in sorted(latest.items())])
+    since = now - timedelta(hours=24)
+    bg = s.query(AuditRecord).filter(AuditRecord.event_type == "auth.break_glass_used", AuditRecord.ts >= since).count()
+    g("soc_break_glass_uses_24h", "Break-glass sign-ins in the last 24 hours", [({}, float(bg))])
     return "\n".join(lines) + "\n"

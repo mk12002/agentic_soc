@@ -23,6 +23,7 @@ from soc_platform.core.observability import current_trace, event
 
 GENESIS = "0" * 64
 CHAIN_LOCK = "audit_chain_head"
+CHECKPOINT = "audit_verified"
 
 ACTOR_AGENT = "agent"
 ACTOR_HUMAN = "human"
@@ -110,18 +111,44 @@ class AuditLog:
               subject_id=str(subject_id), seq=rec.seq)
         return rec
 
-    def verify(self) -> dict[str, Any]:
-        """Recompute the chain. Returns ``{"ok": bool, "records": n, "first_bad_seq": int|None}``."""
-        prev = GENESIS
+    def verify(self, since: tuple[int, str] | None = None) -> dict[str, Any]:
+        """Recompute the chain. Returns ``{"ok": bool, "records": n, "first_bad_seq": int|None, "head", "head_seq"}``.
+
+        ``since=(seq, hash)`` continues from a record already verified (only newer records are read): the full pass
+        grows with the log, which is never pruned, so frequent checks verify incrementally from the checkpoint the
+        scheduled full pass stores (``save_checkpoint``)."""
+        prev, last_seq = (since[1], since[0]) if since else (GENESIS, 0)
         n = 0
-        for rec in self.s.execute(select(AuditRecord).order_by(AuditRecord.seq)).scalars():
+        q = select(AuditRecord).where(AuditRecord.seq > last_seq).order_by(AuditRecord.seq)
+        for rec in self.s.execute(q.execution_options(yield_per=1000)).scalars():
             n += 1
             expected = compute_hash(prev, rec.ts, rec.actor_type, rec.actor_id, rec.event_type,
                                     rec.subject_type, rec.subject_id, rec.payload)
             if rec.prev_hash != prev or rec.hash != expected:
                 return {"ok": False, "records": n, "first_bad_seq": rec.seq}
-            prev = rec.hash
-        return {"ok": True, "records": n, "first_bad_seq": None, "head": prev}
+            prev, last_seq = rec.hash, rec.seq
+        return {"ok": True, "records": n, "first_bad_seq": None, "head": prev, "head_seq": last_seq}
+
+    def save_checkpoint(self, result: dict[str, Any]) -> None:
+        """Record a full verification's outcome (self-check job): the head it reached, or the failure, which stays
+        reported until a later full pass succeeds."""
+        from soc_platform.core.models import SystemFlag
+
+        value = ({"ok": True, "seq": result.get("head_seq", 0), "hash": result.get("head", GENESIS)} if result["ok"]
+                 else {"ok": False, "first_bad_seq": result.get("first_bad_seq")})
+        value["at"] = utcnow().isoformat()
+        f = self.s.get(SystemFlag, CHECKPOINT)
+        if f is None:
+            self.s.add(SystemFlag(name=CHECKPOINT, value=value, updated_by="audit"))
+        else:
+            f.value, f.updated_at = value, utcnow()
+        self.s.flush()
+
+    def checkpoint(self) -> dict[str, Any] | None:
+        from soc_platform.core.models import SystemFlag
+
+        f = self.s.get(SystemFlag, CHECKPOINT)
+        return dict(f.value) if f is not None and f.value else None
 
     def query(
         self,

@@ -73,9 +73,10 @@ rate a vendor allows.
 | Where | The organisation's environment: a container platform (Kubernetes / AKS, Docker hosts) or VMs; Linux containers recommended; Windows supported |
 | Who operates | The organisation (or its appointed operator); the platform needs no inbound access for its developers |
 | Tenancy | Single organisation per deployment; no shared multi-tenant components |
-| Image | Multi-stage build on `python:3.11-slim`; runs as a non-root user (uid 1001); health check on `/health/ready`; the phishing ML engine is included by a build argument |
+| Image | Multi-stage build on `python:3.11-slim` pinned by digest; every package installed against a SHA-256; runs as a non-root user (uid 1001) that cannot modify the code; no package manager or curl; production defaults (it refuses to start until production settings are present); health check on `/health/ready`; the phishing ML engine is included by a build argument; release images signed |
 | Configuration | Environment variables plus `config/connectors.yaml`; secrets as files mounted from the vault (`<NAME>_FILE`); every setting is validated at start-up and a wrong value refuses the start with the fix |
-| Upgrades | New image tag; start-up creates new tables, adds new nullable columns and widens text columns automatically; a change needing a scripted migration is announced with its script |
+| Upgrades | New image digest; the migration step (`init-db`, the only process with the schema owner's credentials) creates new tables, adds new nullable columns and widens text columns; the platform itself runs without schema rights; a change needing a scripted migration is announced with its script |
+| Infrastructure as code | Kubernetes package (base + Azure and on-premises overlays) and, for Azure, a Bicep template for the network, cluster, database, Key Vault, registry, optional WAF and logging |
 
 **Reference deployment** (from `deploy/docker-compose.yml`, verified end to end on Docker Desktop on 2026-10-07):
 
@@ -83,8 +84,9 @@ rate a vendor allows.
 |---|---|---|
 | `platform-api` | API and console | 4 worker processes by default (`SOC_API_WORKERS`, one per CPU core given); stateless - any number of replicas behind the proxy; graceful shutdown lets requests in flight finish |
 | `platform-scheduler` | Scheduled jobs (ingestion, investigation, correlation, retention, self-check, reports, notifications) | Several replicas are safe: the database decides what is due and a per-job lease, renewed while the job runs, prevents concurrent runs; a dead replica's job is taken over within 120 s; stops between jobs on SIGTERM |
-| `postgres` | PostgreSQL 16 | In production a managed service with TLS, backups and point-in-time recovery |
-| Volume | Encrypted file store | Persistent volume or blob mount |
+| `postgres` | PostgreSQL 16 | TLS required (certificate-verified by the platform); schema owner and runtime roles separated; in production a managed service with backups and point-in-time recovery |
+| `platform-migrate` | One-shot schema creation | The only service with the schema owner's credentials |
+| Stored files | Encrypted e-mails and reports | In PostgreSQL (`SOC_BLOB_STORE=database`) |
 
 The compose file also contains an optional `engine` profile (the phishing ML engine's original microservices with
 RabbitMQ and Redis). **It is not needed**: the platform runs the trained models in-process and offline.

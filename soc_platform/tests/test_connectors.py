@@ -121,6 +121,10 @@ def test_actions_registry_routes_endpoint_isolation(session, reg, lead):
     done2 = svc.approve(r2.id, lead)
     assert done2.result["provider"] == "crowdstrike"
     rb = svc.rollback(done2.id, lead, note="test")
+    assert rb.status == "recommended"                     # lifting containment is four-eyes, like containing
+    from soc_platform.core.auth import Principal, Role
+
+    rb = svc.approve(rb.id, Principal(id="lars", name="lars", roles=frozenset({Role.LEAD})))
     assert rb.status == "executed"
     calls = reg.instance("crowdstrike").transport.calls
     assert any(c["params"] == {"action_name": "lift_containment"} for c in calls)
