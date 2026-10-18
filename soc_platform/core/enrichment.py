@@ -26,6 +26,7 @@ from soc_platform.connectors.registry import ConnectorRegistry
 from soc_platform.core.audit import AuditLog
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.models import EnrichmentCache, Evidence, utcnow
+from soc_platform.core.text import readable
 
 # Which lookup types feed which context dimension (section 7.2).
 DIMENSIONS = {
@@ -142,14 +143,14 @@ class EnrichmentOrchestrator:
                     logging.getLogger(__name__).warning("an enrichment record could not be stored in the context store", exc_info=True)
             # the same lookup (type and value, not just the same wording) answered the same way is already on the case
             same = next((e for e in self.s.execute(select(Evidence).where(
-                Evidence.case_id == case_id, Evidence.source_tool == c.tool, Evidence.summary == r.summary,
+                Evidence.case_id == case_id, Evidence.source_tool == c.tool, Evidence.summary == readable(r.summary),
                 Evidence.entity_id.is_(None) if t.entity_id is None else Evidence.entity_id == t.entity_id)).scalars()
                 if (e.data or {}).get("lookup") == t.etype and (e.data or {}).get("value") == t.value), None)
             if same is not None:        # a reassessment re-collects it: keep one row
                 evidence.append(same)
                 continue
             ev = Evidence(case_id=case_id, entity_id=t.entity_id, dimension=r.dimension or c.dimension,
-                          source_tool=c.tool, summary=r.summary, deep_link=r.deep_link,
+                          source_tool=c.tool, summary=readable(r.summary), deep_link=r.deep_link,
                           data={"lookup": t.etype, "value": t.value, "elapsed_ms": r.elapsed_ms, "signals": r.signals,
                                 "records": [x.model_dump(mode="json", exclude={"raw"}) for x in r.records[:25]]})
             self.s.add(ev)

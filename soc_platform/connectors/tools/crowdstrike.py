@@ -182,8 +182,12 @@ class CrowdStrikeConnector(ToolConnector):
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:
             if entity_type == "host":
-                ids = self.get("/devices/queries/devices/v1", params={"filter": f"hostname:'{value}'"}).get("resources") or []
-                devs = self.post("/devices/entities/devices/v2", json={"ids": ids}).get("resources", []) if ids else []
+                aid = context.get("crowdstrike_aid")
+                devs = (self.post("/devices/entities/devices/v2", json={"ids": [aid]}).get("resources", []) if aid else [])
+                devs = [d for d in devs if d.get("device_id") == aid]
+                if not devs:          # no device id known (or it was retired): the host name, as Falcon reports it
+                    ids = self.get("/devices/queries/devices/v1", params={"filter": f"hostname:'{value}'"}).get("resources") or []
+                    devs = self.post("/devices/entities/devices/v2", json={"ids": ids}).get("resources", []) if ids else []
                 recs = [self._host(d) for d in devs]
                 alerts = []
                 for d in devs:

@@ -388,3 +388,26 @@ def test_internal_indicators_are_never_sent_to_outside_reputation_services(monke
         assert "not sent to outside sources" in ti.lookup("domain", "intranet.acme-demo.com").summary
     finally:
         get_settings.cache_clear()
+
+
+def test_a_host_lookup_uses_the_known_device_id_and_never_matches_a_similar_name():
+    """MDE's fallback `startswith(computerDnsName, 'web01')` also returned web010 - another machine's alerts on this
+    host. Falcon searched by host name although the platform held the device id, so a Falcon-alerted host could be
+    'not found' over a name difference (short name, FQDN, case)."""
+    reg = ConnectorRegistry.all_fake()
+    mde = reg.get("defender_endpoint")
+    calls = []
+
+    def fake_get(path, params=None, **_):
+        calls.append((path, (params or {}).get("$filter")))
+        if path == "/api/machines" and "startswith" in str((params or {}).get("$filter")):
+            return {"value": [{"id": "m1", "computerDnsName": "web01.acme-demo.com"},
+                              {"id": "m2", "computerDnsName": "web010.acme-demo.com"}]}
+        return {"value": []}
+
+    mde.get = fake_get
+    r = mde.lookup("host", "web01")
+    assert r.signals["found"] and "1 device(s)" in r.summary                      # web010 left out
+    cs = reg.get("crowdstrike")
+    r = cs.lookup("host", "WEB01.ACME-DEMO.COM", crowdstrike_aid="cs-aid-web01")   # no name match needed
+    assert r.signals["found"] and "1 alert(s)" in r.summary

@@ -612,7 +612,9 @@ runs. In-memory databases use `StaticPool` so every session sees the same data.
 1. **Ingest** from every alert-producing connector through the SyncRunner.
 2. **Cluster** with union-find over alerts that share a resolved user or host within **24 hours** (a 30-day
    lookback). Detections with a poor track record in analyst dispositions are flagged as noisy.
-3. **Investigate:** extract principals; `EnrichmentOrchestrator` fans out lookups to every enabled connector that
+3. **Investigate:** extract principals (a host carries its vendor device ids, so EDR look-ups go by id - a name
+   difference such as short name vs FQDN can no longer make a host the EDR itself alerted on "not found", and a
+   name-prefix search can never pick up a similarly named machine); `EnrichmentOrchestrator` fans out lookups to every enabled connector that
    supports each entity type, in a `ThreadPoolExecutor` (16 workers). Each lookup has a **20 s deadline** and a
    30-minute cache. Timeouts and failures become named "unavailable" results, and the case is marked incomplete
    rather than failing.
@@ -620,6 +622,9 @@ runs. In-memory databases use `StaticPool` so every session sees the same data.
    - base: the alert severity
    - critical on a deception hit
    - +1 level for KEV exposure on the host
+   - at least high for KEV exposure on an internet-exposed or business-critical host (entity attributes from Wiz and
+     the CMDB; criticality read with the vulnerability domain's `CRIT_WEIGHT`), recorded as
+     `exposed_or_critical_host_with_kev` in the scoring factors
    - at least high with 3+ corroborating dimensions
 
    **Confidence:** 0.35 + 0.10 per dimension, capped at 0.95. **Verdict:** true positive if ≥ high and ≥ 0.6

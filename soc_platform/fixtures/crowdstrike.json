@@ -150,6 +150,19 @@
    "path": "^/alerts/queries/alerts/v2$",
    "body": {
     "resources": [
+     "acme:ind:cs-aid-web01:0002"
+    ]
+   },
+   "status": 200,
+   "params": {
+    "filter": "device.device_id:'cs-aid-web01'"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/alerts/queries/alerts/v2$",
+   "body": {
+    "resources": [
      "acme:ind:cs-aid-jane01:0001"
     ]
    },

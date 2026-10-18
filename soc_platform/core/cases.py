@@ -20,6 +20,7 @@ from soc_platform.core.auth import Perm, Principal, agent_principal
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.models import ActionRequest, Case, CaseEntity, CaseNote, Disposition, Entity, Evidence, utcnow
 from soc_platform.core.policy import PolicyEngine
+from soc_platform.core.text import readable
 
 
 def actions_for_case(session: Session, case_id: str) -> list[ActionRequest]:
@@ -86,6 +87,7 @@ class CaseService:
     def add_evidence(self, case_id: str, *, summary: str, source: str, dimension: str, data: dict[str, Any] | None = None,
                      entity_id: str | None = None, deep_link: str | None = None, is_inference: bool = False,
                      observed_at: datetime | None = None) -> Evidence:
+        summary = readable(summary)
         same = self.s.execute(select(Evidence).where(
             Evidence.case_id == case_id, Evidence.summary == summary, Evidence.source_tool == source,
             Evidence.dimension == dimension, Evidence.entity_id.is_(None) if entity_id is None
@@ -391,3 +393,4 @@ def detection_quality(session: Session, domain: str, *, min_count: int = 3, days
             out.append({"detection": det, "dispositions": total, "false_positive_share": round(fp / total, 3),
                         "recommendation": f"Tune or suppress '{det}': {fp}/{total} dispositions benign in {days}d"})
     return sorted(out, key=lambda x: -x["false_positive_share"])
+

@@ -132,7 +132,7 @@ python -m soc_platform reset-demo --yes      # the same data, fresh (refuses whi
 - the cloud misconfigurations, routed to their teams
 - the correlation, the three standard reports, and an audit-chain check
 
-Result: 7 phishing + 3 incident cases, 6 open vulnerabilities, 34 actions awaiting approval (incident 15, phishing 16,
+Result: 7 phishing + 3 incident cases, 6 open vulnerabilities, 37 actions awaiting approval (incident 18, phishing 16,
 vulnerability 3) - the same with or without the ML engine. It uses `SOC_ORG_DOMAINS`, `SOC_RAW_PAYLOAD_DIR` and `SOC_REPORT_OUTPUT_DIR` from settings. Running
 it twice changes nothing.
 
@@ -435,6 +435,9 @@ Use these when someone asks "how do you get that number?". Every one is determin
 - **Base:** the alert's own severity.
 - **Raised to critical:** a deception hit.
 - **Plus one level:** KEV exposure on the host.
+- **At least high:** KEV exposure on a host that is internet-exposed or business-critical (CMDB criticality) - the
+  same alert means more there (exposure-informed triage, U06). The demo's web server shows it: a low "unusual
+  outbound connection" alert, internet-facing with Log4Shell, comes out high with containment recommended.
 - **At least high:** 3 or more corroborating dimensions (deception, identity, privileged access, endpoint, threat
   intel, DNS, exposure).
 - **Confidence:** 0.35 + 0.10 per dimension, capped at 0.95.
@@ -620,7 +623,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 798 passed on SQLite (with PostgreSQL's rules enforced) and 798 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 801 passed on SQLite (with PostgreSQL's rules enforced) and 801 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -770,7 +773,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 798 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 801 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -853,7 +856,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 17 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 798 SQLite, 798 PostgreSQL / 205 |
+| Platform tests / engine tests | 801 SQLite, 801 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
 | Features verified | 108 of 108 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
@@ -1210,7 +1213,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 798 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 801 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |

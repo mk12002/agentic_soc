@@ -162,7 +162,11 @@ class IncidentService:
             if e.kind == "asset":
                 name = a.get("hostname") or a.get("fqdn") or e.display_name
                 if name and not a.get("deception"):
-                    targets.setdefault(("host", str(name).split(".")[0]), Target("host", str(name).split(".")[0], e.id))
+                    # the vendors' own device ids travel with the host name: a look-up by id cannot miss the host
+                    # (Falcon and MDE name hosts differently - short name, FQDN, case) or hit a similar name
+                    ids = {k: keys[k] for k in ("crowdstrike_aid", "mde_device_id") if keys.get(k)}
+                    targets.setdefault(("host", str(name).split(".")[0]),
+                                       Target("host", str(name).split(".")[0], e.id, context=ids))
                 if a.get("ip"):
                     targets.setdefault(("ip", a["ip"]), Target("ip", a["ip"], e.id))
             elif e.kind == "identity":
@@ -194,8 +198,9 @@ class IncidentService:
         # Exposure-informed severity (U06): KEV-listed findings on involved hosts.
         kev = self._kev_findings_on_case_hosts(case_id)
         for f in kev:
-            self.cases.add_evidence(case_id, summary=f"Host {f['host']} carries KEV-listed {f['cve']} "
-                                                     f"(CVSS {f.get('cvss')}) reported by {f['tool']}",
+            cvss = f" (CVSS {f['cvss']:g})" if isinstance(f.get("cvss"), (int, float)) else ""
+            self.cases.add_evidence(case_id, summary=f"Host {f['host']} carries KEV-listed {f['cve']}{cvss} "
+                                                     f"reported by {', '.join(f['tools'])}",
                                     source=f["tool"], dimension="exposure", entity_id=f["host_id"])
         conflict = self._verdict_conflict(case_id)
         if conflict:
@@ -286,8 +291,24 @@ class IncidentService:
                 if cve and (cve in catalog or (f.attributes or {}).get("kev")):
                     out.append({"host": host.display_name, "host_id": host.id, "cve": cve,
                                 "cvss": (f.attributes or {}).get("cvss"), "tool": (f.attributes or {}).get("tool")})
-        uniq = {(x["host_id"], x["cve"]): x for x in out}
-        return list(uniq.values())
+        # one row per (host, CVE) with every reporting scanner; CVSS from NVD (vulnerability intelligence) first, else
+        # the highest any scanner gave - a scanner that leaves it empty (Defender) must not blank it
+        from soc_platform.domains.vulnerability.models import VulnIntel
+
+        uniq: dict[tuple[str, str], dict[str, Any]] = {}
+        for x in out:
+            row = uniq.setdefault((x["host_id"], x["cve"]), {**x, "tools": [], "cvss": None})
+            if x["tool"] and x["tool"] not in row["tools"]:
+                row["tools"].append(x["tool"])
+            if isinstance(x["cvss"], (int, float)) and (row["cvss"] is None or x["cvss"] > row["cvss"]):
+                row["cvss"] = x["cvss"]
+        for row in uniq.values():
+            intel = self.s.get(VulnIntel, row["cve"])
+            if intel is not None and isinstance(intel.cvss, (int, float)):
+                row["cvss"] = intel.cvss
+            row["tools"] = sorted(row["tools"]) or ["inventory"]
+            row["tool"] = row["tools"][0]
+        return [uniq[k] for k in sorted(uniq)]
 
     @staticmethod
     def _signals(evidence: list[Evidence]) -> list[tuple[Evidence, dict[str, Any]]]:
@@ -327,11 +348,33 @@ class IncidentService:
             factors["kev_exposure_boost"] = True
             base = min(4, base + 1)
             dims.add("exposure")
+            # exposure-informed triage (U06): any alert on a host that is reachable from the internet or business-
+            # critical *and* carries a known-exploited CVE is at least high - a low-severity signal there is how
+            # exploitation of that CVE often first shows (an internet-facing web server calling out after Log4Shell)
+            context = self._host_context(case.id) | {"internet_exposed": bool(any_sig("internet_exposed"))}
+            if context["internet_exposed"] or context["business_critical"]:
+                factors["exposed_or_critical_host_with_kev"] = sorted(k for k, v in context.items() if v)
+                base = max(base, 3)
         if len(dims) >= 3:
             base = max(base, 3)
         confidence = min(0.95, 0.35 + 0.1 * len(dims))
         factors["corroborating_dimensions"] = sorted(dims)
         return SEV[base], round(confidence, 2), factors
+
+    def _host_context(self, case_id: str) -> dict[str, bool]:
+        """Whether any host of the case is internet-exposed or business-critical (CMDB criticality, scored as the
+        vulnerability domain scores it)."""
+        from soc_platform.domains.vulnerability.service import CRIT_WEIGHT
+
+        exposed = critical = False
+        for ln in self.s.execute(select(CaseEntity).where(CaseEntity.case_id == case_id)).scalars():
+            e = self.s.get(Entity, ln.entity_id)
+            if e is None or e.kind != "asset":
+                continue
+            a = e.attributes or {}
+            exposed = exposed or a.get("internet_exposed") is True
+            critical = critical or CRIT_WEIGHT.get(str(a.get("criticality") or "").lower(), 0.0) >= 1.0
+        return {"internet_exposed": exposed, "business_critical": critical}
 
     def _mitre(self, case_id: str, evidence: list[Evidence], ev_llm: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_row = {e["evidence_row"]: e["id"] for e in ev_llm}

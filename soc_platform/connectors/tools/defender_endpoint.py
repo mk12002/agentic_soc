@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from soc_platform.connectors.base import LookupResult, Page
+from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import (
     ConnectorAction,
@@ -119,9 +119,20 @@ class DefenderEndpointConnector(MicrosoftConnector):
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
         def run() -> LookupResult:
             if entity_type == "host":
-                ms = self.get("/api/machines", params={"$filter": f"computerDnsName eq '{value.lower()}'"}).get("value", [])
+                ms = []
+                if context.get("mde_device_id"):
+                    try:
+                        m = self.get(f"/api/machines/{context['mde_device_id']}")
+                        ms = [m] if isinstance(m, dict) and m.get("id") else []
+                    except ConnectorError:
+                        ms = []       # retired or offboarded id: fall back to the name
                 if not ms:
-                    ms = self.get("/api/machines", params={"$filter": f"startswith(computerDnsName,'{value.lower()}')"}).get("value", [])
+                    ms = self.get("/api/machines", params={"$filter": f"computerDnsName eq '{value.lower()}'"}).get("value", [])
+                if not ms:
+                    # a short name: only that host or its FQDN - never another machine whose name merely starts so
+                    # (web01 must not match web010)
+                    ms = [m for m in self.get("/api/machines", params={"$filter": f"startswith(computerDnsName,'{value.lower()}')"}).get("value", [])
+                          if str(m.get("computerDnsName", "")).lower().split(".")[0] == value.lower().split(".")[0]]
                 recs = [self._machine(m) for m in ms]
                 alerts = []
                 for m in ms:

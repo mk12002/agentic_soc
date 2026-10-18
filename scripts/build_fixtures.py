@@ -159,8 +159,11 @@ def crowdstrike() -> None:
               {"resources": ids, "meta": {"pagination": {"offset": "scroll-token-1", "limit": 100, "total": len(ids)}}}),
         route("POST", r"^/devices/entities/devices/v2$", {"resources": devices},
               select={"from": "json.ids", "list": "resources", "key": "device_id"}),
-        route("GET", r"^/alerts/queries/alerts/v2$", {"resources": [alerts[0]["composite_id"]]},
-              params={"filter": "device.device_id:'cs-aid-jane01'"}),
+        # each alerting device's own alerts (an investigation asks Falcon for the host's alerts by device id)
+        *[route("GET", r"^/alerts/queries/alerts/v2$",
+                {"resources": [a["composite_id"] for a in alerts if a["device"]["device_id"] == dev]},
+                params={"filter": f"device.device_id:'{dev}'"})
+          for dev in sorted({a["device"]["device_id"] for a in alerts})],
         route("GET", r"^/alerts/queries/alerts/v2$", {"resources": [alerts[0]["composite_id"]]},
               params={"filter": "user_name:'jane.doe'"}),
         route("GET", r"^/alerts/queries/alerts/v2$", {"resources": []}, params={"filter": "*"}),

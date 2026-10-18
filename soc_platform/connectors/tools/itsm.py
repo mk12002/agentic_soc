@@ -173,7 +173,7 @@ class ServiceNowConnector(ToolConnector):
                 "source": "servicenow_cmdb"}
 
     def lookup(self, entity_type: str, value: str, **context: Any) -> LookupResult:
-        return self.timed_lookup(lambda: ok_lookup(self, [], f"CMDB: {self.owner_for({'hostname': value}) or 'no CI found'}"))
+        return self.timed_lookup(lambda: ok_lookup(self, [], f"CMDB: {_owner_text(self.owner_for({'hostname': value})) or 'no CI found'}"))
 
 
 class JiraConnector(ToolConnector):
@@ -270,7 +270,7 @@ class CsvCmdbConnector(ToolConnector):
         return None
 
     def lookup(self, entity_type, value, **context):
-        return self.timed_lookup(lambda: ok_lookup(self, [], f"ownership: {self.owner_for({'hostname': value}) or 'unknown'}"))
+        return self.timed_lookup(lambda: ok_lookup(self, [], f"ownership: {_owner_text(self.owner_for({'hostname': value})) or 'unknown'}"))
 
 
 def _dv(v: Any) -> Any:
@@ -336,3 +336,13 @@ MANIFESTS = [
                             kind="path")],
         confidence="High", focus_areas=("vulnerability", "incident")),
 ]
+
+
+def _owner_text(owner: dict | None) -> str:
+    """An owner record as an analyst reads it: "owner Anil Rao, team Web Platform, Production, criticality ..."."""
+    if not owner:
+        return ""
+    labels = (("owner", "owner"), ("platform_team", "team"), ("environment", ""), ("criticality", "criticality"),
+              ("location", "location"))
+    parts = [f"{label} {owner[k]}".strip() for k, label in labels if owner.get(k)]
+    return ", ".join(parts) + (f" (from {owner['source']})" if owner.get("source") else "")

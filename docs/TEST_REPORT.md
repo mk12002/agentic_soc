@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-18 (rounds 15-26; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-18 (rounds 15-27; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,47 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 26 (2026-10-18) - latest results: go-live review (architecture, infrastructure, security)
+## 0. Round 27 (2026-10-18) - latest results: functional review (does every output mean what it says)
+
+Aim: run the platform end to end on a fresh database and judge each output against the platform's intent, not only
+against "no error". Checked: the demo's totals, every incident's severity and recommendations against its evidence,
+phishing verdicts against the labelled corpus (all three backends), identity and asset resolution at scale, every
+correlation insight, analyst answers about named people and hosts, vulnerability priorities and SLAs, every piece of
+analyst-facing evidence text, the generated Word / PowerPoint reports, and the console (browser tour).
+
+| Found | Now | Evidence |
+|---|---|---|
+| The internet-facing, business-critical web server with Log4Shell had an "unusual outbound connection" alert that stayed **medium with no recommendation**, and the exposure-informed rule (U06) skipped it as a "weak alert" - the very case U06 exists for | KEV exposure on an internet-exposed or business-critical host makes an incident at least high; U06 counts a weak alert on an internet-exposed vulnerable host (elsewhere still medium and above) and cites the exposure | `test_an_alert_on_an_internet_facing_critical_host_with_a_kev_cve_is_at_least_high`, `test_cross_domain_correlations`; demo: web01 high, 3 recommendations, U06 insight |
+| The EDR that raised the alert reported the host **"not found"**: Falcon was searched by host name although the platform held its device id; MDE's fallback `startswith(name)` would also return `web010` for `web01` (another machine's alerts) | Look-ups go by the vendor device id first; the name fallback accepts only the host itself | `test_a_host_lookup_uses_the_known_device_id_and_never_matches_a_similar_name` |
+| Evidence read "CVE-2021-44228 **(CVSS None)**": the CVSS came from whichever scanner row was kept last | NVD intelligence first, else the highest scanner value, omitted when unknown; every reporting scanner listed | incident test above (`CVSS 10`, four scanners) |
+| Analyst answer: "**23** containment actions for this entity" when 5 targeted the person - every action on any of their cases was counted | Counts actions whose targets name the entity; the rest reported as "N more on its cases" | `test_the_analyst_answers_about_the_entity_named_and_counts_only_its_own_actions` |
+| "What is happening with jane-lt01" opened with 17 organisation-wide findings; a medium finding was called "the most serious" next to critical ones | A named entity scopes the answer; organisation-wide lists only for organisation-wide wording; findings ordered by severity, then score | same test |
+| Evidence text showed Python renderings to analysts and the model: `risk=['Low']`, `destinations: []`, `signer=None`, `MFA: ['…']`, `ownership: {'owner': …}` | Normalised where evidence is stored (both paths), CMDB owners written as text; linear on hostile input | incident test above (no reprs), redaction / hostile-input timing |
+| Falcon and MDE fake-mode fixtures answered by-id and per-device queries for one laptop only | Generated for every device (`build_fixtures.py`); only those two fixture files changed | fixtures regenerated, byte-identical elsewhere |
+
+Confirmed correct (no change): the demo's totals (7 + 3 cases, 6 open vulnerabilities; pending approvals now 37,
+incident 18 - web01's three); phishing combined backend 20 / 20 exact on the labelled corpus (heuristic 18, engine 18;
+detection 100 %, false positives 0 %; the supplier bank-change e-mail is labelled suspicious); identity resolution on
+300 people with 6 naming conventions: 0 false merges, 0 splits; asset resolution on a 400-host messy estate: 0 false
+merges, 94.6 % match rate, 77 records left to the analyst queue (the designed trade-off: a split is recoverable, a
+wrong merge is not); vulnerability priorities (Log4Shell on the internet-facing critical server first; a CVSS 9.8
+OpenSSH flaw without known exploitation P2) and SLAs (a KEV CVE takes the 7-day SLA whatever its band - documented);
+reports: 0 placeholder leaks in 380 text blocks; browser tour: 34 screenshots at four widths, light and dark, every
+on-screen count cross-checked with the API, 0 problems.
+
+**Design decision reversed - please confirm:** U06 previously required a medium-or-higher alert, and a test pinned
+web01 as excluded ("weak alert only"). It now also counts a weak alert on an internet-exposed vulnerable host. To
+restore the old behaviour, revert `_exposed_host_under_attack` in `intelligence/correlation.py` and the
+`exposed_or_critical_host_with_kev` rule in `IncidentService._score`.
+
+**Counts:** 801 passed, 16 skipped (817 collected) on SQLite and on PostgreSQL 16. Lint and lock checks clean.
+
+**Still open against the requirements** (implemented, completion needs the client - REQUIREMENTS_TRACEABILITY.md 🟡):
+live-tenant verification of every connector, the client's report and risk-register formats, performance targets on
+client baselines, and IM-T09 (re-hosting Volatility / Ghidra / YARA analysis of collected forensic artefacts - not
+built).
+
+## 0.1 Round 26 (2026-10-18): go-live review (architecture, infrastructure, security)
 
 Aim: a senior-architect review of everything that could fail or be abused in production, then fix every finding.
 The full list, with severities, is SECURITY.md "Go-live review"; each row here names its evidence. New tests:
@@ -43,7 +83,7 @@ the 4 not run are the opt-in live features (real LLM endpoint, public NVD / EPSS
 clean. **Not proved here** (go-live steps): a Bicep `what-if` in the client's subscription, the failover drill on the
 real cluster (CloudNativePG policies and pooler certificate), admission enforcement of signatures.
 
-## 0.1 Round 25 (2026-10-17): no single point of failure, and the value scorecard
+## 0.2 Round 25 (2026-10-17): no single point of failure, and the value scorecard
 
 Aim: make the platform run with no single point of failure, on premises or in the cloud, and measure the benefits the
 customer is promised. Each row is something found and fixed; the tests named fail without the fix.

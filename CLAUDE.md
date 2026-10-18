@@ -79,7 +79,7 @@ session; `verify_features.py` reads the `SOC_LLM_*` lines itself).
 ```bash
 # run
 python -m soc_platform init-db                 # create tables (idempotent)
-python -m soc_platform demo                    # sample org: 7 phishing + 3 incident cases, 34 approvals, 6 open vulns (same with or without the ML engine)
+python -m soc_platform demo                    # sample org: 7 phishing + 3 incident cases, 37 approvals, 6 open vulns (same with or without the ML engine)
 python -m soc_platform reset-demo [--yes]      # server stopped: wipe the demo DB + raw/report files, then init-db + demo
 python -m soc_platform serve                   # API + console + built-in scheduler on 127.0.0.1:8080 (SOC_PORT/SOC_HOST)
 python -m soc_platform scheduler [--once]      # optional separate scheduler service
@@ -177,6 +177,7 @@ soc_platform/
   core/cases.py          CaseService: cases, evidence, recommendations, decisions, actions_for_case, assign/add_note,
                          deferred narration (narration_request / pending_narration / narrate_pending)
   core/enrichment.py     EnrichmentOrchestrator: parallel lookups (16 workers, 20 s deadline, 30 min cache)
+  core/text.py           readable(): evidence text made plain (no ['x'], [], None) - applied on BOTH evidence paths
   core/actions.py        ActionSpec/Registry/Service - the ONLY execution path; idempotency keys; conditional updates;
                          commits `executing` before a tool call and the outcome after; execute_pending, reconcile_stuck
   core/policy.py         L0-L4 levels, PolicyEngine.decide(), PolicyStore (propose/approve), DEFAULT_POLICY
@@ -391,7 +392,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 798 platform tests passing on SQLite and on PostgreSQL (814 collected, 16 skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, 1 database-specific check), 205
+- Current counts (keep docs in sync when they change): 801 platform tests passing on SQLite and on PostgreSQL (817 collected, 16 skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, 1 database-specific check), 205
   engine tests, 108/108 features verified with `--browser --engine --live --llm` (round 25); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
@@ -550,7 +551,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   "the client's in-house LLM (gateway)".
 - **Equal timestamps on Windows**: the clock advances in ~15 ms steps, so "newest first" by time alone is random
   within a tick - make times strictly increasing (case notes, `JobRun.ordinal`).
-- **`demo` expectations** in the guides (7+3 cases, 34 approvals, 6 open vulnerabilities; the same with or without the ML engine) are real; if you change fixtures or
+- **`demo` expectations** in the guides (7+3 cases, 37 approvals, 6 open vulnerabilities; the same with or without the ML engine) are real; if you change fixtures or
   pipelines, re-count and update RUN_GUIDE / PRESENTER_GUIDE.
 - **Browser tour** runs the real scheduler with `SOC_SCHEDULER_START_DELAY=86400`: the heartbeat is live (no
   "Scheduler stopped" banner in screenshots) but no job runs to move figures under the screen-vs-API check. It gives
@@ -622,6 +623,13 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   liveness probe at `/health` restarts every pod during a database outage.
 - **Variable names in `submit_raw`**: `ref` is the de-duplication key (`source_ref`); the blob reference is
   `blob_ref`. Reusing `ref` made every replayed report a new submission (caught by `test_phishing.py`).
+- **Evidence is written in two places** (`CaseService.add_evidence` and `EnrichmentOrchestrator.enrich`): anything
+  that must hold for all evidence (text normalisation, de-duplication) goes in both.
+- **Look a host up by the vendor's device id when the platform has it** (`Target.context`): host names differ between
+  tools (short name, FQDN, case), and a name-prefix search matches other machines (`web01` → `web010`).
+- **Judge outputs against intent, not "no error"**: a functional review found an internet-facing Log4Shell server's
+  alert rated medium with no action, an EDR "not finding" the host it alerted on, and "CVSS None" in evidence - all
+  with green tests. Run the demo and read what it says.
 - **Never call a vendor inside the open transaction.** `_execute` once called the tool after `action.approved` had
   taken the audit chain's row lock: every audited write on the platform waited for the vendor, and a failed commit
   lost the record of an executed containment. The same applies to any new code that calls out while holding writes.

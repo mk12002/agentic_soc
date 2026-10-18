@@ -257,7 +257,7 @@ After `demo`:
 | Where | What you should see |
 |---|---|
 | **Cases** | 10 cases: 7 phishing, 3 incidents |
-| **Approvals** | 34 actions awaiting a decision (incident 15, phishing 16, vulnerability 3), with or without the ML engine |
+| **Approvals** | 37 actions awaiting a decision (incident 18, phishing 16, vulnerability 3), with or without the ML engine |
 | **Vulnerabilities** | 6 open findings; the CVE-2021-44228 (Log4Shell) campaign |
 | **Cloud posture** | Misconfigurations routed to their owning teams |
 | **Intelligence** | A situation brief, correlated findings, the riskiest users and hosts |
@@ -574,7 +574,7 @@ signed in (anonymous callers get only `{"status": "ok"}`) reports `audit_chain: 
 `service` mode; the
 scheduler's first pass runs the vulnerability job first, then incidents and phishing. `demo` can run while the
 scheduler is syncing (the two take turns on each stream) and gives the same figures as on a laptop (7 phishing and 3
-incident cases, 34 actions awaiting approval, 6 open vulnerabilities). Reports are stored in PostgreSQL
+incident cases, 37 actions awaiting approval, 6 open vulnerabilities). Reports are stored in PostgreSQL
 (`[REPORT] daily_exposure: db:reports/...`; Compose sets `SOC_BLOB_STORE=database`), so a report the scheduler
 container built downloads through the API container; `docker compose exec platform-api python -m soc_platform blobs
 check` lists every stored file as readable; and everything survives `docker compose restart`.

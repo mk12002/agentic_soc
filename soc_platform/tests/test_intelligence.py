@@ -44,7 +44,11 @@ def test_cross_domain_correlations(session, world):
     assert all(e.get("ref") for i in ins for e in i.evidence)            # every insight cites evidence
     titles = " ".join(i.title for i in ins)
     assert "FS01-Finance-Backups" not in titles                         # Canary decoy is a sensor, not an asset
-    assert "web01" not in " ".join(i.title for i in ins if i.rule == "exposed_host_under_attack")  # weak alert only
+    # a weak (low) alert counts only on an internet-exposed vulnerable host: web01 is internet-facing with Log4Shell,
+    # and a low "unusual outbound" alert there is how exploitation first shows (U06). Elsewhere medium and above.
+    web = next(i for i in ins if i.rule == "exposed_host_under_attack" and i.title.startswith("web01"))
+    assert web.severity == "critical" and {"endpoint_alert", "kev_exposure", "internet_exposed_vulnerable"} <= {
+        e["signal"] for e in web.evidence}
     db = next(i for i in ins if i.rule == "exposed_host_under_attack" and "db01" in i.title)
     assert "exploitation attempt" in db.title                           # T1190 alert + ProxyNotShell KEV
     assert all(i.narrative for i in ins)
@@ -547,3 +551,42 @@ def test_application_consent_is_not_flagged_without_a_preceding_click(session, w
         _consent(session, jane, "2026-12-31T00:00:00Z")
     rules = {i.rule for i in IntelligenceService(session, vm=world).refresh()}
     assert "consent_after_phishing" not in rules
+
+
+# ---------------------------------------------------------------------------------- functional review (round 27)
+
+
+def test_an_alert_on_an_internet_facing_critical_host_with_a_kev_cve_is_at_least_high(session, world):
+    """A low 'unusual outbound' alert on web01 - internet-facing, business-critical, Log4Shell - stayed medium with no
+    recommendation: the score ignored exposure and criticality it already held (U06 exposure-informed triage)."""
+    from soc_platform.core.models import Case, Evidence
+
+    case = session.query(Case).filter(Case.title.like("Unusual outbound%")).one()
+    assert case.severity == "high"
+    assert sorted(case.assessment["scoring"]["exposed_or_critical_host_with_kev"]) == ["business_critical",
+                                                                                     "internet_exposed"]
+    ev = [e.summary for e in session.query(Evidence).filter(Evidence.case_id == case.id)]
+    log4shell = next(s for s in ev if "CVE-2021-44228" in s)
+    assert "(CVSS 10)" in log4shell and "None" not in log4shell                   # NVD's figure, not a blank
+    assert any(s.startswith("1 Falcon host(s)") and "1 alert(s)" in s for s in ev)  # found by its device id
+    assert not [s for s in ev if re.search(r"\['|\[\]|=None\b|: \{'", s)]          # no Python reprs for analysts
+
+
+def test_the_analyst_answers_about_the_entity_named_and_counts_only_its_own_actions(session, world):
+    """Asked about one laptop, the answer opened with organisation-wide findings, called a medium finding 'the most
+    serious' next to critical ones, and counted every action on the person's cases as 'for this entity'."""
+    from soc_platform.core.models import ActionRequest
+
+    svc = IntelligenceService(session, vm=world)
+    svc.refresh()
+    plan = [c["tool"] for c in svc.analyst._deterministic_plan("what is happening with jane-lt01")]
+    assert "list_insights" not in plan and "top_risky" not in plan
+    assert "list_insights" in [c["tool"] for c in svc.analyst._deterministic_plan("what is happening overall")]
+    ent = next(e for e in svc.analyst._search("jane-lt01") if e.get("kind") == "asset")
+    ctx = svc.analyst._entity_context(ent["entity_id"])
+    sev = [i["severity"] for i in ctx["insights"]]
+    assert sev == sorted(sev, key=lambda s: ["critical", "high", "medium", "low", "informational"].index(s))
+    own = {a["action_id"] for a in ctx["pending_actions"]}
+    for a in session.query(ActionRequest).filter(ActionRequest.id.in_(own)):
+        assert any("jane-lt01" in json.dumps(t).lower() or "cs-aid-jane01" in json.dumps(t) for t in a.targets)
+    assert ctx["pending_on_cases"] >= len(own)

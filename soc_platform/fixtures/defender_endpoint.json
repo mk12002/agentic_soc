@@ -300,6 +300,103 @@
   },
   {
    "method": "GET",
+   "path": "^/api/machines/mde-jane01$",
+   "body": {
+    "id": "mde-jane01",
+    "computerDnsName": "jane-lt01.acme-demo.com",
+    "aadDeviceId": "aad-jane01",
+    "lastIpAddress": "10.20.1.15",
+    "osPlatform": "Windows",
+    "osVersion": "Windows 11 Enterprise",
+    "riskScore": "High",
+    "exposureLevel": "Medium",
+    "healthStatus": "Active",
+    "onboardingStatus": "Onboarded",
+    "lastSeen": "2026-09-20T10:00:00Z",
+    "machineTags": [
+     "Finance"
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/machines/mde-bob02$",
+   "body": {
+    "id": "mde-bob02",
+    "computerDnsName": "bob-lt02.acme-demo.com",
+    "aadDeviceId": "aad-bob02",
+    "lastIpAddress": "10.20.1.22",
+    "osPlatform": "Windows",
+    "osVersion": "Windows 11 Enterprise",
+    "riskScore": "Low",
+    "exposureLevel": "Medium",
+    "healthStatus": "Active",
+    "onboardingStatus": "Onboarded",
+    "lastSeen": "2026-09-20T10:00:00Z",
+    "machineTags": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/machines/mde-web01$",
+   "body": {
+    "id": "mde-web01",
+    "computerDnsName": "web01.acme-demo.com",
+    "aadDeviceId": null,
+    "lastIpAddress": "10.10.0.5",
+    "osPlatform": "Linux",
+    "osVersion": "Ubuntu 22.04 LTS",
+    "riskScore": "Low",
+    "exposureLevel": "High",
+    "healthStatus": "Active",
+    "onboardingStatus": "Onboarded",
+    "lastSeen": "2026-09-20T10:00:00Z",
+    "machineTags": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/machines/mde-db01$",
+   "body": {
+    "id": "mde-db01",
+    "computerDnsName": "db01.acme-demo.com",
+    "aadDeviceId": null,
+    "lastIpAddress": "10.10.0.6",
+    "osPlatform": "Windows",
+    "osVersion": "Windows Server 2019",
+    "riskScore": "Low",
+    "exposureLevel": "High",
+    "healthStatus": "Active",
+    "onboardingStatus": "Onboarded",
+    "lastSeen": "2026-09-20T10:00:00Z",
+    "machineTags": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/api/machines/mde-fs01$",
+   "body": {
+    "id": "mde-fs01",
+    "computerDnsName": "fs01.acme-demo.com",
+    "aadDeviceId": null,
+    "lastIpAddress": "10.10.0.20",
+    "osPlatform": "Windows",
+    "osVersion": "Windows Server 2022",
+    "riskScore": "Low",
+    "exposureLevel": "Medium",
+    "healthStatus": "Active",
+    "onboardingStatus": "Onboarded",
+    "lastSeen": "2026-09-20T10:00:00Z",
+    "machineTags": []
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
    "path": "^/api/machines/findbyip$",
    "body": {
     "value": [

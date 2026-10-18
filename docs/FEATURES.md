@@ -225,7 +225,7 @@ legitimate vendor, internal and marketing mail).
 | Entity extraction (IM-F03) | Users, hosts, IPs, domains, URLs, hashes, processes, cloud resources |
 | Parallel enrichment (IM-F04, IM-T04) | Fan-out across endpoint, identity (incl. directory roles and **Azure role assignments** per subscription / resource group), privileged access, DNS, deception, exposure, email and threat-intel dimensions with per-source timeouts, caching and per-tool rate budgets (the SOC never overloads a tool's API) |
 | Consolidated view (IM-F05) | Entity cards, unified timeline, evidence by dimension, deep links back to each tool |
-| Risk assessment (IM-F06) | Deterministic, exposure-informed severity and confidence (an attacked host with a KEV-listed vulnerability ranks higher - U06), MITRE ATT&CK with evidence, grounded summary |
+| Risk assessment (IM-F06) | Deterministic, exposure-informed severity and confidence (an attacked host with a KEV-listed vulnerability ranks higher, and is at least high when it is internet-exposed or business-critical - U06), MITRE ATT&CK with evidence, grounded summary |
 | Recommendations (IM-F07) | Ranked actions with expected impact, blast radius, reversibility and executing tool |
 | Guarded response (IM-F09) | CrowdStrike containment, Defender isolation / scan / indicators, Entra session revocation / password reset / disable, Umbrella blocks, Delinea rotation - behind the autonomy policy with rollback |
 | Forensics (IM-F10) | Evidence collection via CrowdStrike RTR / Defender investigation package (approval-gated, recommended before containment) |

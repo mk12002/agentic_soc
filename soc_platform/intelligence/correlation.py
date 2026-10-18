@@ -213,7 +213,11 @@ class CorrelationEngine:
     def _exposed_host_under_attack(self, p: RiskProfile) -> Insight | None:
         if p.kind != "asset":
             return None
-        attack = [f for f in p.factors if (f.signal == "endpoint_alert" and f.weight >= 10) or f.signal == "deception_hit"]
+        # an internet-exposed vulnerable host counts even a low-severity alert: on such a host that is how exploitation
+        # first shows (U06 exposure-informed triage); elsewhere medium and above, to keep the rule quiet
+        exposed = any(f.signal == "internet_exposed_vulnerable" for f in p.factors)
+        attack = [f for f in p.factors if (f.signal == "endpoint_alert" and (f.weight >= 10 or exposed))
+                  or f.signal == "deception_hit"]
         vuln = [f for f in p.factors if f.signal in {"kev_exposure", "priority_vulnerability"}]
         if not (attack and vuln):
             return None
@@ -223,7 +227,9 @@ class CorrelationEngine:
         return Insight(rule="exposed_host_under_attack", dedupe_key=_key("exp", p.entity_id),
                        title=f"{p.name} shows {what} and carries {'KEV-listed' if kev else 'priority'} vulnerabilities",
                        severity="critical" if kev else "high", score=p.score, entity_ids=[p.entity_id],
-                       domains=["incident", "vulnerability"], evidence=[_ev(f) for f in attack + vuln],
+                       domains=["incident", "vulnerability"],
+                       evidence=[_ev(f) for f in attack + vuln
+                                 + [x for x in p.factors if x.signal == "internet_exposed_vulnerable"][:3]],
                        next_steps=["Raise incident priority (exposure-informed triage)",
                                    "Emergency-patch or mitigate the listed CVEs on this host",
                                    "Check whether the alerts match exploitation of these CVEs"],

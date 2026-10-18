@@ -77,6 +77,8 @@ def defender_endpoint() -> None:
         route("GET", r"^/api/machines/mde-jane01/alerts$", {"value": [alerts[0]]}),
         route("GET", r"^/api/machines/mde-db01/alerts$", {"value": [alerts[1]]}),
         route("GET", r"^/api/machines/[^/]+/alerts$", {"value": []}),
+        # one machine by its device id (the investigation looks a host up by the id it already holds)
+        *[route("GET", rf"^/api/machines/{m['id']}$", m) for m in machines],
         route("GET", r"^/api/machines/findbyip$", {"value": by_fqdn(j["fqdn"])}, params={"ip": j["ip"], "timestamp": r"~^\d{4}-\d\d-\d\dT"}),
         route("GET", r"^/api/machines/findbyip$", {"value": []}),
         route("GET", r"^/api/alerts$", {"value": alerts}),

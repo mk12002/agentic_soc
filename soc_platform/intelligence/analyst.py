@@ -178,16 +178,36 @@ class IntelligenceAnalyst:
         case_ids = list(dict.fromkeys(ce.case_id for ce in self.s.execute(
             select(CaseEntity).where(CaseEntity.entity_id == entity_id)).scalars()))
         cases = [c for c in (self.s.get(Case, i) for i in case_ids) if c is not None]
-        ins = [i for i in self.s.execute(select(Insight).where(Insight.status != "dismissed")
-                                         .order_by(Insight.score.desc())).scalars() if entity_id in (i.entity_ids or [])]
+        from soc_platform.core.schema import severity_rank
+
+        # "the most serious" means the highest severity first, then the score (a medium finding with a high score
+        # must not outrank a critical one)
+        ins = sorted((i for i in self.s.execute(select(Insight).where(Insight.status != "dismissed")).scalars()
+                      if entity_id in (i.entity_ids or [])),
+                     key=lambda i: (-severity_rank(i.severity), -(i.score or 0), i.id))
         acts = self.s.execute(select(ActionRequest).where(ActionRequest.case_id.in_(case_ids or ["-"]),
                                                           ActionRequest.status.in_(("recommended", "pending_approval")))
-                              ).scalars().all()
+                              .order_by(ActionRequest.created_at, ActionRequest.id)).scalars().all()
+        # an action on one of the entity's cases is not necessarily *about* the entity (another host's indicator
+        # block, the case's ticket): only actions whose targets name this entity are "for" it
+        names = self._entity_names(entity_id)
+        own = [a for a in acts if any(_target_names(t) & names for t in (a.targets or []))]
         return {"cases": [{"case_id": c.id, "title": c.title, "severity": c.severity, "verdict": c.verdict,
                            "status": c.status, "domain": c.domain} for c in cases],
                 "insights": [{"insight_id": i.id, "title": i.title, "severity": i.severity, "rule": i.rule,
                               "next_steps": i.next_steps} for i in ins[:5]],
-                "pending_actions": [{"action_id": a.id, "action": a.action_type, "rationale": a.rationale} for a in acts]}
+                "pending_actions": [{"action_id": a.id, "action": a.action_type, "rationale": a.rationale} for a in own],
+                "pending_on_cases": len(acts)}
+
+    def _entity_names(self, entity_id: str) -> set[str]:
+        from soc_platform.core.models import EntityKey
+
+        ent = self.s.get(Entity, entity_id)
+        names = {str(v).strip().lower() for (v,) in self.s.execute(
+            select(EntityKey.key_value).where(EntityKey.entity_id == entity_id)) if v}
+        if ent is not None and ent.display_name:
+            names.add(ent.display_name.strip().lower())
+        return names | {n.split(".")[0] for n in names if "@" not in n and "." in n}   # host short names
 
     def _pending(self) -> Any:
         q = select(ActionRequest).where(ActionRequest.status.in_(("recommended", "pending_approval")))
@@ -211,9 +231,15 @@ class IntelligenceAnalyst:
         for host in re.findall(r"\b([a-z]+[-_]?[a-z]*\d+[a-z0-9-]*)\b", ql):
             if not host.startswith("cve"):
                 calls.append({"tool": "search_entities", "args": {"text": host}})
-        if any(w in ql for w in ("risk", "riskiest", "most at risk", "worst")):
+        # a question about a named person or host is answered about that entity (its risk and context follow its
+        # look-up); the organisation-wide lists only when the wording itself is organisation-wide
+        named = any(c["tool"] in {"find_entity", "search_entities"} for c in calls)
+        overall = any(w in ql for w in ("riskiest", "most at risk", "worst", "overall", "organisation", "organization",
+                                        "everything", "all ", "top "))
+        if any(w in ql for w in ("risk", "riskiest", "most at risk", "worst")) and (overall or not named):
             calls.append({"tool": "top_risky", "args": {"limit": 5}})
-        if any(w in ql for w in ("correlat", "insight", "chain", "going on", "happening", "summary", "priorit")):
+        if any(w in ql for w in ("correlat", "insight", "chain", "going on", "happening", "summary", "priorit")) \
+                and (overall or not named):
             calls.append({"tool": "list_insights", "args": {}})
         if any(w in ql for w in ("vuln", "patch", "kev", "exposed", "sla")) and not any(c["tool"] == "affected_devices"
                                                                                   for c in calls):
@@ -419,8 +445,11 @@ def _facts_summary(results: list[dict[str, Any]]) -> str:
                 parts.append(f"recommended first step: review and approve the pending {first['action']} "
                              f"({first['rationale'][:120]})")
             if c.get("pending_actions"):
-                parts.append(f"{len(c['pending_actions'])} containment action(s) for this entity are waiting for approval ("
+                parts.append(f"{len(c['pending_actions'])} action(s) targeting it are waiting for approval ("
                              + ", ".join(a["action"] for a in c["pending_actions"][:3]) + ")")
+            others = (c.get("pending_on_cases") or 0) - len(c.get("pending_actions") or [])
+            if others > 0:
+                parts.append(f"{others} more on its cases (other hosts, indicators or tickets)")
         elif r["tool"] == "attack_story" and isinstance(res, dict) and res.get("summary"):
             parts.insert(0, res["summary"].rstrip("."))
         elif r["tool"] == "find_entity" and isinstance(res, dict) and res.get("not_found"):
@@ -539,3 +568,10 @@ class IntelligenceService:
             self.analyst.narrate_many([i for i in insights
                                        if not i.narrative or i.narrative_source in {"deterministic", "stale"}])
         return insights
+
+
+def _target_names(target: dict[str, Any]) -> set[str]:
+    """Every identifier an action target carries, lower-cased (id, value, upn, vendor ids, and a host's short name)."""
+    vals = {str(v).strip().lower() for k, v in (target or {}).items()
+            if k not in ("type", "tags", "kind") and isinstance(v, (str, int)) and str(v).strip()}
+    return vals | {v.split(".")[0] for v in vals if "@" not in v and "/" not in v and "." in v}
