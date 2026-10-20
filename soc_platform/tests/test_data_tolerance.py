@@ -347,3 +347,13 @@ def test_postgres_connections_carry_the_statement_timeout(monkeypatch):
     assert seen["connect_args"]["options"] == "-c statement_timeout=120000"
     monkeypatch.setenv("SOC_DB_STATEMENT_TIMEOUT_SECONDS", "0")
     assert dbmod.statement_timeout_ms() == 0
+
+
+def test_a_postgresql_url_without_a_driver_uses_the_installed_one():
+    """SQLAlchemy 2.1 made psycopg 3 the default for postgresql://; the platform installs psycopg2."""
+    from soc_platform.core.db import engine_url
+
+    assert engine_url("postgresql://u:p@db:5432/soc") == "postgresql+psycopg2://u:p@db:5432/soc"
+    assert engine_url("postgres://u@db/soc") == "postgresql+psycopg2://u@db/soc"
+    assert engine_url("postgresql+psycopg2://u@db/soc") == "postgresql+psycopg2://u@db/soc"   # named driver kept
+    assert engine_url("sqlite:///x.db") == "sqlite:///x.db"

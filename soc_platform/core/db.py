@@ -61,10 +61,21 @@ class BoundedText(TypeDecorator):
         return value
 
 
+def engine_url(url: str) -> str:
+    """A PostgreSQL URL that names no driver gets the one the platform installs (psycopg2). SQLAlchemy 2.1 changed
+    its default for ``postgresql://`` to psycopg 3, so a plain URL (the usual form from a vault or a managed
+    service) failed with "No module named 'psycopg'" on a fresh install."""
+    for plain in ("postgresql://", "postgres://"):
+        if url.startswith(plain):
+            return "postgresql+psycopg2://" + url[len(plain):]
+    return url
+
+
 class Database:
     """Owns one engine and session factory. Tests create their own in-memory instance."""
 
     def __init__(self, url: str) -> None:
+        url = engine_url(url)
         kwargs: dict = {"future": True}
         if url.startswith("sqlite"):
             kwargs["connect_args"] = {"check_same_thread": False}
