@@ -5,7 +5,9 @@ from soc_platform.domains.phishing.engine.configs.settings import Settings
 
 def test_30gb_optimization_fields_present():
     """Verify that all 30GB RAM optimization fields are present with correct defaults."""
-    settings = Settings()
+    # the defaults themselves: not whatever a developer's .env happens to set (that made this pass on one laptop
+    # and fail in every clean environment)
+    settings = Settings(_env_file=None)
     
     # Check Orchestrator Caching & Deduplication
     assert hasattr(settings, "orchestrator_max_concurrent_analyses")
@@ -48,4 +50,4 @@ def test_30gb_optimization_fields_present():
     # Check Azure / Graph
     assert hasattr(settings, "graph_tenant_id")
     assert hasattr(settings, "azure_search_enabled")
-    assert settings.azure_search_enabled is True
+    assert settings.azure_search_enabled is False          # off unless configured

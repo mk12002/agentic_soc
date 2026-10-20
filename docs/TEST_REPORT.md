@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-18 (rounds 15-27; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-20 (rounds 15-28; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,34 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 27 (2026-10-18) - latest results: functional review (does every output mean what it says)
+## 0. Round 28 (2026-10-20) - latest results: Python 3.13, and figures that aged with the calendar
+
+Aim: answer "does the whole system run on Python 3.13?" by installing and testing it there, on Linux, against
+Python 3.11 on Linux (the production image) and Windows (development). Running it two days after round 27 exposed
+something more important: the sample data had crossed 30 days of age, and three parts of the platform aged out with
+the calendar.
+
+| Found | Now | Evidence |
+|---|---|---|
+| Incident clustering looked back 30 days from the wall clock: 30 days after the sample alerts the demo had **one incident instead of three** (and a backfill after an outage would lose its own) | The window ends at the newest alert (capped at now); live data is unchanged | `test_incident_clustering_is_anchored_to_the_alerts_not_the_wall_clock` (0 / 45 / 400 days later; fails on the old code) |
+| Risk's "now" was the newest record of any kind - but people, hosts, indicators and findings are "seen" at every directory or scanner sync - so "now" was the wall clock and the top user fell from critical, three correlation rules stopped firing | "Now" is the newest event (alerts, sign-ins, e-mail, DNS, deception, secret access, elevation) | `test_risk_and_correlations_do_not_age_out_with_the_calendar` (0 / 45 / 400 days; fails on the old code), `test_intelligence.py` |
+| Reported e-mails were stored with the processing time, which also moved every recipient to "today"; a phishing click was dated by when its case was created, so it never decayed | E-mails carry their Date header (else the mailbox's received time); clicks their click time | same tests; `test_activity_decays_by_half_every_half_life_but_open_exposure_does_not` |
+| Eight processes creating a new SQLite schema at once: "database schema has changed" was not retried (seen on the newer SQLite of the 3.13 image) | Retried like "already exists" | `test_many_processes_creating_the_schema_at_once_all_succeed` on Linux 3.13 |
+| The API test module mixed month-old sample data with alerts pushed "now" | Its clock is placed in the sample's era (restored at teardown) | `test_api.py` |
+| An engine test asserted a developer's `.env` value instead of the default | Reads the real defaults | `test_config_settings_30gb.py` |
+| `pip install -r requirements/dev.txt` failed on 3.13 (`pgserver`, test-only, has no 3.13 build) | Marker: skipped on 3.13 | dev install on 3.13 succeeds |
+
+**Python 3.13:** every platform and engine dependency installs on 3.13 at the locked versions (scikit-learn 1.8.0 -
+the trained models' version - numpy, scipy, pandas, xgboost, lightgbm, psycopg2-binary, pydantic, SQLAlchemy,
+FastAPI, cryptography, langgraph); no removed standard-library module is used. Linux 3.13: platform 802 passed with
+3 failures, all also explained on 3.11 (the two above, plus `test_ci_runs_every_gate`, which needs a git checkout the
+test container did not have); ML engine 203 passed, 0 failed; the ML engine inside the platform 16 passed; demo ran.
+After the fixes, the affected files on 3.13: 112 passed, 0 failed. Linux 3.11 behaved the same (803 passed, the same
+two explained failures; engine 203 passed). **Nothing failed on 3.13 alone** except the SQLite start-up race, fixed.
+
+**Counts:** COUNTS_PLACEHOLDER
+
+## 0.0 Round 27 (2026-10-18): functional review (does every output mean what it says)
 
 Aim: run the platform end to end on a fresh database and judge each output against the platform's intent, not only
 against "no error". Checked: the demo's totals, every incident's severity and recommendations against its evidence,

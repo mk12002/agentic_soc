@@ -71,7 +71,7 @@ of failure - two or more API and scheduler replicas across nodes and zones, high
 piece of state - use the Kubernetes package (`kubectl apply -k deploy/kubernetes/overlays/azure` or `.../onprem`); see
 [docs/HIGH_AVAILABILITY.md](docs/HIGH_AVAILABILITY.md).
 
-Requirements: Python 3.11+, SQLite (dev) or PostgreSQL 14+ (prod). The console is plain HTML/JS/CSS served by the
+Requirements: Python 3.11 to 3.13 (tested on both; the container image uses 3.11), SQLite (dev) or PostgreSQL 14+ (prod). The console is plain HTML/JS/CSS served by the
 API - no Node build step, no external CDNs - and works in current Chrome, Edge, Firefox and Safari.
 
 ## Console

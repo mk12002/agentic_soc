@@ -165,3 +165,46 @@ def test_activity_decays_by_half_every_half_life_but_open_exposure_does_not(sess
         assert {f.signal for f in far.factors if f.decayed >= NEGLIGIBLE} == {f.signal for f in p0.factors if f.signal in STANDING}, [(f.signal, f.weight, f.decayed, f.when) for f in far.factors] + [far_days, str(latest)]
         assert far.score <= p0.score
     assert checked & STANDING and checked - STANDING                                # both kinds were exercised
+
+
+@pytest.mark.parametrize("days_later", [0, 45, 400])
+def test_incident_clustering_is_anchored_to_the_alerts_not_the_wall_clock(monkeypatch, session, days_later):
+    """Clustering looked back 30 days from the wall clock: 30 days after the sample alerts the demo lost two of its
+    three incidents (and a backfill after an outage would lose its own). The window now ends at the newest alert."""
+    from soc_platform.connectors.registry import ConnectorRegistry
+    from soc_platform.domains.incident.service import IncidentService
+
+    _travel(monkeypatch, days_later)
+    svc = IncidentService(session, ConnectorRegistry.all_fake())
+    svc.ingest()
+    titles = sorted(c.title for c in svc.cluster())
+    assert len(titles) == 3, titles
+
+
+@pytest.mark.parametrize("days_later", [0, 45, 400])
+def test_risk_and_correlations_do_not_age_out_with_the_calendar(monkeypatch, session, tmp_path, days_later):
+    """Risk's "now" was the newest record of any kind - a directory, scanner or mailbox sync stamped today - so 30 days
+    after the sample events the top user fell from critical and three correlation rules stopped firing. It is now the
+    newest event; reported e-mails carry their own time, not the processing time."""
+    from soc_platform.connectors.registry import ConnectorRegistry
+    from soc_platform.domains.incident.service import IncidentService
+    from soc_platform.domains.phishing.service import PhishingService
+    from soc_platform.domains.vulnerability.service import VulnerabilityService
+    from soc_platform.intelligence.analyst import IntelligenceService
+
+    _travel(monkeypatch, days_later)
+    reg = ConnectorRegistry.all_fake()
+    vm = VulnerabilityService(session, reg)
+    vm.refresh()
+    im = IncidentService(session, reg)
+    im.ingest()
+    for c in im.cluster():
+        im.investigate(c.id, narrate=False)
+    ph = PhishingService(session, reg, org_domains=["acme-demo.com"], raw_dir=str(tmp_path))
+    ph.process(ph.ingest_reported()[0].id, narrate=False)
+    rules = {i.rule for i in IntelligenceService(session, vm=vm).refresh()}
+    assert {"deception_corroborated", "privileged_after_compromise", "exposed_host_under_attack"} <= rules
+    from soc_platform.intelligence.risk import RiskEngine
+
+    top = RiskEngine(session).top("identity", 1)[0]
+    assert top.band == "critical", (top.name, top.score)

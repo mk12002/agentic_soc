@@ -93,6 +93,7 @@ kubectl kustomize deploy/kubernetes/overlays/azure             # render the HA p
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --env-file .env up -d --build  # demo stack
 # (the base compose file is PRODUCTION: Entra, TLS-verified PostgreSQL, owner / runtime roles; the demo is the override)
 # minimum env for a local run: SOC_DEV_JWT_SECRET=<32+ random chars>, SOC_ORG_DOMAINS=acme-demo.com
+# Python 3.11-3.13 (both suites pass on 3.11 and 3.13; pgserver has no 3.13 build - dev.txt skips it there)
 
 # tests (full suite ~25 min SQLite, ~50 min PostgreSQL when both run at once; run the relevant files first)
 python -m pytest soc_platform/tests -q -p no:cacheprovider
@@ -601,7 +602,11 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **Event retention** (`SOC_EVENT_RETENTION_DAYS`, 400) deletes old telemetry entities with their keys, hints,
   relations and source records. A new table that points at entities must be added to its "held" set in
   `core/retention.py`, or pruning leaves a dangling reference.
-- **Risk "now"** is the latest observation in the data, not wall time; open exposures/incidents never decay
+- **Risk "now"** is the latest *event* in the data (`risk.EVENT_KINDS`), not wall time and not a state record: a person,
+  host, indicator, finding or ticket is "seen" at every sync, which made "now" the wall clock and aged dated
+  activity out 30 days later. Event times must be the event's (a reported e-mail: its Date header / the mailbox's
+  received time; a click: its click time) - never the processing time. Incident clustering's 30-day window ends at
+  the newest alert. `test_time.py` travels 0 / 45 / 400 days to prove none of it ages out. Open exposures/incidents never decay
   (`STANDING_SIGNALS`); amplifiers fade with their triggers.
 - **Nothing durable on a host's disk or in one process.** A path saved by one replica could not be read by another
   (a report built by the scheduler, downloaded via the API). New stored files go through `BlobStore`

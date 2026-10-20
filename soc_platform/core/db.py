@@ -118,7 +118,10 @@ class Database:
                 self._create_schema()
                 return
             except SQLAlchemyError as exc:
-                if "already exists" not in str(exc).lower() or attempt == 4:
+                msg = str(exc).lower()
+                # another process created a table or trigger first ("already exists"), or changed the schema while this
+                # connection was preparing a statement (SQLite: "database schema has changed") - both: retry
+                if not ("already exists" in msg or "schema has changed" in msg) or attempt == 4:
                     raise
                 __import__("time").sleep(0.1 * (attempt + 1))
 

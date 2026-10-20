@@ -369,7 +369,7 @@ Use these when someone asks "how do you get that number?". Every one is determin
     they are closed. An unpatched host does not "become safe" by waiting.
   - **Amplifiers** (privileged user at risk, no EDR on a host with activity) fade with the activity that triggered
     them.
-  - "Now" is the latest observation in the data. If every feed stops, scores freeze rather than fall to zero, and
+  - "Now" is the latest event in the data (not a directory or scanner sync, which happens every day). If every feed stops, scores freeze rather than fall to zero, and
     the stale connectors raise the alarm.
 - **Bands:** critical ≥ 80, high ≥ 60, medium ≥ 30, otherwise low.
 - **Main weights:**

@@ -48,7 +48,8 @@ Open **http://127.0.0.1:8080**. Sign in with work email `lena@acme-demo.com` and
 ## 2. One-time setup
 
 **You need:**
-- Python 3.11 or newer.
+- Python 3.11, 3.12 or 3.13 (the platform and the ML engine are tested on 3.11 and 3.13; on 3.13 the optional
+  `pgserver` test helper - an embedded PostgreSQL for local test runs - has no build and is skipped).
 - Git.
 - Optionally Node.js 18+, only for the automated browser tour (§13).
 

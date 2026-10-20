@@ -159,7 +159,7 @@ exceptions: DataError -> 400; KeyError from services -> 404; PermissionError -> 
 
 | Component | Choice | Why | Alternatives considered |
 |---|---|---|---|
-| Language | Python 3.11 | The security-tooling ecosystem (vendor SDKs, email parsing, ML) is Python-first. The ML engine is Python. 3.11 has `datetime.UTC`, `tomllib` and performance gains. | Go (faster, weaker ecosystem for email/ML); TypeScript. |
+| Language | Python 3.11 (image); 3.11-3.13 supported | The security-tooling ecosystem (vendor SDKs, email parsing, ML) is Python-first. The ML engine is Python. 3.11 has `datetime.UTC`, `tomllib` and performance gains. Both test suites pass on Linux 3.11 and 3.13 with the locked platform versions; no removed standard-library module is used. The image stays on 3.11 until its locks are re-resolved and the trained models re-validated on 3.13 (no failure found, but the image is what was measured). | Go (faster, weaker ecosystem for email/ML); TypeScript. |
 | Web framework | FastAPI 0.1xx + Uvicorn | Typed request models (Pydantic), dependency injection for auth/permissions, async where useful, OpenAPI in dev. | Flask (less typing), Django (heavier ORM/admin not needed). |
 | ORM | SQLAlchemy 2.0 (typed `Mapped[]`) | Same code on SQLite and PostgreSQL; explicit sessions and transactions; conditional updates for exactly-once transitions. | Django ORM; raw SQL. |
 | Production database | PostgreSQL 16 | Row-level locking, transactional DDL, JSON, mature managed offerings. | SQL Server (possible via SQLAlchemy; not tested). |
@@ -741,7 +741,8 @@ narration, calls overlap, evidence ids match, and nothing is left pending (`test
   - `AMPLIFIER_TRIGGERS` fade with the signals that triggered them.
   - Found by time-travel testing: open exposure used to fade while still open, and the privileged amplifier never
     faded.
-- **"Now"** is the latest observation in the data (`max(Entity.last_seen)`), so replayed or historic data decays
+- **"Now"** is the latest *event* in the data (`max(last_seen)` over alerts, sign-ins, e-mail, DNS, deception, secret
+  access and elevation - `EVENT_KINDS`), so replayed or historic data decays
   sensibly. `as_of` evaluates at any instant. If every feed stops, scores freeze; stale connectors raise the alarm.
 - **Rules:** each case counts once per entity whatever its roles; decoys are never scored.
 - **Scale:** `candidates()` pre-filters to entities with a risk source (relations, case links, open findings) instead

@@ -22,6 +22,9 @@ from soc_platform.core.models import Case, CaseEntity, Entity, utcnow
 
 SEV_W = {"critical": 40.0, "high": 25.0, "medium": 10.0, "low": 3.0, "informational": 0.0}
 HALF_LIFE_DAYS = 7.0
+# records of something that happened: their time is the event's. State records (people, hosts, indicators, findings,
+# cloud issues, tickets) are "seen" whenever a directory, scanner or look-up is synced - that is the wall clock
+EVENT_KINDS = ("alert", "signin", "email", "mail_event", "dns", "deception", "secret_access", "elevation")
 # Signals that describe a condition which is still true (an open exposure, an open incident): they count in full
 # until the condition ends, instead of decaying like activity does.
 STANDING_SIGNALS = frozenset({"kev_exposure", "priority_vulnerability", "internet_exposed_vulnerable", "open_incident"})
@@ -87,9 +90,26 @@ class RiskEngine:
         # engine kept across writes must see the new latest observation, or figures drift between screens).
         memo = getattr(self, "_latest", None)
         if memo is None or memo[0] != _GENERATION[0]:
-            latest = self.s.execute(select(Entity.last_seen).order_by(Entity.last_seen.desc()).limit(1)).scalar()
+            # the newest *event*: with state records counted, "now" was simply the wall clock and dated activity aged
+            # out of the window - the sample estate lost its critical findings 30 days after its events
+            latest = self.s.execute(select(Entity.last_seen).where(Entity.kind.in_(EVENT_KINDS))
+                                    .order_by(Entity.last_seen.desc()).limit(1)).scalar() or \
+                self.s.execute(select(Entity.last_seen).order_by(Entity.last_seen.desc()).limit(1)).scalar()
             memo = self._latest = (_GENERATION[0], _aware(latest))
         return memo[1]
+
+    def _phish_time(self, case: Case, upn: str = "") -> datetime:
+        """When a phishing case's activity happened: this user's click, else the e-mail's own time - not when the
+        platform processed it (that dated a September click to the day it was analysed, so it never decayed)."""
+        from soc_platform.connectors.tools._common import parse_ts
+
+        per_user = ((case.assessment or {}).get("user_impact") or {}).get("per_user") or {}
+        click = parse_ts((per_user.get(upn) or {}).get("click_time")) if upn else None
+        if click is not None:
+            return _aware(click)
+        mail = self.s.execute(select(Entity.first_seen).join(CaseEntity, CaseEntity.entity_id == Entity.id)
+                              .where(CaseEntity.case_id == case.id, Entity.kind == "email")).scalars().first()
+        return _aware(mail or case.created_at)
 
     def _decay(self, when: datetime | None, now: datetime) -> float:
         age = max(0.0, (now - _aware(when)).total_seconds() / 86400) if when else 0.0
@@ -152,20 +172,21 @@ class RiskEngine:
                 ui = (case.assessment or {}).get("user_impact") or {}
                 upn = self.store.keys_of(entity_id).get("upn", "")
                 if upn and upn in (ui.get("clicked") or []):
-                    add("phishing_click", "email", 20, "phishing", case.id, case.created_at,
+                    add("phishing_click", "email", 20, "phishing", case.id, self._phish_time(case, upn),
                         f"clicked a {case.verdict} email: {case.title}")
                 if upn and upn in (ui.get("identity_compromise") or []):
                     compromised_via.append(case)
                 elif "recipient" in rs and case.verdict == "malicious":
-                    add("phishing_recipient", "email", 4, "phishing", case.id, case.created_at,
+                    add("phishing_recipient", "email", 4, "phishing", case.id, self._phish_time(case),
                         f"received {case.verdict} email: {case.title}")
             elif case.domain == "incident" and case.status != "closed" and rs - {"alert"}:
                 add("open_incident", "incident", SEV_W.get(case.severity, 5) / 2, "incident", case.id,
                     case.created_at, case.title)          # counts in full until the incident is closed
         if compromised_via:
             # one compromise, however many phishing cases point at it
-            latest = max(compromised_via, key=lambda c: c.created_at)
-            add("phishing_identity_compromise", "identity", 30, "phishing", latest.id, latest.created_at,
+            upn = self.store.keys_of(entity_id).get("upn", "")
+            latest = max(compromised_via, key=lambda c: self._phish_time(c, upn))
+            add("phishing_identity_compromise", "identity", 30, "phishing", latest.id, self._phish_time(latest, upn),
                 "identity compromise indicators after phishing click"
                 + (f" (seen from {len(compromised_via)} phishing cases)" if len(compromised_via) > 1 else ""))
 

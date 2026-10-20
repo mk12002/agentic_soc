@@ -13,6 +13,14 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("api")
+    # the platform's clock a few hours after the sample events, whatever today's date: a test that pushes an alert
+    # without a time ("arrives now") must not put a month of calendar between it and the sample activity, or risk's
+    # 30-day window drops the sample - correct for live data, wrong for this module's assertions
+    from datetime import UTC, datetime
+
+    era = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    saved_offset = os.environ.get("SOC_CLOCK_OFFSET_SECONDS")
+    os.environ["SOC_CLOCK_OFFSET_SECONDS"] = str((era - datetime.now(UTC)).total_seconds())
     os.environ.update({"SOC_AUTH_MODE": "dev", "SOC_DEV_JWT_SECRET": "test-secret-0123456789abcdef0123456789",
                        "SOC_DATABASE_URL": f"sqlite:///{tmp / 'api.db'}", "SOC_CONNECTORS_CONFIG": str(ROOT / "config" / "connectors.yaml"),
                        "SOC_REPORT_OUTPUT_DIR": str(tmp / "reports"), "SOC_RAW_PAYLOAD_DIR": str(tmp / "raw"),
@@ -27,7 +35,11 @@ def client(tmp_path_factory):
     from soc_platform.api import app as appmod
 
     appmod.registry.cache_clear()
-    return TestClient(appmod.app)
+    yield TestClient(appmod.app)
+    if saved_offset is None:
+        os.environ.pop("SOC_CLOCK_OFFSET_SECONDS", None)
+    else:
+        os.environ["SOC_CLOCK_OFFSET_SECONDS"] = saved_offset
 
 
 @pytest.fixture(scope="module")

@@ -84,8 +84,14 @@ class IncidentService:
 
     def _unassigned_alerts(self, since_days: int) -> list[Entity]:
         assigned = {r for (r,) in self.s.execute(select(CaseEntity.entity_id).where(CaseEntity.role == "alert")).all()}
-        cutoff = utcnow() - timedelta(days=since_days)
         rows = self.s.execute(select(Entity).where(Entity.kind.in_(ALERT_KINDS))).scalars().all()
+        # the window ends at the newest alert in the data (capped at now), not at the wall clock: live, the newest
+        # alert is minutes old, so nothing changes; after an outage, a backfill or on dated sample data, alerts no
+        # longer age out of their own incident (the demo lost two of its three incidents 30 days after its alerts)
+        newest = max((a.first_seen.replace(tzinfo=None) for a in rows if a.first_seen), default=None)
+        now = utcnow().replace(tzinfo=None)
+        cutoff = min(newest, now) if newest else now
+        cutoff = cutoff - timedelta(days=since_days)
         return [a for a in rows if a.id not in assigned and not _handled_by_phishing(a)
                 and a.first_seen.replace(tzinfo=None) >= cutoff.replace(tzinfo=None)]
 

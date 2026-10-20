@@ -20,7 +20,7 @@ import statistics
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -116,7 +116,7 @@ class PhishingService:
     # ------------------------------------------------------------------ PH-F01 ingestion
 
     def submit_raw(self, raw: bytes, *, source: str, source_ref: str | None = None,
-                   reporter: str | None = None) -> Submission:
+                   reporter: str | None = None, received_at: datetime | None = None) -> Submission:
         sha = hashlib.sha256(raw).hexdigest()
         ref = source_ref or f"{source}:{sha}"
         existing = self.s.execute(select(Submission).where(Submission.source_ref == ref)).scalars().first()
@@ -127,7 +127,7 @@ class PhishingService:
         em = decompose(raw)
         sub = Submission(source=source, source_ref=ref, reporter=(reporter or "").lower() or None,
                          internet_message_id=em.message_id, subject=em.subject, sender=em.sender, mime_sha256=sha,
-                         raw_path=blob_ref)
+                         raw_path=blob_ref, **({"received_at": received_at} if received_at else {}))
         self.s.add(sub)
         self.s.flush()
         self.audit.append(actor_type="agent", actor_id=f"agent:{AGENT}", event_type="phishing.reported",
@@ -174,8 +174,10 @@ class PhishingService:
                     if not raw:
                         continue
                     reporter = ((rep.get("from") or {}).get("emailAddress") or {}).get("address")
+                    from soc_platform.connectors.tools._common import parse_ts
+
                     subs.append(self.submit_raw(raw, source="defender_office365", source_ref=f"mdo:{rid}",
-                                                reporter=reporter))
+                                                reporter=reporter, received_at=parse_ts(rep.get("receivedDateTime"))))
                 cursor = page.next_cursor if page.reset else (page.next_cursor or cursor)
                 if not page.more:
                     break
@@ -353,8 +355,9 @@ class PhishingService:
             refs.append(EntityRef(kind="identity", role="reporter", keys={"upn": sub.reporter}))
         src = self.store.ingest(NormalizedRecord(kind="email", tool="phishing", source_type="reported_email",
                                                  source_id=sub.mime_sha256 or sub.id, title=em.subject, refs=refs,
-                                                 dimension="email", attributes={"sender": em.sender, "subject": em.subject,
-                                                                                "message_id": em.message_id}))
+                                                 dimension="email", observed_at=_email_time(em, sub),
+                                                 attributes={"sender": em.sender, "subject": em.subject,
+                                                             "message_id": em.message_id}))
         self.cases.link(case.id, src.entity_id, "email")
         for rel, ent in self.store.neighbors(src.entity_id):
             self.cases.link(case.id, ent.id, rel.rel_type)
@@ -569,3 +572,26 @@ def behavior_context(em: DecomposedEmail, reporter: str | None, *, org_domains: 
                 ref = sent if sent is not None and sent.tzinfo is not None else utcnow()
                 ctx["days_since_last_contact"] = max(0.0, (ref - last).total_seconds() / 86400)
     return ctx
+
+
+def _email_time(em: DecomposedEmail, sub: Submission) -> datetime | None:
+    """When the reported e-mail happened: its Date header, else when the report arrived - never the processing time.
+    Stamped with "now", an old e-mail uploaded or re-processed today moved every entity it names (the recipients too)
+    to today, and risk - whose "now" is the latest observation - then aged out the real activity of the period."""
+    from email.utils import parsedate_to_datetime
+
+    now = utcnow()
+    sent = None
+    for parse in (datetime.fromisoformat, parsedate_to_datetime):     # the decomposer normalises to ISO 8601
+        try:
+            sent = parse(em.date) if em.date else None
+            break
+        except (TypeError, ValueError, IndexError):
+            continue
+    if sent is not None and sent.tzinfo is None:
+        sent = sent.replace(tzinfo=UTC)
+    for candidate in (sent, sub.received_at):
+        if candidate is not None:
+            c = candidate if candidate.tzinfo else candidate.replace(tzinfo=UTC)
+            return min(c, now)
+    return None
