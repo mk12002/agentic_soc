@@ -620,3 +620,20 @@ def test_a_name_that_matches_nothing_is_reported_as_not_found_never_as_no_eviden
     assert prov.i == 1                      # the model was never asked to explain an empty look-up
     near = IntelligenceService(session, vm=world).analyst.ask("is jane smith compromised?")
     assert "jane.doe@acme-demo.com" in near["answer"]          # suggested as a close match
+
+
+def test_the_score_is_explained_by_points_on_a_curve_that_never_passes_100(session, world):
+    """A person's factors (+50, +40, ...) add up to far more than 100: the screen now shows the total and the curve,
+    and the entity view's list of factors adds up to exactly those points."""
+    import math
+
+    from soc_platform.api.dashboards import entity_360
+    from soc_platform.intelligence.risk import RiskEngine
+
+    for p in RiskEngine(session).top(None, 10):
+        d = p.as_dict()
+        assert d["points"] == round(sum(f["decayed"] for f in d["factors"]), 1)
+        assert p.score == round(100 * (1 - math.exp(-sum(f.decayed for f in p.factors) / d["points_scale"])))
+        assert 0 <= p.score <= 100
+        view = entity_360(session, p.entity_id)["risk"]
+        assert view["points"] == d["points"] and abs(sum(f["decayed"] for f in view["factors"]) - d["points"]) < 0.11

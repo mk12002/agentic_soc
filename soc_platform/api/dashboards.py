@@ -191,14 +191,15 @@ def entity_360(s: Session, eid: str) -> dict[str, Any] | None:
             "seen_by": sorted((attrs.get("by_tool") or {}).keys()), "attributes": {k: v for k, v in attrs.items() if k != "by_tool"},
             "per_tool": attrs.get("by_tool") or {},
             "risk": ({"score": prof.score, "band": prof.band, "dimensions": prof.dimensions,
+                      "points": prof.as_dict()["points"], "points_scale": prof.as_dict()["points_scale"],
                       "factors": _factors_summing_to_score(prof.factors)} if prof else None),
             "activity_by_tool": dict(by_tool), "related": dict(related), "cases": cases, "insights": ins,
             "vulnerabilities": vulns, "timeline": st.timeline([eid])[:100]}
 
 
 def _factors_summing_to_score(factors: list[Any], shown: int = 15) -> list[dict[str, Any]]:
-    """The strongest factors, and the rest as one line, so the list always adds up to the score it explains (with
-    many alerts a host has dozens of factors; listing only the top 15 made the screen's sum disagree with its score)."""
+    """The strongest factors, and the rest as one line, so the list always adds up to the points behind the score
+    (with many alerts a host has dozens of factors; listing only the top 15 made the screen's sum disagree)."""
     ranked = sorted(factors, key=lambda f: -f.decayed)
     if len(ranked) <= shown:
         return [f.__dict__ for f in ranked]

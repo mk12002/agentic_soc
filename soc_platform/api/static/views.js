@@ -188,7 +188,8 @@ async function CaseDetail(id) {
   const acts = [...v.actions].sort((x, y) => (x.priority || 99) - (y.priority || 99));
   const astat = x => (x.result || {}).awaiting_second_approval && x.status === 'pending_approval' ? status('medium', 'Awaiting second approval')
     : status(x.status === 'executed' ? 'ok' : ['rejected', 'rolled_back'].includes(x.status) ? 'info' : x.status === 'failed' ? 'critical' : 'medium', cap(x.status));
-  const actRow = x => `<tr><td class="num muted">${esc(x.priority ?? '')}</td>
+  // the rank in the recommended order (contain first, communicate last); the stored priority is a sort weight, not a rank
+  const actRow = (x, i) => `<tr><td class="num muted" title="recommended order">${i + 1}</td>
     <td style="min-width:190px"><div class="t-title mono" style="overflow-wrap:anywhere">${esc(x.action_type)}</div><div class="small" style="margin-top:3px;color:var(--text-2);overflow-wrap:anywhere">${esc(x.rationale)}</div>
       <div class="t-sub">L${esc(x.level)}${x.blast_radius ? ' · blast radius: ' + esc(x.blast_radius) : ''}${x.reversible === false ? ' · not reversible' : ''}</div>
       ${(x.policy_reasons || []).slice(1).map(r => `<div class="t-sub">${esc(r)}</div>`).join('')}</td>
@@ -301,9 +302,9 @@ async function Entity(id) {
       ${r ? `<div class="actions"><div class="card kpi" style="min-width:160px"><div class="label">Risk score</div><div class="value">${Math.round(r.score)}<span class="muted" style="font-size:14px">/100</span></div><div class="foot">${esc(r.dimensions.map(dimLabel).join(' · '))}</div></div></div>` : ''}</div>
     <div class="grid g-2">
       <div class="stack">
-        ${card('Why this score', (r && r.factors.length) ? r.factors.map(f => `<div class="list-row" style="align-items:flex-start"><span class="score mono" style="min-width:42px">+${Math.round(f.decayed)}</span>
+        ${card('Why this score', (r && r.factors.length) ? (r.points != null ? `<div class="small muted" style="margin-bottom:8px">Each signal adds risk points (below, fading with age). The points add up to <b>${nf(Math.round(r.points))}</b>; the score is 100 × (1 − e<sup>−points ÷ ${esc(r.points_scale)}</sup>) - every signal raises it, each by less as the total grows, so ${esc(r.points_scale)} points give 63 and it never passes 100.</div>` : '') + r.factors.map(f => `<div class="list-row" style="align-items:flex-start"><span class="score mono" style="min-width:42px">+${Math.round(f.decayed)}</span>
           <div class="grow"><div class="t-title">${esc(cap(f.signal))}</div><div class="t-sub">${esc(f.detail)}</div></div><span class="tag">${esc(f.source)}</span><span class="muted small">${dt(f.when)}</span></div>`).join('') : empty('No risk factors in the window'),
-          {sub: 'weights decay with age'})}
+          {sub: 'weights decay with age', right: r && r.points != null ? `<span class="small muted" title="score = 100 × (1 − e^(−points ÷ ${esc(r.points_scale)})): each signal adds, each adds less as the total grows, and the score never passes 100">${nf(Math.round(r.points))} points → score ${Math.round(r.score)} <span class="mono">ⓘ</span></span>` : ''})}
         ${card('Timeline across tools', e.timeline.slice(-40).reverse().map(t => `<div class="tl-row"><div class="tl-meta"><span class="mono muted">${dt(t.ts)}</span><span class="tag">${esc(t.tool || '')}</span></div><div class="tl-title">${esc(t.title)}</div></div>`).join('') || empty('No events'))}
       </div>
       <div class="stack">
@@ -906,29 +907,26 @@ const NODE = {identity: 'var(--c-critical)', asset: 'var(--c-high)', secret: 'va
   recipient: 'var(--c-phishing)', case: 'var(--text-3)', campaign: 'var(--c-phishing)'};
 
 function blastGraph(b) {
-  const W = 640, H = 440, cx = W / 2, cy = H / 2;
-  const center = b.nodes.filter(n => n.principal), ring1 = b.nodes.filter(n => !n.principal && ['secret', 'case', 'campaign'].includes(n.kind)),
-    ring2 = b.nodes.filter(n => !n.principal && ['indicator', 'recipient'].includes(n.kind));
-  const pos = {};
-  center.forEach((n, i) => { pos[n.id] = [cx + (center.length > 1 ? (i - (center.length - 1) / 2) * 110 : 0), cy]; });
-  const place = (arr, r) => arr.forEach((n, i) => { const a = (i / Math.max(arr.length, 1)) * 2 * Math.PI - Math.PI / 2 + (r > 150 ? 0.25 : 0);
-    pos[n.id] = [cx + r * 1.35 * Math.cos(a), cy + r * Math.sin(a)]; });
-  place(ring1, 105); place(ring2, 178);
-  const short = s => { s = String(s || ''); return s.length > 24 ? s.slice(0, 22) + '…' : s; };
-  let g = '';
-  b.edges.forEach(e => { const a = pos[e.from], c = pos[e.to]; if (a && c) g += `<line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}"/>`; });
-  // campaign hub links principals to recipients
-  if (pos.campaign) center.filter(n => n.kind === 'identity').forEach(n => { const a = pos[n.id], c = pos.campaign; g += `<line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}"/>`; });
-  b.nodes.forEach(n => {
-    const p = pos[n.id]; if (!p) return;
-    const r = n.principal ? 13 : n.kind === 'recipient' ? 6 : 8;
-    const fill = n.kind === 'recipient' && !n.interacted ? 'var(--surface)' : (NODE[n.kind] || 'var(--c-other)');
-    g += `<g><title>${esc(n.kind)}: ${esc(n.label)}${n.interacted ? ' (interacted)' : ''}</title><circle cx="${p[0]}" cy="${p[1]}" r="${r}" style="fill:${fill};stroke:${NODE[n.kind] || 'var(--c-other)'};stroke-width:2"/>
-      <text x="${p[0]}" y="${p[1] + r + 12}" text-anchor="middle" style="${n.principal ? 'font-weight:650;fill:var(--text)' : ''}">${esc(short(n.label))}</text></g>`;
-  });
-  return `<svg class="graph" viewBox="0 0 ${W} ${H}" role="img" aria-label="blast radius">${g}</svg>
-    <div class="legend">${[['identity', 'User'], ['asset', 'Host'], ['secret', 'Privileged secret'], ['indicator', 'Indicator'], ['recipient', 'Recipient (filled = interacted)'], ['case', 'Related case']]
-      .map(([k, l]) => `<span><i style="background:${NODE[k]}"></i>${l}</span>`).join('')}</div>`;
+  // grouped reach, not a force graph: at real-tenant size a graph of every indicator is unreadable
+  const by = k => b.nodes.filter(n => n.kind === k);
+  const short = (s, n = 46) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+  const dot = k => `<i class="bdot" style="background:${NODE[k] || 'var(--c-other)'}"></i>`;
+  const sec = (title, n, body) => n ? `<div class="bsec"><div class="small strong">${title} <span class="muted">(${nf(n)})</span></div>${body}</div>` : '';
+  const principals = b.nodes.filter(n => n.principal);
+  const people = principals.map(n => `<div class="brow">${dot(n.kind)}<span class="strong">${['asset', 'identity'].includes(n.kind) ? entLink(n.id, n.label) : esc(n.label)}</span><span class="tag">${n.kind === 'asset' ? 'host' : 'user'}</span></div>`).join('');
+  const secrets = by('secret').map(n => `<div class="brow">${dot('secret')}<span>${esc(n.label)}</span><span class="t-sub">accessed after compromise</span></div>`).join('');
+  const rec = by('recipient');
+  const recips = `<div class="bchips">${rec.map(n => `<span class="chip plain${n.interacted ? ' high' : ''}" title="${esc(n.label)}${n.interacted ? ' - interacted' : ''}">${esc(short(n.label, 28))}</span>`).join('')}</div>
+    <div class="t-sub">${nf(rec.filter(n => n.interacted).length)} of ${nf(rec.length)} other recipients interacted (highlighted)</div>`;
+  const cases = by('case').map(n => `<div class="brow">${chip(n.severity || 'info')}<span title="${esc(n.label)}">${caseLink(n.id.replace(/^case:/, ''), short(n.label, 60))}</span><span class="t-sub">${esc(cap(n.domain || ''))}</span></div>`).join('');
+  const groups = {};
+  by('indicator').forEach(n => { const [t, ...v] = String(n.label).split(':'); (groups[v.length ? t : 'other'] = groups[v.length ? t : 'other'] || []).push(v.length ? v.join(':') : n.label); });
+  const IND = {domain: 'Domains', url: 'URLs', ip: 'IP addresses', email: 'Sender addresses', sha256: 'File hashes', other: 'Other'};
+  const inds = Object.entries(groups).sort((a, z) => z[1].length - a[1].length).map(([t, vs]) => `<div class="bind"><div class="t-sub strong">${esc(IND[t] || cap(t))} · ${nf(vs.length)}</div>${
+    vs.slice(0, 5).map(v => `<div class="mono small" title="${esc(v)}">${esc(short(v, 52))}</div>`).join('')}${vs.length > 5 ? `<div class="t-sub" title="${esc(vs.slice(5).join(', '))}">and ${nf(vs.length - 5)} more</div>` : ''}</div>`).join('');
+  return `<div class="blast">${sec('At the centre', principals.length, people)}${sec('Privileged secrets', by('secret').length, secrets)}
+    ${sec('Also received the phishing e-mail', rec.length, recips)}${sec('Related cases', by('case').length, cases)}
+    ${sec('Indicators involved', by('indicator').length, `<div class="binds">${inds}</div>`)}</div>`;
 }
 
 async function Story(id) {

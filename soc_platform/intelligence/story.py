@@ -40,6 +40,7 @@ TACTIC_ORDER = {t: i for i, (t, _) in enumerate(TACTICS)}
 PRINCIPAL_ROLES = {"user", "host", "source_host", "compromised", "clicked", "affected_user", "affected_host"}
 SENSITIVE_SECRET_ACTIONS = {"VIEW", "COPY PASSWORD", "EXPORT", "CHECKOUT", "LAUNCH", "DOWNLOAD"}
 PLATFORM_TOOLS = {"phishing", "incident", "platform", "vulnerability"}
+BENIGN_VERDICTS = {"safe", "spam", "likely_benign", "benign", "false_positive"}
 PHASES = [("contain", "Contain", {"endpoint.isolate", "identity.revoke_sessions", "identity.disable_account", "identity.confirm_compromised"}),
           ("preserve", "Preserve evidence", {"endpoint.collect_forensics"}),
           ("eradicate", "Eradicate", {"email.campaign_purge", "indicator.block", "dns.block_domain", "email.block_sender",
@@ -205,7 +206,9 @@ class AttackStory:
     def _related_cases(self, principals: set[str], seed: Case) -> list[Case]:
         ids = {ce.case_id for ce in self.s.execute(select(CaseEntity).where(CaseEntity.entity_id.in_(principals or {"-"}))).scalars()}
         ids.discard(seed.id)
-        cases = [c for c in (self.s.get(Case, i) for i in ids) if c is not None]
+        # a case the platform or an analyst found benign is not part of the attack: Jane also received the spam and a
+        # legitimate invoice, and those once put their links and senders into this story's blast radius and plan
+        cases = [c for c in (self.s.get(Case, i) for i in ids) if c is not None and c.verdict not in BENIGN_VERDICTS]
         return sorted(cases, key=lambda c: -SEV_RANK.get(c.severity, 0))[:10]
 
     # ------------------------------------------------------------------ events

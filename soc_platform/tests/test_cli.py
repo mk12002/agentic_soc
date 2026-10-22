@@ -133,3 +133,21 @@ def test_database_url_comes_from_a_vault_file_and_init_db_never_prints_its_passw
         assert "db.internal" in out and "s3cret-Pa55" not in out
     finally:
         get_settings.cache_clear()
+
+
+def test_serve_says_at_start_why_development_sign_in_is_off(monkeypatch):
+    """A server started without .env answered every sign-in with 'disabled on this server' and logged nothing."""
+    from soc_platform.config import get_settings
+
+    monkeypatch.setenv("SOC_AUTH_MODE", "dev")
+    monkeypatch.delenv("SOC_DEV_JWT_SECRET", raising=False)
+    monkeypatch.delenv("SOC_DEV_JWT_SECRET_FILE", raising=False)
+    get_settings.cache_clear()
+    try:
+        line = cli._sign_in_status()
+        assert "OFF" in line and "SOC_DEV_JWT_SECRET" in line and ".env" in line
+        monkeypatch.setenv("SOC_DEV_JWT_SECRET", "x" * 40)
+        get_settings.cache_clear()
+        assert "development sign-in on" in cli._sign_in_status()
+    finally:
+        get_settings.cache_clear()

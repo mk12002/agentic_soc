@@ -307,3 +307,32 @@ def test_deep_analysis_survives_any_shape_of_model_answer(session, estate):
         except Exception as exc:  # noqa: BLE001 - any exception is the defect under test
             crashes.append(f"{str(docs[i])[:120]}: {type(exc).__name__}: {exc}")
     assert not crashes, crashes[:8]
+
+
+def test_a_benign_case_about_the_same_person_is_not_part_of_the_attack(session, estate):
+    """Jane also received spam and a legitimate invoice: those closed, benign cases once put their links and senders
+    into the story's blast radius and their actions into its response plan."""
+    from soc_platform.core.models import CaseEntity
+
+    reg, _ = estate
+    seed = _case(session, "phishing")
+    jane = next(ce.entity_id for ce in session.query(CaseEntity).filter(CaseEntity.case_id == seed.id)
+                if (session.get(Entity, ce.entity_id).display_name or "").startswith("jane.doe@"))
+    benign = Case(domain="phishing", title="Reported: weekly newsletter", status="closed", severity="low", verdict="spam")
+    session.add(benign)
+    session.flush()
+    session.add(CaseEntity(case_id=benign.id, entity_id=jane, role="recipient"))
+    session.flush()
+    st = story_for_case(session, seed.id, reg)
+    assert benign.id not in st["generated_from"]
+    assert f"case:{benign.id}" not in {n["id"] for n in st["blast_radius"]["nodes"]}
+
+
+def test_vendor_techniques_put_reconnaissance_under_discovery(session, estate):
+    """Defender for Identity sends T1087.002 and Sentinel T1135: the story used to file them under Initial Access and
+    Execution while also reporting no evidence of discovery."""
+    reg, _ = estate
+    st = story_for_case(session, _case(session, "phishing").id, reg)
+    disc = [s["title"] for s in st["steps"] if s["stage_name"] == "Discovery"]
+    assert any("enumeration" in t.lower() for t in disc), [(s["stage_name"], s["title"]) for s in st["steps"]]
+    assert "Discovery" not in {g["stage_name"] for g in st["gaps"]}

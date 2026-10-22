@@ -312,7 +312,9 @@ could explain it, what did we not see, and what do we do now*, across every conn
 * **Benign explanations tested** - "user travelling / VPN", "legitimate admin script", "authorised scanner",
   "normal duties" and others are accepted, rejected or marked unlikely, each with its evidence.
 * **Gaps** - stages where nothing was found, naming the tools that were checked.
-* **Blast radius** - users who received / interacted, hosts, privileged secrets, related cases, as a graph.
+* **Blast radius** - who and what is at the centre, privileged secrets, the other recipients (highlighted when they
+  interacted), related cases and the indicators grouped by type, as grouped lists that stay readable at tenant size.
+  Cases found benign (safe, spam, false positive) are not part of the story.
 * **Response plan** - pending actions grouped into contain → preserve → eradicate → recover → communicate;
   select and approve in one step. Each action still goes through policy and four-eyes checks.
 * The same attack gives the same story from any related case (phishing case, incident case, entity page), and the

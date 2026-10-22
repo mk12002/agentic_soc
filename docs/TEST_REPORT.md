@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-20 (rounds 15-28; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-22 (rounds 15-29; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,33 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 28 (2026-10-20) - latest results: Python 3.13, and figures that aged with the calendar
+## 0. Round 29 (2026-10-22) - latest results: the demo script checked claim by claim
+
+Aim: make every statement in the client demo video script true of the running system. Each claim was checked against
+a freshly reset demo (every screen's API answer) and against the code; where the system fell short, the system was
+fixed rather than the script softened.
+
+| Found | Now | Evidence |
+|---|---|---|
+| **Four-eyes was one person for the platform's own recommendations**: a single lead's approval ran an isolation, password reset, campaign purge, domain block or secret rotation, while the screens, the client review pack and the deployment guide said a second person approves | Two different people: the first approval is recorded and audited (`action.first_approval`), nothing runs until a second, different lead approves; the same lead twice is refused; the compliance pack fails an agent-recommended four-eyes action executed on one approval | `test_core_governance.py` (two new tests), `test_feature_checks.py`, `test_api.py`; SECURITY.md finding 20, ENGINEERING.md decision 99 |
+| The attack story filed LDAP reconnaissance under Initial Access and file-share enumeration under Execution, while reporting "no evidence of discovery" - the vendors' own techniques (T1087.002, T1135) were not read | Vendor techniques, sub-techniques (parent fallback) and vendor tactic names are read: both steps are Discovery | `test_story.py::test_vendor_techniques_put_reconnaissance_under_discovery` |
+| The story's blast radius and response plan included cases found benign (the spam and the legitimate invoice the same person received), with their links and senders | Cases with a benign verdict are not part of a story | `test_story.py::test_a_benign_case_about_the_same_person_is_not_part_of_the_attack` (fails without the fix) |
+| The story's "legitimate IT work" rejection named unrelated domains (portal.azure.com); its verdict counted 9 tools while its summary said 10; a signal list ended ", )" | Only the matching domain; both counts stated ("9 tools (1 more blocked a step)"); the list complete | `test_story.py` |
+| Incident severity factors were stored but never shown | Incident cases show "Why &lt;severity&gt;": every fixed rule that set the severity and confidence | console |
+| Risk factors (+50, +40 ...) added up to far more than the score of 100 with no explanation | The entity view shows the points total and the curve (score = 100 x (1 - e^(-points / 60))); the API returns `points` | `test_intelligence.py::test_the_score_is_explained_by_points_on_a_curve_that_never_passes_100` |
+| Evidence references showed nothing on hover (a browser tooltip that rarely appears, repeating the fact) | A popover on hover or keyboard focus (tool, time, evidence); a click scrolls to the evidence row; on the case and the story | console |
+| Preflight warned "the newest record is 31 days old" on fixed sample data - three tests failed as the sample dates aged | Freshness is judged for live tools only | `test_connector_admin.py` |
+| A server started without `.env` answered sign-in with "disabled on this server" and logged nothing | `serve` prints whether development sign-in is on and, if not, why | `test_cli.py::test_serve_says_at_start_why_development_sign_in_is_off` |
+| ATT&CK chips without a name (T1190); insight titles saying "other" and "privileged_access"; the recommended-actions "#" column showing a sort weight (10, 11, 20 ... 90) | Named from the technique catalogue; "SIEM" and "privileged access"; the rank 1..N | console |
+
+**Live data, not demo data:** no pipeline code holds a demo value (a search of all platform code outside tests and
+sample data for demo names, hosts, domains, CVEs and ids found only comments, connectors' sample-data settings, the
+dev sign-in default and the `demo` command). Not provable here: a run against a real tenant - the record / read /
+recommend stages and the preflight exist to find vendor differences before anything acts.
+
+**Counts:** 818 passed, 16 skipped (834 collected) on SQLite and on PostgreSQL 16. Lint clean.
+
+## 0.00 Round 28 (2026-10-20): Python 3.13, and figures that aged with the calendar
 
 Aim: answer "does the whole system run on Python 3.13?" by installing and testing it there, on Linux, against
 Python 3.11 on Linux (the production image) and Windows (development). Running it two days after round 27 exposed

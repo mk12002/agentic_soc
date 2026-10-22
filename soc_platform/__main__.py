@@ -223,6 +223,7 @@ def cmd_serve() -> None:
     import uvicorn
 
     _refuse_bad_config()
+    print(_sign_in_status(), flush=True)
 
     workers = max(1, int(os.environ.get("SOC_API_WORKERS", "1") or 1))
     uvicorn.run("soc_platform.api.app:app", host=os.environ.get("SOC_HOST", "127.0.0.1"),
@@ -231,6 +232,21 @@ def cmd_serve() -> None:
                 # on SIGTERM (a deploy, `docker stop`) requests in flight get this long to finish, then the server stops
                 # - inside the orchestrator's own grace period, so the scheduler and access log shut down cleanly
                 timeout_graceful_shutdown=max(1, int(os.environ.get("SOC_SHUTDOWN_GRACE_SECONDS", "20") or 20)))
+
+
+def _sign_in_status() -> str:
+    """One start-up line saying how people sign in - and, when development sign-in is off, why (a server started
+    without .env loaded answers the console's sign-in with 'disabled on this server' and nothing else)."""
+    from soc_platform.config import get_settings
+
+    st = get_settings()
+    if st.auth_mode != "dev":
+        return f"sign-in: {st.auth_mode} (Entra ID single sign-on)"
+    no_secret = ("SOC_DEV_JWT_SECRET is not set - was .env loaded? (scripts\\serve_with_env.cmd or "
+                 ". .\\scripts\\load_env.ps1)")
+    why = [w for w, bad in ((no_secret, not st.dev_jwt_secret), ("SOC_ENVIRONMENT=prod", st.environment == "prod")) if bad]
+    return ("sign-in: development sign-in OFF - " + "; ".join(why)) if why else \
+        f"sign-in: development sign-in on (local browser only), Python {sys.version.split()[0]} at {sys.executable}"
 
 
 def cmd_token(user: str = "analyst@acme-demo.com", roles: str = "analyst") -> None:

@@ -36,6 +36,9 @@ AMPLIFIER_TRIGGERS: dict[str, frozenset[str] | None] = {
 BANDS = [(80, "critical"), (60, "high"), (30, "medium"), (0, "low")]
 
 
+POINTS_SCALE = 60   # risk points at which the score reaches 63 (= 100 x (1 - 1/e))
+
+
 @dataclass
 class Factor:
     signal: str
@@ -67,6 +70,8 @@ class RiskProfile:
     def as_dict(self) -> dict[str, Any]:
         return {"entity_id": self.entity_id, "kind": self.kind, "name": self.name, "score": self.score,
                 "band": self.band, "dimensions": self.dimensions,
+                # the points behind the score (score = 100 x (1 - e^(-points/60))): shown so the factors can be checked
+                "points": round(sum(f.decayed for f in self.factors), 1), "points_scale": POINTS_SCALE,
                 "factors": [f.__dict__ for f in sorted(self.factors, key=lambda x: -x.decayed)]}
 
 
@@ -220,7 +225,8 @@ class RiskEngine:
                     "account with privileged credential access shows compromise indicators", factor=strongest(trig))
 
         raw = sum(f.decayed for f in factors)
-        score = round(100 * (1 - math.exp(-raw / 60)))     # whole points: the same figure on every screen and answer
+        # a saturating curve: every signal adds, each adds less as the total grows, and the score never passes 100
+        score = round(100 * (1 - math.exp(-raw / POINTS_SCALE)))   # whole points: the same figure on every surface
         band = next(b for t, b in BANDS if score >= t)
         return RiskProfile(entity_id, ent.kind, ent.display_name, score, band, factors)
 

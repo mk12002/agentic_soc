@@ -381,3 +381,13 @@ svg.graph line { stroke: var(--border-strong); stroke-width: 1; }
 .hbar-track span { display: block; min-width: 2px; }   /* values on hover and in the total: no text on colour */
 .hbar-total { font-size: 12.5px; font-weight: 650; text-align: right; color: var(--text); }
 .hbar-split { font-size: 11px; font-weight: 500; color: var(--text-2); }
+
+/* attack story: blast radius as grouped reach */
+.blast { display: flex; flex-direction: column; gap: 14px; }
+.bsec { display: flex; flex-direction: column; gap: 6px; }
+.brow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; overflow-wrap: anywhere; }
+.bdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.bchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.binds { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 16px; }
+.bind { min-width: 0; }
+.bind .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

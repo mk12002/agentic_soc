@@ -659,7 +659,7 @@ analysts before go-live. To serve many analysts, start several processes: `$env:
 
 | Symptom | Cause and fix |
 |---|---|
-| Sign-in does nothing, "not available", or "Development sign-in is disabled on this server" | `SOC_DEV_JWT_SECRET` is missing in this window. Add it to `.env` (§3), run `. .\scripts\load_env.ps1`, restart `serve`. From Command Prompt (`load_env.ps1` is PowerShell-only) start with `scripts\serve_with_env.cmd` instead (`scripts\serve_with_env.cmd reset` resets the demo first). |
+| Sign-in does nothing, "not available", or "Development sign-in is disabled on this server" | `serve` prints why at start-up (`sign-in: development sign-in OFF - ...`). Usually `SOC_DEV_JWT_SECRET` is missing in this window - a bare `python -m soc_platform serve` in a new Command Prompt also runs the system Python instead of `.venv`. Add it to `.env` (§3), run `. .\scripts\load_env.ps1`, restart `serve`. From Command Prompt (`load_env.ps1` is PowerShell-only) start with `scripts\serve_with_env.cmd` instead (`scripts\serve_with_env.cmd reset` resets the demo first). |
 | Signed in as the wrong person / the other window changed user | Tabs of one browser share the sign-in. Use a private window or another browser profile for the second person (§4, *Signing in*). |
 | No Approve buttons | You are signed in as Admin, Auditor or Automation admin (none of them approve, by design), or the action needs a Lead. Sign in as `lena@acme-demo.com`, Lead. |
 | A screen says it needs all-domain scope | You signed in with a *... only* data scope. Sign out and choose *All domains*. |
