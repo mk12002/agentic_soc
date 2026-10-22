@@ -301,9 +301,11 @@ class CaseService:
         actions = actions_for_case(self.s, case_id)
         dispositions = self.s.execute(select(Disposition).where(Disposition.subject_id == case_id)).scalars().all()
         timeline = self.store.timeline([x["id"] for x in entities if x["kind"] in {"asset", "identity", "indicator"}])
-        summaries = {ev.id: (ev.summary, ev.source_tool, ev.deep_link) for ev in evidence}
+        summaries = {ev.id: (ev.summary, ev.source_tool, ev.observed_at.isoformat() if ev.observed_at else None)
+                     for ev in evidence}
         claims = [{**c, "evidence": [{"ref": r, "id": row_of.get(r), "summary": summaries.get(row_of.get(r), ("",))[0],
-                                      "source": summaries.get(row_of.get(r), ("", ""))[1]}
+                                      "source": summaries.get(row_of.get(r), ("", ""))[1],
+                                      "observed_at": summaries.get(row_of.get(r), ("", "", None))[2]}
                                      for r in (c.get("evidence_ids") or [])]}
                   for c in (case.assessment or {}).get("claims", [])]
         return {
@@ -313,6 +315,7 @@ class CaseService:
                      "created_at": case.created_at.isoformat(), "attributes": case.attributes},
             "completeness": case.completeness,
             "assessment": {**(case.assessment or {}),
+                           "mitre": _named_techniques((case.assessment or {}).get("mitre") or []),
                            "facts": [c for c in claims if c.get("kind") == "fact"],
                            "inferences": [c for c in claims if c.get("kind") != "fact"]},
             "entities": entities,
@@ -321,6 +324,8 @@ class CaseService:
             "actions": [{"id": a.id, "action_type": a.action_type, "status": a.status, "level": a.autonomy_level,
                          "targets": a.targets, "rationale": a.rationale, "policy_reasons": a.policy_reasons,
                          "evidence_ids": a.evidence_ids, "approver": a.approver,
+                         "result": {"awaiting_second_approval": bool((a.result or {}).get("awaiting_second_approval"))
+                                    and a.status == "pending_approval"},
                          "expected_impact": (a.result or {}).get("expected_impact"),
                          "blast_radius": (a.result or {}).get("blast_radius"),
                          "reversible": (a.result or {}).get("reversible"),
@@ -394,3 +399,17 @@ def detection_quality(session: Session, domain: str, *, min_count: int = 3, days
                         "recommendation": f"Tune or suppress '{det}': {fp}/{total} dispositions benign in {days}d"})
     return sorted(out, key=lambda x: -x["false_positive_share"])
 
+
+def _named_techniques(mitre: list[Any]) -> list[Any]:
+    """ATT&CK techniques with their names: a vendor sends the id alone (T1190), so the name comes from the
+    platform's technique catalogue (the parent's name for a sub-technique the catalogue does not list)."""
+    from soc_platform.intelligence.attack_coverage import TECHNIQUES  # data only; same lazy pattern as access.py
+
+    out = []
+    for m in mitre:
+        if isinstance(m, dict) and not m.get("name"):
+            tid = str(m.get("technique") or "")
+            known = TECHNIQUES.get(tid) or TECHNIQUES.get(tid.split(".")[0])
+            m = {**m, "name": known[0] if known else ""}
+        out.append(m)
+    return out

@@ -179,7 +179,7 @@ automation is a reviewed policy change per action type - W6 shows it."
 **Click:** Intelligence. Ask: *"Is jane.doe@acme-demo.com compromised and what should we do first?"*
 **Say:** "The assistant plans which read-only tools to call, calls them, and answers only from their results.
 Every sentence cites the tool result it came from."
-**Point at:** the evidence list under the answer (R1, R4...), "How this was answered: llm planner" with the tools
+**Point at:** the evidence list under the answer (R1, R4...), "How this was answered: AI-planned look-ups" with the tools
 it called, the situation brief, the correlated findings with next steps, and the risk list.
 **Justify:**
 - The assistant can only call tools from a fixed **read-only** catalogue. It can never trigger an action.
@@ -257,7 +257,8 @@ explainable risk score."
 ### W6 - Approvals, governance, kill switch (3 min)
 
 **Click:** Approvals. Approve a normal action as **Lead**. In the Analyst browser, try `endpoint.isolate`: it is
-refused (four-eyes needs a second, senior approver). Then Automation policy.
+refused (four-eyes needs a lead). Approve it as Lead: it waits for a second lead; approve it in a second Lead
+window and it runs. Then Automation policy.
 **Say:** "Every action is a request evaluated by a versioned autonomy policy. By default a human approves
 everything. High-impact actions need four eyes; nobody can approve their own. The kill switch halts all automation
 on every replica immediately and survives restarts."
@@ -977,7 +978,8 @@ recommended, sent for approval or blocked, and recorded in the audit log. Defaul
 4. A destructive action type is capped at L3, so it is never autonomous.
 5. Any VIP or critical-tagged target caps it at L3 and marks it high-impact.
 6. More targets than the action's blast-radius limit caps it at L3 and marks it high-impact.
-7. Four-eyes: a second person must approve, and it must be someone with `approve_high_impact` (a lead).
+7. Four-eyes: two different people with `approve_high_impact` (leads) must approve. A person who requests the
+   action counts as the first; a platform recommendation needs two leads' approvals.
 
 The reasons are always shown next to the action, even when no cap applied.
 

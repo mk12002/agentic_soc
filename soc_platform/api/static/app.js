@@ -9,6 +9,9 @@ const arg = (...a) => esc(JSON.stringify(a));
 const nf = n => (n == null || n === '') ? '–' : Number(n).toLocaleString();
 const pct = (x, d = 0) => x == null ? '–' : (x * 100).toFixed(d) + '%';
 const cap = s => { const t = String(s || '').replace(/_/g, ' ').trim(); return t.charAt(0).toUpperCase() + t.slice(1); };
+// risk dimensions in plain words ('other' is what the SIEM connectors report)
+const DIM_LABELS = {other: 'SIEM', privileged_access: 'privileged access', threat_intel: 'threat intel'};
+const dimLabel = d => DIM_LABELS[d] || String(d || '').replace(/_/g, ' ');
 const dt = s => s ? String(s).slice(0, 16).replace('T', ' ') : '–';
 const day = s => s ? String(s).slice(0, 10) : '–';
 
@@ -102,11 +105,18 @@ const btn = (label, fn, args = [], cls = '', ic = '') =>
 const go = (href, label, cls = '') => `<a href="${esc(href)}" class="${cls}">${esc(label)}</a>`;
 const empty = t => `<div class="empty">${esc(t)}</div>`;
 const skeleton = () => `<div class="card"><div class="card-b">${'<div class="skeleton"></div>'.repeat(6)}</div></div>`;
+// an evidence reference: hover or focus shows what it cites (tool, when, what); a click scrolls to the evidence row
+const citeTip = e => [e.source, e.observed_at ? 'observed ' + dt(e.observed_at) : '', e.summary].filter(Boolean).join(' · ');
 const cite = x => {
-  const ev = x.evidence || [];
-  if (ev.length) return ev.map(e => `<abbr class="cite" title="${esc((e.source || '') + ': ' + (e.summary || ''))}">${esc(e.ref)}</abbr>`).join('');
-  return (x.evidence_ids || []).map(r => `<abbr class="cite">${esc(r)}</abbr>`).join('');
+  const ev = (x.evidence || []).length ? x.evidence : (x.evidence_ids || []).map(ref => ({ref}));
+  return ev.map(e => `<abbr class="cite" tabindex="0" data-fn="jumpEv" data-args="${arg(e.ref)}"${e.summary ? ` data-tip="${esc(citeTip(e))}" aria-label="${esc(e.ref + ': ' + citeTip(e))}"` : ''}>${esc(e.ref)}</abbr>`).join('');
 };
+function jumpEv(ref) {
+  const row = document.querySelector(`.ev[data-ref="${CSS.escape(ref)}"]`);
+  if (!row) return;
+  row.scrollIntoView({behavior: 'smooth', block: 'center'});
+  row.classList.remove('hl'); void row.offsetWidth; row.classList.add('hl');
+}
 function page(title, sub, actions, body) {
   return `<div class="page-head"><div><h1>${esc(title)}</h1>${sub ? `<p>${sub}</p>` : ''}</div>${actions ? `<div class="actions">${actions}</div>` : ''}</div>${body}`;
 }
@@ -384,7 +394,7 @@ function goTo(h) { location.hash = h; }
 
 // ---------------------------------------------------------------- delegation
 function runSearch() { const q = ($('#global-q').value || '').trim(); if (q.length >= 2) location.hash = '#/search/' + encodeURIComponent(q); }
-const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signInEntra, signOut, dl, runSearch, refreshPage: () => render()};
+const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signInEntra, signOut, dl, runSearch, jumpEv, refreshPage: () => render()};
 document.addEventListener('click', ev => {
   const menu = $('#user-menu');
   if (menu && !menu.hidden && !ev.target.closest('.user')) menu.hidden = true;

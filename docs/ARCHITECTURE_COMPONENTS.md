@@ -344,7 +344,7 @@ The access-log row and audit event carry the request's trace id (flow A).
    - a destructive action type: never autonomous (L3);
    - a VIP or critical target: approval required;
    - more targets than the maximum: lead approval required;
-   - four-eyes: a second person must approve.
+   - four-eyes: two different people must approve.
 
    Every reason is shown to the analyst.
 4. The outcome is one of: observed (L0-L1), **recommended** (L2), pending approval (L3), or execute (L4, only where
@@ -354,6 +354,9 @@ The access-log row and audit event carry the request's trace id (flow A).
    - Approval counts only for roles whose scope covers the action's domain.
    - An analyst who requests an action they may approve is approving it, unless four-eyes applies; then a different
      person must approve, because the requester cannot approve their own action.
+   - A four-eyes action an agent recommended needs two different people: the first approval is recorded
+     (`action.first_approval`, status stays `pending_approval`, `awaiting_second_approval`) and the second, by
+     someone else, executes it. Both are conditional updates, so two people approving at once cannot both be first.
 6. On approval, `ActionService` re-judges the decision in the action's own domain, moves the status to `executing`
    with a conditional update (exactly once), **commits it with its audit record**, and only then calls the
    connector's write method, with no transaction open; the outcome and its audit record are committed after. An

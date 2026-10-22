@@ -84,6 +84,9 @@ def test_all_three_domains_over_http(client, seeded):
     iso = next(x for x in pending if x["action_type"] == "endpoint.isolate")
     assert client.post(f"/api/v1/actions/{iso['id']}/approve", headers=a, json={"note": ""}).status_code == 403
     r = client.post(f"/api/v1/actions/{iso['id']}/approve", headers=lead, json={"note": "confirmed"}).json()
+    assert r["status"] == "pending_approval" and r["result"]["awaiting_second_approval"]    # four-eyes: one is not enough
+    assert client.post(f"/api/v1/actions/{iso['id']}/approve", headers=lead, json={"note": ""}).status_code == 403
+    r = client.post(f"/api/v1/actions/{iso['id']}/approve", headers=tok(client, "lea", "lead"), json={"note": "ok"}).json()
     assert r["status"] == "executed"
     rb = client.post(f"/api/v1/actions/{r['id']}/rollback", headers=lead, json={"note": "test"}).json()
     assert rb["status"] == "recommended" and rb["action_type"] == "endpoint.release"   # releasing needs four eyes too

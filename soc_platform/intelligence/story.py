@@ -89,8 +89,20 @@ class Ev:
 SEV_RANK = {"informational": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
-def _tactic_of(techniques: list[str]) -> str | None:
-    tacs = [TECHNIQUES[t][1] for t in techniques if t in TECHNIQUES]
+TACTIC_BY_WORD = {re.sub(r"[^a-z]", "", n.lower()): t for t, n in TACTICS}
+
+
+def _known(technique: str) -> str | None:
+    """A technique the catalogue knows, or its parent: vendors send sub-techniques (T1087.002) the catalogue may
+    list only as the parent (T1087)."""
+    return technique if technique in TECHNIQUES else technique.split(".")[0] if technique.split(".")[0] in TECHNIQUES else None
+
+
+def _tactic_of(techniques: list[str], vendor_tactics: list[str] | None = None) -> str | None:
+    tacs = [TECHNIQUES[k][1] for k in (_known(t) for t in techniques) if k]
+    # the vendor's own tactic ("Discovery", "credentialAccess") when no technique is known to the catalogue
+    tacs = tacs or [TACTIC_BY_WORD[w] for w in (re.sub(r"[^a-z]", "", str(v).lower()) for v in vendor_tactics or [])
+                    if w in TACTIC_BY_WORD]
     return min(tacs, key=lambda x: TACTIC_ORDER.get(x, 99)) if tacs else None
 
 
@@ -99,7 +111,7 @@ def classify(ent: Entity) -> tuple[str, list[str], bool] | None:
     a = ent.attributes or {}
     kind, sev = ent.kind, str(a.get("severity") or "informational").lower()
     title = (ent.display_name or "").lower()
-    techs = [str(t) for t in [a.get("technique_id"), *(a.get("mitre_techniques") or [])] if t]
+    techs = [str(t) for t in [a.get("technique_id"), *(a.get("mitre_techniques") or []), *(a.get("techniques") or [])] if t]
     if kind in {"finding", "cloud_issue"}:
         return None                                              # exposure, not an attack step
     if kind == "signin":
@@ -128,7 +140,7 @@ def classify(ent: Entity) -> tuple[str, list[str], bool] | None:
             techs = techs or ["T1114.003"]
         if "anonymized" in title or "unfamiliar" in title or "impossible travel" in title or a.get("dimension") == "identity":
             techs = techs or ["T1078"]
-        tac = _tactic_of(techs)
+        tac = _tactic_of(techs, [*(a.get("tactics") or []), a.get("category")])
         if tac is None:
             dim = a.get("dimension")
             tac = {"endpoint": "TA0002", "identity": "TA0001", "email": "TA0001", "cloud": "TA0001", "dns": "TA0011"}.get(dim)
@@ -346,11 +358,12 @@ class AttackStory:
         phish = [c for c in cases if c.domain == "phishing"]
         if phish:
             c = phish[0]
-            sigs = [s.get("name") for s in (c.assessment or {}).get("signals") or [] if isinstance(s, dict)]
+            sigs = list(dict.fromkeys(str(s.get("name") or "").strip() for s in (c.assessment or {}).get("signals") or []
+                                      if isinstance(s, dict)))[:8]
             refs = [e.ref for e in evs if e.kind in {"email", "click"}]
             if c.verdict in {"malicious", "suspicious"}:
                 add("The reported email was legitimate", "rejected",
-                    f"analysis verdict {c.verdict} ({', '.join(x for x in sigs if x)[:160] or 'multiple signals'})", refs)
+                    f"analysis verdict {c.verdict} ({', '.join(x for x in sigs if x) or 'multiple signals'})", refs)
             else:
                 add("The reported email was legitimate", "plausible", f"analysis verdict {c.verdict}", refs)
         risky = [e for e in evs if e.kind == "signin" or (e.kind == "alert" and "T1078" in e.techniques)]
@@ -379,8 +392,9 @@ class AttackStory:
                         email_domains.add(m.group(1).lower())
             linked = [e for e in exec_evs if any(d in e.title.lower() for d in email_domains)]
             if linked:
+                shared = sorted({d for d in email_domains for e in linked if d in e.title.lower()})
                 add("The script execution was legitimate IT / admin activity", "rejected",
-                    f"the command downloaded from the same domain as the phishing link ({', '.join(sorted(email_domains))})",
+                    f"the command reached the same domain as the phishing link ({', '.join(shared)})",
                     [e.ref for e in linked])
             else:
                 add("The script execution was legitimate IT / admin activity", "cannot_assess",
@@ -529,6 +543,8 @@ class AttackStory:
         succ = [s for s in steps if s["outcome"] == "succeeded"]
         deep = {"TA0003", "TA0004", "TA0006", "TA0007", "TA0008", "TA0009", "TA0010", "TA0040"}
         tools = {t for s in succ for t in s["tools"]}
+        blockers = {t for s in steps for t in s["tools"]} - tools
+        corroborated = f"corroborated by {len(tools)} tools" + (f" ({len(blockers)} more blocked a step)" if blockers else "")
         stages = {s["stage"] for s in succ}
         blocked_only = {s["stage"] for s in steps if s["outcome"] == "blocked"} - stages
         reached = f"{len(stages)} kill-chain stage(s) reached" + (f" ({len(blocked_only)} more blocked)" if blocked_only else "")
@@ -538,7 +554,7 @@ class AttackStory:
         elif not succ:
             verdict, conf, why = "attempt_blocked", "high", "every observed step was blocked by a control"
         elif len(stages) >= 3 and stages & deep and len(tools) >= 3 and not benign_open:
-            verdict, conf, why = "confirmed_compromise", "high", f"{reached}, corroborated by {len(tools)} tools; benign explanations rejected"
+            verdict, conf, why = "confirmed_compromise", "high", f"{reached}, {corroborated}; benign explanations rejected"
         elif stages & deep or len(stages) >= 2:
             verdict, conf, why = "likely_compromise", "medium" if benign_open else "high", \
                 f"{reached} across {len(tools)} tool(s)" + (f"; {len(benign_open)} benign explanation(s) still plausible" if benign_open else "")

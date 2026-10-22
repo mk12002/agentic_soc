@@ -7,10 +7,12 @@ import pytest
 from soc_platform.connectors.base import SyncRunner
 from soc_platform.connectors.registry import ConnectorRegistry
 from soc_platform.core.actions import ActionService
+from soc_platform.core.auth import Role
 from soc_platform.core.cases import CaseService, agreement_report, detection_quality
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.models import Case
 from soc_platform.domains.incident.service import IncidentService
+from soc_platform.tests.conftest import person
 
 
 @pytest.fixture()
@@ -79,7 +81,9 @@ def test_lead_approves_isolation_and_it_reaches_the_edr(session, world, lead):
     jane = max(svc.cluster(), key=lambda c: c.attributes["alert_count"])
     view = svc.investigate(jane.id)
     iso = next(a for a in view["actions"] if a["action_type"] == "endpoint.isolate")
-    done = ActionService(session, svc.actions, svc.policy).approve(iso["id"], lead, note="confirmed compromise")
+    acts = ActionService(session, svc.actions, svc.policy)
+    assert acts.approve(iso["id"], lead, note="confirmed compromise").status == "pending_approval"   # four-eyes
+    done = acts.approve(iso["id"], person("lars", Role.LEAD), note="second approval")
     assert done.status == "executed" and done.result["provider"] == "crowdstrike"
 
 

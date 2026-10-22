@@ -220,16 +220,19 @@ buttons), and the grant is in the audit log with Ada's justification.
 
 The platform recommends actions; nothing runs until a person with the right role approves.
 - **Normal actions** (e.g. create a ticket, block an indicator): an Analyst or a Lead may approve.
-- **High-impact actions** need a **Lead**: host isolation and account disable (both marked *four-eyes* in the
-  policy), actions on VIP targets, and anything over its blast-radius limit.
-- **Four-eyes** means the approver must be a different person from whoever requested the action. When a person
-  (not the platform) requests an isolation or an account disable, they can never approve it themselves.
+- **High-impact actions** need a **Lead**: the *four-eyes* actions of the policy (by default: isolate and release a host, disable an account, reset a password, purge a campaign, rotate a privileged secret, block a domain),
+  actions on VIP targets, and anything over its blast-radius limit.
+- **Four-eyes** means two different people. When the platform recommended the action, two different Leads must
+  approve it: the first approval is recorded ("Awaiting second approval") and nothing runs until the second. When a
+  person requested it, they count as the first and a different Lead approves; nobody approves their own request.
 
 1. Window 1: `ann@acme-demo.com`, Analyst. **Approvals** → find an **Isolate host** (`endpoint.isolate`) action
    and press *Approve*. It is refused: an analyst cannot approve a high-impact action.
-2. Window 2 (private): `lena@acme-demo.com`, Lead. **Approvals** → approve the same action. It executes (in fake
-   mode, against the fixture EDR).
-3. Approve a normal action as Ann (e.g. **Create ticket**) to show that routine work does not wait for a Lead.
+2. Window 2 (private): `lena@acme-demo.com`, Lead. **Approvals** → approve the same action. It does **not** run: the
+   row shows "First approval by lena@acme-demo.com - a second lead must approve". Approving again as Lena is refused.
+3. Window 3 (another browser profile): `alice@acme-demo.com`, Lead. Approve it: it executes (in fake mode, against
+   the fixture EDR).
+4. Approve a normal action as Ann (e.g. **Create ticket**) to show that routine work does not wait for a Lead.
    Signed in as Ada (Admin), Max (Automation admin) or Audrey (Auditor), the same Approve is refused.
 4. **Audit log**: the recommendation, Lena's approval and the execution, in the hash chain.
 
@@ -656,7 +659,7 @@ analysts before go-live. To serve many analysts, start several processes: `$env:
 
 | Symptom | Cause and fix |
 |---|---|
-| Sign-in does nothing, or "not available" | `SOC_DEV_JWT_SECRET` is missing in this window. Add it to `.env` (§3), run `. .\scripts\load_env.ps1`, restart `serve`. |
+| Sign-in does nothing, "not available", or "Development sign-in is disabled on this server" | `SOC_DEV_JWT_SECRET` is missing in this window. Add it to `.env` (§3), run `. .\scripts\load_env.ps1`, restart `serve`. From Command Prompt (`load_env.ps1` is PowerShell-only) start with `scripts\serve_with_env.cmd` instead (`scripts\serve_with_env.cmd reset` resets the demo first). |
 | Signed in as the wrong person / the other window changed user | Tabs of one browser share the sign-in. Use a private window or another browser profile for the second person (§4, *Signing in*). |
 | No Approve buttons | You are signed in as Admin, Auditor or Automation admin (none of them approve, by design), or the action needs a Lead. Sign in as `lena@acme-demo.com`, Lead. |
 | A screen says it needs all-domain scope | You signed in with a *... only* data scope. Sign out and choose *All domains*. |

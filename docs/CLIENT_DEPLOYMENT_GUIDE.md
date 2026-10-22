@@ -810,8 +810,8 @@ redaction and fallbacks stay as they are. Add a test like `test_openai_compatibl
 
 - Every write to a tool is an `ActionRequest` evaluated by the versioned autonomy policy. The default is **L2 -
   recommend**: the platform proposes, a human approves in the console, the connector executes, the result and the
-  reverse action are recorded. Actions marked four-eyes in the policy (by default: disable account, isolate host)
-  need a second approver, and every action type has a per-request target limit (e.g. campaign purge 200).
+  reverse action are recorded. Actions marked four-eyes in the policy (by default: isolate and release a host, disable an account, reset a password, purge a campaign, rotate a privileged secret, block a domain)
+  need two different people - two leads when the platform recommended them, and every action type has a per-request target limit (e.g. campaign purge 200).
 - **Grant write permissions per action type only when the client approves that action type.** Without the write
   permission the action is still recommended; execution fails cleanly and is recorded.
 - **Per tool, first:** a tool offers actions only from the **Recommend** stage (never above L2 there) and follows the

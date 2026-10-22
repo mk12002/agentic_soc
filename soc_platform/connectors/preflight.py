@@ -87,7 +87,7 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
-def _stream(conn: Any, stream: str, now: datetime) -> dict[str, Any]:
+def _stream(conn: Any, stream: str, now: datetime, *, live: bool = True) -> dict[str, Any]:
     t0 = time.perf_counter()
     page = conn.fetch_page(stream, None)
     ms = round((time.perf_counter() - t0) * 1000, 1)
@@ -115,7 +115,8 @@ def _stream(conn: Any, stream: str, now: datetime) -> dict[str, Any]:
         status = "warning"
         notes.append("records are dated in the future: the tool's clock or time zone is wrong (times are read as UTC "
                      "unless the record says otherwise)")
-    elif newest and kinds and kinds <= EVENT_KINDS and (now - newest).days > OLD_DAYS:
+    elif live and newest and kinds and kinds <= EVENT_KINDS and (now - newest).days > OLD_DAYS:
+        # (sample data is dated by design: its age says nothing about a feed, so only a live tool is judged)
         status = "warning"
         notes.append(f"the newest record is {(now - newest).days} days old: is this the right tenant / workspace, and "
                      "is the licence for this data active?")
@@ -187,7 +188,7 @@ def run_preflight(registry: Any, name: str) -> dict[str, Any]:
                 rows.append({"stream": st, "status": "skipped", "notes": [stopped]})
                 continue
             try:
-                rows.append(_stream(conn, st, now))
+                rows.append(_stream(conn, st, now, live=inst.mode == "live"))
                 signed_in = True
             except Exception as exc:  # each failure is classified into a check with a fix
                 status, detail, fix = _classify(exc, read_scopes)

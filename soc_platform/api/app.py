@@ -1633,7 +1633,9 @@ def story_approve(cid: str, body: BundleBody, p: Principal = Depends(need(Perm.A
         s.commit()           # each approval stands alone: one that fails discards only its own changes
         try:
             r = svc.approve(aid, p, note=body.note or "approved from attack story")
-            out.append({"id": aid, "ok": True, "status": r.status})
+            out.append({"id": aid, "ok": True, "status": r.status,
+                        "awaiting_second_approval": bool((r.result or {}).get("awaiting_second_approval"))
+                        and r.status == "pending_approval"})
         except Exception as exc:  # noqa: BLE001 - reported per action
             s.rollback()
             out.append({"id": aid, "ok": False, "error": str(exc)[:200]})

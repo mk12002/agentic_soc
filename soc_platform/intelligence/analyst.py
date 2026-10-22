@@ -44,7 +44,9 @@ _SCORE_IN_TITLE = re.compile(r"\s{0,3}\(\d{1,3}(?:\.\d+)?/100\)")
 PLANNER_SYSTEM = (
     "You are a SOC investigation planner. Choose read-only tools to answer the analyst's question. "
     "Use only tools from the catalogue, with the documented arguments. Prefer the fewest calls that fully "
-    "answer the question (max 5). Return JSON: {\"calls\": [{\"tool\": \"name\", \"args\": {...}}]}.")
+    "answer the question (max 5). A person or host named in words rather than by e-mail address or host name "
+    "(\"jane doe\", \"Bob's laptop\") is looked up with search_entities and the name. "
+    "Return JSON: {\"calls\": [{\"tool\": \"name\", \"args\": {...}}]}.")
 
 
 @dataclass
@@ -93,13 +95,25 @@ class IntelligenceAnalyst:
         if kind == "asset" and key == "hostname":
             return self._search(value)
         e = self.store.find(kind, key, value)
-        return self._entity_brief(e) if e else {"not_found": f"{kind} {key}={value}"}
+        if e:
+            return self._entity_brief(e)
+        # an exact key that is not stored ("jane.doe" for jane.doe@acme-demo.com, a display name passed as a upn) is
+        # resolved by the name search, so a person is never reported missing because of how the name was written
+        hits = [h for h in self._search(value) if kind not in ("asset", "identity", "indicator") or h["kind"] == kind]
+        if len(hits) == 1:
+            return hits[0]
+        return hits or {"not_found": f"{kind} {key}={value}"}
 
     def _search(self, text: str = "") -> Any:
-        t = f"%{text.lower()}%"
-        rows = self.s.execute(select(Entity).where(Entity.kind.in_(("asset", "identity", "indicator")),
-                                                   or_(Entity.display_name.ilike(t), Entity.canonical_key.ilike(t)))
-                              .limit(10)).scalars().all()
+        """Users, hosts and indicators whose name contains every word of ``text``, in any order or separator:
+        "jane doe", "Jane.Doe" and "doe jane" all find jane.doe@acme-demo.com. People first."""
+        words = _name_words(text)
+        if not words:
+            return []
+        q = select(Entity).where(Entity.kind.in_(("asset", "identity", "indicator")))
+        for w in words:
+            q = q.where(or_(Entity.display_name.ilike(f"%{w}%"), Entity.canonical_key.ilike(f"%{w}%")))
+        rows = self.s.execute(q.order_by(Entity.kind.desc(), Entity.display_name).limit(10)).scalars().all()
         return [self._entity_brief(e) for e in rows]
 
     def _entity_risk(self, entity_id: str = "") -> Any:
@@ -231,6 +245,10 @@ class IntelligenceAnalyst:
         for host in re.findall(r"\b([a-z]+[-_]?[a-z]*\d+[a-z0-9-]*)\b", ql):
             if not host.startswith("cve"):
                 calls.append({"tool": "search_entities", "args": {"text": host}})
+        if not any(c["tool"] in {"find_entity", "search_entities"} for c in calls):
+            name = self._name_in(q)          # "is jane doe compromised?" - a person named in words
+            if name:
+                calls.append({"tool": "search_entities", "args": {"text": name}})
         # a question about a named person or host is answered about that entity (its risk and context follow its
         # look-up); the organisation-wide lists only when the wording itself is organisation-wide
         named = any(c["tool"] in {"find_entity", "search_entities"} for c in calls)
@@ -316,7 +334,12 @@ class IntelligenceAnalyst:
                 results.append({"tool": "attack_story", "args": {"case_id": top["case_id"]},
                                 "result": self._attack_story(top["case_id"])})
         evidence = self._to_evidence(results)
-        if self.llm is not None:
+        missing = self._unresolved(results)
+        if missing is not None:
+            # the question named someone or something the platform could not find: say exactly that. "Not found" is
+            # not "no evidence of compromise", and a model given only empty look-ups once drew that conclusion
+            answer = missing
+        elif self.llm is not None:
             answer = self.llm.grounded("intelligence.answer", question, evidence)
         else:
             answer = {"summary": _facts_summary(results), "claims": _readable_claims(results),
@@ -328,6 +351,33 @@ class IntelligenceAnalyst:
                 "answer": answer["summary"], "claims": answer.get("claims", []),
                 "insufficient_evidence": answer.get("insufficient_evidence", False), "source": answer.get("source"),
                 "results": results}
+
+    def _name_in(self, q: str) -> str | None:
+        """Two or three consecutive words of the question that name exactly the entities they match ("jane doe")."""
+        words = [w for w in re.findall(r"[a-z][a-z'-]{1,40}", q.lower()) if w not in _QUESTION_WORDS]
+        for n in (3, 2):
+            for i in range(len(words) - n + 1):
+                phrase = " ".join(words[i:i + n])
+                if self._search(phrase):
+                    return phrase
+        return None
+
+    def _unresolved(self, results: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """A deterministic answer when every look-up of a named user, host or indicator found nothing."""
+        looks = [r for r in results if r["tool"] in {"find_entity", "search_entities"}]
+        if not looks or any(_resolved(r["result"]) for r in looks):
+            return None
+        names = sorted({str(r["args"].get("value") or r["args"].get("text") or "").strip() for r in looks} - {""})
+        near: list[str] = []
+        for n in names:
+            for w in _name_words(n):
+                near += [h["name"] for h in self._search(w)[:3]]
+        near = sorted(set(near))[:5]
+        text = (f"I could not find a user, host or indicator matching {', '.join(repr(n) for n in names) or 'the name'}, "
+                "so I cannot say whether it is compromised. ")
+        text += (f"Did you mean: {', '.join(near)}?" if near else
+                 "Try the full e-mail address or host name.")
+        return {"summary": text, "claims": [], "source": "deterministic", "insufficient_evidence": True}
 
     def _narration_request(self, insight: Insight) -> tuple[str, list[dict[str, Any]]]:
         evidence = [{"id": f"E{i + 1}", "claim": f"{e.get('signal')}: {e.get('summary')} ({e.get('source')}, "
@@ -420,6 +470,32 @@ _BRIEF_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 def _ref(results: list[dict[str, Any]], r: dict[str, Any]) -> str:
     return f"R{results.index(r) + 1}"
+
+
+# words of a question that are never part of a name (so "is jane doe compromised" leaves "jane doe")
+_QUESTION_WORDS = frozenset([
+    "a", "an", "and", "any", "are", "at", "be", "been", "by", "can", "could", "did", "do", "does", "for", "from",
+    "has", "have", "how", "i", "in", "is", "it", "me", "my", "of", "on", "or", "our", "risk", "risky", "safe",
+    "show", "tell", "that", "the", "their", "there", "this", "to", "us", "was", "we", "were", "what", "when",
+    "where", "which", "who", "whom", "why", "will", "with", "would", "you", "your", "about", "compromised",
+    "compromise", "hacked", "breached", "affected", "involved", "infected", "status", "doing", "user", "host",
+    "person", "account", "laptop", "machine", "device", "server", "please", "give", "find", "look", "up", "check",
+    "most", "now", "right", "current", "currently", "today", "latest", "top", "all", "everyone", "anyone", "people",
+    "users", "hosts", "overall", "worst", "first", "should", "next", "happened", "happening", "going"
+])
+
+
+def _name_words(text: str) -> list[str]:
+    """The words of a name, lower-case, without separators: "Jane.Doe" -> ["jane", "doe"]."""
+    return re.findall(r"[a-z0-9]{2,64}", (text or "").lower())[:6]
+
+
+def _resolved(result: Any) -> bool:
+    if isinstance(result, dict):
+        return bool(result.get("entity_id"))
+    if isinstance(result, list):
+        return any(isinstance(x, dict) and x.get("entity_id") for x in result)
+    return False
 
 
 def _facts_summary(results: list[dict[str, Any]]) -> str:

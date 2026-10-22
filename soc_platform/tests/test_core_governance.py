@@ -106,6 +106,7 @@ def test_agent_request_waits_for_human_approval(session, registry, analyst):
 
 def test_lead_approval_executes_and_audits(session, registry, lead):
     svc = ActionService(session, registry, PolicyEngine())
+    svc.policy.document["actions"]["endpoint.isolate"]["four_eyes"] = False   # one approval: the non-four-eyes path
     req = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "h1"}],
                       requested_by=agent_principal("incident"), case_id="C1")
     done = svc.approve(req.id, lead, note="confirmed")
@@ -113,6 +114,31 @@ def test_lead_approval_executes_and_audits(session, registry, lead):
     events = [r.event_type for r in AuditLog(session).query(subject_id=req.id)]
     assert {"action.requested", "action.approved", "action.executed"} <= set(events)
     assert AuditLog(session).verify()["ok"]
+
+
+def test_an_agent_recommended_four_eyes_action_needs_two_different_people(session, registry, lead):
+    """Four-eyes means two people: an agent's recommendation is not one of them, so two different leads approve."""
+    svc = ActionService(session, registry, PolicyEngine())
+    req = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "h1"}],
+                      requested_by=agent_principal("incident"), case_id="C1")
+    first = svc.approve(req.id, lead, note="first")
+    assert first.status == "pending_approval" and first.result["awaiting_second_approval"]
+    assert registry.get("endpoint.isolate").calls == []                     # nothing ran on one approval
+    with pytest.raises(PermissionError):
+        svc.approve(req.id, lead, note="again")                             # the same person cannot be both
+    done = svc.approve(req.id, person("lars", Role.LEAD), note="second")
+    assert done.status == "executed" and done.approver == "lars" and done.result["first_approver"] == "lena"
+    events = [r.event_type for r in AuditLog(session).query(subject_id=req.id)]
+    assert {"action.first_approval", "action.approved", "action.executed"} <= set(events)
+
+
+def test_a_rejection_after_the_first_approval_stops_a_four_eyes_action(session, registry, lead):
+    svc = ActionService(session, registry, PolicyEngine())
+    req = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "h1"}],
+                      requested_by=agent_principal("incident"), case_id="C1")
+    svc.approve(req.id, lead)
+    assert svc.reject(req.id, person("lars", Role.LEAD), note="not this host").status == "rejected"
+    assert registry.get("endpoint.isolate").calls == []
 
 
 def test_requester_cannot_self_approve_four_eyes(session, registry, lead):
@@ -159,6 +185,7 @@ def test_rollback_goes_through_the_policy_and_cannot_skip_four_eyes(session, reg
     svc = ActionService(session, registry, PolicyEngine())
     req = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "h2"}], requested_by=agent_principal("i"))
     svc.approve(req.id, person("lars", Role.LEAD))
+    svc.approve(req.id, person("lea", Role.LEAD))                        # four-eyes: two people
     rev = svc.rollback(req.id, lead)
     assert rev.status == "recommended" and registry.get("endpoint.release").calls == []
     assert {"action.rollback_requested", "action.requested"} <= {
@@ -189,6 +216,7 @@ def test_the_tool_call_runs_after_a_durable_executing_record_and_holds_no_lock(t
     with db.session() as s:
         svc = ActionService(s, registry, PolicyEngine())
         req = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "h1"}], requested_by=agent_principal("i"))
+        svc.approve(req.id, person("lars", Role.LEAD))                   # four-eyes: the first of two approvals
         done = svc.approve(req.id, lead)
         assert done.status == "executed"
     assert seen["status"] == "executing"

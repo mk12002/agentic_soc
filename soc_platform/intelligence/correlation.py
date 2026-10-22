@@ -74,6 +74,10 @@ def _basis(ins: Insight) -> str:
     return json.dumps([ins.severity, ev])
 
 
+# how a risk dimension reads in a title ("other" holds SIEM alerts) - the console uses the same words
+DIM_LABEL = {"other": "SIEM", "privileged_access": "privileged access", "threat_intel": "threat intel"}
+
+
 class CorrelationEngine:
     def __init__(self, session: Session, *, risk: RiskEngine | None = None) -> None:
         self.s = session
@@ -254,7 +258,7 @@ class CorrelationEngine:
             return None
         return Insight(rule="entity_risk_high", dedupe_key=_key("risk", p.entity_id),
                        title=f"{p.kind.title()} {p.name}: {p.band} risk ({p.score:.0f}/100) across "
-                             f"{', '.join(p.dimensions)}", severity=p.band, score=p.score, entity_ids=[p.entity_id],
+                             f"{', '.join(DIM_LABEL.get(d, d.replace('_', ' ')) for d in p.dimensions)}", severity=p.band, score=p.score, entity_ids=[p.entity_id],
                        domains=["incident", "phishing", "vulnerability"],
                        evidence=[_ev(f) for f in sorted(p.factors, key=lambda x: -x.decayed)[:8]],
                        next_steps=["Open the entity view and review the contributing signals"],

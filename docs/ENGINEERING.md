@@ -864,7 +864,9 @@ It is rebuilt on demand and never stored. An event not in the store cannot appea
   6. more targets than `max_targets` → L3 + high-impact
   7. four-eyes → high-impact
 
-  All reasons are returned for display.
+  All reasons are returned for display. Four-eyes means two different people: a person who requests the action is
+  the first, so a different lead approves; an agent's recommendation needs two different leads (the first approval is
+  recorded and audited as `action.first_approval`, the second executes).
 - **`PolicyStore`:** versioned documents; propose (automation admin) → approve (a different person with
   `approve_policy`) → active. Every version is kept.
 - **Kill switch:** a durable flag in `system_flags` (or `SOC_KILL_SWITCH`), read by every replica. It halts
@@ -1729,6 +1731,7 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 96 | `sslmode=verify-full` (or `verify-ca`) required in production | libpq's default `prefer` | `prefer` accepts an unencrypted or intercepted connection without warning | A managed server needs `sslrootcert=system`; a private CA its file |
 | 97 | Image dependencies hash-locked on Linux in the base image (`pip-compile --generate-hashes`), constrained by `platform.lock`; images and CI actions pinned by digest / commit; releases signed | Constraints by version only; tags | A version pin does not stop a changed file; a moved tag runs other code (the scan action's tag had been removed upstream) | `supply_chain.py image-lock` needs Docker; `check` keeps the locks in step |
 | 98 | Privileged platform grants need a second administrator and end within 90 days; rollback is a policy-governed action; turning the kill switch off needs a lead | Trust administrators; rollback as an immediate undo | One administrator could create a lead from a second account; one lead could release a host whose isolation needed two | Standing privileged access belongs in Entra PIM |
+| 99 | Four-eyes is two people even when an agent recommended the action: two different leads approve, the first approval is recorded and audited | Count the agent as the first pair of eyes (one lead approves) | An agent's recommendation is not a human check; the documents and the client review promise two people, and one compromised lead account could otherwise isolate hosts or reset passwords alone |
 ---
 
 ## 26. Known limitations and trade-offs

@@ -54,6 +54,7 @@ FEATURES: list[tuple[str, str, list[str]]] = [
     ("Platform", "Approvals, four-eyes, separation of duties, policy change control",
      ["test_core_governance.py::test_agent_request_waits_for_human_approval", "test_core_governance.py::test_lead_approval_executes_and_audits",
       "test_core_governance.py::test_requester_cannot_self_approve_four_eyes", "test_core_governance.py::test_analyst_request_of_normal_action_is_explicit_approval",
+      "test_core_governance.py::test_an_agent_recommended_four_eyes_action_needs_two_different_people",
       "test_core_governance.py::test_policy_change_needs_different_approver", "test_api.py::test_policy_change_control_and_kill_switch"]),
     ("Platform", "Action layer: preconditions, idempotency, rollback, failure records, cross-case de-duplication",
      ["test_core_governance.py::test_failed_precondition_blocks", "test_core_governance.py::test_idempotency_on_replay",

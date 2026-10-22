@@ -249,7 +249,13 @@ textarea { height: auto; padding: 8px 10px; }
 .ev:last-child { border-bottom: 0; }
 .ev .ref { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); min-width: 30px; }
 abbr.cite { text-decoration: none; font-family: var(--mono); font-size: 11px; color: var(--accent); background: var(--accent-soft);
-  padding: 0 5px; border-radius: 4px; margin-left: 3px; cursor: help; }
+  padding: 0 5px; border-radius: 4px; margin-left: 3px; cursor: pointer; position: relative; }
+abbr.cite[data-tip]:hover::after, abbr.cite[data-tip]:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; width: max-content; max-width: min(360px, 80vw);
+  white-space: normal; font-family: var(--font, inherit); font-size: 12px; line-height: 1.4; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); padding: 7px 9px; pointer-events: none; }
+.ev.hl { animation: evhl 1.6s ease-out; }
+@keyframes evhl { from { background: var(--accent-soft); } to { background: transparent; } }
 .callout { display: flex; gap: 10px; padding: 12px 14px; border-radius: 8px; background: var(--high-bg); border: 1px solid var(--high-bd);
   color: var(--text); margin: 12px 0; font-size: 13px; }
 .callout.info { background: var(--accent-soft); border-color: transparent; }

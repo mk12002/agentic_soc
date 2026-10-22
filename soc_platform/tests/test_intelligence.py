@@ -590,3 +590,33 @@ def test_the_analyst_answers_about_the_entity_named_and_counts_only_its_own_acti
     for a in session.query(ActionRequest).filter(ActionRequest.id.in_(own)):
         assert any("jane-lt01" in json.dumps(t).lower() or "cs-aid-jane01" in json.dumps(t) for t in a.targets)
     assert ctx["pending_on_cases"] >= len(own)
+
+
+def test_a_person_named_in_words_is_found_with_or_without_the_ai(session, world):
+    """"is jane doe compromised?" once answered "no evidence that Jane Doe is compromised" about the most compromised
+    person in the estate: the planner looked her up as upn "jane.doe", which is not a stored key, and nothing
+    resolved the name."""
+    plain = IntelligenceService(session, vm=world).analyst.ask("is jane doe compromised?")
+    assert any(c["tool"] == "entity_risk" for c in plain["tool_calls"]) and not plain["insufficient_evidence"]
+    assert "jane.doe@acme-demo.com" in plain["answer"]
+
+    plan = {"calls": [{"tool": "find_entity", "args": {"kind": "identity", "key": "upn", "value": "jane.doe"}}]}
+    answer = {"summary": "Jane is at critical risk.", "claims": [{"text": "Jane is at critical risk.", "kind": "fact",
+                                                                 "evidence_ids": ["R2"]}]}
+    svc = IntelligenceService(session, LLMGateway(session, Settings(), provider=_Scripted([plan, answer])), vm=world)
+    r = svc.analyst.ask("is jane doe compromised?")
+    found = next(x for x in r["results"] if x["tool"] == "find_entity")["result"]
+    assert found.get("name") == "jane.doe@acme-demo.com"
+    assert any(x["tool"] == "entity_risk" and x["result"].get("score") for x in r["results"])
+
+
+def test_a_name_that_matches_nothing_is_reported_as_not_found_never_as_no_evidence(session, world):
+    plan = {"calls": [{"tool": "find_entity", "args": {"kind": "identity", "key": "upn", "value": "john smith"}}]}
+    prov = _Scripted([plan, {"summary": "There is no evidence that John Smith is compromised.", "claims": []}])
+    r = IntelligenceService(session, LLMGateway(session, Settings(), provider=prov), vm=world).analyst.ask(
+        "is john smith compromised?")
+    assert r["insufficient_evidence"] and r["source"] == "deterministic"
+    assert "could not find" in r["answer"] and "no evidence" not in r["answer"].lower()
+    assert prov.i == 1                      # the model was never asked to explain an empty look-up
+    near = IntelligenceService(session, vm=world).analyst.ask("is jane smith compromised?")
+    assert "jane.doe@acme-demo.com" in near["answer"]          # suggested as a close match

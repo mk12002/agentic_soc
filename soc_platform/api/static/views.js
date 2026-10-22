@@ -36,7 +36,7 @@ async function Overview() {
     <div class="grid g-2 mt">
       ${card('Highest-priority insights', o.insights.top.map(i => `<div class="list-row">${chip(i.severity)}<div class="grow"><div class="t-title">${esc(i.title)}</div><div class="t-sub">${esc(cap(i.rule))}</div></div></div>`).join('') || empty('No open insights'),
         {right: go('#/intelligence', 'All insights', 'small')})}
-      ${card('Riskiest users and hosts', top.map(p => `<div class="list-row"><div class="grow"><div class="t-title">${entLink(p.entity_id, p.name)}</div><div class="t-sub">${esc(p.dimensions.join(' · '))}</div></div>
+      ${card('Riskiest users and hosts', top.map(p => `<div class="list-row"><div class="grow"><div class="t-title">${entLink(p.entity_id, p.name)}</div><div class="t-sub">${esc(p.dimensions.map(dimLabel).join(' · '))}</div></div>
           <div style="width:90px">${meter(p.score)}</div><span class="score">${Math.round(p.score)}</span></div>`).join('') || empty('No risk signals'))}
     </div>
     <div class="grid g-kpi mt" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
@@ -91,14 +91,14 @@ async function Intelligence() {
   setMainG(__g, page('Intelligence', 'Cross-domain correlation over every data source. Findings are raised by deterministic rules; the analyst assistant only explains, citing evidence.', actions,
     `<div class="grid g-2">
       <div class="stack">
-        ${card('Situation brief', `<div class="prose">${esc(b.summary)}</div>`, {right: chip(b.source === 'llm' ? 'LLM narrative' : 'Deterministic', 'plain')})}
+        ${card('Situation brief', `<div class="prose">${esc(b.summary)}</div>`, {right: chip(b.source === 'llm' ? 'AI narrative' : 'Platform summary', 'plain')})}
         ${card('Ask the analyst', `<div class="inline"><input class="input" style="flex:1;min-width:260px" id="iq" data-enter="askIntel" placeholder="e.g. Is jane.doe@acme-demo.com compromised and what should we do first?">
           ${btn('Ask', 'askIntel', [], 'primary')}</div><div id="ia"></div>`)}
         ${card(`Correlated findings <span class="muted">(${ins.length})</span>`, shown.map(i => `
           <div class="list-row" style="align-items:flex-start;padding:14px 0">
             <div>${chip(i.severity)}</div>
             <div class="grow"><div class="t-title">${esc(i.title)}</div>
-              <div class="t-sub">${esc(cap(i.rule))} · ${esc((i.requirements || []).join(', '))} · last seen ${dt(i.last_seen)}</div>
+              <div class="t-sub"${(i.requirements || []).length ? ` title="${esc('Requirements: ' + i.requirements.join(', '))}"` : ''}>${esc(cap(i.rule))} · last confirmed ${dt(i.last_seen)}</div>
               ${i.narrative ? `<p class="small clamp" style="margin:8px 0 6px;color:var(--text-2)" title="${esc(i.narrative)}">${esc(i.narrative)}</p>` : ''}
               ${(i.next_steps || []).length ? `<div class="small"><span class="strong">Next steps</span><ol style="margin:4px 0 0 18px;padding:0">${i.next_steps.map(n => `<li>${esc(n)}</li>`).join('')}</ol></div>` : ''}
               <details class="mt" style="margin-top:8px"><summary>Evidence (${(i.evidence || []).length})</summary>${(i.evidence || []).map(e => `<div class="ev"><span class="ref">${esc(e.source || '')}</span><span class="small">${esc(e.summary || e.signal || '')} <span class="muted">${esc(e.when ? dt(e.when) : '')}</span></span></div>`).join('')}</details>
@@ -107,7 +107,7 @@ async function Intelligence() {
           </div>`).join('') + (filtered.length > shown.length ? `<div style="padding-top:12px">${btn(`Show all ${filtered.length}`, 'intelAll', [], 'sm')}</div>` : '') || empty('No findings for this filter'),
           {right: `<div class="seg">${['all', 'critical', 'high', 'medium'].map(f => `<button class="${f === INTEL_FILTER ? 'on' : ''}" data-fn="intelFilter" data-args="${arg(f)}">${cap(f)}</button>`).join('')}</div>`})}
       </div>
-      ${card('Risk by user and host', top.map(p => `<div class="list-row"><div class="grow"><div class="t-title">${entLink(p.entity_id, p.name)}</div><div class="t-sub">${esc(p.kind)} · ${esc(p.dimensions.join(', '))}</div>
+      ${card('Risk by user and host', top.map(p => `<div class="list-row"><div class="grow"><div class="t-title">${entLink(p.entity_id, p.name)}</div><div class="t-sub">${esc(p.kind)} · ${esc(p.dimensions.map(dimLabel).join(', '))}</div>
         <div style="margin-top:6px">${meter(p.score)}</div></div><span class="score">${Math.round(p.score)}</span></div>`).join('') || empty('No risk signals yet'), {sub: 'time-decayed, explainable'})}
     </div>`));
 }
@@ -118,7 +118,7 @@ async function askIntel() {
   $('#ia').innerHTML = `<div class="divider"></div><div class="prose">${esc(r.answer)}</div>
     ${(r.claims || []).length ? (() => { const row = c => `<div class="${c.kind === 'fact' ? 'fact' : 'inf'}">${esc(c.text)} ${(c.evidence_ids || []).map(x => `<abbr class="cite">${esc(x)}</abbr>`).join('')}</div>`;
       return `<div class="mt small"><div class="strong" style="margin-bottom:4px">Evidence behind the answer</div>${r.claims.slice(0, 6).map(row).join('')}${r.claims.length > 6 ? `<details><summary>${r.claims.length - 6} more</summary>${r.claims.slice(6).map(row).join('')}</details>` : ''}</div>`; })() : ''}
-    <div class="small muted mt">How this was answered: ${esc(r.planner)} planner · ${r.tool_calls.map(t => `<span class="tag">${esc(t.tool)}</span>`).join('')}</div>${llmNotice(r)}`;
+    <div class="small muted mt">How this was answered: ${r.planner === 'llm' ? 'AI-planned look-ups' : 'rule-based look-ups'} · ${r.tool_calls.map(t => `<span class="tag">${esc(t.tool)}</span>`).join('')}</div>${llmNotice(r)}`;
 }
 async function refreshIntel() { await post('/api/v1/intelligence/refresh'); toast('Correlation refreshed'); Intelligence(); }
 async function insightAct(id, verb) { await post(`/api/v1/intelligence/insights/${id}/${verb}`); toast(`Insight ${verb}d`); Intelligence(); }
@@ -164,8 +164,21 @@ async function Cases(id) {
 function caseFilter(f) { CASE_FILTER = f; CASE_OFFSET = 0; Cases(); }
 function casePage(o) { CASE_OFFSET = Math.max(0, Number(o) || 0); Cases(); }
 function ownerFilter(f) { OWNER_FILTER = f; CASE_OFFSET = 0; Cases(); }
-async function runInc() { toast('Running incident pipeline…'); const r = await post('/api/v1/incidents/run'); toast(`${r.new_incidents} new incident(s), ${r.investigated.length} investigated`); render(); }
-async function runPh() { toast('Pulling reported email…'); const r = await post('/api/v1/phishing/ingest'); toast(`${(r.processed || []).length} message(s) analysed`); render(); }
+async function runInc() {
+  toast('Running incident pipeline…');
+  const r = await post('/api/v1/incidents/run');
+  const down = (r.errors || []).length ? ` ${r.errors.length} tool(s) did not answer - shown as unavailable.` : '';
+  toast(r.new_incidents ? `${r.new_incidents} new incident(s), ${r.investigated.length} investigated.${down}`
+    : `No new alerts since the last run - every incident is already investigated.${down}`, !!down);
+  render();
+}
+async function runPh() {
+  toast('Pulling reported email…');
+  const r = await post('/api/v1/phishing/ingest');
+  const n = (r.processed || []).length;
+  toast(n ? `${n} new reported e-mail(s) analysed.` : 'No new reported e-mail - every report in the mailbox is already analysed.');
+  render();
+}
 
 async function CaseDetail(id) {
   const __g = GEN;
@@ -173,7 +186,8 @@ async function CaseDetail(id) {
   const c = v.case, a = v.assessment || {};
   const un = (v.completeness && v.completeness.unavailable) || [];
   const acts = [...v.actions].sort((x, y) => (x.priority || 99) - (y.priority || 99));
-  const astat = x => status(x.status === 'executed' ? 'ok' : ['rejected', 'rolled_back'].includes(x.status) ? 'info' : x.status === 'failed' ? 'critical' : 'medium', cap(x.status));
+  const astat = x => (x.result || {}).awaiting_second_approval && x.status === 'pending_approval' ? status('medium', 'Awaiting second approval')
+    : status(x.status === 'executed' ? 'ok' : ['rejected', 'rolled_back'].includes(x.status) ? 'info' : x.status === 'failed' ? 'critical' : 'medium', cap(x.status));
   const actRow = x => `<tr><td class="num muted">${esc(x.priority ?? '')}</td>
     <td style="min-width:190px"><div class="t-title mono" style="overflow-wrap:anywhere">${esc(x.action_type)}</div><div class="small" style="margin-top:3px;color:var(--text-2);overflow-wrap:anywhere">${esc(x.rationale)}</div>
       <div class="t-sub">L${esc(x.level)}${x.blast_radius ? ' · blast radius: ' + esc(x.blast_radius) : ''}${x.reversible === false ? ' · not reversible' : ''}</div>
@@ -196,6 +210,22 @@ async function CaseDetail(id) {
       (bd.fusion_note ? `<div class="t-sub" style="margin-top:8px">${esc(bd.fusion_note)}</div>` : '')
     : `<div class="small">Rule-based analyser${bd.engine_error ? ` only - the ML models could not run (${esc(String(bd.engine_error).slice(0, 140))})` : ' only (the ML models are not installed or switched off)'}.</div>`,
     {sub: bd.engine ? 'trained models and rules each give a verdict; the more severe one counts' : ''});
+  // incident severity is computed by fixed rules (IncidentService._score): show every rule that applied
+  const sevWhy = (cs, f) => {
+    const CTX = {internet_exposed: 'internet-facing', business_critical: 'business-critical'};
+    const rows = [`The tool rated the alert <b>${esc(f.base_alert_severity || 'unknown')}</b> - the starting point.`];
+    if (f.deception_hit) rows.push('A decoy was touched (deception hit): <b>raised to critical</b> - decoys have no business use.');
+    if (f.kev_exposure_boost) rows.push('A host in the case carries a vulnerability on the CISA known-exploited list: <b>one level up</b>.');
+    if ((f.exposed_or_critical_host_with_kev || []).length) rows.push(`That host is ${esc(f.exposed_or_critical_host_with_kev.map(k => CTX[k] || k).join(' and '))}: <b>at least high</b>.`);
+    const sig = [f.risky_signin && 'risky sign-in', f.mailbox_rule && 'suspicious mailbox rule', f.privileged_credential_access && 'privileged credential access',
+      f.threat_intel_malicious && 'indicator rated malicious by threat intel', f.destination_reached && 'malicious destination reached'].filter(Boolean);
+    if (sig.length) rows.push(`Signals found: ${esc(sig.join(', '))}.`);
+    const dims = f.corroborating_dimensions || [];
+    rows.push(`Corroborated in ${dims.length} area(s)${dims.length ? ` (${esc(dims.map(dimLabel).join(', '))})` : ''}${dims.length >= 3 ? ': three or more make it <b>at least high</b>' : ''}; confidence is 35 % + 10 % per area, at most 95 %.`);
+    return `<h3 class="small strong" style="margin:16px 0 4px">Why ${esc(cs.severity)} - computed by fixed rules, the same evidence always gives the same result</h3>
+      <ul class="small" style="margin:0;padding-left:18px">${rows.map(r => `<li>${r}</li>`).join('')}</ul>
+      <div class="t-sub">Result: severity ${esc(cs.severity)}, confidence ${pct(cs.confidence)}.</div>`;
+  };
   setMainG(__g, `<div class="page-head"><div>
       <div class="inline" style="margin-bottom:8px"><a href="#/cases" class="small" aria-label="Back to cases" title="Back to cases">${icon('back', '')}</a>${chip(c.severity)}${chip(c.verdict || 'pending', 'plain')}<span class="muted small">${esc(cap(c.domain))} · ${esc(cap(c.status))} · opened ${dt(c.created_at)}</span></div>
       <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} · automation mode ${esc(cap(c.autonomy_mode || 'recommend'))} ·
@@ -209,12 +239,13 @@ async function CaseDetail(id) {
         ${card('Assessment', `<div class="prose">${esc(c.summary)}</div>${a.narration_pending ? '<div class="t-sub" style="margin-top:6px">The written explanation is being prepared; the verdict, evidence and recommendations below are final. Refresh in a moment.</div>' : ''}
           ${(a.facts || []).length ? `<h3 class="small strong" style="margin:16px 0 4px">Facts</h3>${a.facts.map(x => `<div class="fact small">${esc(x.text)} ${cite(x)}</div>`).join('')}` : ''}
           ${(a.inferences || []).length ? `<h3 class="small strong" style="margin:16px 0 4px">Inferences</h3>${a.inferences.map(x => `<div class="inf small">${esc(x.text)} ${cite(x)}</div>`).join('')}` : ''}
+          ${c.domain === 'incident' && a.scoring ? sevWhy(c, a.scoring) : ''}
           ${(a.mitre || []).length ? `<h3 class="small strong" style="margin:16px 0 6px">MITRE ATT&amp;CK</h3>${a.mitre.map(m => `<span class="tag">${esc(m.technique)} ${esc(m.name || '')}</span>`).join('')}` : ''}`,
-          {sub: 'hover a reference to see the evidence it cites'})}
+          {sub: 'hover a reference to see the evidence it cites; click it to jump there'})}
         ${analysisCard}
         ${card(`Recommended actions <span class="muted">(${acts.length})</span>`, table(['#', 'Action and rationale', 'Targets', 'Status', ''], acts.map(actRow), {empty: 'No actions recommended'}), {flush: true})}
         ${card('Evidence', Object.entries(v.evidence).map(([d, items]) => `<div class="small strong" style="margin:10px 0 2px;text-transform:capitalize">${esc(cap(d))}</div>` +
-          items.map(i => `<div class="ev"><span class="ref">${esc(i.ref || '')}</span><div class="grow small"><span class="muted">${esc(i.source)}</span> · ${esc(i.summary)}
+          items.map(i => `<div class="ev" data-ref="${esc(i.ref || '')}"><span class="ref">${esc(i.ref || '')}</span><div class="grow small"><span class="muted">${esc(i.source)}</span> · ${esc(i.summary)}
             ${i.type !== 'fact' ? chip('inference', 'plain') : ''} ${i.deep_link ? `<a target="_blank" rel="noopener noreferrer" href="${esc(safeUrl(i.deep_link))}">open in tool</a>` : ''}</div></div>`).join('')).join('') || empty('No evidence'))}
       </div>
       <div class="stack">
@@ -234,7 +265,10 @@ async function CaseDetail(id) {
       </div>
     </div>`);
 }
-async function act(aid, verb, cid) { await post(`/api/v1/actions/${aid}/${verb}`, {note: 'via console'}); toast(`Action ${verb === 'approve' ? 'approved' : verb === 'reject' ? 'rejected' : 'rolled back'}`); refreshStatus(); cid ? CaseDetail(cid) : Approvals(); }
+async function act(aid, verb, cid) {
+  const r = await post(`/api/v1/actions/${aid}/${verb}`, {note: 'via console'});
+  toast(verb === 'approve' && (r.result || {}).awaiting_second_approval && r.status === 'pending_approval' ? 'First approval recorded - a second lead must approve before it runs'
+    : `Action ${verb === 'approve' ? `approved - ${cap(r.status || 'done')}` : verb === 'reject' ? 'rejected' : 'rolled back'}`); refreshStatus(); cid ? CaseDetail(cid) : Approvals(); }
 async function assignCase(id, who) { await post(`/api/v1/cases/${id}/assign`, {assignee: who === 'me' ? ME.id : (who || null)}); toast(who ? 'Case assigned' : 'Case unassigned'); CaseDetail(id); }
 async function addNote(id) { const t = $('#note-text').value.trim(); if (!t) { toast('Write a note first', true); return; } await post(`/api/v1/cases/${id}/notes`, {text: t}); toast('Note added'); CaseDetail(id); }
 async function decide(id) { await post(`/api/v1/cases/${id}/disposition`, {verdict: $('#dv').value, reasoning: $('#dr').value}); toast('Decision recorded'); CaseDetail(id); }
@@ -264,7 +298,7 @@ async function Entity(id) {
   const r = e.risk;
   setMainG(__g, `<div class="page-head"><div><div class="inline" style="margin-bottom:8px"><span class="tag">${esc(e.kind)}</span>${r && r.score > 0 ? chip(r.band) : chip('no risk signals', 'plain')}</div>
       <h1>${esc(e.name)}</h1><p>Seen by ${esc(e.seen_by.join(', ') || '–')}</p></div>
-      ${r ? `<div class="actions"><div class="card kpi" style="min-width:160px"><div class="label">Risk score</div><div class="value">${Math.round(r.score)}<span class="muted" style="font-size:14px">/100</span></div><div class="foot">${esc(r.dimensions.join(' · '))}</div></div></div>` : ''}</div>
+      ${r ? `<div class="actions"><div class="card kpi" style="min-width:160px"><div class="label">Risk score</div><div class="value">${Math.round(r.score)}<span class="muted" style="font-size:14px">/100</span></div><div class="foot">${esc(r.dimensions.map(dimLabel).join(' · '))}</div></div></div>` : ''}</div>
     <div class="grid g-2">
       <div class="stack">
         ${card('Why this score', (r && r.factors.length) ? r.factors.map(f => `<div class="list-row" style="align-items:flex-start"><span class="score mono" style="min-width:42px">+${Math.round(f.decayed)}</span>
@@ -294,7 +328,7 @@ async function Approvals() {
   const doms = Object.keys(sm.by_domain).sort();
   const total = APPROVAL_FILTER === 'all' ? sm.total : (sm.by_domain[APPROVAL_FILTER] || 0);
   const types = Object.entries(sm.by_type || {}).slice(0, 8);
-  setMainG(__g, page('Approvals', 'Actions the platform recommends. Nothing here runs until someone with the right role approves it; four-eyes actions need a second person.', '',
+  setMainG(__g, page('Approvals', 'Actions the platform recommends. Nothing here runs until someone with the right role approves it; four-eyes actions need two different people.', '',
     `<div class="grid g-2">
       ${card('Waiting by domain', donut(sm.by_domain), {sub: `${nf(sm.total)} actions awaiting a decision`})}
       ${card('Waiting by action type', hbars(types.map(([t, n]) => ({label: t, values: {actions: n}})), ['actions'], {label: 'actions by type', empty: 'Nothing is waiting'}))}
@@ -304,7 +338,7 @@ async function Approvals() {
       table(['Action', 'Targets', 'Rationale', 'Policy', ''], xs.map(x => `<tr>
       <td class="nowrap"><div class="t-title mono">${esc(x.action_type)}</div><div class="t-sub">${esc(cap(x.domain))} · L${esc(x.level)}</div></td>
       <td class="small wrap">${x.targets.slice(0, 3).map(t => esc(t.name || t.recipient || t.id)).join('<br>') || '<span class="muted">-</span>'}</td><td class="small wrap">${esc(x.rationale)}</td>
-      <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}</td>
+      <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}${(x.result || {}).awaiting_second_approval && x.status === 'pending_approval' ? `<div class="t-sub" style="color:var(--high)">First approval by ${esc(x.approver)} - a second lead must approve</div>` : ''}</td>
       <td><div class="inline" style="flex-wrap:wrap;gap:6px">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}${x.case_id ? `<a class="btn sm ghost" href="#/cases/${encodeURIComponent(x.case_id)}">Case</a>` : ''}</div></td></tr>`),
       {empty: 'Nothing is waiting for approval.'}) +
       pager(APPROVAL_OFFSET, xs.length, total, 'approvalPage', 'actions'), {flush: true})));
@@ -902,7 +936,8 @@ async function Story(id) {
   const [st, llmSt] = await Promise.all([api('/api/v1/cases/' + encodeURIComponent(id) + '/story'), api('/api/v1/llm/status')]);
   const a = st.assessment, b = st.blast_radius.stats;
   const evById = Object.fromEntries(st.events.map(e => [e.ref, e]));
-  const refs = rs => rs.map(r => { const e = evById[r]; return `<abbr class="cite" title="${esc(e ? `${e.tool} · ${e.ts || 'time not reported'} · ${e.title}` : r)}">${esc(r)}</abbr>`; }).join('');
+  const refs = rs => rs.map(r => { const e = evById[r]; const tip = e ? `${e.tool} · ${e.ts ? dt(e.ts) : 'time not reported'} · ${e.title}` : r;
+    return `<abbr class="cite" tabindex="0" data-tip="${esc(tip)}" aria-label="${esc(r + ': ' + tip)}">${esc(r)}</abbr>`; }).join('');
   const kc = st.kill_chain.map(k => `<div class="stg ${esc(k.state)}" title="${esc(k.name)}: ${esc(cap(k.state))}"><b>${esc(k.name)}</b>${
     {observed: 'Observed', blocked: 'Blocked', no_evidence: 'Checked - none', blind_spot: 'Blind spot', before_scope: '-'}[k.state] || esc(k.state)}</div>`).join('');
   const steps = st.steps.map(s => `<div class="stp ${s.outcome === 'blocked' ? 'blocked' : ''}">
@@ -919,7 +954,7 @@ async function Story(id) {
   const plan = st.response_plan.map(ph => `<div class="small strong" style="margin:12px 0 2px">${esc(ph.label)}</div>` + ph.actions.map(x => `
       <div class="plan-item">${x.approvable && can('approve_action') ? `<input type="checkbox" class="plan-cb" value="${esc(x.id)}" ${ph.phase === 'contain' || ph.phase === 'preserve' ? 'checked' : ''} aria-label="select">` : `<span style="width:13px"></span>`}
         <div class="grow"><div class="mono small strong">${esc(x.action_type)}</div><div class="small" style="color:var(--text-2)">${esc(x.rationale)}</div>
-        <div class="t-sub">${esc(x.targets.join(', '))}${(x.duplicate_ids || []).length ? ` · ×${x.duplicate_ids.length + 1} (one per related case, approved together)` : ''}${x.four_eyes ? ' · four-eyes: needs a second approver' : ''}</div></div>
+        <div class="t-sub">${esc(x.targets.join(', '))}${(x.duplicate_ids || []).length ? ` · ×${x.duplicate_ids.length + 1} (one per related case, approved together)` : ''}${x.four_eyes ? ' · four-eyes: two different people approve' : ''}</div></div>
         ${status(x.status === 'executed' ? 'ok' : x.approvable ? 'medium' : 'info', cap(x.status))}</div>`).join('')).join('');
   const da = st.deep_analysis;
   const deepPanel = !llmSt.configured
@@ -952,7 +987,8 @@ async function Story(id) {
 
 function deepHtml(d, evById) {
   if (!d.ok) return `<div class="callout">${esc(d.reason || 'Deep analysis unavailable')}</div>`;
-  const cite = ids => (ids || []).map(r => `<abbr class="cite" title="${esc(evById[r] ? evById[r].title : r)}">${esc(r)}</abbr>`).join('');
+  const cite = ids => (ids || []).map(r => { const tip = evById[r] ? `${evById[r].tool} · ${evById[r].title}` : r;
+    return `<abbr class="cite" tabindex="0" data-tip="${esc(tip)}" aria-label="${esc(r + ': ' + tip)}">${esc(r)}</abbr>`; }).join('');
   return `${d.disagreement ? `<div class="callout danger">${esc(d.disagreement)}</div>` : ''}
     <div class="inline" style="margin-bottom:8px">${chip(d.confidence === 'high' ? 'critical' : d.confidence === 'medium' ? 'medium' : 'info', 'plain')}<span class="small">model confidence <b>${esc(d.confidence)}</b> · ${esc(d.provider)} ${esc(d.model || '')} · ${esc(dt(d.generated_at))}${d.cached ? ' · cached' : ''}</span>
       ${d.dropped_statements ? `<span class="small" style="color:var(--high)">${d.dropped_statements} unsupported statement(s) removed</span>` : '<span class="small muted">every statement cited</span>'}</div>
@@ -979,7 +1015,8 @@ async function approveBundle(id) {
   if (!ids.length) { toast('Select at least one action', true); return; }
   const r = await post(`/api/v1/cases/${id}/story/approve`, {action_ids: ids});
   const failed = r.results.filter(x => !x.ok);
-  toast(`${r.approved} approved${failed.length ? ` · ${failed.length} not approved: ${failed[0].error}` : ''}`, failed.length > 0);
+  const second = r.results.filter(x => x.ok && x.awaiting_second_approval).length;
+  toast(`${r.approved - second} approved${second ? ` · ${second} need a second lead (first approval recorded)` : ''}${failed.length ? ` · ${failed.length} not approved: ${failed[0].error}` : ''}`, failed.length > 0);
   refreshStatus(); Story(id);
 }
 

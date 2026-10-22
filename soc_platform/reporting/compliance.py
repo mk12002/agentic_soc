@@ -59,6 +59,10 @@ def build_evidence(session: Session, settings: Settings, *, period_days: int = 9
     # applies to four-eyes actions, which must be approved by a different person.
     four_eyes = [a for a in acts if any("four" in str(r).lower() for r in (a.policy_reasons or []))]
     self_approved = [a.id for a in four_eyes if a.approver and a.requested_by and a.approver.lower() == a.requested_by.lower()]
+    # an agent's recommendation is no first pair of eyes: an executed one needs two different human approvers
+    self_approved += [a.id for a in four_eyes if a.requested_by_type == "agent" and a.status in {"executed", "rolled_back"}
+                      and not str(a.approver or "").startswith("policy:")
+                      and str((a.result or {}).get("first_approver") or "").lower() in {"", str(a.approver or "").lower()}]
     autonomous = [a for a in acts if a.status in {"executed", "rolled_back"} and str(a.approver or "").startswith("policy:")]
     destructive_auto = [a.id for a in autonomous if any("destructive" in str(r).lower() for r in (a.policy_reasons or []))]
     pols = list(session.execute(select(PolicyVersion).order_by(PolicyVersion.id)).scalars())
@@ -82,7 +86,7 @@ def build_evidence(session: Session, settings: Settings, *, period_days: int = 9
          "tests": [_test("audit hash chain verifies end-to-end", chain["ok"],
                          f"{chain['records']} records; head {str(chain.get('head', ''))[:16]}...", chain)]},
         {"control": "NFR-01 / R04 Human approval and separation of duties for actions",
-         "tests": [_test("four-eyes actions approved by a second person", not self_approved,
+         "tests": [_test("four-eyes actions approved by two different people", not self_approved,
                          f"{len(four_eyes)} four-eyes actions of {len(acts)}; self-approved: {len(self_approved)}", self_approved),
                    _test("no destructive action executed without approval", not destructive_auto,
                          f"{len(autonomous)} autonomous executions; destructive among them: {len(destructive_auto)}",

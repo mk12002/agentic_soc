@@ -7,10 +7,11 @@ import pytest
 from soc_platform.connectors.base import SyncRunner
 from soc_platform.connectors.registry import ConnectorRegistry, discover, interpolate
 from soc_platform.core.actions import ActionService
-from soc_platform.core.auth import agent_principal
+from soc_platform.core.auth import Role, agent_principal
 from soc_platform.core.context_store import ContextStore
 from soc_platform.core.entity_resolution import EntityResolver
 from soc_platform.core.policy import PolicyEngine
+from soc_platform.tests.conftest import person
 
 EXPECTED = {"crowdstrike", "defender_endpoint", "defender_office365", "entra", "rapid7", "wiz", "avanan", "umbrella",
             "canary", "delinea_secret_server", "delinea_privilege_manager", "nvd", "epss", "cisa_kev", "threat_intel",
@@ -114,15 +115,17 @@ def test_actions_registry_routes_endpoint_isolation(session, reg, lead):
     # A Defender-only host must route to MDE, a Falcon host to CrowdStrike.
     r1 = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "db01", "mde_device_id": "mde-db01"}],
                      requested_by=agent_principal("incident"))
-    done = svc.approve(r1.id, lead)
+    svc.approve(r1.id, lead)                                    # four-eyes: two different leads
+    done = svc.approve(r1.id, person("lars", Role.LEAD))
     assert done.status == "executed" and done.result["provider"] == "defender_endpoint"
     r2 = svc.request("endpoint.isolate", targets=[{"type": "asset", "id": "jane", "crowdstrike_aid": "cs-aid-jane01"}],
                      requested_by=agent_principal("incident"))
+    svc.approve(r2.id, person("lars", Role.LEAD))
     done2 = svc.approve(r2.id, lead)
     assert done2.result["provider"] == "crowdstrike"
     rb = svc.rollback(done2.id, lead, note="test")
     assert rb.status == "recommended"                     # lifting containment is four-eyes, like containing
-    from soc_platform.core.auth import Principal, Role
+    from soc_platform.core.auth import Principal
 
     rb = svc.approve(rb.id, Principal(id="lars", name="lars", roles=frozenset({Role.LEAD})))
     assert rb.status == "executed"

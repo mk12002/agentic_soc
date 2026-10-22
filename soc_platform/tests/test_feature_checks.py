@@ -115,3 +115,26 @@ def test_compliance_pack_fails_when_a_control_is_violated(session):
                               policy_reasons=["configured level L2", "four-eyes: a second person must approve"]))
     session.flush()
     assert sod_result() == "fail"
+
+
+def test_compliance_pack_fails_when_one_person_approved_an_agents_four_eyes_action(session):
+    """An agent's recommendation is not a first pair of eyes: one human approval of it fails the control."""
+    from soc_platform.config import Settings
+    from soc_platform.reporting.compliance import build_evidence
+
+    def sod_result():
+        ev = build_evidence(session, Settings(), period_days=30)
+        return next(t for c in ev["controls"] for t in c["tests"] if t["test"].startswith("four-eyes"))["result"]
+
+    session.add(ActionRequest(action_type="endpoint.isolate", targets=[{"id": "h1"}], requested_by="agent:incident",
+                              requested_by_type="agent", approver="lena", idempotency_key="k-two-people",
+                              status="executed", result={"first_approver": "lars"},
+                              policy_reasons=["configured level L2", "four-eyes: two different people must approve"]))
+    session.flush()
+    assert sod_result() == "pass"
+    session.add(ActionRequest(action_type="endpoint.isolate", targets=[{"id": "h2"}], requested_by="agent:incident",
+                              requested_by_type="agent", approver="lena", idempotency_key="k-one-person",
+                              status="executed", result={},
+                              policy_reasons=["configured level L2", "four-eyes: two different people must approve"]))
+    session.flush()
+    assert sod_result() == "fail"

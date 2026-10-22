@@ -13,10 +13,12 @@ import pytest
 from soc_platform.connectors.registry import ConnectorRegistry
 from soc_platform.core.actions import ActionService
 from soc_platform.core.audit import AuditLog
+from soc_platform.core.auth import Role
 from soc_platform.core.policy import DEFAULT_POLICY, PolicyEngine
 from soc_platform.domains.phishing.agents.decompose import decompose
 from soc_platform.domains.phishing.models import Submission
 from soc_platform.domains.phishing.service import AutoClosePolicy, PhishingService
+from soc_platform.tests.conftest import person
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "artifacts" / "phishing" / "corpus"
@@ -77,7 +79,8 @@ def test_remediation_recommendations_are_gated_and_vip_aware(session, ph, lead, 
     assert any("VIP" in r for r in purge["policy_reasons"])
     with pytest.raises(PermissionError):
         ActionService(session, ph.actions, ph.policy).approve(purge["id"], analyst)
-    done = ActionService(session, ph.actions, ph.policy).approve(purge["id"], lead)
+    ActionService(session, ph.actions, ph.policy).approve(purge["id"], lead)         # four-eyes: two different leads
+    done = ActionService(session, ph.actions, ph.policy).approve(purge["id"], person("lars", Role.LEAD))
     assert done.status == "executed" and done.result["messages"] == 9
     assert acts["identity.revoke_sessions"]["targets"][0]["upn"] == "jane.doe@acme-demo.com"
     assert acts["endpoint.isolate"]["targets"][0]["mde_device_id"] == "mde-jane01"
@@ -133,6 +136,7 @@ def test_metrics_and_audit(session, ph, analyst, lead):
     v = ph.process(ph.ingest_reported()[0].id)
     purge = next(a for a in v["actions"] if a["action_type"] == "email.campaign_purge")
     ActionService(session, ph.actions, ph.policy).approve(purge["id"], lead)
+    ActionService(session, ph.actions, ph.policy).approve(purge["id"], person("lars", Role.LEAD))     # four-eyes: the second lead
     m = ph.metrics()
     assert m["reported"] == 1 and m["verdict_mix"] == {"malicious": 1} and m["clickers"] == {"jane.doe@acme-demo.com": 1}
     assert m["time_to_containment_minutes"]["samples"] == 1

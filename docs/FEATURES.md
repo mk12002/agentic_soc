@@ -92,7 +92,10 @@ splits, 100 % match rate on the sample estate.
 ### 1.3 Cases, evidence and explainability
 
 Every investigation is a case with a plain-language assessment, **facts separated from inferences**, each claim
-citing numbered evidence (hover a reference to see the evidence text and source), MITRE ATT&CK mapping,
+citing numbered evidence (hover or focus a reference to see the tool, the time and the evidence text; click it to
+jump to the evidence row), MITRE ATT&CK mapping (a technique the vendor sends by id alone is named from the
+platform's catalogue), on incident cases **Why &lt;severity&gt;** - every fixed rule that set the severity and
+confidence,
 completeness (sources that were unavailable are named, never hidden), recommended actions, entities, a unified
 timeline across tools, analyst decision capture and the case's audit trail.
 
@@ -124,7 +127,7 @@ and a unified cross-tool timeline.
 * **Autonomy levels L0-L4 per action type** (observe, notify, recommend, approve, autonomous). Default: every
   action is L2 - the platform recommends, a person decides.
 * **Gates:** destructive actions are never autonomous; VIP / critical assets and blast radius force approval;
-  hard blast-radius limits block; **four-eyes** actions need a second person (by default: isolate and release a
+  hard blast-radius limits block; **four-eyes** actions need two different people - two leads when the platform recommended them (by default: isolate and release a
   host, disable an account, reset passwords, purge a campaign, rotate a privileged secret, block a domain).
 * **Action layer:** pre-conditions re-checked at execution, idempotency keys (replays never duplicate
   containment), multi-vendor routing (e.g. isolate via CrowdStrike *or* Defender), reverse actions / rollback

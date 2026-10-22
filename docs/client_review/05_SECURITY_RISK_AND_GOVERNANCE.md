@@ -136,7 +136,8 @@ Slack or a webhook.
 request's effective level, in this order: a failed precondition blocks; more targets than the hard limit blocks; the
 kill switch caps at L3; a destructive action type caps at L3; a VIP or critical-asset target forces L3 and
 high-impact; more targets than the action's limit forces L3 and high-impact; four-eyes marks it high-impact. All
-reasons are shown to the approver.
+reasons are shown to the approver. A four-eyes action needs two different people: when the platform recommended it,
+two different leads approve it (the first approval is recorded, nothing runs until the second).
 
 **Default policy** (every action type is L2 - recommend - until the organisation approves a change):
 

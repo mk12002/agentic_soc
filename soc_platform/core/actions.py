@@ -84,6 +84,13 @@ def idempotency_key(action_type: str, params: dict[str, Any], targets: list[dict
     return f"{action_type}:{hashlib.sha256(body.encode()).hexdigest()[:40]}"
 
 
+def _first_approver(req: ActionRequest) -> str | None:
+    """Who gave the first of two four-eyes approvals, or None (a kill-switch hold leaves ``policy:L4`` there)."""
+    if req.status != "pending_approval" or not (req.result or {}).get("awaiting_second_approval"):
+        return None
+    return req.approver if req.approver and not req.approver.startswith("policy:") else None
+
+
 class ActionService:
     def __init__(self, session: Session, registry: ActionRegistry, policy: PolicyEngine) -> None:
         self.s = session
@@ -192,6 +199,14 @@ class ActionService:
                                   else "approve_action permission required")
         if req.requested_by == approver.id and not _self_ok:
             raise PermissionError("separation of duties: requester cannot approve their own action")
+        # Four-eyes means two people. A person who requests the action is the first; when an agent recommended it,
+        # two different people must approve it - the first approval is recorded and the action keeps waiting.
+        first = _first_approver(req)
+        if bool((req.result or {}).get("four_eyes")) and req.requested_by_type == "agent":
+            if first is None:
+                return self._first_approval(req, approver, note)
+            if first.lower() == approver.id.lower():
+                raise PermissionError("four-eyes: a second, different person must approve this action")
         spec = self.registry.get(req.action_type)
         # Pre-conditions are re-checked at execution time; state may have changed since the request.
         failures = spec.preconditions(req.params, req.targets)
@@ -201,16 +216,38 @@ class ActionService:
             self.audit.append(actor_type="human", actor_id=approver.id, event_type="action.blocked",
                               subject_type="action", subject_id=req.id, payload={"failures": failures})
             return req
+        cond = [ActionRequest.id == req.id, ActionRequest.status.in_(APPROVABLE)]
+        if first is not None:
+            cond.append(ActionRequest.approver == first)       # the first approval this decision builds on still holds
         claimed = self.s.execute(
-            update(ActionRequest).where(ActionRequest.id == req.id, ActionRequest.status.in_(APPROVABLE))
+            update(ActionRequest).where(*cond)
             .values(status="approved", approver=approver.id, decision_note=note, decided_at=utcnow())
         ).rowcount
         if claimed != 1:
             raise ValueError("action was decided concurrently")
         self.s.refresh(req)
+        if first is not None:
+            req.result = {**(req.result or {}), "first_approver": first, "awaiting_second_approval": False}
         self.audit.append(actor_type="human", actor_id=approver.id, event_type="action.approved",
                           subject_type="action", subject_id=req.id, payload={"note": note})
         return self._execute(req, spec, actor=approver)
+
+    def _first_approval(self, req: ActionRequest, approver: Principal, note: str) -> ActionRequest:
+        """The first of two approvals of a four-eyes action: recorded (approver column, status pending_approval),
+        audited, nothing executed. Conditional, so two people approving at once cannot both be 'first'."""
+        held = req.approver if (req.approver or "").startswith("policy:") else None
+        claimed = self.s.execute(
+            update(ActionRequest).where(ActionRequest.id == req.id, ActionRequest.status.in_(APPROVABLE),
+                                        ActionRequest.approver.is_(None) if held is None else ActionRequest.approver == held)
+            .values(status="pending_approval", approver=approver.id, decision_note=note)
+        ).rowcount
+        if claimed != 1:
+            raise ValueError("action was decided concurrently")
+        self.s.refresh(req)
+        req.result = {**(req.result or {}), "awaiting_second_approval": True}
+        self.audit.append(actor_type="human", actor_id=approver.id, event_type="action.first_approval",
+                          subject_type="action", subject_id=req.id, payload={"note": note})
+        return req
 
     def reject(self, request_id: str, approver: Principal, note: str = "") -> ActionRequest:
         req = self._get(request_id)

@@ -199,7 +199,7 @@ class PolicyEngine:
             cap(Level.L3_APPROVE, f"blast radius {len(targets)} exceeds {v.max_targets}: lead approval required")
         if v.four_eyes:
             high_impact = True
-            reasons.append("four-eyes: a second person must approve")
+            reasons.append("four-eyes: two different people must approve")
 
         outcome = {
             Level.L0_OBSERVE: "observed",
