@@ -114,6 +114,9 @@ Two virtual machines, each running the API and scheduler containers (`deploy/doc
 `postgres` service, pointed at the shared database), behind a load-balancer pair, with a managed or clustered
 PostgreSQL and `SOC_BLOB_STORE=database` (the compose default). Same guarantees as section 2; capacity is
 added by adding VMs. Kubernetes adds self-healing, rolling deploys and autoscaling on top.
+On Azure, with two `Standard_D2s_v5` VMs in two zones and a zone-redundant PostgreSQL Flexible Server, this costs
+about $554 a month on demand and $351 with 1-year reservations - the recommended size for a small SOC
+(`INFRASTRUCTURE_AND_COSTS.md` section 10.1a).
 
 A single host running the whole compose file (`deploy/docker-compose.yml` as shipped) is right for a demo or a pilot:
 it is a single point of failure by design.

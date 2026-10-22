@@ -250,7 +250,9 @@ def test_the_engine_makes_no_outbound_connection_in_offline_mode(engine, monkeyp
     """The engine read the project's .env itself on first import, so an OCR key there sent image attachments to an
     Azure OCR service, and its URL / threat-intel agents queried public lookup services with e-mail URLs and hashes.
     Offline mode now clears every lookup switch and credential on the live settings: with every network connection
-    blocked, analysing messages with links, an image (QR code) and attachments must not even try to connect."""
+    blocked, analysing messages with links, an image (QR code) and attachments must not even try to connect.
+    Name lookups count too: the sender-reputation store resolved the engine's own database host (``database`` from
+    the engine's .env) on every message - it failed at DNS, before any connect, so blocking connect alone missed it."""
     import socket
 
     from soc_platform.domains.phishing.agents.decompose import decompose
@@ -266,7 +268,14 @@ def test_the_engine_makes_no_outbound_connection_in_offline_mode(engine, monkeyp
         attempts.append(address)
         raise OSError("network blocked by test")
 
+    def no_lookup(host, *a, **k):
+        attempts.append(("dns", host))
+        raise socket.gaierror("name lookup blocked by test")
+
     monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(socket, "getaddrinfo", no_lookup)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@database:5432/email_security")    # as the engine's .env has
+    object.__setattr__(engine_settings, "database_url", "postgresql://u:p@database:5432/email_security")
     try:
         for name in ("quishing_qr", "cred_phish_lookalike", "malspam_macro", "html_attachment_phish"):
             raw = (CORPUS / f"{name}.eml").read_bytes()
@@ -300,3 +309,28 @@ def test_engine_behaviour_does_not_depend_on_a_developers_env_file(monkeypatch):
         az.EngineAnalyzer.enforce_offline()
         assert engine_settings.enable_ocr_extraction is True
         assert engine_settings.azure_ocr_endpoint is None and engine_settings.azure_ocr_key is None   # local only
+
+
+def test_sender_reputation_stays_quiet_when_the_engine_database_is_off(monkeypatch):
+    """In the platform the engine's own database is switched off by design; sender reputation logged "Failed to get
+    sender reputation" for every analysed e-mail. Off by design is not a failure: neutral, no attempt, no warning."""
+    pytest.importorskip("psycopg2")
+    from loguru import logger as engine_log
+
+    from soc_platform.domains.phishing.engine.services import database as db
+    from soc_platform.domains.phishing.engine.services import sender_reputation as sr
+
+    monkeypatch.setenv("ENGINE_DATABASE_ENABLED", "0")
+    called = []
+    monkeypatch.setattr(db, "connect_database", lambda *a, **k: called.append(a))
+    warnings = []
+    sink = engine_log.add(lambda m: warnings.append(m), level="WARNING")
+    try:
+        rep = sr.SenderReputationEngine()
+        assert rep.get_reputation("Someone@Example.org")["status"] == "unavailable"
+        assert rep.update_reputation("someone@example.org", "malicious", 0.9)["status"] == "unavailable"
+        rep.record_feedback("someone@example.org", True)
+        rep.ensure_table()
+    finally:
+        engine_log.remove(sink)
+    assert called == [] and warnings == []

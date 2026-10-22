@@ -59,6 +59,14 @@ def _candidate_urls(database_url: str) -> list[DatabaseConnectionAttempt]:
 _BREAKER: dict[str, float] = {}
 
 
+def database_enabled() -> bool:
+    """False when the engine's own database is switched off (``ENGINE_DATABASE_ENABLED=0``) - as it always is when the
+    engine runs inside the platform, which keeps its state in the platform's database."""
+    import os
+
+    return os.environ.get("ENGINE_DATABASE_ENABLED", "1") != "0"
+
+
 def connect_database(
     database_url: str,
     *,
@@ -76,7 +84,7 @@ def connect_database(
     import os
     import time as _time
 
-    if os.environ.get("ENGINE_DATABASE_ENABLED", "1") == "0":
+    if not database_enabled():
         raise psycopg2.OperationalError("engine database disabled (ENGINE_DATABASE_ENABLED=0)")
     opened_until = _BREAKER.get(database_url, 0.0)
     if _time.monotonic() < opened_until:

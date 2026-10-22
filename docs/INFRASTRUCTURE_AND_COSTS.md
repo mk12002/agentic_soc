@@ -22,7 +22,7 @@ measurement method), `CLIENT_DEPLOYMENT_GUIDE.md` (per-tool permissions and setu
 |---|---|---|
 | What does it run on? | Two small application services (API, scheduler) in containers and **one PostgreSQL database**. Nothing else is required. | Architecture |
 | Recommended hosting | **Azure** (the organisation's identity, Defender, Sentinel and Azure OpenAI are already there), across three availability zones. On premises is fully supported with the same images. | Section 9 |
-| Monthly infrastructure, production HA | **≈ $701 pay-as-you-go; ≈ $470 with 1-year reservations** (Azure, small-to-mid SOC, every component redundant across three availability zones). Large SOC: ≈ $1,386 / $924. Add $389 for a dedicated WAF **only if** the console is reachable from the internet. | [P] section 10.1 |
+| Monthly infrastructure, production HA | **Small SOC: ≈ $554 on demand, ≈ $351 with 1-year reservations (lean HA, no Kubernetes, section 10.1a).** Small-to-mid with Kubernetes: **≈ $701 pay-as-you-go; ≈ $470 with 1-year reservations** (Azure, small-to-mid SOC, every component redundant across three availability zones). Large SOC: ≈ $1,386 / $924. Add $389 for a dedicated WAF **only if** the console is reachable from the internet. | [P] section 10.1 |
 | Monthly LLM cost | **$5-$26 (small / mid SOC) on gpt-4.1-mini**; $1.50-$7.50 on Claude Haiku 5.5; about $93-$100 on premium models for a mid SOC. Capped by a hard budget. | [M] tokens x [P] prices, section 11 |
 | Storage | **About 5.7 KB per stored record**, all indexes and links included. A mid-size SOC needs roughly 30-60 GB for a full year. | [M] section 5 |
 | Capacity | 100 concurrent analysts served at 150 requests/s with no error by four server processes on a laptop; sync of 21,691 records in 6 minutes on PostgreSQL. A real SOC's load is a fraction of this. | [M] section 6 |
@@ -315,6 +315,21 @@ $1,319 per vCore for 3 years [P]). Backup stays free while the backups fit in th
 retention, a mid-size SOC's database (27 GB after 400 days, section 5) and its daily changes fit in 64 GiB [A];
 geo-redundant backup (decision D6) is billed for the part above the provisioned size.
 
+**Lowering the bill.** These are list prices, not fixed prices. With the same high-availability design:
+
+| Lever | Recommended HA, per month | How |
+|---|---|---|
+| Pay-as-you-go (the table above) | $700.69 | - |
+| 1-year reservations (nodes, database) | $469.54 | the table above |
+| 3-year reservations | **≈ $346.93** | nodes 3 x $1,048 / 36 = $87.33, database 4 vCore x $1,319 / 36 = $146.56 (primary + standby), the other lines unchanged at $113.04 [P] |
+| The organisation's Microsoft agreement | lower again | Enterprise Agreement / Azure commitment discounts apply on top of list price; not known here |
+| An existing shared AKS cluster and registry | minus $73 + most of the $221 nodes | the platform needs about 4 vCPU of pod requests (section 2) on a cluster that already has an SLA and spare capacity |
+| Right-size after measuring | depends | sizes here are generous for the mid profile; `load_test.py` and `measure_scale.py` against the real environment (section 14) |
+
+Savings that **reduce availability** (acceptable for a pilot, not for production): no zone-redundant standby
+(-$191.61 pay-as-you-go), two nodes instead of three (-$73.73), AKS Free tier (-$73.00) - section 10.2 says what each
+one costs in resilience. The pilot configuration without redundancy is $352.68.
+
 **Where the money goes (recommended, pay-as-you-go):** the database with its standby 55 %, the three nodes 32 %, the
 AKS SLA 10 %, everything else 3 %.
 
@@ -331,6 +346,39 @@ AKS SLA 10 %, everything else 3 %.
 `scripts/load_test.py` and `scripts/measure_scale.py --db <the Azure server>` against the provisioned environment;
 moving to the large size is a setting change (Microsoft: scaling database compute causes a short downtime even with
 HA, so schedule it).
+
+### 10.1a Lean HA for a small SOC - no Kubernetes [P]
+
+At a small SOC's volume (the small profile of section 5, or an organisation's own ticket counts well below it) the
+application tier needs very little: the cost of 10.1 is the redundant database and the Kubernetes machinery, not
+capacity. The lean design keeps the guarantee that matters - **the database survives a zone with no committed data
+lost** - and runs the two application services on two plain VMs instead of a cluster. Unit prices from the Azure
+Retail Prices API, Central India, read **2026-10-21** (VMs) and 2026-10-18 (the rest, as in 10.1):
+
+| Item | Unit price [P] | Lean HA, on demand | 1-year reserved | 3-year reserved |
+|---|---|---|---|---|
+| 2 VMs `Standard_D2s_v5` (2 vCPU, 8 GB), one per availability zone, each running the API and the scheduler | $0.101/h; reserved $546 per year, $1,048 per 3 years | $147.46 | $91.00 | $58.22 |
+| PostgreSQL Flexible Server, General Purpose 2 vCore + zone-redundant standby | as 10.1 | $366.46 | $220.00 | $146.56 |
+| PostgreSQL storage, primary and standby | as 10.1 | $16.77 | $16.77 | $16.77 |
+| Log Analytics 5 GB, Key Vault, Container Registry Basic | as 10.1 | $23.27 | $23.27 | $23.27 |
+| Load balancing | the organisation's existing Application Gateway or load balancer [A] | $0 | $0 | $0 |
+| **Total** | | **$553.96** | **$351.04** | **$244.82** |
+
+Against 10.1's recommended configuration that is $146.73 less on demand, $118.50 less with 1-year reservations and
+$102.11 less with 3-year reservations. What it gives up: the managed Kubernetes control plane's self-healing and
+autoscaling, and zero-downtime rolling deploys (a deploy updates one VM at a time). What it keeps: two copies of the
+application in two zones (a job on a failed VM is taken over within one 120 s lease, `test_high_availability.py`),
+the zone-redundant database (D1), point-in-time backups. Stored e-mails and reports must be in the database
+(`SOC_BLOB_STORE=database`), as in 10.1. **Deployment:** each VM runs only the API and scheduler services of `deploy/docker-compose.yml`
+(not its `postgres` service) with `SOC_DATABASE_URL` pointed at the managed server - the smallest deployment without
+a single point of failure in `HIGH_AVAILABILITY.md` section 3.3. D2s_v5 is chosen over the burstable B2ms ($0.0896/h, no
+reservation listed in Central India on 2026-10-21) because reserved it is cheaper and its CPU is not credit-limited.
+
+**Pilot, no redundancy:** one `Standard_B2ms` VM ($0.0896/h = $65.41) and PostgreSQL Flexible Server Burstable B2s
+($0.098/h = $71.54; Burstable cannot have an HA standby) with 64 GiB storage ($8.38) and the same $23.27 of logs,
+vault and registry: **≈ $168.60 a month** on demand. A zone outage means a point-in-time restore (minutes to hours).
+Neither burstable size has been measured with the platform: run `scripts/load_test.py` and
+`scripts/measure_scale.py` against it, as for every size in this section.
 
 ### 10.2 Every availability decision, justified
 
@@ -384,6 +432,25 @@ support (an OpenShift or Tanzu subscription, PostgreSQL vendor support) at the o
 
 **Monthly cost formula [A]:** 9 VMs (or 6 if a cluster exists) × the internal monthly VM rate + 1-2 TB backup storage
 × the internal storage rate + 3-4 person-days of platform operations × the internal day rate.
+
+**Indicative monthly cost on dedicated hardware [A]** - for comparison with section 10.1; replace every line with the
+organisation's own quote and internal rates. The 9 VMs run on three physical servers, one per failure domain (losing a
+server loses one VM of each kind, which the design tolerates), so each server carries about 8 vCPU, 32 GB and 500 GB:
+
+| Item | Assumption | Per month |
+|---|---|---|
+| 3 servers: 8 cores, 64 GB RAM, 2 x 960 GB SSD (mirrored) | $4,000-6,000 each, written off over 5 years [A]; vendor list prices vary widely with configuration - an entry 1U model (for example the Dell PowerEdge R360: one Xeon E-2400, up to 8 cores) fits | $200-300 |
+| Backup NAS at a second site, 2 TB | about $1,500, 5 years [A] | $25 |
+| Power and cooling | about 0.4 kW of equipment, 0.6 kW with cooling (PUE 1.5), 730 h, at $0.10-0.18 per kWh [A] | $45-80 |
+| Hardware support | about 10 % of the hardware price a year [A] | $100-150 |
+| Platform operations | 3-4 person-days a month at $150-300 a day [A] | $450-1,200 |
+| Software licences | none (open source) | $0 |
+| **Total** | | **≈ $820-1,760** |
+
+People are half to two-thirds of the total. On an **existing** virtualisation or Kubernetes platform with spare
+capacity the server, backup, power and support lines largely disappear (the VMs come from existing capacity at the
+internal charge-back rate) and the extra operations effort is about 1-2 person-days a month: that is the only case in
+which on premises is cheaper in cash than Azure's reserved price (section 9).
 
 ---
 
@@ -455,6 +522,10 @@ How to read it:
 | **Recommended HA**, small SOC, 1-year reserved | $470 | $5 | $1.50 | **≈ $475** |
 | **Recommended HA**, mid-size SOC, pay-as-you-go | $701 | $26 | $7.50 | **≈ $727** |
 | **Recommended HA**, mid-size SOC, 1-year reserved | $470 | $26 | $7.50 | **≈ $496** |
+| **Lean HA (10.1a)**, small SOC, on demand | $554 | $5 | $1.50 | **≈ $559** |
+| **Lean HA (10.1a)**, small SOC, 1-year reserved | $351 | $5 | $1.50 | **≈ $356** |
+| **Lean HA (10.1a)**, small SOC, 3-year reserved | $245 | $5 | $1.50 | **≈ $250** |
+| Pilot, single VM + burstable database (10.1a) | $169 | $5 | $1.50 | **≈ $174** |
 | Large SOC HA, pay-as-you-go | $1,386 | $148 | $43 | **≈ $1,534** |
 | Large SOC HA, 1-year reserved | $924 | $148 | $43 | **≈ $1,072** |
 | Any of the above, console internet-facing | + $389 (large: + $410) dedicated WAF | - | - | - |
@@ -531,6 +602,7 @@ removed) and replays them through the test suite, then read-only and shadow mode
 | The 2-vCore database carries the mid-size load | database size | `scripts/measure_scale.py --db <server>` and the load test before go-live |
 | Whether the console is reachable from the internet | the WAF line (D5) | the organisation's access design |
 | Operations effort (1 vs 3-4 person-days/month) | hosting decision | the organisation's platform team |
+| On-premises hardware, power, support and day rates (section 10.3) | on-premises cost | the organisation's hardware quote and internal rates |
 | Real vendor payload size (only if raw payloads are kept) | storage | `SOC_STORE_RAW_PAYLOADS=1` in the record stage, then the `blobs` table size |
 | Claude token counts | options D, E | `scripts/measure_llm_usage.py` against the chosen model |
 

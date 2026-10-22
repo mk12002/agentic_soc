@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from soc_platform.domains.phishing.engine.services.database import database_enabled
 from soc_platform.domains.phishing.engine.services.logging_service import get_service_logger
 
 logger = get_service_logger("sender_reputation")
@@ -29,6 +30,8 @@ class SenderReputationEngine:
 
     def ensure_table(self) -> None:
         """Create sender_reputation table if it doesn't exist."""
+        if not database_enabled():
+            return
         try:
             with self._connect() as conn:
                 with conn.cursor() as cur:
@@ -58,6 +61,8 @@ class SenderReputationEngine:
     def update_reputation(self, sender_email: str, verdict: str, risk_score: float) -> dict[str, Any]:
         """Update sender reputation after an analysis."""
         sender_email = sender_email.lower().strip()
+        if not database_enabled():   # switched off by design (in-platform): neutral, no connection, no warning
+            return {"sender_email": sender_email, "reputation_score": 0.5, "status": "unavailable"}
         sender_domain = sender_email.split("@")[-1] if "@" in sender_email else sender_email
         now = datetime.now(UTC)
 
@@ -106,6 +111,8 @@ class SenderReputationEngine:
     def get_reputation(self, sender_email: str) -> dict[str, Any]:
         """Get reputation for a sender email address."""
         sender_email = sender_email.lower().strip()
+        if not database_enabled():   # switched off by design (in-platform): neutral, no connection, no warning
+            return {"sender_email": sender_email, "reputation_score": 0.5, "status": "unavailable"}
         try:
             with self._connect() as conn, conn.cursor() as cur:
                 cur.execute("""
@@ -142,6 +149,8 @@ class SenderReputationEngine:
     def record_feedback(self, sender_email: str, is_false_positive: bool) -> None:
         """Record analyst feedback for reputation adjustment."""
         sender_email = sender_email.lower().strip()
+        if not database_enabled():
+            return
         try:
             with self._connect() as conn:
                 with conn.cursor() as cur:
