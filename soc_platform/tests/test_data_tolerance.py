@@ -359,6 +359,7 @@ def test_a_postgresql_url_without_a_driver_uses_the_installed_one():
     assert engine_url("sqlite:///x.db") == "sqlite:///x.db"
 
 
+@pytest.mark.skipif(bool(__import__("os").environ.get("SOC_TEST_POSTGRES")), reason="SQLite file check (PG mode maps SQLite URLs to PostgreSQL)")
 def test_a_sqlite_database_in_a_folder_that_does_not_exist_yet_is_created(tmp_path):
     """.env.example puts the database in ./data/, which a fresh clone does not have: reset-demo failed with
     'unable to open database file' on the first command after cloning."""
