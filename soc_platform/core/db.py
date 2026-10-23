@@ -61,6 +61,20 @@ class BoundedText(TypeDecorator):
         return value
 
 
+def _sqlite_folder(url: str) -> None:
+    """Create the folder of a SQLite database file: .env.example puts it in ./data/, which a fresh clone does not have
+    (git ignores it), and SQLite will not create a folder - 'unable to open database file' on the first command."""
+    if not url.startswith("sqlite"):
+        return
+    from pathlib import Path
+
+    from sqlalchemy.engine import make_url
+
+    name = make_url(url).database
+    if name and name != ":memory:" and not name.startswith("file:"):
+        Path(name).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
+
 def engine_url(url: str) -> str:
     """A PostgreSQL URL that names no driver gets the one the platform installs (psycopg2). SQLAlchemy 2.1 changed
     its default for ``postgresql://`` to psycopg 3, so a plain URL (the usual form from a vault or a managed
@@ -85,6 +99,7 @@ class Database:
             kwargs["poolclass"] = StaticPool
         else:
             kwargs.update(pool_settings())
+            _sqlite_folder(url)
         timeout, idle = statement_timeout_ms(), idle_tx_timeout_ms()
         if (timeout or idle) and url.startswith("postgresql"):
             # a runaway query, or a transaction left open by a stuck caller, releases its connection and locks (the

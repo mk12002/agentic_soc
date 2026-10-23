@@ -34,28 +34,36 @@ and requires identical results with no original name in any output ([details](do
 Every connector has a **fake mode** that replays vendor-shaped fixture data through the same code as the live API,
 so the whole platform runs end to end on a laptop.
 
+You need Python 3.11-3.13 and [Git LFS](https://git-lfs.com) (the phishing models are stored with it - install it
+**before** cloning, or run `git lfs pull` afterwards).
+
 ```bash
 git clone https://github.com/mk12002/agentic_soc.git && cd agentic_soc
 python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements/platform.txt -r requirements/dev.txt
+pip install -r requirements/platform.txt -r requirements/dev.txt -r requirements/phishing.txt
 pip install -e .
-cp .env.example .env                           # set SOC_DEV_JWT_SECRET to a long random string
+cp .env.example .env                           # then set SOC_DEV_JWT_SECRET to a long random string
+```
 
-python -m soc_platform demo                    # runs all three workflows on the sample estate
+The platform reads its settings **only from the environment** - it never opens `.env` by itself. Load it into the
+shell you start the platform from, then build the demo and start the server **in that same shell**:
+
+```bash
+set -a; . ./.env; set +a                       # bash / zsh  (PowerShell: . .\scripts\load_env.ps1)
+python -m soc_platform reset-demo --yes        # empty database + all three workflows on the sample estate
 python -m soc_platform serve                   # API + console on http://127.0.0.1:8080
 ```
+
+From Windows Command Prompt, `scripts\serve_with_env.cmd reset` does all three steps. The first lines `serve`
+prints must say `sign-in: development sign-in on`; if they say `OFF`, `.env` was not loaded in that shell.
 
 Open the console, choose a role and **Continue** (development sign-in; production uses Entra ID SSO). Then run the
 pipelines from *Cases* and *Vulnerabilities*, or follow the scripted walkthrough in
 [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md). The console opens in light mode; the moon icon switches to dark.
 
-The phishing ML swarm (content text classifier, URL/header/attachment/TI/behaviour models; sandbox with a detonation host) runs automatically
-once installed (`SOC_PHISHING_ENGINE=auto`; `0` = rule-based analyser only):
-
-```bash
-git lfs pull
-pip install -r requirements/phishing.txt
-```
+The phishing ML swarm (content text classifier, URL/header/attachment/TI/behaviour models; sandbox with a detonation
+host) runs automatically when `requirements/phishing.txt` is installed and the models are present
+(`SOC_PHISHING_ENGINE=auto`; `0` = rule-based analyser only). Without it everything works on the rule-based analyser.
 
 ### Docker
 

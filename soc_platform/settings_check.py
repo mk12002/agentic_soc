@@ -125,6 +125,8 @@ TEXT = {"SOC_HOST", "SOC_DB_RUNTIME_ROLE", "SOC_ENTRA_TENANT_ID", "SOC_ENTRA_AUD
         "SOC_JOB_RETENTION_SECONDS", "SOC_JOB_SELF_CHECK_SECONDS", "SOC_JOB_VM_SECONDS", "SOC_JOB_WEEKLY_REPORTS_SECONDS"}
 JOB_SECONDS = {n for n in TEXT if n.startswith("SOC_JOB_")}
 IGNORED_PREFIXES = ("SOC_TEST_", "SOC_LIVE_")          # test-suite controls
+# read by the deployment (Docker Compose, deploy/postgres/init-roles.sh), not by the platform: known, so not "unknown"
+DEPLOYMENT_ONLY = {"SOC_APP_DB_PASSWORD"}
 
 
 def _num(kind: str, raw: str) -> float | None:
@@ -229,7 +231,7 @@ def _sslmode(url: str) -> str:
 
 def _known(name: str) -> bool:
     base = name.removesuffix("_FILE")   # NAME_FILE: a vault-mounted secret for NAME
-    return base in SPEC or base in TEXT or name in SPEC or name in TEXT
+    return base in SPEC or base in TEXT or name in SPEC or name in TEXT or name in DEPLOYMENT_ONLY
 
 
 def check_environment(env: Mapping[str, str] | None = None) -> list[SettingProblem]:

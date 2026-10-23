@@ -357,3 +357,32 @@ def test_a_postgresql_url_without_a_driver_uses_the_installed_one():
     assert engine_url("postgres://u@db/soc") == "postgresql+psycopg2://u@db/soc"
     assert engine_url("postgresql+psycopg2://u@db/soc") == "postgresql+psycopg2://u@db/soc"   # named driver kept
     assert engine_url("sqlite:///x.db") == "sqlite:///x.db"
+
+
+def test_a_sqlite_database_in_a_folder_that_does_not_exist_yet_is_created(tmp_path):
+    """.env.example puts the database in ./data/, which a fresh clone does not have: reset-demo failed with
+    'unable to open database file' on the first command after cloning."""
+    from soc_platform.core.db import Database
+
+    target = tmp_path / "data" / "nested" / "soc.db"
+    db = Database(f"sqlite:///{target.as_posix()}")
+    db.create_all()
+    assert target.exists()
+    db.engine.dispose()
+
+
+def test_the_env_example_holds_no_setting_the_settings_check_calls_unknown():
+    """The template a fresh clone copies must pass `config check` without warnings about its own names
+    (SOC_APP_DB_PASSWORD, used by Compose and the database init script, was reported as unknown)."""
+    from pathlib import Path
+
+    from soc_platform.settings_check import check_environment
+
+    env = {}
+    for line in (Path(__file__).resolve().parents[2] / ".env.example").read_text(encoding="utf-8").splitlines():
+        t = line.strip()
+        if t and not t.startswith("#") and "=" in t:
+            k, v = t.split("=", 1)
+            env[k.strip()] = v.split(" #")[0].strip()
+    unknown = [p for p in check_environment(env) if "not a setting" in p.message]
+    assert not unknown, [p.name for p in unknown]
