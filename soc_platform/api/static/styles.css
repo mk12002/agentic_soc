@@ -390,4 +390,4 @@ svg.graph line { stroke: var(--border-strong); stroke-width: 1; }
 .bchips { display: flex; flex-wrap: wrap; gap: 6px; }
 .binds { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 16px; }
 .bind { min-width: 0; }
-.bind .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bind .mono { overflow-wrap: anywhere; }   /* long URLs / hashes wrap rather than hide behind an ellipsis */
