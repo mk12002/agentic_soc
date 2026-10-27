@@ -32,7 +32,16 @@ sample data for demo names, hosts, domains, CVEs and ids found only comments, co
 dev sign-in default and the `demo` command). Not provable here: a run against a real tenant - the record / read /
 recommend stages and the preflight exist to find vendor differences before anything acts.
 
-**Counts:** 818 passed, 16 skipped (834 collected) on SQLite and on PostgreSQL 16. Lint clean.
+**A fresh clone, followed as a newcomer would** (cloned from GitHub into an empty folder, installed from zero, the
+README run step by step): code, fixtures, corpus and the Git LFS models all arrived; the demo matched this machine
+figure for figure; 55 tests passed in the clone, the engine's included. Three things stopped a newcomer and are fixed:
+the first command failed ("unable to open database file" - `.env.example` puts the database in `./data/`, which git
+ignores and SQLite does not create; the platform now creates the folder); the README never loaded `.env` (sign-in was
+disabled, and the demo and the server used different databases); `config check` called a template setting
+(`SOC_APP_DB_PASSWORD`, used by Compose) unknown. Regression tests: `test_data_tolerance.py` (both fail without the fixes).
+
+**Counts:** 820 passed, 16 skipped on SQLite; 819 passed, 17 skipped on PostgreSQL 16 (836 collected; the SQLite
+database-folder check skips on PostgreSQL). Lint clean.
 
 ## 0.00 Round 28 (2026-10-20): Python 3.13, and figures that aged with the calendar
 
