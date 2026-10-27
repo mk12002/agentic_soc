@@ -465,7 +465,7 @@ change a setting → propose → *Configuration changes awaiting approval*; **Pa
 **THE POINT:** autonomy is a versioned, two-person decision per action type, with a durable off switch.
 
 **VOICE-OVER:**
-> Autonomy is not on or off; it is set per action type, from observe, to notify, to recommend, to approve, to
+> Autonomy is not on or off; it is set per action type, from observe, to enrich, to recommend, to approve, to
 > autonomous. Today every action is at recommend. Moving one up - say, blocking a known-malicious file hash on
 > endpoints automatically - is a policy change proposed by one person and approved by another, with every version kept.
 >

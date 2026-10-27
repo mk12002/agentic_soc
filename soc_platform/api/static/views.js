@@ -750,7 +750,7 @@ async function saveLlmPolicy() {
 async function Policy() {
   const __g = GEN;
   const [p, cat, h] = await Promise.all([api('/api/v1/policy'), api('/api/v1/actions/catalog'), api('/health')]);
-  setMainG(__g, page('Automation policy', `Versioned autonomy policy (active version ${esc(p.active_version || 'default')}). L0 observe · L1 notify · L2 recommend · L3 approve · L4 autonomous. Destructive actions are never autonomous.`, '',
+  setMainG(__g, page('Automation policy', `Versioned autonomy policy (active version ${esc(p.active_version || 'default')}). L0 observe · L1 enrich · L2 recommend · L3 approve · L4 autonomous. Destructive actions are never autonomous.`, '',
     `<div class="grid g-2">
       ${card('Actions', table(['Action', 'Executes via', 'Level', 'Properties'], cat.map(a => `<tr><td class="mono small">${esc(a.action_type)}</td><td class="small muted">${esc(a.tool)}</td>
         <td><span class="chip plain ${a.level >= 4 ? 'high' : a.level === 3 ? 'medium' : ''}">L${a.level}</span></td><td class="small">${a.destructive ? chip('destructive', 'high plain') : ''} ${a.reversible ? chip('reversible', 'ok plain') : ''}</td></tr>`)), {flush: true})}
