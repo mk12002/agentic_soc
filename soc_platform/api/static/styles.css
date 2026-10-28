@@ -147,6 +147,10 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .page-head h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; margin: 0; font-weight: 650; }
 .page-head p { margin: 4px 0 0; color: var(--text-3); max-width: 760px; }
 .page-head .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+/* entity 360: name and risk card share the row (3:1); when the card wraps under the name it fills the row instead
+   of sitting at the right edge with an empty gap beside it */
+.page-head .ph-main { flex: 3 1 420px; min-width: 0; }
+.page-head .ph-score { flex: 1 1 260px; min-width: 0; }
 
 /* ---------------------------------------------------------------- layout */
 .grid { display: grid; gap: 16px; }
@@ -247,7 +251,8 @@ textarea { height: auto; padding: 8px 10px; }
 .inf { border-left: 2px dashed var(--border-strong); color: var(--text-2); }
 .ev { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .ev:last-child { border-bottom: 0; }
-.ev .ref { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); min-width: 30px; }
+.ev .ref { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); min-width: 30px; flex: none; }   /* a tool name never squeezed by its text */
+.ev > .small { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 abbr.cite { text-decoration: none; font-family: var(--mono); font-size: 11px; color: var(--accent); background: var(--accent-soft);
   padding: 0 5px; border-radius: 4px; margin-left: 3px; cursor: pointer; position: relative; }
 abbr.cite[data-tip]:hover::after, abbr.cite[data-tip]:focus-visible::after {
@@ -390,4 +395,17 @@ svg.graph line { stroke: var(--border-strong); stroke-width: 1; }
 .bchips { display: flex; flex-wrap: wrap; gap: 6px; }
 .binds { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 16px; }
 .bind { min-width: 0; }
+/* approvals: what each action is about, and its "why and what" panel */
+.origin { margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+tr.adetail > td { background: var(--surface-2); }
+.adbox { padding: 6px 2px; }
+.adgrid { gap: 20px; }
+.adgrid .list-row { padding: 6px 0; }
+.adpre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; margin: 6px 0; max-height: 260px; overflow-y: auto; }
+.mt-s { margin-top: 8px; }
+/* "+N more": opens the rest of a list in place */
+.linkbtn { background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px; color: var(--accent); cursor: pointer; }
+.linkbtn:hover { text-decoration: underline; }
+.linkbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .bind .mono { overflow-wrap: anywhere; }   /* long URLs / hashes wrap rather than hide behind an ellipsis */

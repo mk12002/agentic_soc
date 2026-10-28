@@ -55,6 +55,11 @@ const AUDIT = () => {
     const r = el.getBoundingClientRect();
     if (!el.children.length && (el.textContent || '').trim() && cs.display !== 'inline' && r.height > 0 && r.width < 24 && el.scrollWidth > r.width + 4)
       out.push('squeezed ' + desc(el));  // text box collapsed by its neighbours
+    // a one-word label (a tool name, tag or chip) broken across lines by its neighbours ("phis / hing")
+    if (el.matches('.ev .ref, .tag, .chip') && !/\s/.test((el.textContent || '').trim())) {
+      const rg = document.createRange(); rg.selectNodeContents(el);       // the text's own line boxes, not the (stretched) box
+      if (new Set([...rg.getClientRects()].map(x => Math.round(x.top))).size > 1) out.push('label broken ' + desc(el));
+    }
     if (!r.width || !r.height) continue;
     if ((cs.overflowX === 'hidden' || cs.overflowX === 'clip') && el.scrollWidth > el.clientWidth + 1 && !el.classList.contains('clamp') && el.tagName !== 'SELECT')
       out.push('clipped ' + desc(el));
@@ -140,6 +145,7 @@ async function visit(page, hash, name, full = true) {
   await page.fill('#iq', `Is ${EST.focus_upn} compromised and what should we do first?`);
   await page.click('[data-fn="askIntel"]');
   await page.waitForFunction(() => !document.querySelector('#ia .spin') && document.querySelector('#ia').textContent.length > 40, null, {timeout: 120000});
+  await page.$$eval('#main details', ds => ds.slice(0, 2).forEach(d => { d.open = true; }));   // findings' evidence audited open
   await shot(page, '02-intelligence');
   await visit(page, 'cases', '03-cases', false);
   const term = EST.focus_upn.split('@')[0].split(/[._]/)[0];          // e.g. "jane": finds cases, identity, findings
@@ -153,6 +159,11 @@ async function visit(page, hash, name, full = true) {
   const analysis = await page.evaluate(() => [...document.querySelectorAll('#main .card-h h2')].map(h => h.textContent).includes('Analysis'));
   if (!analysis) problems.push('phishing case: the Analysis card (models vs rules) is missing');
   await page.hover('abbr.cite').catch(() => {});
+  if (await page.$('[data-fn="showMore"]')) {          // "+N more" opens the rest of the list in place
+    const id = await page.getAttribute('[data-fn="showMore"]', 'aria-controls');
+    await page.click('[data-fn="showMore"]');
+    if (await page.$eval(`#${id}`, el => el.hidden || !el.getBoundingClientRect().height)) problems.push('"+N more" did not open the rest of the list');
+  } else problems.push('phishing case: no "+N more" list to open (the campaign purge has more than 3 targets)');
   await page.goto(`${BASE}/#/cases/${incCase.id}`); await settle(page);   // own the case and leave a note, in the UI
   await page.click('[data-fn="assignCase"]'); await settle(page);
   await page.fill('#note-text', 'Spoke to the user: laptop handed to IT for re-imaging. Waiting on EDR isolation approval.');
@@ -164,6 +175,21 @@ async function visit(page, hash, name, full = true) {
   await shot(page, '05-case-incident');
   await visit(page, `entity/${jane.id}`, '06-entity-360');
   await visit(page, 'approvals', '07-approvals');
+  {                                             // "why and what": an action with cited evidence, opened in the list
+    const acts = await call(lead, 'GET', '/api/v1/actions?status=recommended,pending_approval');
+    const a = acts.find(x => x.case && (x.evidence_ids || []).length);
+    if (!a) problems.push('approvals: no action with cited evidence to open');
+    else {
+      await page.click(`[aria-controls="ad-${a.id}"]`);
+      await page.waitForFunction(id => { const r = document.getElementById('ad-' + id); return r && r.dataset.loaded; }, a.id, {timeout: 30000})
+        .catch(() => problems.push('approvals: the why-and-what panel did not load'));
+      const refs = await page.$$eval(`#ad-${a.id} .adgrid .list-row .mono.strong`, xs => xs.map(x => x.textContent.trim()));
+      if (refs.join(',') !== a.evidence_ids.join(','))
+        problems.push(`screen/API mismatch - approvals "evidence cited in the panel": screen ${refs.join(',')}, API ${a.evidence_ids.join(',')}`);
+      await page.$eval(`#ad-${a.id}`, r => r.scrollIntoView({block: 'center'}));
+      await shot(page, '07b-approval-detail', false);
+    }
+  }
   await visit(page, `story/${phishCase.id}`, '24-attack-story');
   const llmOn = (await call(lead, 'GET', '/api/v1/llm/status')).configured;
   if (llmOn) {                                  // real model: the evidence-bound review, photographed as it renders
@@ -229,7 +255,7 @@ async function visit(page, hash, name, full = true) {
   const tabs = await page.$$eval('.seg button', bs => Object.fromEntries(bs.map(b => [b.childNodes[0].textContent.trim().toLowerCase(), b.querySelector('.muted') ? b.querySelector('.muted').textContent.trim() : ''])));
   same('approvals', 'All tab', tabs.all, asum.total);
   for (const [d, n] of Object.entries(asum.by_domain)) same('approvals', `${d} tab`, tabs[d], n);
-  same('approvals', 'rows listed', await page.$$eval('table tbody tr', r => r.length), Math.min(asum.total, 500));
+  same('approvals', 'rows listed', await page.$$eval('table tbody tr:not(.adetail)', r => r.length), Math.min(asum.total, 500));
   const csum = await call(lead, 'GET', '/api/v1/cases/summary');
   await page.goto(`${BASE}/#/cases`); await settle(page);
   const ctabs = await page.$$eval('.seg button', bs => Object.fromEntries(bs.map(b => [b.childNodes[0].textContent.trim().toLowerCase(), b.querySelector('.muted') ? b.querySelector('.muted').textContent.trim() : ''])));

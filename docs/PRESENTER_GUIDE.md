@@ -139,7 +139,9 @@ it twice changes nothing.
 To show the LLM features, the `.env` must contain an approved endpoint (already configured for Azure AI Foundry):
 `SOC_LLM_PROVIDER=azure_foundry`, `SOC_LLM_ENDPOINT`, `SOC_LLM_API_KEY`, `SOC_LLM_DEPLOYMENT=gpt-4.1-mini`,
 `SOC_LLM_APPROVED_ENDPOINTS` (same URL), `SOC_LLM_MODEL_VERSION=gpt-4.1-mini`. Load them into the environment (or
-run with `docker compose --env-file .env`). Without them everything works and says "deterministic".
+run with `docker compose --env-file .env`). Without them everything works and says "deterministic". Load them
+**before** `reset-demo`: the demo writes each case's explanation with the model as it builds the cases (a demo built
+without a model keeps the cited summary until the case is reassessed).
 
 Checklist (10 minutes before):
 - [ ] Data loaded: Cases shows 7 phishing + 3 incident cases; Vulnerabilities shows 6 findings.
@@ -263,7 +265,10 @@ window and it runs. Then Automation policy.
 everything. High-impact actions need four eyes; nobody can approve their own. The kill switch halts all automation
 on every replica immediately and survives restarts."
 **Point at:**
-- The domain filter tabs (All 34 = Incident 15 + Phishing 16 + Vulnerability 3).
+- The domain filter tabs (All 37 = Incident 18 + Phishing 16 + Vulnerability 3).
+- Under each rationale, what the action is about: the case (severity and title) or the remediation campaign.
+- **Why and what** on an `endpoint.isolate` row: the evidence it cites (the same E-numbers as the case), the host's
+  criticality, reversible, four-eyes, who recommended it. "You decide here, without opening the case."
 - The policy column (L2 recommend, four-eyes).
 - On the Policy screen: levels, Reversible flags, "Pending policy changes - proposer cannot approve".
 

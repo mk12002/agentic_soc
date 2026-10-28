@@ -82,26 +82,35 @@ def cmd_demo() -> None:
     org = st.org_domains or [SAMPLE_ORG]                     # the built-in sample organisation unless configured
     analyst = Principal(f"demo.analyst@{org[0]}", "Demo Analyst", frozenset({Role.ANALYST}))
     with _db().session() as s:
+        from soc_platform.llm.gateway import LLMGateway
+
+        # with an approved model configured the demo cases get its written explanation, as the scheduled jobs give
+        # theirs: verdicts, scores and actions are computed first and are identical either way
+        gw = LLMGateway(s, st) if st.llm_provider != "none" else None
         vm = VulnerabilityService(s, reg)
         r = vm.refresh()
         print(f"[VM] {r['consolidation']['raw_findings']} raw findings -> {r['consolidation']['consolidated']} consolidated; "
               f"priority {r['priority_bands']}; asset match rate {r['asset_match_rate']['match_rate']}")
         camp = vm.create_campaign("CVE-2021-44228", analyst, notify_via="ticket")
         print(f"[VM] campaign {camp.id} created for CVE-2021-44228 (notifications await approval)")
-        im = IncidentService(s, reg)
+        im = IncidentService(s, reg, llm=gw)
         im.ingest()
         cases = im.cluster()
+        incident_ids = []
         for c in cases:
             if c.status != "closed":
-                v = im.investigate(c.id)
+                v = im.investigate(c.id, narrate=False)
+                incident_ids.append(c.id)
                 print(f"[IM] {v['case']['severity']:>8} {v['case']['title'][:70]} - {len(v['actions'])} recommended action(s)")
         from soc_platform.domains.phishing.agents.analyzer import engine_enabled
 
         engine = engine_enabled()                            # the trained models, when installed (SOC_PHISHING_ENGINE)
         print(f"[PH] analysis: {'ML engine + heuristic' if engine else 'heuristic only'}")
-        ph = PhishingService(s, reg, org_domains=org, raw_dir=Path(st.raw_payload_dir) / "phishing", use_engine=engine)
+        ph = PhishingService(s, reg, llm=gw, org_domains=org, raw_dir=Path(st.raw_payload_dir) / "phishing", use_engine=engine)
+        phishing_ids = []
         for sub in ph.ingest_reported():
-            v = ph.process(sub.id)
+            v = ph.process(sub.id, narrate=False)
+            phishing_ids.append(v["case"]["id"])
             a = v["assessment"]
             print(f"[PH] {v['case']['verdict']} '{v['case']['title'][:50]}': {len(a['campaign']['recipients'])} recipients, "
                   f"clicked {a['user_impact']['clicked']}, compromised {a['user_impact']['identity_compromise']}")
@@ -110,8 +119,16 @@ def cmd_demo() -> None:
         for f in SAMPLE_UPLOADS:
             path = corpus / f
             if path.exists():
-                v = ph.process(ph.submit_raw(path.read_bytes(), source="upload", reporter=analyst.id).id)
+                v = ph.process(ph.submit_raw(path.read_bytes(), source="upload", reporter=analyst.id).id, narrate=False)
+                phishing_ids.append(v["case"]["id"])
                 print(f"[PH] {v['case']['verdict']:>10} '{v['case']['title'][:60]}' (uploaded sample)")
+        if gw is not None:
+            s.commit()          # never hold the database while the model writes (the jobs do the same)
+            n_im, n_ph = im.narrate_pending(incident_ids), ph.narrate_pending(phishing_ids)
+            print(f"[LLM] written explanations: {n_im} incident case(s), {n_ph} phishing case(s) "
+                  "(clear spam / safe reports keep the cited summary)")
+        else:
+            print("[LLM] no model configured: cases carry the deterministic, cited explanation")
         from soc_platform.domains.vulnerability.misconfig import MisconfigurationService
 
         mis = MisconfigurationService(s, reg)

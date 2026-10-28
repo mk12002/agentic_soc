@@ -43,6 +43,7 @@ from soc_platform.core.models import (
     AuditRecord,
     Case,
     Entity,
+    Evidence,
     PolicyVersion,
     UnresolvedItem,
 )
@@ -1138,7 +1139,64 @@ def list_actions(status: str | None = None, case_id: str | None = None, domain: 
         q = q.where(ActionRequest.domain == domain)
     if "*" not in p.domains:
         q = q.where(ActionRequest.domain.in_(sorted(p.domains)))  # "platform" actions are cross-domain
-    return [_action(a) for a in s.execute(q).scalars()]
+    rows = list(s.execute(q).scalars())
+    # one query each for the cases and campaigns behind the page, so every row can say what it is about
+    ids = sorted({a.case_id for a in rows if a.case_id})
+    cases = {c.id: c for c in s.execute(select(Case).where(Case.id.in_(ids))).scalars()} if ids else {}
+    camps = _campaigns(s, [i for i in ids if i not in cases])
+    return [{**_action(a), **_origin(p, cases.get(a.case_id), camps.get(a.case_id))} for a in rows]
+
+
+def _campaigns(s: Session, ids: list[str]) -> dict[str, Any]:
+    from soc_platform.domains.vulnerability.models import RemediationCampaign
+
+    return {c.id: c for c in s.execute(select(RemediationCampaign).where(RemediationCampaign.id.in_(ids))).scalars()} if ids else {}
+
+
+def _origin(p: Principal, case: Case | None, campaign: Any) -> dict[str, Any]:
+    """What an action was raised on: its case (when the caller may see it) or, for a remediation ticket, its campaign."""
+    return {"case": {"id": case.id, "title": case.title, "severity": case.severity, "verdict": case.verdict,
+                     "status": case.status, "domain": case.domain} if case is not None and p.in_domain(case.domain) else None,
+            "campaign": {"id": campaign.id, "title": campaign.title, "cve": campaign.cve, "status": campaign.status}
+            if campaign is not None else None}
+
+
+def _action_in_scope(s: Session, p: Principal, ar: ActionRequest | None) -> Case | None:
+    """An action is visible when its domain is, and its case too when it has one. A remediation ticket carries its
+    campaign's id in case_id - there is no case behind it, so the domain alone decides (it once answered 404)."""
+    if ar is None or not p.in_domain(ar.domain if ar.domain in {"phishing", "incident", "vulnerability"} else "*"):
+        raise HTTPException(404, "unknown action")
+    case = s.get(Case, ar.case_id) if ar.case_id else None
+    if case is not None and not p.in_domain(case.domain):
+        raise HTTPException(404, "unknown action")
+    return case
+
+
+@app.get("/api/v1/actions/{aid}/context")
+def action_context(aid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    """Everything a reviewer needs to decide on one action from the approvals list: what it was raised on, the evidence
+    it cites (numbered as on the case), what the tool will be asked to do, and its impact - all read from records."""
+    from soc_platform.core.enrichment import evidence_for_llm
+
+    ar = s.get(ActionRequest, aid)
+    case = _action_in_scope(s, p, ar)
+    cited: list[dict[str, Any]] = []
+    if case is not None and ar.evidence_ids:
+        rows = list(s.execute(select(Evidence).where(Evidence.case_id == case.id)).scalars())
+        seen = {e.id: e.observed_at for e in rows}
+        by_ref = {x["id"]: x for x in evidence_for_llm(rows)}
+        cited = [{"ref": r, "source": x["source"], "summary": x["claim"], "dimension": x["dimension"],
+                  "type": "inference" if x["is_inference"] else "fact",
+                  "observed_at": seen[x["evidence_row"]].isoformat() if seen.get(x["evidence_row"]) else None}
+                 for r in ar.evidence_ids if (x := by_ref.get(r))]
+    spec = next((c for c in registry().action_registry().catalog() if c["action_type"] == ar.action_type), {})
+    res = ar.result or {}
+    return {"action": _action(ar), **_origin(p, case, _campaigns(s, [ar.case_id]).get(ar.case_id) if ar.case_id and case is None else None),
+            "evidence": cited, "tool": spec.get("tool"), "description": spec.get("description"),
+            "destructive": bool(spec.get("destructive")),
+            "reversible": res["reversible"] if res.get("reversible") is not None else bool(spec.get("reversible")),
+            "reverse_type": spec.get("reverse_type"), "expected_impact": res.get("expected_impact"),
+            "blast_radius": res.get("blast_radius"), "precondition_failures": ar.precondition_failures or []}
 
 
 @app.get("/api/v1/actions/summary")
@@ -1207,9 +1265,7 @@ def decide_action(aid: str, verb: str, body: Decision, p: Principal = Depends(cu
     svc = _action_service(s)
     ar = s.get(ActionRequest, aid)
     if ar is not None:
-        _case_in_scope(s, p, ar.case_id)
-        if not p.in_domain(ar.domain if ar.domain in {"phishing", "incident", "vulnerability"} else "*"):
-            raise HTTPException(404, "unknown action")
+        _action_in_scope(s, p, ar)
     try:
         fn = {"approve": svc.approve, "reject": svc.reject, "rollback": svc.rollback}[verb]
         return _action(fn(aid, p, note=body.note))

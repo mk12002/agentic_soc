@@ -67,6 +67,12 @@ protection (a slow page can never paint over the page you moved to), accessible 
   by age; Phishing: who clicked, most active reporters, how reports were handled; Approvals: waiting by domain and by
   action type; Cloud posture: by severity and by owner (overdue / on time). Inline SVG and CSS bars coloured by
   meaning (critical red, safe green), following light and dark themes, labels wrapped never cut.
+* **Approvals carry their context** - every waiting action names what it was raised on (the case, with its
+  severity and title, or the remediation campaign and its CVE) and, for a ticket, the team it goes to. **Why and
+  what** opens in the row: the evidence the action cites (numbered and worded as on its case), what the tool will
+  be asked to do (targets with their criticality, the full ticket text), reversible or destructive, blast radius,
+  the policy reasons and who recommended it - read from records, so an approver decides without leaving the list
+  (`GET /api/v1/actions/{id}/context`).
 
 ### 1.2 Shared context store and entity resolution
 

@@ -227,7 +227,8 @@ The platform recommends actions; nothing runs until a person with the right role
   person requested it, they count as the first and a different Lead approves; nobody approves their own request.
 
 1. Window 1: `ann@acme-demo.com`, Analyst. **Approvals** → find an **Isolate host** (`endpoint.isolate`) action
-   and press *Approve*. It is refused: an analyst cannot approve a high-impact action.
+   (the row names its case) and open **Why and what**: the evidence it cites, the host's criticality, that isolation
+   is reversible and needs four eyes. Press *Approve*. It is refused: an analyst cannot approve a high-impact action.
 2. Window 2 (private): `lena@acme-demo.com`, Lead. **Approvals** → approve the same action. It does **not** run: the
    row shows "First approval by lena@acme-demo.com - a second lead must approve". Approving again as Lena is refused.
 3. Window 3 (another browser profile): `alice@acme-demo.com`, Lead. Approve it: it executes (in fake mode, against
@@ -260,7 +261,7 @@ After `demo`:
 
 | Where | What you should see |
 |---|---|
-| **Cases** | 10 cases: 7 phishing, 3 incidents |
+| **Cases** | 10 cases: 7 phishing, 3 incidents. With an LLM configured (and loaded into the shell that runs `demo`), each case's Assessment is the model's written explanation; clear spam / safe reports and runs without a model keep the deterministic, cited summary. Verdicts, severities and actions are the same either way |
 | **Approvals** | 37 actions awaiting a decision (incident 18, phishing 16, vulnerability 3), with or without the ML engine |
 | **Vulnerabilities** | 6 open findings; the CVE-2021-44228 (Log4Shell) campaign |
 | **Cloud posture** | Misconfigurations routed to their owning teams |
@@ -456,6 +457,7 @@ python -m soc_platform token lena@acme-demo.com lead            # prints a token
 **API documentation (dev mode only):** http://127.0.0.1:8080/docs lists every endpoint. Production mode hides it.
 
 **Useful endpoints:** `GET /api/v1/cases`, `GET /api/v1/cases/{id}/story`, `GET /api/v1/actions?status=pending_approval`,
+`GET /api/v1/actions/{id}/context` (the evidence, tool and impact behind one action),
 `POST /api/v1/actions/{id}/approve` (body `{}`), `GET /api/v1/dashboard/overview`, `POST /api/v1/intelligence/ask`
 (body `{"question": "..."}`), `GET /api/v1/audit/verify`, `GET /api/v1/search?q=jane`,
 `POST /api/v1/cases/{id}/assign` (body `{"assignee": "ann@acme-demo.com"}`, or `null` to clear),

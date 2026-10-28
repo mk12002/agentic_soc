@@ -38,8 +38,9 @@ Between audiences: stop the server and run `python -m soc_platform reset-demo --
 3. **Case** (5 min) - open the phishing case: verdict, why (hover the E-numbers to see the evidence), campaign
    scope, who clicked, endpoint/identity impact, MITRE, recommended actions with blast radius and reversibility.
    Click the user → **entity 360**: one person across every tool, the risk factors and the unified timeline.
-4. **Approvals** (2 min) - approve one containment as lead (it waits for a second lead; approve it in a second lead
-   window and it runs); show that an analyst cannot approve a four-eyes action
+4. **Approvals** (2 min) - each row names its case (or campaign); open **Why and what** on a containment to show
+   the evidence it cites, what will happen and whether it can be undone. Approve it as lead (it waits for a second
+   lead; approve it in a second lead window and it runs); show that an analyst cannot approve a four-eyes action
    and that nothing ran without approval. Policy screen: autonomy levels, kill switch.
 5. **Vulnerabilities** (4 min) - four scanners → one record per host×CVE, KEV/EPSS/exposure prioritisation, owner
    routing, campaign; *Cloud misconfigurations*: route to owners, mark fixed, **Validate** → false closure caught.

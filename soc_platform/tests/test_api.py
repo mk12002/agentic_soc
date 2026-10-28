@@ -392,3 +392,70 @@ def test_console_single_sign_on_config_is_public_and_only_in_entra_mode(client, 
     finally:
         monkeypatch.undo()
         get_settings.cache_clear()
+
+
+def _campaign_ticket(client, analyst, lead):
+    """A remediation campaign's ticket waiting for approval (a campaign is started for a CVE that has none yet)."""
+    def waiting():
+        return [x for x in client.get("/api/v1/actions?status=recommended,pending_approval", headers=lead).json()
+                if x["action_type"] == "ticket.create" and x["campaign"]]
+    if not waiting():
+        f = next(x for x in client.get("/api/v1/vm/findings", headers=analyst).json() if not x["campaign_id"])
+        client.post("/api/v1/vm/campaigns", headers=analyst, json={"cve": f["cve"], "notify_via": "ticket"})
+    return waiting()[0]
+
+
+def test_every_action_awaiting_approval_says_what_it_is_about(client, seeded):
+    """An approver must see what an action concerns without opening anything: its case, or for a remediation ticket
+    its campaign; a ticket names the team it goes to (the list showed a bare '-' and the use-case code 'U03')."""
+    a, lead = tok(client, "ann", "analyst"), tok(client, "lena", "lead")
+    client.post("/api/v1/vm/misconfigurations/route", headers=a)
+    _campaign_ticket(client, a, lead)
+    acts = client.get("/api/v1/actions?status=recommended,pending_approval", headers=lead).json()
+    assert acts and all(x["case"] or x["campaign"] for x in acts if x["case_id"])
+    cased = next(x for x in acts if x["case"])
+    assert cased["case"]["title"] and cased["case"]["severity"]
+    tickets = [x for x in acts if x["action_type"] == "ticket.create" and not x["targets"]]
+    assert tickets and all(x["params"].get("group") for x in tickets)
+    routed = [x for x in tickets if str(x["params"].get("correlation_id", "")).startswith("misconfig:")]
+    assert routed
+    for x in routed:
+        assert "U03" not in x["rationale"] and x["params"]["group"] in x["rationale"] and "misconfiguration" in x["rationale"]
+
+
+def test_why_and_what_shows_the_evidence_an_action_cites_numbered_as_on_its_case(client, seeded):
+    lead = tok(client, "lena", "lead")
+    acts = client.get("/api/v1/actions?status=recommended,pending_approval", headers=lead).json()
+    x = next(a for a in acts if a["case"] and len(a["evidence_ids"]) > 1)
+    ctx = client.get(f"/api/v1/actions/{x['id']}/context", headers=lead).json()
+    assert [e["ref"] for e in ctx["evidence"]] == x["evidence_ids"]
+    case = client.get(f"/api/v1/cases/{x['case_id']}", headers=lead).json()
+    on_case = {e["ref"]: e["summary"] for rows in case["evidence"].values() for e in rows}
+    assert all(on_case[e["ref"]] == e["summary"] and e["source"] for e in ctx["evidence"])
+    assert ctx["case"]["title"] == case["case"]["title"] and ctx["tool"]
+    assert isinstance(ctx["reversible"], bool) and isinstance(ctx["destructive"], bool)
+
+
+def test_a_remediation_campaign_ticket_can_be_approved_from_the_list(client, seeded):
+    """The ticket carries its campaign's id where a case id would be: approving it answered 'unknown case' (404) to
+    everyone, so a remediation request could never be sent."""
+    a, lead = tok(client, "ann", "analyst"), tok(client, "lena", "lead")
+    t = _campaign_ticket(client, a, lead)
+    ctx = client.get(f"/api/v1/actions/{t['id']}/context", headers=lead).json()
+    assert ctx["case"] is None and ctx["campaign"]["id"] == t["case_id"] and ctx["evidence"] == []
+    r = client.post(f"/api/v1/actions/{t['id']}/approve", headers=lead, json={"note": "send it"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] in {"executed", "pending_approval"}
+
+
+def test_an_action_outside_the_callers_domains_has_no_context(client, seeded):
+    lead = tok(client, "lena", "lead")
+    ph_only = {"Authorization": "Bearer " + client.get("/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing").json()["token"]}
+    acts = client.get("/api/v1/actions", headers=lead).json()
+    inc = next(x for x in acts if x["domain"] == "incident")
+    ph = next(x for x in acts if x["domain"] == "phishing")
+    assert client.get(f"/api/v1/actions/{inc['id']}/context", headers=ph_only).status_code == 404
+    assert client.get(f"/api/v1/actions/{ph['id']}/context", headers=ph_only).status_code == 200
+    assert client.get("/api/v1/actions/does-not-exist/context", headers=lead).status_code == 404
+    seen = client.get("/api/v1/actions", headers=ph_only).json()
+    assert seen and all(x["case"] is None or x["case"]["domain"] == "phishing" for x in seen)

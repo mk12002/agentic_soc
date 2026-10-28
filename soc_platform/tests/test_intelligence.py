@@ -500,6 +500,28 @@ def test_planners_survive_any_shape_of_model_answer(session, world):
         assert isinstance(r["answer"], str) and r["tool_calls"] and r["planner"] in {"llm", "deterministic"}, r
 
 
+def test_a_person_named_where_the_model_should_pass_an_id_is_still_answered_about(session, world):
+    """The model planned entity_risk with a person's UPN instead of the id from find_entity, and the answer said there
+    was no risk information for someone at 100/100: a name is resolved in code before the tool runs, and the person's
+    cases come with their risk."""
+    from soc_platform.intelligence.risk import RiskEngine
+
+    top = RiskEngine(session).top("identity", 1)[0]
+    plan = {"calls": [{"tool": "entity_risk", "args": {"entity_id": top.name}}]}
+    gw = LLMGateway(session, Settings(llm_monthly_token_budget=10**9), provider=_Scripted([plan, "no JSON: the facts answer"]))
+    svc = IntelligenceService(session, gw, vm=world)
+    r = svc.analyst.ask(f"Is {top.name} compromised and what should we do first?")
+    assert r["planner"] == "llm"
+    got = {x["tool"]: x for x in r["results"]}                       # what the model is given to answer from
+    assert got["entity_risk"]["args"]["entity_id"] == top.entity_id
+    assert got["entity_risk"]["result"]["score"] == top.score and got["entity_risk"]["result"]["name"] == top.name
+    assert got["entity_context"]["args"]["entity_id"] == top.entity_id and got["entity_context"]["result"]["cases"]
+    # a name shared by many users or hosts is not guessed: it stays as given and is reported not found
+    org = top.name.split("@")[-1]
+    assert svc.analyst._entity_ref(org) == org
+    assert svc.analyst._entity_risk(svc.analyst._entity_ref(org)) == {"not_found": org}
+
+
 def _consent(session, upn: str, when: str, *, result: str = "success", rid: str = "da-consent-1") -> None:
     """An Entra directory audit 'Consent to application' by ``upn`` (the workbook's PHISH-02 consent event)."""
     from soc_platform.core.context_store import ContextStore

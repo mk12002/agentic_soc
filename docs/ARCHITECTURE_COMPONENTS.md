@@ -349,7 +349,11 @@ The access-log row and audit event carry the request's trace id (flow A).
    Every reason is shown to the analyst.
 4. The outcome is one of: observed (L0-L1), **recommended** (L2), pending approval (L3), or execute (L4, only where
    the policy explicitly allows it).
-5. A person approves (`POST /api/v1/actions/{id}/approve`) or rejects:
+5. The approvals list (`GET /api/v1/actions`) says what each action was raised on (its case, or a remediation
+   ticket's campaign); `GET /api/v1/actions/{id}/context` gives the reviewer the evidence it cites (numbered by
+   `evidence_for_llm`, as on the case), the tool and its impact. An action is visible when its domain is, and its
+   case too when it has one; a campaign ticket's `case_id` is the campaign's id, so the domain alone decides.
+   A person approves (`POST /api/v1/actions/{id}/approve`) or rejects:
    - Approval needs a human with step-up MFA, never an API key or an agent.
    - Approval counts only for roles whose scope covers the action's domain.
    - An analyst who requests an action they may approve is approving it, unless four-eyes applies; then a different

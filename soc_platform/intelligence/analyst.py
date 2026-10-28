@@ -281,11 +281,25 @@ class IntelligenceAnalyst:
                 return calls[:5], "llm"
         return self._deterministic_plan(q), "deterministic"
 
+    def _entity_ref(self, ref: Any) -> Any:
+        """The entity id a tool needs. The model sometimes passes a person's UPN or a host name where the id from
+        find_entity belongs, and got 'no risk information' for someone at 100/100: a name that resolves to exactly
+        one user or host is replaced by its id; anything else is left as given (and reported not found)."""
+        if not isinstance(ref, str) or not ref.strip() or self.s.get(Entity, ref.strip()) is not None:
+            return ref
+        hits = [h for h in self._search(ref) if h["kind"] in ("identity", "asset")]
+        exact = [h for h in hits if h["name"].lower() == ref.strip().lower() or ref.strip().lower() in
+                 {str(v).lower() for v in h["keys"].values()}]
+        pick = exact or hits
+        return pick[0]["entity_id"] if len(pick) == 1 else ref
+
     def _execute(self, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results = []
         for c in calls:
             spec = self.tools[c["tool"]]
             args = c.get("args") if isinstance(c.get("args"), dict) else {}
+            if "entity_id" in args:
+                args = {**args, "entity_id": self._entity_ref(args["entity_id"])}
             try:
                 # a savepoint per tool: a value the database refuses (PostgreSQL then aborts the whole transaction)
                 # fails that tool only - the rest of the answer and the request's own writes are unaffected
@@ -307,6 +321,16 @@ class IntelligenceAnalyst:
                                     "result": self._entity_risk(it["entity_id"])})
                     results.append({"tool": "entity_context", "args": {"entity_id": it["entity_id"]},
                                     "result": self._entity_context(it["entity_id"])})
+        # a plan that went straight to one of the pair (no look-up first) gets the other: a person's risk is
+        # answered with their cases and next steps, and their cases with their risk
+        have = {(r["tool"], r["args"].get("entity_id")) for r in results}
+        for r in list(results):
+            eid = r["args"].get("entity_id")
+            if r["tool"] in {"entity_risk", "entity_context"} and eid and self.s.get(Entity, eid) is not None:
+                other = "entity_context" if r["tool"] == "entity_risk" else "entity_risk"
+                if (other, eid) not in have:
+                    have.add((other, eid))
+                    results.append({"tool": other, "args": {"entity_id": eid}, "result": self.tools[other].fn(entity_id=eid)})
         return results
 
     @staticmethod

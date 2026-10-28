@@ -8,6 +8,21 @@ const PBAND = {P1: 'critical', P2: 'high', P3: 'medium', P4: 'low'};
 const pchip = p => `<span class="chip ${PBAND[p] || ''}">${esc(p)}</span>`;
 const entLink = (id, name) => `<a href="#/entity/${encodeURIComponent(id)}">${esc(name)}</a>`;
 const caseLink = (id, name) => `<a href="#/cases/${encodeURIComponent(id)}">${esc(name)}</a>`;
+// a list that shows its first n items (already-escaped HTML) and opens the rest in place: "+N more" is a button,
+// never text you can only hover (it did nothing when clicked, and touch screens have no hover)
+let MORE_SEQ = 0;
+const moreList = (items, n = 3, sep = '<br>', label = k => `+${k} more`) => {
+  if (items.length <= n) return items.join(sep);
+  const id = 'more-' + (++MORE_SEQ), tag = sep ? 'span' : 'div';   // rows of <div>s are wrapped in a div
+  return items.slice(0, n).join(sep) + `<${tag} id="${id}" hidden>${sep}${items.slice(n).join(sep)}</${tag}>${sep === '<br>' ? '<br>' : ' '}`
+    + `<button type="button" class="linkbtn" data-fn="showMore" data-args="${arg(id)}" data-more="${esc(label(items.length - n))}" aria-expanded="false" aria-controls="${id}">${esc(label(items.length - n))}</button>`;
+};
+function showMore(id) {
+  const el = document.getElementById(id), b = document.querySelector(`[aria-controls="${CSS.escape(id)}"]`);
+  if (!el) return;
+  el.hidden = !el.hidden;
+  if (b) { b.setAttribute('aria-expanded', String(!el.hidden)); b.textContent = el.hidden ? b.dataset.more : 'Show fewer'; }
+}
 
 // ================================================================= Overview
 async function Overview() {
@@ -99,7 +114,7 @@ async function Intelligence() {
             <div>${chip(i.severity)}</div>
             <div class="grow"><div class="t-title">${esc(i.title)}</div>
               <div class="t-sub"${(i.requirements || []).length ? ` title="${esc('Requirements: ' + i.requirements.join(', '))}"` : ''}>${esc(cap(i.rule))} · last confirmed ${dt(i.last_seen)}</div>
-              ${i.narrative ? `<p class="small clamp" style="margin:8px 0 6px;color:var(--text-2)" title="${esc(i.narrative)}">${esc(i.narrative)}</p>` : ''}
+              ${i.narrative ? `<p class="small" style="margin:8px 0 6px;color:var(--text-2)">${esc(i.narrative)}</p>` : ''}
               ${(i.next_steps || []).length ? `<div class="small"><span class="strong">Next steps</span><ol style="margin:4px 0 0 18px;padding:0">${i.next_steps.map(n => `<li>${esc(n)}</li>`).join('')}</ol></div>` : ''}
               <details class="mt" style="margin-top:8px"><summary>Evidence (${(i.evidence || []).length})</summary>${(i.evidence || []).map(e => `<div class="ev"><span class="ref">${esc(e.source || '')}</span><span class="small">${esc(e.summary || e.signal || '')} <span class="muted">${esc(e.when ? dt(e.when) : '')}</span></span></div>`).join('')}</details>
             </div>
@@ -193,7 +208,7 @@ async function CaseDetail(id) {
     <td style="min-width:190px"><div class="t-title mono" style="overflow-wrap:anywhere">${esc(x.action_type)}</div><div class="small" style="margin-top:3px;color:var(--text-2);overflow-wrap:anywhere">${esc(x.rationale)}</div>
       <div class="t-sub">L${esc(x.level)}${x.blast_radius ? ' · blast radius: ' + esc(x.blast_radius) : ''}${x.reversible === false ? ' · not reversible' : ''}</div>
       ${(x.policy_reasons || []).slice(1).map(r => `<div class="t-sub">${esc(r)}</div>`).join('')}</td>
-    <td class="small wrap" style="min-width:110px">${x.targets.slice(0, 3).map(t => esc(t.name || t.recipient || t.id)).join('<br>')}${x.targets.length > 3 ? `<br><span class="muted">+${x.targets.length - 3} more</span>` : ''}</td>
+    <td class="small wrap" style="min-width:110px">${moreList(x.targets.map(t => esc(t.name || t.recipient || t.id)))}</td>
     <td>${astat(x)}${x.approver ? `<div class="t-sub">${esc(x.approver)}</div>` : ''}</td>
     <td><div class="inline" style="flex-wrap:wrap;gap:6px">${['recommended', 'pending_approval'].includes(x.status) && can('approve_action') ? btn('Approve', 'act', [x.id, 'approve', id], 'sm primary') + btn('Reject', 'act', [x.id, 'reject', id], 'sm') :
       x.status === 'executed' && can('rollback_action') ? btn('Roll back', 'act', [x.id, 'rollback', id], 'sm') : ''}</div></td></tr>`;
@@ -297,9 +312,9 @@ async function Entity(id) {
   const __g = GEN;
   const e = await api('/api/v1/entities/' + encodeURIComponent(id) + '/360');
   const r = e.risk;
-  setMainG(__g, `<div class="page-head"><div><div class="inline" style="margin-bottom:8px"><span class="tag">${esc(e.kind)}</span>${r && r.score > 0 ? chip(r.band) : chip('no risk signals', 'plain')}</div>
+  setMainG(__g, `<div class="page-head"><div class="ph-main"><div class="inline" style="margin-bottom:8px"><span class="tag">${esc(e.kind)}</span>${r && r.score > 0 ? chip(r.band) : chip('no risk signals', 'plain')}</div>
       <h1>${esc(e.name)}</h1><p>Seen by ${esc(e.seen_by.join(', ') || '–')}</p></div>
-      ${r ? `<div class="actions"><div class="card kpi" style="min-width:160px"><div class="label">Risk score</div><div class="value">${Math.round(r.score)}<span class="muted" style="font-size:14px">/100</span></div><div class="foot">${esc(r.dimensions.map(dimLabel).join(' · '))}</div></div></div>` : ''}</div>
+      ${r ? `<div class="ph-score"><div class="card kpi"><div class="label">Risk score</div><div class="value">${Math.round(r.score)}<span class="muted" style="font-size:14px">/100</span></div><div class="foot">${esc(r.dimensions.map(dimLabel).join(' · '))}</div></div></div>` : ''}</div>
     <div class="grid g-2">
       <div class="stack">
         ${card('Why this score', (r && r.factors.length) ? (r.points != null ? `<div class="small muted" style="margin-bottom:8px">Each signal adds risk points (below, fading with age). The points add up to <b>${nf(Math.round(r.points))}</b>; the score is 100 × (1 − e<sup>−points ÷ ${esc(r.points_scale)}</sup>) - every signal raises it, each by less as the total grows, so ${esc(r.points_scale)} points give 63 and it never passes 100.</div>` : '') + r.factors.map(f => `<div class="list-row" style="align-items:flex-start"><span class="score mono" style="min-width:42px">+${Math.round(f.decayed)}</span>
@@ -338,11 +353,58 @@ async function Approvals() {
       `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}">${esc(cap(f))} <span class="muted">${f === 'all' ? sm.total : (sm.by_domain[f] || 0)}</span></button>`).join('')}</div></div>` +
       table(['Action', 'Targets', 'Rationale', 'Policy', ''], xs.map(x => `<tr>
       <td class="nowrap"><div class="t-title mono">${esc(x.action_type)}</div><div class="t-sub">${esc(cap(x.domain))} · L${esc(x.level)}</div></td>
-      <td class="small wrap">${x.targets.slice(0, 3).map(t => esc(t.name || t.recipient || t.id)).join('<br>') || '<span class="muted">-</span>'}</td><td class="small wrap">${esc(x.rationale)}</td>
+      <td class="small wrap">${actTargets(x)}</td><td class="small wrap">${esc(x.rationale)}${actOrigin(x)}</td>
       <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}${(x.result || {}).awaiting_second_approval && x.status === 'pending_approval' ? `<div class="t-sub" style="color:var(--high)">First approval by ${esc(x.approver)} - a second lead must approve</div>` : ''}</td>
-      <td><div class="inline" style="flex-wrap:wrap;gap:6px">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}${x.case_id ? `<a class="btn sm ghost" href="#/cases/${encodeURIComponent(x.case_id)}">Case</a>` : ''}</div></td></tr>`),
+      <td><div class="inline" style="flex-wrap:wrap;gap:6px">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}
+        <button class="btn sm ghost" data-fn="actDetail" data-args="${arg(x.id)}" aria-expanded="false" aria-controls="ad-${esc(x.id)}">Why and what</button></div></td></tr>
+      <tr class="adetail" id="ad-${esc(x.id)}" hidden><td colspan="5"><div class="adbox" aria-live="polite"></div></td></tr>`),
       {empty: 'Nothing is waiting for approval.'}) +
       pager(APPROVAL_OFFSET, xs.length, total, 'approvalPage', 'actions'), {flush: true})));
+}
+// what an action was raised on: its case (severity and title) or, for a remediation ticket, its campaign
+const actOrigin = x => x.case ? `<div class="t-sub origin">${chip(x.case.severity)} ${caseLink(x.case.id, x.case.title)}</div>`
+  : x.campaign ? `<div class="t-sub origin">Remediation campaign ${go('#/vulnerabilities', x.campaign.cve || x.campaign.title)} · ${esc(cap(x.campaign.status))}</div>` : '';
+// a ticket has no targets: the team it goes to is who it acts on
+const actTargets = x => x.targets.length ? moreList(x.targets.map(t => esc(t.name || t.recipient || t.id)))
+  : (x.params || {}).group ? `<span class="muted">team</span> ${esc(x.params.group)}` : '<span class="muted">-</span>';
+// "Why and what": the evidence the action cites, what the tool will be asked to do and the impact - fetched on first open
+async function actDetail(id) {
+  const row = document.getElementById('ad-' + id);
+  if (!row) return;
+  const open = row.hidden;
+  row.hidden = !open;
+  const b = document.querySelector(`[aria-controls="ad-${CSS.escape(id)}"]`);
+  if (b) b.setAttribute('aria-expanded', String(open));
+  if (!open || row.dataset.loaded) return;
+  const box = row.querySelector('.adbox');
+  box.innerHTML = '<div class="small muted">Loading…</div>';
+  const c = await api('/api/v1/actions/' + encodeURIComponent(id) + '/context');
+  row.dataset.loaded = '1';
+  box.innerHTML = actContext(c);
+}
+function actContext(c) {
+  const a = c.action, p = a.params || {};
+  const shown = new Set(['title', 'description', 'group', 'correlation_id']);
+  const extra = Object.entries(p).filter(([k, v]) => !shown.has(k) && v !== null && v !== '' && typeof v !== 'object');
+  const why = c.evidence.length ? c.evidence.map(e => `<div class="list-row small" style="align-items:flex-start"><span class="mono strong" style="min-width:34px">${esc(e.ref)}</span>
+      <div class="grow">${esc(e.summary)}<div class="t-sub">${esc(e.source)}${e.observed_at ? ' · ' + dt(e.observed_at) : ''}${e.type === 'inference' ? ' · inference' : ''}</div></div></div>`).join('')
+    : `<div class="small muted">${c.campaign ? `Raised by the remediation campaign for ${esc(c.campaign.cve || c.campaign.title)}: priority, owner and due date come from the scanner findings in the ticket.`
+      : c.case ? 'This action cites no case evidence; see the case for the full picture.' : 'Raised outside a case from the findings named in the request below.'}</div>`;
+  const targets = a.targets.map(t => `<div class="list-row small"><span class="grow" style="overflow-wrap:anywhere">${esc(t.name || t.recipient || t.value || t.id)}</span>
+      ${t.criticality ? `<span class="muted">${esc(t.criticality)}</span>` : ''}${(t.tags || []).map(g => `<span class="tag">${esc(g)}</span>`).join('')}</div>`).join('');
+  const impact = [c.destructive ? chip('destructive', 'high plain') : '', c.reversible ? chip('reversible', 'ok plain') : chip('not reversible', 'plain'),
+    c.blast_radius ? `<span class="small">blast radius: ${esc(c.blast_radius)}</span>` : '', c.expected_impact ? `<span class="small">${esc(c.expected_impact)}</span>` : ''].filter(Boolean).join(' ');
+  return `<div class="grid g-2 adgrid">
+    <div><div class="small strong">Why</div>${actOrigin(c)}<div class="mt-s">${why}</div></div>
+    <div><div class="small strong">What happens if approved</div>
+      <div class="small" style="margin:4px 0">${esc(c.description || a.action_type)}${c.tool ? ` - via <b>${esc(c.tool)}</b>` : ''}</div>
+      ${targets}${p.group ? `<div class="small">Sent to team <b>${esc(p.group)}</b>${p.priority ? ` · priority ${esc(p.priority)}` : ''}</div>` : ''}
+      ${p.title || p.description ? `<div class="adpre"><div class="strong">${esc(p.title || '')}</div>${esc(p.description || '')}</div>` : ''}
+      ${extra.length ? `<dl class="kv small">${extra.map(([k, v]) => `<dt>${esc(cap(k))}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
+      <div class="inline mt-s" style="flex-wrap:wrap;gap:6px">${impact}</div>
+      ${(a.policy_reasons || []).map(r => `<div class="t-sub">${esc(r)}</div>`).join('')}
+      ${c.precondition_failures.length ? `<div class="t-sub" style="color:var(--high)">Preconditions not met: ${esc(c.precondition_failures.join('; '))}</div>` : ''}
+      <div class="t-sub mt-s">Recommended by ${esc(a.requested_by)} · ${dt(a.created_at)}</div></div></div>`;
 }
 function approvalFilter(f) { APPROVAL_FILTER = f; APPROVAL_OFFSET = 0; Approvals(); }
 function approvalPage(o) { APPROVAL_OFFSET = Math.max(0, Number(o) || 0); Approvals(); }
@@ -392,7 +454,7 @@ async function Suppliers() {
 
 // ================================================================= Vulnerabilities
 // a list a person can take in at real-tenant volume: the count, the first few, how many more (the rest on hover)
-const names = (xs, n = 6) => !xs || !xs.length ? 'none' : `<b>${nf(xs.length)}</b> · ${esc(xs.slice(0, n).join(', '))}${xs.length > n ? ` <span class="muted" title="${esc(xs.slice(n).join(', '))}">and ${nf(xs.length - n)} more</span>` : ''}`;
+const names = (xs, n = 6) => !xs || !xs.length ? 'none' : `<b>${nf(xs.length)}</b> · ${moreList(xs.map(esc), n, ', ', k => `and ${nf(k)} more`)}`;
 async function Vulnerabilities() {
   const __g = GEN;
   const [m, f, cov] = await Promise.all([api('/api/v1/vm/metrics'), api('/api/v1/vm/findings'), api('/api/v1/vm/coverage')]);
@@ -551,7 +613,7 @@ async function showHistory() {
   const h = await api('/api/v1/config/history?limit=30');
   $('#cfgextra').innerHTML = h.length ? table(['Version', 'Kind', 'Status', 'By', 'Approved by', 'Changes', ''], h.map(v => `<tr><td class="mono">#${esc(v.id)}</td><td class="small">${esc(cap(v.kind))}</td>
       <td>${status(v.status === 'active' ? 'ok' : v.status === 'proposed' ? 'medium' : 'info', cap(v.status))}</td><td class="small">${esc(v.proposed_by)}<div class="t-sub">${dt(v.created_at)}</div></td>
-      <td class="small">${esc(v.approved_by || '–')}</td><td class="small">${v.changes.slice(0, 3).map(c => `<div><span class="mono">${esc(c.connector)}.${esc(c.field)}</span> → ${esc(fmtVal(c.to))}</div>`).join('')}${v.changes.length > 3 ? `<div class="muted">+${v.changes.length - 3} more</div>` : ''}</td>
+      <td class="small">${esc(v.approved_by || '–')}</td><td class="small">${moreList(v.changes.map(c => `<div><span class="mono">${esc(c.connector)}.${esc(c.field)}</span> → ${esc(fmtVal(c.to))}</div>`), 3, '')}</td>
       <td>${can('manage_connectors') && ['active', 'superseded'].includes(v.status) ? btn('Restore', 'restoreConfig', [v.id], 'sm') : ''}</td></tr>`), {flush: true}) : empty('No console changes yet - the file alone is in force.');
 }
 function showLists() {
@@ -923,7 +985,7 @@ function blastGraph(b) {
   by('indicator').forEach(n => { const [t, ...v] = String(n.label).split(':'); (groups[v.length ? t : 'other'] = groups[v.length ? t : 'other'] || []).push(v.length ? v.join(':') : n.label); });
   const IND = {domain: 'Domains', url: 'URLs', ip: 'IP addresses', email: 'Sender addresses', sha256: 'File hashes', other: 'Other'};
   const inds = Object.entries(groups).sort((a, z) => z[1].length - a[1].length).map(([t, vs]) => `<div class="bind"><div class="t-sub strong">${esc(IND[t] || cap(t))} · ${nf(vs.length)}</div>${
-    vs.slice(0, 5).map(v => `<div class="mono small" title="${esc(v)}">${esc(short(v, 52))}</div>`).join('')}${vs.length > 5 ? `<div class="t-sub" title="${esc(vs.slice(5).join(', '))}">and ${nf(vs.length - 5)} more</div>` : ''}</div>`).join('');
+    moreList(vs.map(v => `<div class="mono small" title="${esc(v)}">${esc(short(v, 52))}</div>`), 5, '', k => `and ${nf(k)} more`)}</div>`).join('');
   return `<div class="blast">${sec('At the centre', principals.length, people)}${sec('Privileged secrets', by('secret').length, secrets)}
     ${sec('Also received the phishing e-mail', rec.length, recips)}${sec('Related cases', by('case').length, cases)}
     ${sec('Indicators involved', by('indicator').length, `<div class="binds">${inds}</div>`)}</div>`;
@@ -1022,6 +1084,6 @@ async function approveBundle(id) {
 window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit};
-Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
   rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey});

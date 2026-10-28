@@ -151,3 +151,58 @@ def test_serve_says_at_start_why_development_sign_in_is_off(monkeypatch):
         assert "development sign-in on" in cli._sign_in_status()
     finally:
         get_settings.cache_clear()
+
+
+def _demo_outcome() -> dict[str, tuple]:
+    from soc_platform.core.db import get_database
+    from soc_platform.core.models import ActionRequest, Case
+
+    with get_database().session() as s:
+        acts = {}
+        for a in s.execute(select(ActionRequest)).scalars():
+            acts.setdefault(a.case_id, []).append(a.action_type)
+        return {c.title: (c.domain, c.verdict, c.severity, sorted(acts.get(c.id, [])), c.summary)
+                for c in s.execute(select(Case)).scalars()}
+
+
+def test_demo_cases_get_the_models_written_explanation_and_nothing_else_changes(demo_env, monkeypatch):
+    """The demo built every case without the model, so incidents never showed a written explanation even with an
+    approved model configured. With one, the cases are narrated as the scheduled jobs narrate theirs; verdicts,
+    severities and recommended actions are identical to a run without it."""
+    import json
+
+    from soc_platform.config import get_settings
+    from soc_platform.llm import gateway as gwmod
+
+    cli.cmd_reset_demo("--yes")
+    plain = _demo_outcome()
+    get_database_dispose()
+
+    class Narrator(gwmod.Provider):
+        name = "scripted"
+
+        def complete(self, system, user, *, tier):
+            return gwmod.Completion(json.dumps({"summary": "The model's written account of this case.", "insufficient_evidence": False,
+                                                "claims": [{"text": "The first evidence item shows the activity.", "kind": "fact",
+                                                            "evidence_ids": ["E1"]}]}), 10, 10, "scripted-1")
+
+    real = gwmod.LLMGateway
+    monkeypatch.setattr(gwmod, "LLMGateway", lambda s, st, **kw: real(s, st, provider=Narrator(), **kw))
+    object.__setattr__(get_settings(), "llm_provider", "scripted")
+    cli.cmd_reset_demo("--yes")
+    narrated = _demo_outcome()
+
+    assert set(narrated) == set(plain)
+    for title, (domain, verdict, severity, actions, summary) in narrated.items():
+        assert (domain, verdict, severity, actions) == plain[title][:4], title    # the model changes no decision
+    incidents = [v for v in narrated.values() if v[0] == "incident"]
+    assert incidents and all(v[4] == "The model's written account of this case." for v in incidents)
+    assert all(v[4] != "The model's written account of this case." for v in plain.values())
+    assert any(v[0] == "phishing" and v[4] == "The model's written account of this case." for v in narrated.values())
+
+
+def get_database_dispose() -> None:
+    from soc_platform.core import db as dbm
+
+    if dbm._default is not None:
+        dbm._default.engine.dispose()
