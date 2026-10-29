@@ -125,8 +125,8 @@ Maintained hostname-pattern to owner/platform-team/criticality mapping (fallback
 Detections, host inventory, Spotlight vulnerabilities, IOC lookup, containment and RTR collection.
 
 - Vendor: CrowdStrike · focus areas: incident, vulnerability, phishing
-- Read scopes: Alerts:read, Hosts:read, Spotlight vulnerabilities:read, IOCs:read
-- Write scopes (only for approved actions): Hosts:write, Real time response:write
+- Read scopes: Alerts:read, Hosts:read, Vulnerabilities (Spotlight):read, IOC Management:read
+- Write scopes (only for approved actions): Hosts:write, Real time response:read
 - To confirm with the client: API client scopes; Spotlight/Exposure licence; RTR response policy
 - Configuration:
   - `base_url` (optional): API base (e.g. https://api.eu-1.crowdstrike.com)
@@ -139,7 +139,7 @@ Detections, host inventory, Spotlight vulnerabilities, IOC lookup, containment a
 Alerts, device inventory, TVM vulnerabilities, advanced hunting, isolation, scans, custom indicators.
 
 - Vendor: Microsoft · focus areas: incident, vulnerability, phishing
-- Read scopes: Alert.Read.All, Machine.Read.All, Vulnerability.Read.All, AdvancedQuery.Read.All, Ti.Read.All
+- Read scopes: Alert.Read.All, Machine.Read.All, Vulnerability.Read.All, AdvancedQuery.Read.All, Ti.Read.All, Machine.ReadWrite.All (only for 'which device had this IP' - findbyip requires it)
 - Write scopes (only for approved actions): Machine.Isolate, Machine.Scan, Machine.CollectForensics, Ti.ReadWrite.All
 - To confirm with the client: Licence tier (P2 for advanced hunting/TVM); app permissions; hunting quota
 - Configuration:
@@ -148,7 +148,7 @@ Alerts, device inventory, TVM vulnerabilities, advanced hunting, isolation, scan
   - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
   - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
   - `user_domain` (optional): UPN suffix for alert users
-  - `mde_base` (optional): API base (regional endpoints)
+  - `mde_base` (optional): API base: https://api.security.microsoft.com (default) or a regional host such as https://eu.api.security.microsoft.com
 
 ### Microsoft Defender for Identity (`defender_identity`)
 
@@ -191,7 +191,7 @@ Elevation and application-control events.
 - Vendor: Delinea · focus areas: incident
 - Read scopes: see vendor docs / to confirm
 - Write scopes (only for approved actions): -
-- To confirm with the client: API access approval and available event granularity
+- To confirm with the client: API access approval; the elevation-events and token paths from the console's own Swagger page (Help > API Reference) - not in public documentation
 - Configuration:
   - `base_url`: Privilege Manager URL
   - `client_id` (secret): API client id
@@ -206,7 +206,7 @@ Secret access audit, privileged sessions, standing privilege; credential rotatio
 - Vendor: Delinea · focus areas: incident
 - Read scopes: View Secret Audit, View Launched Sessions
 - Write scopes (only for approved actions): Change Password Now on target secrets
-- To confirm with the client: API access approval - privileged access data needs extra governance
+- To confirm with the client: API access approval (privileged access data needs extra governance); the audit and sessions paths and the rotation call against the instance's own REST API reference - a tenant-wide secret-audit list is not in Delinea's public documentation
 - Configuration:
   - `base_url`: Secret Server URL
   - `username` (secret): API user
@@ -222,7 +222,7 @@ Secret access audit, privileged sessions, standing privilege; credential rotatio
 Users, sign-ins, risky users and detections, directory and Azure roles, MFA, inbox rules; session revoke and account control.
 
 - Vendor: Microsoft · focus areas: incident, phishing
-- Read scopes: User.Read.All, AuditLog.Read.All, IdentityRiskyUser.Read.All, IdentityRiskEvent.Read.All, RoleManagement.Read.Directory, UserAuthenticationMethod.Read.All, MailboxSettings.Read
+- Read scopes: User.Read.All, AuditLog.Read.All, IdentityRiskyUser.Read.All, IdentityRiskEvent.Read.All, GroupMember.Read.All, RoleManagement.Read.Directory, UserAuthenticationMethod.Read.All, MailboxSettings.Read
 - Write scopes (only for approved actions): User.RevokeSessions.All, User.EnableDisableAccount.All, IdentityRiskyUser.ReadWrite.All, User-PasswordProfile.ReadWrite.All
 - To confirm with the client: Entra ID P2 for Identity Protection risk data; write permissions for response actions; the Reader role on the Azure subscriptions (or a management group) for Azure role assignments
 - Configuration:

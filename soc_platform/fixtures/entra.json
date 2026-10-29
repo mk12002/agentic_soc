@@ -362,6 +362,42 @@
    "body": {
     "value": [
      {
+      "id": "da-dev-001",
+      "activityDateTime": "2026-09-20T09:17:00Z",
+      "activityDisplayName": "Add registered owner to device",
+      "category": "Device",
+      "result": "success",
+      "initiatedBy": {
+       "app": {
+        "displayName": "Device Registration Service"
+       }
+      },
+      "targetResources": [
+       {
+        "type": "Device",
+        "id": "dev-2",
+        "displayName": "DESKTOP-7H2K9Q"
+       },
+       {
+        "type": "User",
+        "id": "u-jane-0001",
+        "userPrincipalName": "jane.doe@acme-demo.com"
+       }
+      ]
+     }
+    ]
+   },
+   "status": 200,
+   "params": {
+    "$filter": "~Add registered owner to device"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "^/v1.0/auditLogs/directoryAudits$",
+   "body": {
+    "value": [
+     {
       "id": "da-001",
       "activityDateTime": "2026-09-20T09:18:02Z",
       "activityDisplayName": "Set-InboxRule",
@@ -462,25 +498,6 @@
   },
   {
    "method": "GET",
-   "path": "^/v1.0/users/jane.doe@acme-demo.com/registeredDevices$",
-   "body": {
-    "value": [
-     {
-      "id": "dev-1",
-      "displayName": "JANE-LT01",
-      "registrationDateTime": "2025-02-01T00:00:00Z"
-     },
-     {
-      "id": "dev-2",
-      "displayName": "DESKTOP-7H2K9Q",
-      "registrationDateTime": "2026-09-20T09:17:00Z"
-     }
-    ]
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
    "path": "^/v1.0/users/bob.lee@acme-demo.com$",
    "body": {
     "id": "u-bob-0002",
@@ -531,14 +548,6 @@
   {
    "method": "GET",
    "path": "^/v1.0/users/bob.lee@acme-demo.com/mailFolders/inbox/messageRules$",
-   "body": {
-    "value": []
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
-   "path": "^/v1.0/users/bob.lee@acme-demo.com/registeredDevices$",
    "body": {
     "value": []
    },
@@ -603,14 +612,6 @@
   },
   {
    "method": "GET",
-   "path": "^/v1.0/users/raj.mehta@acme-demo.com/registeredDevices$",
-   "body": {
-    "value": []
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
    "path": "^/v1.0/users/priya.nair@acme-demo.com$",
    "body": {
     "id": "u-priya-0004",
@@ -657,14 +658,6 @@
   {
    "method": "GET",
    "path": "^/v1.0/users/priya.nair@acme-demo.com/mailFolders/inbox/messageRules$",
-   "body": {
-    "value": []
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
-   "path": "^/v1.0/users/priya.nair@acme-demo.com/registeredDevices$",
    "body": {
     "value": []
    },
@@ -725,14 +718,6 @@
   },
   {
    "method": "GET",
-   "path": "^/v1.0/users/arun.k@acme-demo.com/registeredDevices$",
-   "body": {
-    "value": []
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
    "path": "^/v1.0/users/meera.s@acme-demo.com$",
    "body": {
     "id": "u-meera-0006",
@@ -779,14 +764,6 @@
   {
    "method": "GET",
    "path": "^/v1.0/users/meera.s@acme-demo.com/mailFolders/inbox/messageRules$",
-   "body": {
-    "value": []
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
-   "path": "^/v1.0/users/meera.s@acme-demo.com/registeredDevices$",
    "body": {
     "value": []
    },
@@ -847,14 +824,6 @@
   },
   {
    "method": "GET",
-   "path": "^/v1.0/users/tom.w@acme-demo.com/registeredDevices$",
-   "body": {
-    "value": []
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
    "path": "^/v1.0/users/li.chen@acme-demo.com$",
    "body": {
     "id": "u-li-0008",
@@ -901,14 +870,6 @@
   {
    "method": "GET",
    "path": "^/v1.0/users/li.chen@acme-demo.com/mailFolders/inbox/messageRules$",
-   "body": {
-    "value": []
-   },
-   "status": 200
-  },
-  {
-   "method": "GET",
-   "path": "^/v1.0/users/li.chen@acme-demo.com/registeredDevices$",
    "body": {
     "value": []
    },

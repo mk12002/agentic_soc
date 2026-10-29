@@ -146,7 +146,7 @@ immediately (section 6).
 
 | Activity | Result at the time of writing |
 |---|---|
-| Platform test suite on SQLite and PostgreSQL 16 | 820 on SQLite, 819 on PostgreSQL (one SQLite-file check skips there) |
+| Platform test suite on SQLite and PostgreSQL 16 | 878 on SQLite, 877 on PostgreSQL (one SQLite-file check skips there) |
 | Phishing ML engine tests | 205 passing |
 | Feature verification (including a real-browser tour, live public feeds and a live LLM) | 108 of 108 features verified |
 | Penetration suite, input fuzzing, static analysis, dependency audit | No open findings |
@@ -235,7 +235,7 @@ Confirmed before the platform is promoted beyond the read-only stage:
 | 3 | Role holders (propose vs approve separated), break-glass custodians | Phase 0 |
 | 4 | Retention periods per data class | Phase 0 |
 | 5 | Threat-intelligence sources permitted to receive external indicators | Phase 2 |
-| 6 | LLM gateway, models per tier, token allocation, pseudonymisation stays on | Phase 2 |
+| 6 | LLM gateway, the models offered per feature (`SOC_LLM_MODELS`, checked with *Check which models answer*), token allocation, pseudonymisation stays on | Phase 2 |
 | 7 | Notification channels and the severity threshold | Phase 2 |
 | 8 | Success-criteria targets (section 5) | Before phase 3 |
 | 9 | Action types approved for human-approved execution, and their write permissions | Phase 4 |

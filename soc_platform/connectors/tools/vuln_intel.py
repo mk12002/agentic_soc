@@ -7,12 +7,20 @@ by the caller with an explicit freshness timestamp (VM-T06 staleness indication)
 
 from __future__ import annotations
 
+from datetime import UTC, timedelta
 from typing import Any
 
-from soc_platform.connectors.base import LookupResult, Page
+from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.http import ApiKeyHeader, HttpTransport, NoAuth
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ToolConnector, ok_lookup
+from soc_platform.connectors.tools._common import ToolConnector, ok_lookup, parse_ts
+
+NVD_MAX_WINDOW = timedelta(days=120)    # the API's longest date range
+
+
+def _nvd_time(dt: Any) -> str:
+    """The extended ISO-8601 form the NVD API takes: 2026-01-01T00:00:00.000+00:00."""
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
 
 
 class NvdConnector(ToolConnector):
@@ -23,15 +31,35 @@ class NvdConnector(ToolConnector):
     lookups = ("cve",)
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
-        start = int(cursor or 0)
-        body = self.get("/rest/json/cves/2.0", params={"startIndex": start, "resultsPerPage": 2000,
-                                                       "lastModStartDate": self.settings.get("since", "")} if
-                        self.settings.get("since") else {"startIndex": start, "resultsPerPage": 2000})
+        if not self.settings.get("since"):
+            start = int(cursor or 0)
+            body = self.get("/rest/json/cves/2.0", params={"startIndex": start, "resultsPerPage": 2000})
+            vulns = body.get("vulnerabilities") or []
+            total = int(body.get("totalResults", len(vulns)))
+            nxt = start + len(vulns)
+            if vulns and nxt < total:
+                return Page(vulns, str(nxt), source_total=total, has_more=True)
+            return Page(vulns, None, source_total=total, has_more=False, reset=True)
+        # NVD accepts lastModStartDate only with lastModEndDate, at most 120 days apart: walk from ``since`` to now in
+        # windows of that size (cursor "<window start>|<index>")
+        from soc_platform.core.models import utcnow
+
+        win, _, idx = (cursor or "").partition("|")
+        frm = parse_ts(win or self.settings["since"])
+        if frm is None:
+            raise ConnectorError(f"nvd: 'since' is not a date: {self.settings['since']!r}")
+        now = utcnow()
+        to = min(frm + NVD_MAX_WINDOW, now)
+        start = int(idx or 0)
+        body = self.get("/rest/json/cves/2.0", params={
+            "startIndex": start, "resultsPerPage": 2000, "lastModStartDate": _nvd_time(frm), "lastModEndDate": _nvd_time(to)})
         vulns = body.get("vulnerabilities") or []
         total = int(body.get("totalResults", len(vulns)))
         nxt = start + len(vulns)
         if vulns and nxt < total:
-            return Page(vulns, str(nxt), source_total=total, has_more=True)
+            return Page(vulns, f"{frm.isoformat()}|{nxt}", source_total=total, has_more=True)
+        if to < now - timedelta(seconds=1):
+            return Page(vulns, f"{to.isoformat()}|0", source_total=total, has_more=True)
         return Page(vulns, None, source_total=total, has_more=False, reset=True)
 
     def normalize(self, stream, raw):  # feed data is consumed via cve_detail(); nothing to store as entities

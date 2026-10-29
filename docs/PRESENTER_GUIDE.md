@@ -320,7 +320,8 @@ isn't in its figures - is removed."
 
 ### W10 - Audit, access, compliance (as Auditor) (2 min)
 
-**Click:** Audit log ("Chain verified · N records") → Access (roles, service accounts - "can never approve
+**Click:** Audit log ("Chain verified · N records"; *About this audit log* - retention, protection, who may read
+and export; *Export the audit trail* - Excel for a period) → Access (roles, service accounts - "can never approve
 actions"; the key is shown once) → sign in as **Auditor** → Reports → *Generate pack*.
 **Say:** "Here is the proof trail. The compliance pack tests the controls from the records themselves: audit
 integrity, four-eyes approvals, policy change control, MFA, LLM governance, encryption and retention, kill
@@ -587,7 +588,7 @@ and recommendation is identical."
 
 - **Identity:**
   - Entra ID SSO (RS256 against the tenant's JWKS).
-  - Step-up MFA for approvals, rollback, policy, kill switch and access management.
+  - Step-up MFA for approvals, rollback, policy, kill switch, access management and watch-list changes.
   - Service-account keys: hashed, expiring, and never allowed to approve.
   - Sealed break-glass (only its hash is configured; exchanged for a 15-minute session; every use is audited and
     alerted; guesses are throttled).
@@ -630,7 +631,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 820 passed on SQLite (with PostgreSQL's rules enforced) and 819 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 878 passed on SQLite (with PostgreSQL's rules enforced) and 877 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -732,21 +733,22 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Can it hallucinate a number into a board report? | No. Figures are computed in code and shown next to the narrative. A narrative sentence stating a figure that isn't in its cited figures is dropped. |
 | Can a prompt injection in an email make it do something? | The model's output can never trigger an action; the analyst assistant can only call read-only tools. The worst case is a bad narrative, and that narrative must still cite evidence. |
 | What data goes to the model? | Only the evidence needed for that task, with internal identities pseudonymised and restored afterwards. Only to an approved endpoint (fail closed), on a pinned model, every prompt logged. Nothing leaves without an LLM configured. |
-| Why gpt-4.1-mini, not a bigger model? | It's cheap and fast, and the guardrails do the heavy lifting on trust. A bigger model can be used per tier (small/large) by changing a deployment name. The platform is provider-agnostic. |
+| Why gpt-4.1-mini, not a bigger model? | It's cheap and fast, and the guardrails do the heavy lifting on trust. An administrator picks the model per feature on the AI usage screen - gpt-4.1-nano, gpt-4.1-mini or gpt-4.1 by default, more as you deploy them - and *Check which models answer* shows which ones your endpoint serves. The platform is provider-agnostic. |
 | Could we run the model inside our tenant? | Yes: Azure AI Foundry in the client's subscription, or an OpenAI-compatible self-hosted model (vLLM, Ollama). |
-| We have our own LLM platform (Claude, Gemini and OpenAI models behind one endpoint). Can you use it instead of your Azure? | Yes - it is configuration, not code: point `SOC_LLM_PROVIDER=openai_compatible` (or `anthropic`) at the gateway, name a model per tier, and set its auth header, extra headers and CA if it needs them. Redaction, citations, the numeric guardrail, the budget and the fallback all still apply, and every verdict, score and action stays identical because the model never produces them. Walkthrough: CLIENT_DEPLOYMENT_GUIDE.md section 5. |
+| We have our own LLM platform (Claude, Gemini and OpenAI models behind one endpoint). Can you use it instead of your Azure? | Yes - it is configuration, not code: point `SOC_LLM_PROVIDER=openai_compatible` (or `anthropic`) at the gateway, list its models, and set its auth header, extra headers and CA if it needs them. Redaction, citations, the numeric guardrail, the budget and the fallback all still apply, and every verdict, score and action stays identical because the model never produces them. Walkthrough: CLIENT_DEPLOYMENT_GUIDE.md section 5. |
 | Our model is trained on company data - does that matter? | It writes better prose about your environment, but it only ever sees the evidence the platform sends for that task, and it still cannot change a figure or a decision. |
 | Can we see exactly what the AI did, and why? | Yes. Every request and job run has a trace id. From any audit event, the trace shows everything it caused: the request, every audit event and each model call - the prompt as sent (names pseudonymised), the answer, and every statement the evidence check removed with the reason ("cites no evidence", "states a figure its evidence doesn't contain"). The same id is on every log line sent to your SIEM. |
 | Is every action logged? | Every change and decision is in the hash-chained audit log, and every successful write request is guaranteed at least one audit event - even from a route whose code forgot. Every request is in the access log; every model call, outbound tool call, job and CLI command is a structured log line. |
 | Can one person or a script run up the AI bill? | No. Administrators set, on the AI usage screen, a monthly and a daily token budget, per-person hourly and daily limits (by role or by person; 0 switches the model off for someone) and a hard cap on every answer's length. Over a limit the call isn't sent: the person gets the platform's own cited answer and a note saying why. Scheduled work counts only against the platform budgets, so one person can't starve it. |
-| How do we know which features need the big model? | The AI usage screen measures it per feature: cost on each tier, how often answers were usable and how many statements the evidence check removed. From those figures - computed, not judged by a model - it advises "try small", "use large" or "keep". Switch one feature, compare a week later. |
-| What does it cost? | Measured: about $5 / month for a small SOC, $26 mid-size, $150 large at gpt-4.1-mini (LLM_TOKENS_AND_COST.md). A cheaper small-tier model cuts another ~25 %. A monthly token budget with findings at 80 % and 100 % caps spend; beyond it the platform falls back to deterministic output. |
+| How do we know which features need the big model? | The AI usage screen measures it per feature: cost on its model and on the neighbouring one, how often answers were usable and how many statements the evidence check removed. From those figures - computed, not judged by a model - it advises "try gpt-4.1-mini", "use gpt-4.1" or "keep". Switch one feature, compare a week later. |
+| What does it cost? | Measured: about $5 / month for a small SOC, $26 mid-size, $150 large at gpt-4.1-mini (LLM_TOKENS_AND_COST.md). A cheaper model for routine text cuts another ~25 %. A monthly token budget with findings at 80 % and 100 % caps spend; beyond it the platform falls back to deterministic output. |
 
 ### About automation and control
 
 | Question | Answer |
 |---|---|
 | Can it take actions on its own? | Only if the organisation promotes an action type in the versioned policy. That is a reviewed change, and the proposer can't approve it. Destructive actions can never be autonomous. |
+| Will onboarding our tools go smoothly? | Every connector was checked against the vendor's current documentation (endpoints, sign-in, permissions, paging, limits) and the problems found were fixed and tested. What only your instance can confirm is listed per tool in CLIENT_DEPLOYMENT_GUIDE.md section 4 - Delinea's API paths, whether actions may touch admin accounts, Office 365's purge on a Microsoft beta API, licences. Preflight checks each tool before it goes live and says what to fix. |
 | What stops a rogue admin? | Separation of duties (no self-approval of four-eyes actions, policies or grants; privileged grants need a second administrator and expire), step-up MFA, the audit chain (append-only in the database too, its head shipped to the log platform) and the access log. |
 | How do we stop everything? | The kill switch stops all automation at once - durable, shared by every replica, audited; every action then needs a person's approval. Pausing a tool stops every write to it, approved or not. |
 | What if an action fails half-way? | Actions are idempotent; pre-conditions are re-checked at execution; the action is on record before the tool is called, and if the server dies mid-call it is flagged "outcome unknown - verify in the tool", never run twice; failures are recorded; reversible actions roll back through their reverse action, under the same policy. |
@@ -780,7 +782,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 820 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 878 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -863,7 +865,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 17 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 820 SQLite, 819 PostgreSQL / 205 |
+| Platform tests / engine tests | 878 SQLite, 877 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
 | Features verified | 108 of 108 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
@@ -1011,8 +1013,8 @@ it is recorded as executing before the tool is called, and the result is recorde
 
 - **Domain scope:** any role can be limited to phishing, incident and/or vulnerability data. Records outside the
   scope answer "not found", including inside reports, the audit log and the access log.
-- **Step-up MFA:** approvals, rollback, policy approval, the kill switch and access management need a token that
-  shows MFA. This is on by default in production.
+- **Step-up MFA:** approvals, rollback, policy approval, the kill switch, access management and watch-list changes
+  need a token that shows MFA. This is on by default in production.
 - **Service accounts:** API keys that can hold only analyst, auditor or automation-admin roles and can never approve.
   They are hashed at rest, shown once, and expire.
 - **Break-glass:** a sealed emergency credential. Only its SHA-256 is configured; it is exchanged for a 15-minute
@@ -1085,11 +1087,12 @@ and every model call writes an **LLM call** row (with its duration). Every notif
 | **Cloud posture** | Open, past SLA, false closures, teams involved; misconfigurations with route / mark fixed / validate | Wiz issues through the same lifecycle as findings | Vulnerability scope |
 | **ATT&CK coverage** | Weighted coverage, priority blind spots, single-source techniques, firing; the matrix; blind spots to close | The enabled tools' detection capabilities (56 techniques) and what has fired | All |
 | **Shadow IT** | Unsanctioned services, high-risk services, users involved, risky sites; by category; risky destinations | Umbrella DNS against `config/sanctioned_services.yaml`; aggregated, never stored | Incident scope |
+| **Watch lists** | Block list and exception list: every entry (value, type, note, file, who added it, when); upload an Excel workbook or CSV with a preview; remove; export | `watchlist_entries`; matched against each case's people, hosts and indicators when a case is shown - a banner on the case, a badge in the case list, a section in the investigation record; never changes a severity, verdict or action | All can view; changes need `manage_watchlists` (lead, MFA) |
 | **Integrations** | Each connector's stage, freshness and last preflight; *Preflight*, *Configure* (propose a change; approve another person's) and *Pause*; configuration history, restore, export / import; key suppliers and sanctioned services; platform self-check; notification channels and recent deliveries; scheduled jobs with history and replay | Connector checkpoints; job runs; the self-check; the notification log | All can view (self-check and notifications: all-domain scope); Test, Sync and job replay need `manage_connectors` |
 | **Automation policy** | Every action type with level, limits, four-eyes, reversible; kill switch; pending policy changes | The active policy version | All; changes by role |
-| **Reports** | Seven standard reports; describe a report in words; compliance evidence pack; audit export | The 16-source catalogue (§6.8) | All (scoped); evidence exports need `export_evidence` |
+| **Reports** | Seven standard reports; describe a report in words; compliance evidence pack; audit export; the organisation's report style (Word / PowerPoint templates, logo, brand, writing guide; preview) | The 16-source catalogue (§6.8) | All (scoped); evidence exports need `export_evidence` |
 | **Access** | Your access; role assignments; service accounts; role permissions | Role grants and API keys | Admin (manage), all (own access) |
-| **Audit log** | Chain status and records | The hash-chained audit log | All roles have audit read (scoped to the viewer's domains) |
+| **Audit log** | Chain status; about the log (records and period, by actor type and kind, last full verification, retention of the log and of every other data class, protections, who may read / export); export (JSON Lines, JSON, CSV, Excel, Word; by period, event type, actor); latest records with traces | The hash-chained audit log and the settings in force | All roles have audit read (scoped to the viewer's domains); export needs `export_evidence` with all-domain scope |
 
 Every screen works in light and dark themes and at 768 px and above. All times are shown in UTC.
 
@@ -1221,7 +1224,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 820 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 878 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |

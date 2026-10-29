@@ -110,6 +110,9 @@ orange because they form the only write path.
 | **policy.py** | Autonomy levels L0-L4. `PolicyEngine.decide(ceiling)` applies the caps; `PolicyStore` versions policy changes (propose / approve). |
 | `auth.py` + `access.py` | Roles and permissions, token checks, role grants, API keys, revocation, break-glass and the kill switch. |
 | `audit.py` | A hash-chained, append-only audit log. `_lock_chain` serialises appends across replicas. |
+| `audit_export.py` | Audit exports (`GET /api/v1/audit/export?format=jsonl\|json\|csv\|xlsx\|docx`, filtered by time, event type, actor or subject) and the facts the *Audit log* screen states (`GET /api/v1/audit/info`: size, span, last verification, retention from the settings, protections, access). The .xlsx is written without a spreadsheet library (text cells only); CSV cells are guarded against formulas. |
+| `reporting/style.py` | The organisation's report style (`report_styles`, versioned): brand, logo, Word / PowerPoint templates, writing guide; uploads validated (macros, DTDs, sizes, 16:9) and kept in `blobs`; `use_style()` sets `design.STYLE` around every render, so concurrent reports never mix styles; `preview()`; routes under `/api/v1/reports/style`. |
+| `watchlists.py` | The block and exception lists (`watchlist_entries`): Excel / CSV upload with preview (`POST /api/v1/watchlists/{name}/upload`), removal, CSV export, and `case_matches()` - the people, hosts and indicators of a case on a list, read whenever the case page, case list or investigation record is built. Context only: nothing decisional reads it. |
 | `crypto.py` | Fernet / MultiFernet encryption (key rotation); atomic writes with 0600 permissions. |
 | `retention.py` + `selfcheck.py` | Retention per data class with legal hold; a proof that every surface shows the same figure. |
 | `connector_config.py` | `ConfigStore`: console-managed connector configuration with propose / approve (four-eyes) / pause / restore, gated by preflight. |
@@ -124,7 +127,7 @@ orange because they form the only write path.
 |---|---|
 | `gateway.py` | `LLMGateway.grounded()` / `complete_json()`:<br>- citations checked against the evidence ids supplied;<br>- the numeric-fidelity guardrail drops any figure not in the cited evidence;<br>- a circuit breaker, timeouts, and up to `SOC_LLM_CONCURRENCY` parallel calls. |
 | `redaction.py` | `Redactor`: pseudonymises internal names, addresses and hosts before a prompt leaves; restores them in the answer. |
-| `usage_policy.py` | Budgets, per-person limits, model tier and answer cap per feature, `usage_report`. A refusal raises `BudgetExceeded`, and the caller falls back to the deterministic text. |
+| `usage_policy.py` | Budgets, per-person limits, the model (by name, from `SOC_LLM_MODELS`) and answer cap per feature, `usage_report` (cost per model, advice to try a smaller or use a larger model). A refusal raises `BudgetExceeded`, and the caller falls back to the deterministic text. |
 | `providers/` | `openai_compatible` (also used for Azure OpenAI / AI Foundry) and `anthropic_provider`. |
 
 With the model off, every figure, verdict and action is identical: the model writes only narrative.
@@ -376,7 +379,7 @@ The access-log row and audit event carry the request's trace id (flow A).
 
 1. A feature needs narrative: the case explanation, deep analysis, an answer to an analyst's question, the situation
    brief, or report text. It passes computed facts to `LLMGateway`, each with an evidence id.
-2. `usage_policy.py` checks the budget, the person's limits and the feature's switch and tier. A refusal raises
+2. `usage_policy.py` checks the budget, the person's limits and the feature's switch, and picks the feature's model (passed to the provider as `model=`). A refusal raises
    `BudgetExceeded`, and the feature uses its deterministic text.
 3. `Redactor` replaces internal names, addresses, `DOMAIN\\user` accounts, host names under the organisation's
    domains, the case's own device names and internal IP addresses with pseudonyms - one map per call. The prompt goes

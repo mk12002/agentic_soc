@@ -43,7 +43,7 @@ class DefenderEndpointConnector(MicrosoftConnector):
     streams = ("alerts", "machines", "vulnerabilities")
     lookups = ("host", "ip", "hash", "domain", "user")
     read_scopes = ("Alert.Read.All", "Machine.Read.All", "Vulnerability.Read.All", "AdvancedQuery.Read.All",
-                   "Ti.Read.All")
+                   "Ti.Read.All", "Machine.ReadWrite.All (only for 'which device had this IP' - findbyip requires it)")
     write_scopes = ("Machine.Isolate", "Machine.Scan", "Machine.CollectForensics", "Ti.ReadWrite.All")
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
@@ -143,7 +143,8 @@ class DefenderEndpointConnector(MicrosoftConnector):
                 return ok_lookup(self, recs + alerts, summary, recs[0].deep_link if recs else None, found=bool(ms),
                                  endpoint_alerts=len(alerts), risk=[m.get("riskScore") for m in ms])
             if entity_type == "ip":
-                ms = self.get("/api/machines/findbyip", params={"ip": value, "timestamp": _ts(context.get("at"))}).get("value", [])
+                # an OData function call, not query parameters; the time must be within the last 30 days
+                ms = self.get(f"/api/machines/findbyip(ip='{value}',timestamp={_ts(context.get('at'))})").get("value", [])
                 return ok_lookup(self, [self._machine(m) for m in ms], f"{len(ms)} device(s) used IP {value}")
             if entity_type == "hash":
                 f = self.get(f"/api/files/{value}")
@@ -246,7 +247,7 @@ MANIFEST = ConnectorManifest(
     factory=lambda s, t: DefenderEndpointConnector(s, t, rate_per_sec=1.5, burst=20),  # MDE: 100 calls/min per app
     live_transport=mde_transport,
     config=APP_FIELDS + [ConfigField("user_domain", "UPN suffix for alert users", required=False),
-                         ConfigField("mde_base", "API base (regional endpoints)", required=False, kind="url")],
+                         ConfigField("mde_base", "API base: https://api.security.microsoft.com (default) or a regional host such as https://eu.api.security.microsoft.com", required=False, kind="url")],
     actions=_actions, confidence="High",
     to_confirm="Licence tier (P2 for advanced hunting/TVM); app permissions; hunting quota",
     fake_settings={"user_domain": "acme-demo.com", "tenant_id": "demo-tenant"},

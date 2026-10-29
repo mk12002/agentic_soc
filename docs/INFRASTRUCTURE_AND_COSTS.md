@@ -56,7 +56,7 @@ tool (writes only after a person approves an action). The one inbound path is an
 | Tool | Hosted where | What the platform reads | How often | Implication for hosting the platform |
 |---|---|---|---|---|
 | Microsoft Entra ID | Microsoft cloud | users, risky users, risk detections, directory audits; sign-ins on investigation | every 5 min (incremental) | internet egress to `graph.microsoft.com` |
-| Defender for Endpoint | Microsoft cloud | alerts, machines, vulnerabilities (TVM) | 5 min (alerts, machines) / 6 h (vulnerabilities) | `api.securitycenter.microsoft.com` |
+| Defender for Endpoint | Microsoft cloud | alerts, machines, vulnerabilities (TVM) | 5 min (alerts, machines) / 6 h (vulnerabilities) | `api.security.microsoft.com` |
 | Defender for Office 365 | Microsoft cloud | reported messages, e-mail alerts; mail-flow look-ups | every 2 min (reports) | `graph.microsoft.com` |
 | Defender for Identity | Microsoft cloud (via Graph) | alerts; logon events on investigation | 5 min | `graph.microsoft.com` |
 | Microsoft Sentinel | Azure | incidents | 5 min | `management.azure.com` |
@@ -498,7 +498,8 @@ How to read it:
 - Token counts were measured on the OpenAI tokenizer; Claude counts tokens differently, so options D and E should be
   re-measured with `measure_llm_usage.py` against that model before relying on them (expect the same order of magnitude).
 - **Quality is checked, not assumed:** the AI usage screen shows, per feature, how often answers were usable and how
-  many statements the evidence guardrail removed, and advises *try small* / *use large* from those figures.
+  many statements the evidence guardrail removed, and advises a smaller or larger model by name (*try gpt-4.1-mini*,
+  *use gpt-4.1*) from those figures; the model is chosen per feature on that screen.
 - Batch APIs (50 % cheaper at both Azure and Anthropic) could carry the scheduled reports; not used today.
 - **The organisation's own LLM gateway** can be used instead (CLIENT_DEPLOYMENT_GUIDE.md section 5); the token counts
   above stay valid, priced at its internal rates.

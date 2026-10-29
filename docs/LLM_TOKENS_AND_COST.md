@@ -110,9 +110,9 @@ Monthly (30 days):
     10-minute refresh.
 - **Auto-closed reports cost nothing:** clear-benign and bulk reports get a deterministic, cited explanation.
   At 70 % auto-close, phishing explanation cost falls by 70 %.
-- **The cheapest lever at scale is the small tier.** Point `SOC_LLM_DEPLOYMENT_SMALL` at a cheaper model (for
-  example gpt-4.1-nano). Phishing explanations, finding narratives and planners then move to it, with no code
-  change; the large SOC's bill drops by about 28 %.
+- **The cheapest lever at scale is a smaller model for routine text.** On the AI usage screen, set phishing
+  explanations, finding narratives and the planners to gpt-4.1-nano (or point `SOC_LLM_DEPLOYMENT_SMALL` at it, which
+  moves every routine feature at once), with no code change; the large SOC's bill drops by about 28 %.
 - **Batch pricing.** Azure and OpenAI batch APIs are about 50 % cheaper for work that can wait (nightly
   reports, bulk re-narration). The platform does not use batch mode today; it is a possible further saving for
   scheduled reports.
@@ -132,10 +132,10 @@ for the next model call; no restart. Anyone with `read_audit` (analysts, leads, 
 | Monthly tokens | `SOC_LLM_MONTHLY_TOKEN_BUDGET` (50,000,000) | Hard cap for the whole platform. A finding is raised at the warning level (80 %) and at 100 %; after the cap, model text falls back to the platform's own cited text until the month rolls over. |
 | Daily tokens | a tenth of the month | No single day may use more, so a runaway script or a flood of incidents cannot spend the month in an afternoon. A finding is raised while today's budget is used up; it clears itself the next day. |
 | Per person, per hour / per day | 100,000 / 400,000 | For what a person asks for: analyst questions, deep analysis, reports they build. An override per role (the most generous of a person's roles applies) and per person (wins over the role). **0 = no model text for that person.** Scheduled work (incident and phishing explanations, finding narratives, the brief, scheduled reports) counts only against the platform caps, so one person can never starve it. |
-| Per feature: tier | the tier the code asks for (section 1) | `small` or `large` for that feature alone. |
-| Per feature: max answer | small 1,500 / large 3,000 tokens | The most one answer may contain, sent to the provider (`max_tokens`; `SOC_LLM_MAX_TOKENS_FIELD=max_completion_tokens` for gateways or models that need that name). The largest answer measured was about 2,000 tokens (deep analysis), so the defaults never cut a normal answer; they stop a misbehaving model from writing - and billing - pages. |
+| Per feature: model | the default model for the size of work the code asks for (section 1): the configured deployment, else gpt-4.1-mini for routine narrative and gpt-4.1 for summaries and reports | Any model on the list, by name - by default **gpt-4.1-nano, gpt-4.1-mini, gpt-4.1**. The list is the deployment's (`SOC_LLM_MODELS`, below): a model can only be chosen where it is deployed. *Check which models answer* sends each one a request of a few dozen tokens and shows which the endpoint serves - a feature set to a model it does not serve falls back to the platform's own text on every call. |
+| Per feature: max answer | smaller models 1,500 / larger models 3,000 tokens | The most one answer may contain, sent to the provider (`max_tokens`; `SOC_LLM_MAX_TOKENS_FIELD=max_completion_tokens` for gateways or models that need that name). The largest answer measured was about 2,000 tokens (deep analysis), so the defaults never cut a normal answer; they stop a misbehaving model from writing - and billing - pages. |
 | Per feature: on / off | on | Off = that feature always uses the platform's own text. |
-| Prices per tier | gpt-4.1-mini list prices for both | Used only to show cost and what a tier change would save. |
+| Prices per model | list prices per million tokens (gpt-4.1-nano $0.10 / $0.40, gpt-4.1-mini $0.40 / $1.60, gpt-4.1 $2.00 / $8.00, input / output); 0 for a model the platform does not know | Used only to show cost and what the neighbouring model would cost. Enter the client's own prices. |
 
 **Over any limit nothing fails.** The call is not sent; the caller uses its deterministic, cited fallback (the same
 figures and verdicts - only the wording differs); the refusal is logged with its reason (`budget_exceeded`,
@@ -144,7 +144,9 @@ platform without the model: your hourly AI limit (100,000 tokens) is reached."* 
 
 | Other setting (environment) | Default | Effect |
 |---|---|---|
-| `SOC_LLM_DEPLOYMENT_SMALL` | = large deployment | The model behind the small tier. |
+| `SOC_LLM_MODELS` | `gpt-4.1-nano,gpt-4.1-mini,gpt-4.1` (Anthropic provider: its two default Claude models) | The models offered per feature, comma-separated; `name=deployment` where the Azure deployment or the gateway's model id differs from the name to show (`gpt-4.1=soc-gpt41`). Add a model here when it is deployed; it then appears in every feature's list. A size (smaller / larger: timeout and default answer cap) follows from the name (mini, nano, haiku, flash, lite = smaller). |
+| `SOC_LLM_DEPLOYMENT` / `SOC_LLM_DEPLOYMENT_SMALL` | - / = `SOC_LLM_DEPLOYMENT` | The defaults: the model for summaries and reports, and for routine narrative, until an administrator chooses per feature. A deployment named here that is not on the list is added to it. |
+| `SOC_LLM_MODEL_VERSION` | - | Optional pins, one per model, comma-separated, each the model's name and version (`gpt-4.1-mini-2025-04-14`). A call whose chosen model has a pin and is answered by another version is logged `model_version_mismatch`. |
 | `SOC_LLM_EXPLAIN_AUTO_CLOSED` | 0 | 1 = also have the model explain reports that auto-close (not recommended at volume). |
 | `SOC_BRIEF_CACHE_SECONDS` | 900 | The longest time an unchanged brief is reused. |
 | `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` | 30 / 120 | Read timeouts: small-tier calls are short; large-tier calls (deep analysis, reports) can produce ~2,000 tokens, about 30 s at ~70 tokens/s. Connect timeout is 10 s. One retry is made on throttling or transient server errors. |
@@ -162,34 +164,37 @@ must not use it.
 
 ---
 
-## 4b. Choosing the small or the large model for each feature
+## 4b. Choosing the model for each feature
 
 The **By feature** table on the AI usage screen shows, per feature, over the last 30 days: calls, mean tokens in and
-out, cost on its tier and what it would cost on the other, how often an answer the model gave was **usable** (it
+out, cost on its model and what it would have cost on the neighbouring one, how often an answer the model gave was **usable** (it
 parsed; calls the endpoint failed to answer - down, slow, circuit open - are shown separately as *not answered* and
-kept out of the advice, because an outage says nothing about the tier), how many of its **statements the evidence check removed** (the grounding guardrail drops any
+kept out of the advice, because an outage says nothing about the model), how many of its **statements the evidence check removed** (the grounding guardrail drops any
 statement that cites no evidence or states a figure its evidence does not contain), and the 95th-percentile response
 time. From those figures - computed in code, never by a model - it advises:
 
 | Advice | When | What to do |
 |---|---|---|
-| **try small** | on large; at least 20 calls; at least 98 % usable; at most 5 % of statements removed; answers average 600 tokens or less | Switch the feature to small, then compare the same row a week later. If usable or removed statements get worse, switch back. |
-| **use large** | on small; more than 5 % of answers unusable, or more than 15 % of statements removed | Switch to large: the small model is writing claims the evidence does not support, so readers get thinner text. |
+| **try &lt;the next smaller model&gt;** (e.g. *try gpt-4.1-mini*) | a smaller model exists; at least 20 calls; at least 98 % usable; at most 5 % of statements removed; answers average 600 tokens or less | Switch the feature to it, then compare the same row a week later. If usable or removed statements get worse, switch back. |
+| **use &lt;the next larger model&gt;** (e.g. *use gpt-4.1*) | a larger model exists; more than 5 % of answers unusable, or more than 15 % of statements removed | Switch up: the model is writing claims the evidence does not support, so readers get thinner text. |
 | **keep** | anything else | Quality and cost are in balance. |
-| **not enough data** | fewer than 20 calls in the period | Keep the code's default. |
+| **not enough data** | fewer than 20 calls in the period | Keep the default. |
+
+"Smaller" and "larger" order the list by size, then by output price. Calls logged before models had names count
+against their size's default model.
 
 How to think about it:
 
-- **The large tier earns its price where the model must reason across a lot of evidence**: incident summaries (many
+- **A larger model earns its price where it must reason across a lot of evidence**: incident summaries (many
   tools), deep analysis of an attack story, the situation brief, the analyst's answer, report sections. Errors there
   are costly, and the guardrail removing statements means a thinner explanation for the person who needs it most.
-- **The small tier is enough for short, single-source, templated text**: why one e-mail got its verdict, one
+- **A smaller model is enough for short, single-source, templated text**: why one e-mail got its verdict, one
   correlated finding, choosing tools for a question (the planner), planning a report, short report commentary.
 - **The figures that matter are the guardrail's removed-statement rate and the usable rate**, not the tone of the
   text: they say directly whether the cheaper model keeps to the evidence. Cost per call is in the same row.
-- **Change one feature at a time**, for a week, and compare - every call is logged with its tier, so the table shows
-  both periods.
-- Nothing numeric changes either way: figures, verdicts, scores and actions are computed in code; the tier changes
+- **Change one feature at a time**, for a week, and compare - every call is logged with the model chosen for it, so
+  the table shows both periods.
+- Nothing numeric changes either way: figures, verdicts, scores and actions are computed in code; the model changes
   only the wording quality and the cost.
 
 ---

@@ -5,12 +5,16 @@ figures as tiles, tables with a clear header and readable rows, status in colour
 page numbers on every page, and charts with whole-number axes. Layout only - every figure is computed elsewhere and
 passed in; nothing here calculates or words a finding.
 
-A client's own Word template (styles, header, footer) or PowerPoint master can still be supplied; the house style is
-then applied on top only where the template has no style of its own.
+The organisation's report style (``reporting/style.py``, set on the Reports screen) replaces the house colours, font,
+organisation name, classification line and footer, adds its logo, and supplies a Word template (styles, page set-up,
+header, footer - the house header / footer are added only where the template has none) and a PowerPoint master. It
+is read from ``STYLE`` (a context variable set by ``style.use_style``), so concurrent reports never mix styles;
+outside that context the house style applies.
 """
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any
 
 from docx.enum.section import WD_ORIENT
@@ -32,6 +36,49 @@ SEVERITY_TONE = {"critical": "bad", "high": "warn", "medium": "warn", "low": "in
                  "P1": "bad", "P2": "warn", "P3": "info", "P4": "neutral"}
 CLASSIFICATION = "Confidential - internal"
 MISSING = "not yet measured"
+
+STYLE: ContextVar[dict[str, Any] | None] = ContextVar("report_style", default=None)
+
+
+def _style() -> dict[str, Any]:
+    return STYLE.get() or {}
+
+
+def primary() -> str:
+    return _style().get("primary") or NAVY
+
+
+def accent() -> str:
+    return _style().get("accent") or ACCENT
+
+
+def font_name() -> str:
+    return _style().get("font") or "Calibri"
+
+
+def classification() -> str:
+    return _style().get("classification") or CLASSIFICATION
+
+
+def brand() -> str:
+    """The name in every running header and slide footer: the organisation's, else the platform's."""
+    return _style().get("organisation") or "Agentic SOC"
+
+
+def footer_text() -> str:
+    return _style().get("footer") or "Every figure is computed from the connected tools' records"
+
+
+def logo() -> bytes | None:
+    return _style().get("logo_bytes")
+
+
+def writing_guide() -> str:
+    return _style().get("guide") or ""
+
+
+def tone_colours() -> dict[str, str]:
+    return {**TONES, "neutral": primary(), "info": accent()}
 
 
 def rgb(hexcode: str) -> RGBColor:
@@ -125,20 +172,23 @@ def _run(paragraph: Any, text: str, *, size: float = 10, bold: bool = False, col
 def new_document(title: str, *, template: Any = None, landscape: bool = False) -> Any:
     """An A4 document in the house style with a running header (report name, classification) and a footer with
     page X of Y. A client template keeps its own styles, header and footer."""
+    import io
     from pathlib import Path
 
     from docx import Document
 
     if template and Path(template).exists():
         return Document(str(template))
+    if _style().get("word_bytes"):
+        return _from_word_template(Document(io.BytesIO(_style()["word_bytes"])), title, landscape)
     d = Document()
     st = d.styles["Normal"]
-    st.font.name, st.font.size = "Calibri", Pt(10)
+    st.font.name, st.font.size = font_name(), Pt(10)
     st.font.color.rgb = rgb(TEXT)
     st.paragraph_format.space_after = Pt(4)
-    for name, size, color in (("Heading 1", 13, NAVY), ("Heading 2", 11, NAVY)):
+    for name, size, color in (("Heading 1", 13, primary()), ("Heading 2", 11, primary())):
         h = d.styles[name]
-        h.font.name, h.font.size, h.font.bold = "Calibri", Pt(size), True
+        h.font.name, h.font.size, h.font.bold = font_name(), Pt(size), True
         h.font.color.rgb = rgb(color)
         h.paragraph_format.space_before, h.paragraph_format.space_after = Pt(14), Pt(5)
         h.paragraph_format.keep_with_next = True
@@ -151,16 +201,62 @@ def new_document(title: str, *, template: Any = None, landscape: bool = False) -
     sec.left_margin = sec.right_margin = Cm(1.8)
     sec.top_margin, sec.bottom_margin = Cm(1.6), Cm(1.6)
     sec.header_distance = sec.footer_distance = Cm(0.8)
+    _house_header(sec, title)
+    _house_footer(sec)
+    return d
+
+
+def _house_header(sec: Any, title: str) -> None:
+    import io
+
     head = sec.header.paragraphs[0]
     head.text = ""
-    _run(head, "Agentic SOC  ·  " + title, size=8, color=MUTED)
-    _run(head, "\t\t" + CLASSIFICATION, size=8, color=MUTED, bold=True)
+    if logo():
+        head.add_run().add_picture(io.BytesIO(logo()), height=Cm(0.55))
+        head.add_run("  ")
+    _run(head, brand() + "  ·  " + title, size=8, color=MUTED)
+    _run(head, "\t\t" + classification(), size=8, color=MUTED, bold=True)
+
+
+def _house_footer(sec: Any) -> None:
     foot = sec.footer.paragraphs[0]
     foot.text = ""
-    _run(foot, "Every figure is computed from the connected tools' records  ·  page ", size=8, color=MUTED)
+    _run(foot, footer_text() + "  ·  page ", size=8, color=MUTED)
     _field(foot, "PAGE")
     _run(foot, " of ", size=8, color=MUTED)
     _field(foot, "NUMPAGES")
+
+
+def _has_content(part: Any) -> bool:
+    return any(p.text.strip() for p in part.paragraphs) or bool(part._element.xpath(".//w:drawing"))
+
+
+def _from_word_template(d: Any, title: str, landscape: bool) -> Any:
+    """The organisation's template as the base: its sample body removed, its styles, page set-up, header and footer
+    kept; the house header / footer only where it has none."""
+    from docx.enum.style import WD_STYLE_TYPE
+
+    body = d.element.body
+    for child in list(body):
+        if child.tag != qn("w:sectPr"):
+            body.remove(child)
+    names = {s.name for s in d.styles}
+    for name, size in (("Heading 1", 13), ("Heading 2", 11)):   # headings the reports use, if the template lacks them
+        if name not in names:
+            h = d.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+            h.base_style = d.styles["Normal"] if "Normal" in names else None
+            h.font.size, h.font.bold, h.font.name = Pt(size), True, font_name()
+            h.font.color.rgb = rgb(primary())
+            h.paragraph_format.space_before, h.paragraph_format.space_after = Pt(14), Pt(5)
+            h.paragraph_format.keep_with_next = True
+    sec = d.sections[0]
+    if landscape and sec.page_width and sec.page_height and sec.page_width < sec.page_height:
+        sec.orientation = WD_ORIENT.LANDSCAPE
+        sec.page_width, sec.page_height = sec.page_height, sec.page_width
+    if not _has_content(sec.header):
+        _house_header(sec, title)
+    if not _has_content(sec.footer):
+        _house_footer(sec)
     return d
 
 
@@ -171,8 +267,13 @@ def cover(d: Any, title: str, subtitle: str, meta: str) -> None:
     _no_borders(t)
     _cell_margins(t, 160, 160, 220, 220)
     c = t.rows[0].cells[0]
-    _shade(c, NAVY)
+    _shade(c, primary())
     p = c.paragraphs[0]
+    if logo():
+        import io
+
+        p.add_run().add_picture(io.BytesIO(logo()), height=Cm(1.1))
+        p = c.add_paragraph()
     _run(p, title, size=20, bold=True, color="FFFFFF")
     p2 = c.add_paragraph()
     _run(p2, subtitle, size=11, color="DCE3F0")
@@ -195,7 +296,7 @@ def tiles(d: Any, items: list[tuple[str, Any, str]], *, unit_map: dict[str, str]
         p = cell.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.LEFT
         _run(p, fmt(value, (unit_map or {}).get(label, ""), missing="–"), size=20, bold=True,
-             color=TONES.get(tone, NAVY))
+             color=tone_colours().get(tone, primary()))
         lp = cell.add_paragraph()
         _run(lp, label, size=8, color=MUTED)
     d.add_paragraph()
@@ -219,7 +320,7 @@ def table(d: Any, header: list[str], rows: list[list[Any]], *, widths_cm: list[f
     _cell_margins(t)
     for i, h in enumerate(header):
         c = t.rows[0].cells[i]
-        _shade(c, NAVY)
+        _shade(c, primary())
         p = c.paragraphs[0]
         if i in numeric:
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -241,7 +342,7 @@ def table(d: Any, header: list[str], rows: list[list[Any]], *, widths_cm: list[f
             color, bold = TEXT, False
             if tone_col is not None and i == tone_col:
                 tone = (tones or SEVERITY_TONE).get(str(v), "neutral")
-                color, bold = TONES.get(tone, TEXT), True
+                color, bold = tone_colours().get(tone, TEXT), True
             _run(p, text, size=9, color=color, bold=bold)
     if widths_cm:
         layout = OxmlElement("w:tblLayout")
@@ -300,13 +401,24 @@ def new_deck(template: Any = None) -> Any:
 
     if template and Path(template).exists():
         return Presentation(str(template))
+    if _style().get("deck_bytes"):
+        import io
+
+        prs = Presentation(io.BytesIO(_style()["deck_bytes"]))
+        ids = prs.slides._sldIdLst                     # the template's sample slides go; its master and layouts stay
+        for sid in list(ids):
+            prs.part.drop_rel(sid.rId)
+            ids.remove(sid)
+        return prs
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
     return prs
 
 
 def _blank(prs: Any) -> Any:
-    layout = next((lay for lay in prs.slide_layouts if lay.name.lower() == "blank"), prs.slide_layouts[-1])
+    layouts = list(prs.slide_layouts)
+    layout = next((lay for lay in layouts if lay.name.lower() == "blank"),
+                  min(layouts, key=lambda lay: len(lay.placeholders)))     # a template's emptiest layout
     return prs.slides.add_slide(layout)
 
 
@@ -323,7 +435,7 @@ def _text(slide: Any, x: Any, y: Any, w: Any, h: Any, text: str, *, size: float 
         p.alignment = align
     r = p.add_run()
     r.text = text
-    r.font.size, r.font.bold, r.font.name = PPt(size), bold, "Calibri"
+    r.font.size, r.font.bold, r.font.name = PPt(size), bold, font_name()
     r.font.color.rgb = _prgb(color)
     return box
 
@@ -344,11 +456,15 @@ def title_slide(prs: Any, title: str, subtitle: str, meta: str) -> Any:
 
     s = _blank(prs)
     W, H = prs.slide_width, prs.slide_height
-    _rect(s, 0, 0, W, H, NAVY)
-    _rect(s, Inches(0.8), Inches(3.55), Inches(1.6), Inches(0.08), ACCENT)
+    _rect(s, 0, 0, W, H, primary())
+    _rect(s, Inches(0.8), Inches(3.55), Inches(1.6), Inches(0.08), accent())
     _text(s, Inches(0.8), Inches(2.0), Inches(11.5), Inches(1.4), title, size=40, bold=True, color="FFFFFF")
     _text(s, Inches(0.8), Inches(3.8), Inches(11.5), Inches(0.6), subtitle, size=20, color="DCE3F0")
     _text(s, Inches(0.8), Inches(6.6), Inches(11.5), Inches(0.4), meta, size=11, color="AEB9CF")
+    if logo():
+        import io
+
+        s.shapes.add_picture(io.BytesIO(logo()), Inches(0.8), Inches(0.6), height=Inches(0.8))
     return s
 
 
@@ -360,12 +476,12 @@ def content_slide(prs: Any, title: str, report: str, number: int, subtitle: str 
 
     s = _blank(prs)
     W = prs.slide_width
-    _text(s, Inches(0.6), Inches(0.35), Inches(12), Inches(0.7), title, size=28, bold=True, color=NAVY)
-    _rect(s, Inches(0.6), Inches(1.05), Inches(1.2), Inches(0.06), ACCENT)
+    _text(s, Inches(0.6), Inches(0.35), Inches(12), Inches(0.7), title, size=28, bold=True, color=primary())
+    _rect(s, Inches(0.6), Inches(1.05), Inches(1.2), Inches(0.06), accent())
     if subtitle:
         _text(s, Inches(0.6), Inches(1.18), Inches(12), Inches(0.45), subtitle, size=13, color=MUTED)
     _rect(s, 0, Inches(7.1), W, Inches(0.4), "F3F4F6")
-    _text(s, Inches(0.6), Inches(7.16), Inches(9), Inches(0.3), f"Agentic SOC  ·  {report}  ·  {CLASSIFICATION}",
+    _text(s, Inches(0.6), Inches(7.16), Inches(9), Inches(0.3), f"{brand()}  ·  {report}  ·  {classification()}",
           size=9, color=MUTED)
     _text(s, Inches(11.7), Inches(7.16), Inches(1.0), Inches(0.3), str(number), size=9, color=MUTED,
           align=PP_ALIGN.RIGHT)
@@ -382,9 +498,9 @@ def deck_tiles(slide: Any, items: list[tuple[str, Any, str]], x: Any, y: Any, w:
     for i, (label, value, tone) in enumerate(items):
         cx, cy = x + (i % per_row) * (tw + gap), y + (i // per_row) * (h + gap)
         _rect(slide, cx, cy, tw, h, TILE)
-        _rect(slide, cx, cy, Inches(0.07), h, TONES.get(tone, NAVY))
+        _rect(slide, cx, cy, Inches(0.07), h, tone_colours().get(tone, primary()))
         _text(slide, cx + Inches(0.25), cy + Inches(0.12), tw - Inches(0.35), Inches(0.65),
-              fmt(value, (unit_map or {}).get(label, ""), missing="–"), size=28, bold=True, color=TONES.get(tone, NAVY))
+              fmt(value, (unit_map or {}).get(label, ""), missing="–"), size=28, bold=True, color=tone_colours().get(tone, primary()))
         _text(slide, cx + Inches(0.25), cy + Inches(0.8), tw - Inches(0.35), Inches(0.4), label, size=11, color=MUTED)
 
 
@@ -410,7 +526,7 @@ def deck_table(slide: Any, header: list[str], rows: list[list[Any]], x: Any, y: 
         for c_i, v in enumerate(row):
             cell = tbl.cell(r_i, c_i)
             cell.fill.solid()
-            cell.fill.fore_color.rgb = _prgb(NAVY if r_i == 0 else (ROW_ALT if r_i % 2 == 0 else "FFFFFF"))
+            cell.fill.fore_color.rgb = _prgb(primary() if r_i == 0 else (ROW_ALT if r_i % 2 == 0 else "FFFFFF"))
             cell.margin_left = cell.margin_right = Inches(0.08)
             tf = cell.text_frame
             tf.word_wrap = True
@@ -418,10 +534,10 @@ def deck_table(slide: Any, header: list[str], rows: list[list[Any]], x: Any, y: 
             p.alignment = PP_ALIGN.RIGHT if c_i in numeric else PP_ALIGN.LEFT
             run = p.add_run()
             run.text = str(v) if r_i == 0 else fmt(v, missing="–")
-            run.font.size, run.font.name = PPt(font), "Calibri"
+            run.font.size, run.font.name = PPt(font), font_name()
             color, bold = ("FFFFFF", True) if r_i == 0 else (TEXT, False)
             if r_i and tone_col is not None and c_i == tone_col:
-                color, bold = TONES.get((tones or SEVERITY_TONE).get(str(v), "neutral"), TEXT), True
+                color, bold = tone_colours().get((tones or SEVERITY_TONE).get(str(v), "neutral"), TEXT), True
             run.font.color.rgb, run.font.bold = _prgb(color), bold
 
 
@@ -438,13 +554,13 @@ def deck_chart(slide: Any, chart: dict, x: Any, y: Any, w: Any, h: Any, *, color
         data.add_series(srs["name"], srs["values"])
     gf = slide.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, x, y, w, h, data)
     ch = gf.chart
-    ch.font.size, ch.font.name = PPt(11), "Calibri"
+    ch.font.size, ch.font.name = PPt(11), font_name()
     ch.has_title = bool(chart.get("title"))
     if ch.has_title:
         ch.chart_title.text_frame.text = chart["title"]
         tp = ch.chart_title.text_frame.paragraphs[0]
         tp.runs[0].font.size, tp.runs[0].font.bold = PPt(13), True
-        tp.runs[0].font.color.rgb = _prgb(NAVY)
+        tp.runs[0].font.color.rgb = _prgb(primary())
     ch.has_legend = len(chart["series"]) > 1
     if ch.has_legend:
         ch.legend.position, ch.legend.include_in_layout = XL_LEGEND_POSITION.BOTTOM, False
@@ -469,7 +585,7 @@ def deck_chart(slide: Any, chart: dict, x: Any, y: Any, w: Any, h: Any, *, color
     if len(chart["series"]) == 1 and all(c in STATUS for c in chart["categories"]):
         _chart_colors(ch, list(chart["categories"]), per_point=True)    # severity / verdict bars in their colours
         return gf
-    palette = colors or [ACCENT, "E08A1E", "3A9E6E", "B84A62", "6B5BA8"]
+    palette = colors or [accent(), "E08A1E", "3A9E6E", "B84A62", "6B5BA8"]
     for i, srs in enumerate(plot.series):
         srs.format.fill.solid()
         srs.format.fill.fore_color.rgb = _prgb(palette[i % len(palette)])
@@ -532,11 +648,11 @@ def deck_doughnut(slide: Any, title: str, counts: dict[str, Any], x: Any, y: Any
     data.add_series(title, [counts[k] for k in keys])
     gf = slide.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, x, y, w, h, data)
     ch = gf.chart
-    ch.font.size, ch.font.name = PPt(12), "Calibri"
+    ch.font.size, ch.font.name = PPt(12), font_name()
     ch.has_title = True
     ch.chart_title.text_frame.text = title
     tp = ch.chart_title.text_frame.paragraphs[0].runs[0]
-    tp.font.size, tp.font.bold, tp.font.color.rgb = PPt(14), True, _prgb(NAVY)
+    tp.font.size, tp.font.bold, tp.font.color.rgb = PPt(14), True, _prgb(primary())
     ch.has_legend = True
     ch.legend.position, ch.legend.include_in_layout = XL_LEGEND_POSITION.RIGHT, False
     plot = ch.plots[0]
@@ -565,11 +681,11 @@ def deck_stacked(slide: Any, title: str, categories: list[str], series: list[tup
         data.add_series(name, vals)
     gf = slide.shapes.add_chart(XL_CHART_TYPE.BAR_STACKED, x, y, w, h, data)
     ch = gf.chart
-    ch.font.size, ch.font.name = PPt(12), "Calibri"
+    ch.font.size, ch.font.name = PPt(12), font_name()
     ch.has_title = True
     ch.chart_title.text_frame.text = title
     tp = ch.chart_title.text_frame.paragraphs[0].runs[0]
-    tp.font.size, tp.font.bold, tp.font.color.rgb = PPt(14), True, _prgb(NAVY)
+    tp.font.size, tp.font.bold, tp.font.color.rgb = PPt(14), True, _prgb(primary())
     ch.has_legend = True
     ch.legend.position, ch.legend.include_in_layout = XL_LEGEND_POSITION.BOTTOM, False
     plot = ch.plots[0]

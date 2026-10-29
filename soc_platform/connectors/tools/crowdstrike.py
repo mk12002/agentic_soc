@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from soc_platform.connectors.base import LookupResult, Page
+from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import (
@@ -40,8 +40,9 @@ class CrowdStrikeConnector(ToolConnector):
     dimension = "endpoint"
     streams = ("alerts", "hosts", "vulnerabilities")
     lookups = ("host", "hash", "domain", "ip", "user")
-    read_scopes = ("Alerts:read", "Hosts:read", "Spotlight vulnerabilities:read", "IOCs:read")
-    write_scopes = ("Hosts:write", "Real time response:write")
+    read_scopes = ("Alerts:read", "Hosts:read", "Vulnerabilities (Spotlight):read", "IOC Management:read")
+    # containment, and read-only RTR commands (ps, netstat, ls) - the host's response policy must also allow RTR
+    write_scopes = ("Hosts:write", "Real time response:read")
     page_size = 100
 
     # ------------------------------------------------------------------ streams
@@ -232,20 +233,43 @@ class CrowdStrikeConnector(ToolConnector):
         return {"released": ids, "response": body}
 
     def rtr_collect(self, params: dict, targets: list) -> dict:
-        """Evidence-preserving collection over RTR (replaces the custom polling agent, IM-T09)."""
+        """Evidence-preserving collection over RTR (replaces the custom polling agent, IM-T09). RTR commands are
+        asynchronous: each is queued (``cloud_request_id``) and its output read back until complete; the session is
+        closed afterwards."""
         out = {}
         commands = params.get("commands") or ["ps", "netstat", "ls C:\\Windows\\Temp"]
         for aid in targets_of(targets, "asset", "crowdstrike_aid"):
             sess = self.post("/real-time-response/entities/sessions/v1", json={"device_id": aid, "origin": "soc_platform"})
-            sid = ((sess.get("resources") or [{}])[0]).get("session_id", "fixture-session")
+            sid = ((sess.get("resources") or [{}])[0]).get("session_id")
+            if not sid:
+                raise ConnectorError(f"RTR session for {aid} was not opened (is the host online, and RTR allowed by its "
+                                     "response policy?)")
             results = []
-            for cmd in commands:
-                base = cmd.split()[0]
-                r = self.post("/real-time-response/entities/command/v1",
-                              json={"base_command": base, "command_string": cmd, "session_id": sid})
-                results.append({"command": cmd, "response": r})
+            try:
+                for cmd in commands:
+                    queued = self.post("/real-time-response/entities/command/v1",
+                                       json={"base_command": cmd.split()[0], "command_string": cmd, "session_id": sid})
+                    rid = ((queued.get("resources") or [{}])[0]).get("cloud_request_id")
+                    results.append({"command": cmd, **self._rtr_result(rid)})
+            finally:
+                self.req("DELETE", "/real-time-response/entities/sessions/v1", params={"session_id": sid})
             out[aid] = results
         return {"collected": out}
+
+    def _rtr_result(self, request_id: str | None, *, wait_s: float = 60.0) -> dict[str, Any]:
+        """A queued RTR command's output, read until complete (bounded wait)."""
+        import time
+
+        if not request_id:
+            return {"complete": False, "error": "the command was not queued"}
+        deadline = time.monotonic() + wait_s
+        while True:
+            r = ((self.get("/real-time-response/entities/command/v1",
+                           params={"cloud_request_id": request_id, "sequence_id": 0}).get("resources") or [{}])[0])
+            if r.get("complete") or time.monotonic() > deadline:
+                return {"complete": bool(r.get("complete")), "stdout": r.get("stdout", ""), "stderr": r.get("stderr", ""),
+                        "cloud_request_id": request_id}
+            time.sleep(2)
 
 
 def _preconditions_has_aid(params: dict, targets: list) -> list[str]:

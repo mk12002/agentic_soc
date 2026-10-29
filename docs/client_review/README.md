@@ -61,7 +61,7 @@ estimated. The supporting detail is in the repository:
 | Test rounds and results | `docs/TEST_REPORT.md`, `docs/FEATURE_VERIFICATION.md` |
 | Requirement-by-requirement coverage | `docs/REQUIREMENTS_TRACEABILITY.md` |
 
-Latest verification at the time of writing (`docs/TEST_REPORT.md`): 820 platform tests passing on SQLite and 819 on
+Latest verification at the time of writing (`docs/TEST_REPORT.md`): 878 platform tests passing on SQLite and 877 on
 PostgreSQL 16, 205 phishing ML engine tests, 108 of 108 features verified (including a browser tour, live public feeds
 and a live LLM), static security analysis (bandit) and dependency audit (pip-audit) with no findings.
 

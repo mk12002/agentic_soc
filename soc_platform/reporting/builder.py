@@ -27,6 +27,7 @@ from soc_platform.connectors.base import ConnectorError
 from soc_platform.core.models import Case, utcnow
 from soc_platform.llm.gateway import BudgetExceeded, LLMGateway, model_choice, model_list
 from soc_platform.reporting import charts
+from soc_platform.reporting.style import guide_instruction
 
 Facts = list[tuple[str, Any]]
 
@@ -484,14 +485,14 @@ WRITE_RULES = ("Write the section for the stated audience in clear prose (2-5 se
                "cite fact ids (F#) for every sentence; do not invent numbers.")
 
 
-def _narrate(llm: LLMGateway | None, spec: dict, section: dict, data: dict) -> dict[str, Any]:
+def _narrate(llm: LLMGateway | None, spec: dict, section: dict, data: dict, guide: str = "") -> dict[str, Any]:
     facts = [(k, "not available" if v is None else v) for k, v in data["facts"]]
     data["facts"] = facts
     evidence = [{"id": f"F{i}", "claim": f"{k}: {v}", "source": section["source"]} for i, (k, v) in enumerate(facts, 1)]
     fdict = {k: v for k, v in facts}
     if llm is not None:
         q = (f"Report '{spec['title']}' for {spec['audience']}. Section '{section.get('title') or SOURCES[section['source']][0]}'. "
-             f"Instruction: {section.get('instruction') or 'summarise'}. {WRITE_RULES}")
+             f"Instruction: {section.get('instruction') or 'summarise'}. {WRITE_RULES}{guide_instruction(guide)}")
         g = llm.grounded(f"report.section.{section['source']}", q, evidence, tier="large")
         if g.get("source") == "llm" and g.get("claims"):
             return {"text": " ".join(f"{c['text']} [{', '.join(c['evidence_ids'])}]" for c in g["claims"]), "source": "llm",
@@ -547,7 +548,7 @@ def _pptx(path: Path, spec: dict, sections: list[dict], meta: dict) -> None:
 
     prs = D.new_deck()
     D.title_slide(prs, spec["title"], f"For the {spec['audience']}  ·  last {spec['days']} day(s)",
-                  f"Generated {meta['at']} UTC  ·  every figure computed from the platform's records  ·  {D.CLASSIFICATION}")
+                  f"Generated {meta['at']} UTC  ·  every figure computed from the platform's records  ·  {D.classification()}")
     n = 1
     for s in sections:
         n += 1
@@ -609,9 +610,11 @@ def build_report(session: Session, registry: Any, spec: dict, out_dir: str | Pat
     from concurrent.futures import ThreadPoolExecutor
 
     from soc_platform.llm.gateway import llm_concurrency
+    from soc_platform.reporting.style import ReportStyleStore, use_style
 
+    guide = ReportStyleStore(session).active().get("guide") or ""     # read here: the pool's threads have no session
     with ThreadPoolExecutor(max_workers=llm_concurrency() if llm is not None else 1) as pool:
-        narratives = list(pool.map(lambda b: _narrate(llm, spec, b["_section"], b["data"]), built))
+        narratives = list(pool.map(lambda b: _narrate(llm, spec, b["_section"], b["data"], guide), built))
     for b, narrative in zip(built, narratives, strict=True):
         b["narrative"] = narrative
         del b["_section"]
@@ -622,7 +625,8 @@ def build_report(session: Session, registry: Any, spec: dict, out_dir: str | Pat
     out.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "_", spec["title"].lower()).strip("_")[:40] or "report"
     path = out / f"{slug}_{utcnow():%Y%m%d_%H%M%S}.{spec.get('format', 'docx')}"
-    (_pptx if spec.get("format") == "pptx" else _docx)(path, spec, built, meta)
+    with use_style(session):
+        (_pptx if spec.get("format") == "pptx" else _docx)(path, spec, built, meta)
     ref = BlobStore(session).store_generated(path, f"reports/{path.name}")
     run = ReportRun(kind=f"custom:{spec.get('id') or slug}", path=ref,
                     metrics={"sections": len(built), "writer": meta["writer"], "skipped": skipped, "domains": sorted(used), "scope": sorted(domains),

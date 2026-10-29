@@ -51,8 +51,9 @@ class OpenAICompatibleProvider(Provider):
         prefix = os.environ.get("SOC_LLM_AUTH_PREFIX", "Bearer ")
         return {**llm_extra_headers(), **({name: f"{prefix}{self.key}"} if self.key else {})}
 
-    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
-        model = self.models.get(tier) or self.models["large"]
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None,
+                 model: str | None = None) -> Completion | None:
+        model = model or self.models.get(tier) or self.models["large"]
         if not (self.base and model) or (self.requires_key and not self.key):
             return None
         url = self.base + ("/chat/completions" if self.base.endswith("/v1") else "/v1/chat/completions")

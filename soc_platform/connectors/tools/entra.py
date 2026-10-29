@@ -13,7 +13,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from soc_platform.connectors.base import LookupResult, Page
+from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, targets_of
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, ARM, MicrosoftConnector, graph_and_arm_transport
@@ -41,8 +41,25 @@ class EntraConnector(MicrosoftConnector):
     dimension = "identity"
     streams = ("users", "signins", "risky_users", "risk_detections", "directory_audits")
     lookups = ("user", "ip")
+    # GroupMember.Read.All + RoleManagement.Read.Directory: without them Graph returns a user's groups and directory
+    # roles with every name null, and the privileged-role check silently finds nothing
     read_scopes = ("User.Read.All", "AuditLog.Read.All", "IdentityRiskyUser.Read.All", "IdentityRiskEvent.Read.All",
-                   "RoleManagement.Read.Directory", "UserAuthenticationMethod.Read.All", "MailboxSettings.Read")
+                   "GroupMember.Read.All", "RoleManagement.Read.Directory", "UserAuthenticationMethod.Read.All",
+                   "MailboxSettings.Read")
+    # Graph's own per-tenant limits for these families, whatever the app's overall budget: sign-in and audit logs 5
+    # requests per 10 s; Identity Protection 1 per second, and its 429s carry no Retry-After to wait on
+    FAMILY_LIMITS = (("/auditLogs/", 0.5, 5), ("/identityProtection/", 1.0, 1))
+
+    def req(self, method: str, path: str, **kw: Any) -> Any:
+        from soc_platform.connectors.base import RateLimited, TokenBucket
+        from soc_platform.connectors.http import FixtureTransport
+
+        if not isinstance(self.http, FixtureTransport):      # sample data has no tenant to protect
+            buckets = self.__dict__.setdefault("_family_buckets", {p: TokenBucket(r, b) for p, r, b in self.FAMILY_LIMITS})
+            for prefix, bucket in buckets.items():
+                if prefix in path and not bucket.acquire(timeout=120):
+                    raise RateLimited()
+        return super().req(method, path, **kw)
     write_scopes = ("User.RevokeSessions.All", "User.EnableDisableAccount.All", "IdentityRiskyUser.ReadWrite.All",
                     "User-PasswordProfile.ReadWrite.All")
 
@@ -164,11 +181,22 @@ class EntraConnector(MicrosoftConnector):
             "risky": lambda: self.get("/v1.0/identityProtection/riskyUsers",
                                       params={"$filter": f"userPrincipalName eq '{upn}'"}).get("value", []),
             "rules": lambda: self.get(f"/v1.0/users/{upn}/mailFolders/inbox/messageRules").get("value", []),
-            "devices": lambda: self.get(f"/v1.0/users/{upn}/registeredDevices").get("value", []),
+            "devices": lambda: self._registered_devices(upn, since_iso),
         }
         with ThreadPoolExecutor(max_workers=len(reads)) as pool:
             futures = {k: pool.submit(fn) for k, fn in reads.items()}
-            got = {k: f.result() for k, f in futures.items()}   # any failure propagates, as before
+            got, unavailable = {}, []
+            for k, f in futures.items():
+                try:
+                    got[k] = f.result()
+                except ConnectorError as exc:
+                    # the person must exist; every other part is context. One part a tenant does not license or
+                    # permit (Identity Protection without P2, a mailbox outside the app's access policy) is reported
+                    # as unavailable instead of failing the whole identity lookup
+                    if k == "user":
+                        raise
+                    got[k] = []
+                    unavailable.append(f"{k} ({type(exc).__name__})")
         u, membership, signins, risky, rules, devices = (got[k] for k in ("user", "membership", "signins", "risky",
                                                                           "rules", "devices"))
         roles = [r.get("displayName") for r in membership if r.get("@odata.type", "").endswith("directoryRole")]
@@ -184,8 +212,26 @@ class EntraConnector(MicrosoftConnector):
         return {"user": u, "roles": roles, "privileged_roles": sorted(set(roles) & PRIVILEGED_ROLES), "groups": groups,
                 "mfa_methods": methods, "signins": signins, "risky": risky[0] if risky else None,
                 "inbox_rules": rules, "suspicious_inbox_rules": suspicious_rules, "devices": devices,
-                "new_devices": new_devices, "azure_roles": azure, "azure_error": azure_error,
+                "new_devices": new_devices, "azure_roles": azure, "azure_error": azure_error, "unavailable": unavailable,
                 "azure_privileged": sorted(f"{r['role']} on {r['scope_name']}" for r in azure or [] if r["privileged"])}
+
+    def _registered_devices(self, upn: str, since_iso: str | None) -> list[dict[str, Any]]:
+        """Devices registered to the user, from the directory audit log ("Add registered owner to device"). Graph's
+        per-user device lists (registeredDevices, ownedDevices) do not accept application permissions, so the audit
+        log is what an app can read. Only documented filters are sent (activity name, time); the user is matched here
+        on the event's target user."""
+        flt = "activityDisplayName eq 'Add registered owner to device'" + (
+            f" and activityDateTime ge {since_iso}" if since_iso else "")
+        out = []
+        for a in self.odata_all("/v1.0/auditLogs/directoryAudits", {"$filter": flt, "$top": 999}, limit=5000):
+            targets = a.get("targetResources") or []
+            if a.get("activityDisplayName") != "Add registered owner to device" or not any(
+                    str(t.get("userPrincipalName") or "").lower() == upn.lower() for t in targets):
+                continue
+            dev = next((t for t in targets if str(t.get("type") or "").lower() == "device"), {})
+            out.append({"id": dev.get("id"), "displayName": dev.get("displayName"),
+                        "registrationDateTime": a.get("activityDateTime")})
+        return out
 
     def _azure_roles(self, object_id: str | None) -> list[dict[str, Any]] | str:
         """The user's Azure role assignments (direct, or inherited through a group - ``assignedTo`` covers both) on
@@ -258,7 +304,8 @@ class EntraConnector(MicrosoftConnector):
                            f"{len(ctx['suspicious_inbox_rules'])} suspicious inbox rule(s); "
                            f"{len(ctx['new_devices'])} newly registered device(s); "
                            + (f"Azure roles: {', '.join(r['role'] + ' on ' + r['scope_name'] for r in ctx['azure_roles']) or 'none'}"
-                              if ctx["azure_roles"] is not None else ctx["azure_error"]))
+                              if ctx["azure_roles"] is not None else ctx["azure_error"])
+                           + (f"; unavailable: {', '.join(ctx['unavailable'])}" if ctx["unavailable"] else ""))
                 return ok_lookup(self, recs, summary, recs[0].deep_link, risky_signins=len(risky_signins),
                                  user_risk=(ctx["risky"] or {}).get("riskLevel", "none"),
                                  suspicious_inbox_rules=len(ctx["suspicious_inbox_rules"]),

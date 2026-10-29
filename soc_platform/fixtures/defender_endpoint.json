@@ -397,7 +397,7 @@
   },
   {
    "method": "GET",
-   "path": "^/api/machines/findbyip$",
+   "path": "^/api/machines/findbyip\\(ip='10\\.20\\.1\\.15',timestamp=\\d{4}-\\d\\d-\\d\\dT[^)]*\\)$",
    "body": {
     "value": [
      {
@@ -418,15 +418,11 @@
      }
     ]
    },
-   "status": 200,
-   "params": {
-    "ip": "10.20.1.15",
-    "timestamp": "~^\\d{4}-\\d\\d-\\d\\dT"
-   }
+   "status": 200
   },
   {
    "method": "GET",
-   "path": "^/api/machines/findbyip$",
+   "path": "^/api/machines/findbyip\\(.*\\)$",
    "body": {
     "value": []
    },
