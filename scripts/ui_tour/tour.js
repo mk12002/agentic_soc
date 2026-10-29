@@ -381,7 +381,7 @@ async function visit(page, hash, name, full = true) {
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
   const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'ai-usage', 'reports', 'access', 'audit',
-    `search/${encodeURIComponent(term)}`];
+    'watchlists', `search/${encodeURIComponent(term)}`];
   for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light']]) {
     await page.setViewportSize({width: w, height: 900});
     await page.evaluate(t => { document.documentElement.setAttribute('data-theme', t); }, theme);

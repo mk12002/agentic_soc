@@ -29,6 +29,21 @@ documentation so onboarding has no surprises, and flag what must be confirmed.
 | Tool onboarding review: every connector's endpoints, sign-in, permissions, paging and limits checked against the vendor's current documentation | Fixed: Defender for Endpoint `findbyip` called as the documented OData function (and its `Machine.ReadWrite.All` permission listed); Entra device registrations read from the audit log (Graph's per-user device lists refuse application permissions, which would have failed every identity lookup), each optional part of an identity lookup failing on its own (Identity Protection without P2, a mailbox outside the app's scope), `GroupMember.Read.All` listed (without it group and role names come back blank), Graph's per-tenant limits for audit logs and Identity Protection kept; CrowdStrike RTR output read back and the session closed (commands are asynchronous - the collection returned nothing); NVD asked with both dates in windows of at most 120 days (a start date alone is refused); Avanan tokens renewed from their own ~30-minute expiry and on a 401; the Defender for Endpoint host moved to `api.security.microsoft.com` (token audience unchanged). Flagged for confirmation: Delinea paths and rotation call, Privilege Manager API (per-console Swagger only), the Office 365 block-sender endpoint (undocumented) and remediation (Graph beta), admin targets needing a privileged role, Rapid7 cloud API v4, Sentinel's move to the Defender portal | `test_tool_onboarding.py` (10 tests, each tied to the documented vendor behaviour); fixtures regenerated from the builders (only the changed routes); `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 4 and the review pack updated |
 | *About this audit log* on the Audit screen (`GET /api/v1/audit/info`): records and period, by actor and kind, last full verification, retention of the log and of every other data class from the settings in force, protections, who may read and export | Figures equal the settings and the log's own counts | `test_the_audit_facts_are_read_from_the_log_and_the_settings` |
 
+**In the browser.** The browser tour (Chrome; every screen, light + dark, layout audited at 1440 / 1280 / 1024 / 768 px,
+axe-core accessibility scan, stored-XSS probe, every on-screen count cross-checked against the API; the Watch lists
+screen added to its route list) first found 14 layout problems, all in this round's screens: the report-style form's
+fields clipped at half width, the new model table needing 107 px of sideways scroll at 1280 px, and model names breaking
+at their hyphens. Fixed (the style cards and the model table take full rows; model names do not wrap); the final tour:
+35 screenshots, **0 problems, 0 accessibility notes**. A functional run through the console as lead, auditor, analyst
+and administrator (35 checks: preview and upload of an Excel and a CSV list, case badges and banner, removal, the
+investigation record's section, a style pack, brand, both previews, a report built in the style, reset, every audit
+export format and a filtered one, read-only views per role, model choice and the model check, markup in a list note and
+the organisation name shown as text) passed 35 of 35 with no browser error after fixing a **bug that predates this
+round**: the console's download helper parsed any response whose type contained "json", so JSON Lines and JSON
+downloads (the Reports screen's audit export among them) never started; downloads now take the response as it is.
+Every downloaded file was opened: the .xlsx by openpyxl, the .docx / .pptx by python-docx / python-pptx, the JSON
+exports' chain verification reads `ok`.
+
 Found and fixed on the way: upper-case URL schemes and hashes were not recognised as URLs / hashes (tests written
 first); FEATURES.md still called autonomy level L1 "notify" (the code: enrich). Checked in a browser: the new screen,
 the case banner and badges, the upload preview and the Audit screen as lead, analyst and auditor (no console errors).

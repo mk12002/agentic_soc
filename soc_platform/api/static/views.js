@@ -753,7 +753,7 @@ async function AiUsage() {
       <td>${edit ? `<select id="wt-${esc(f.workflow)}" aria-label="Model for ${esc(f.workflow)}"><option value="">${esc(f.default_model)} (default)</option>${pol.models.map(m => `<option value="${esc(m.name)}"${r.model === m.name ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
         <input class="input" style="width:90px;margin-top:4px" id="wm-${esc(f.workflow)}" aria-label="Output cap for ${esc(f.workflow)}" placeholder="cap ${esc(P.max_output_tokens[f.tier] || '')}" value="${esc(r.max_output_tokens || '')}">
         <label class="inline small" style="margin-top:4px"><input type="checkbox" id="we-${esc(f.workflow)}"${r.enabled === false ? '' : ' checked'}> on</label>`
-        : `<span class="tag">${esc(f.model)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}`}</td></tr>`; };
+        : `<span class="tag" style="white-space:nowrap">${esc(f.model)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}`}</td></tr>`; };
   const lim = (id, v, ph, label) => `<input class="input" style="width:100%;max-width:130px" id="${id}" aria-label="${esc(label || id)}" value="${v == null ? '' : esc(v)}" placeholder="${esc(ph || '')}"${edit ? '' : ' readonly'}>`;
   const roleRows = pol.roles.map(r => { const v = (P.roles || {})[r] || {}; return `<tr><td class="small">${esc(cap(r))}</td><td>${lim('rh-' + r, v.hourly_tokens, 'everyone', cap(r) + ' per hour')}</td><td>${lim('rd-' + r, v.daily_tokens, 'everyone', cap(r) + ' per day')}</td></tr>`; });
   const row2 = (label, a, b) => `<tr><td class="small">${label}</td><td>${a}</td><td>${b || ''}</td></tr>`;
@@ -772,16 +772,18 @@ async function AiUsage() {
           row2('Daily tokens', lim('lp-day', P.daily_tokens, '', 'Daily tokens')),
           row2('Warn at (fraction of the month)', lim('lp-alert', P.alert_at, '', 'Warn at')),
           row2('Longest answer: smaller / larger models', lim('lp-cs', P.max_output_tokens.small, '', 'Longest answer, smaller models'), lim('lp-cl', P.max_output_tokens.large, '', 'Longest answer, larger models'))]), {flush: true, sub: 'tokens; 0 = no cap'})}
+      ${card('Limits per person', `<div class="small muted" style="margin-bottom:6px">Questions, deep analysis and reports a person asks for. Scheduled work counts only against the budgets. 0 = no model text for them.</div>
+        ${table(['Who', 'Per hour', 'Per day'], [row2('<b>Everyone</b>', lim('lu-h', P.user_default.hourly_tokens, '', 'Everyone per hour'), lim('lu-d', P.user_default.daily_tokens, '', 'Everyone per day')), ...roleRows], {flush: true})}
+        <label class="small" style="display:block;margin-top:10px" for="lusers">Per person (overrides the role), one per line: <span class="mono">name@company.com | per hour | per day</span></label>
+        <textarea id="lusers" rows="4" class="mono" style="width:100%"${edit ? '' : ' readonly'}>${esc(userOver)}</textarea>`, {sub: 'tokens; a role overrides everyone'})}
+    </div>
+    <div class="mt">
       ${card('Models', `<div class="small muted" style="margin-bottom:6px">The models a feature can use - the ones deployed on your endpoint (<span class="mono">SOC_LLM_MODELS</span> adds more). Prices are USD per million tokens and only drive the cost figures.</div>
         ${table(['Model', 'Size', {h: '$ in / M', num: 1}, {h: '$ out / M', num: 1}, 'Answers?'], pol.models.map((m, i) => { const pr = P.prices[m.name] || {input: 0, output: 0};
           return `<tr><td class="mono small">${esc(m.name)}${m.deployment !== m.name ? `<div class="t-sub">deployment ${esc(m.deployment)}</div>` : ''}${Object.values(pol.default_models).includes(m.name) ? `<div class="t-sub">default for ${esc(Object.entries(pol.default_models).filter(([, v]) => v === m.name).map(([k]) => k === 'small' ? 'routine narrative' : 'summaries and reports').join(', '))}</div>` : ''}</td>
             <td class="small">${esc(m.size === 'small' ? 'smaller' : 'larger')}</td><td class="num">${lim('mpi-' + i, pr.input, '', m.name + ' input price')}</td><td class="num">${lim('mpo-' + i, pr.output, '', m.name + ' output price')}</td>
             <td class="small" id="mchk-${i}">–</td></tr>`; }), {flush: true})}
         ${edit ? `<div class="mt">${btn('Check which models answer', 'checkModels', [], 'sm')}</div>` : ''}`, {sub: 'a feature set to a model your endpoint does not serve falls back to the platform\'s own text'})}
-      ${card('Limits per person', `<div class="small muted" style="margin-bottom:6px">Questions, deep analysis and reports a person asks for. Scheduled work counts only against the budgets. 0 = no model text for them.</div>
-        ${table(['Who', 'Per hour', 'Per day'], [row2('<b>Everyone</b>', lim('lu-h', P.user_default.hourly_tokens, '', 'Everyone per hour'), lim('lu-d', P.user_default.daily_tokens, '', 'Everyone per day')), ...roleRows], {flush: true})}
-        <label class="small" style="display:block;margin-top:10px" for="lusers">Per person (overrides the role), one per line: <span class="mono">name@company.com | per hour | per day</span></label>
-        <textarea id="lusers" rows="4" class="mono" style="width:100%"${edit ? '' : ' readonly'}>${esc(userOver)}</textarea>`, {sub: 'tokens; a role overrides everyone'})}
     </div>
     ${edit ? `<div class="form-row mt"><input class="input" id="lp-note" aria-label="Why" placeholder="Why (kept in the history and the audit log)">${btn('Save limits and model choices', 'saveLlmPolicy', [], 'primary')}</div><div id="lpout"></div>` : `<div class="small muted mt">Only an administrator changes these.</div>`}
     <div class="grid g-2e mt">
@@ -870,7 +872,7 @@ function styleCard(rs) {
   const part = (slot, label) => { const f = F[slot]; return `<div class="list-row"><div class="grow"><div class="t-title">${esc(label)}</div>
       <div class="t-sub">${f ? `${esc(f.name)} · ${esc(f.detail)} · ${esc(f.by)} ${dt(f.at)}` : 'house style'}</div></div>${manage && f ? btn('Remove', 'styleRemove', [slot], 'sm ghost') : ''}</div>`; };
   const field = (id, label, v, ph, extra = '') => `<label class="small" for="${id}">${label}</label><input class="input" id="${id}" value="${esc(v || '')}" placeholder="${esc(ph || '')}"${manage ? '' : ' readonly'}${extra}>`;
-  return `<div class="grid g-2">
+  return `<div class="stack">
     ${card('What every report looks like', `<p class="small muted" style="margin-top:0">Applied to every Word report and PowerPoint deck - standard, described and scheduled - and the audit trail report. Figures and citations never change; only the look and, for model-written text, the wording.</p>
       ${part('word', 'Word template')}${part('deck', 'PowerPoint template (16:9)')}${part('logo', 'Logo')}
       <div class="list-row"><div class="grow"><div class="t-title">Writing guide</div><div class="t-sub">${S.guide ? `${nf(S.guide.length)} characters - used when the model writes report narrative` : 'none - the model writes in plain report English'}</div></div>${manage && S.guide ? btn('Remove', 'styleRemove', ['guide'], 'sm ghost') : ''}</div>
@@ -888,7 +890,7 @@ function styleCard(rs) {
         <div class="stack" style="gap:4px">${field('st-pri', 'Primary colour (hex)', S.primary, '1F2A44', ' maxlength="7"')}</div>
         <div class="stack" style="gap:4px">${field('st-acc', 'Accent colour (hex)', S.accent, '2563EB', ' maxlength="7"')}</div>
         <div class="stack" style="gap:4px">${field('st-font', 'Font', S.font, 'Calibri', ' maxlength="40"')}</div>
-        <div class="stack" style="gap:4px">${field('st-foot', 'Footer text', S.footer, "Every figure is computed from the connected tools' records", ' maxlength="160"')}</div>
+        <div class="stack" style="gap:4px">${field('st-foot', 'Footer text', S.footer, 'The house footer', ' maxlength="160"')}</div>
       </div>
       <label class="small" for="st-guide">Writing guide - tone, terms and wording for model-written narrative (it cannot change a fact, a figure or a citation)</label>
       <textarea id="st-guide" rows="5" maxlength="8000" placeholder="e.g. Write for executives. British English. Say 'incident', never 'breach', unless confirmed. Lead with the business impact.">${esc(S.guide || '')}</textarea>

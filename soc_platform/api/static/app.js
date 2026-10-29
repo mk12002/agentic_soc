@@ -44,14 +44,14 @@ async function api(path, opts = {}) {
     toast((typeof d === 'string' ? d : (d && d.message) || JSON.stringify(d)).slice(0, 300), true);
     throw new Error(t);
   }
-  return (r.headers.get('content-type') || '').includes('json') ? r.json() : r;
+  return !opts.raw && (r.headers.get('content-type') || '').includes('json') ? r.json() : r;
 }
 const post = (p, body) => api(p, {method: 'POST', body: body === undefined ? undefined : JSON.stringify(body)});
 const can = p => ((window.ME && window.ME.permissions) || []).includes(p);
 const inDomain = d => { const ds = (window.ME && window.ME.domains) || []; return ds.includes('*') || (d !== '*' && ds.includes(d)); };
 
 async function dl(path) {
-  const r = await api(path);
+  const r = await api(path, {raw: true});     // a file: never parsed, even when it is JSON or JSON Lines
   const b = await r.blob();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(b);
