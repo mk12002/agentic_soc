@@ -68,6 +68,8 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Ownership and tickets | ServiceNow / Jira / CSV | CI owner, support group, criticality, ticket status | Yes (owner names) | Route work to the right team |
 | Public intelligence | NVD, EPSS, CISA KEV, approved TI sources | CVE scores, exploitation status, indicator reputation | No | Context and prioritisation |
 | Platform records | The platform | Cases, evidence, actions, approvals, insights, notes, audit chain, access log, model-call log | Yes (analysts, subjects) | Workflow, accountability, audit |
+| Watch lists | Uploaded by a lead (Excel / CSV) | Block and exception lists of user names, e-mail addresses, hosts, IPs, domains, URLs and hashes, each with a note, who added it and when; removed entries kept, marked removed | Yes (named people) | Shown on cases that involve a listed item (context only) |
+| Report style | Uploaded by a lead or administrator | Word / PowerPoint templates, logo, brand settings, writing guide - encrypted in the database | No (unless a template carries names) | The look and wording of generated reports |
 
 ## 4 Storage
 
@@ -102,7 +104,8 @@ audit chain with what it removed.
 | Telemetry events (sign-ins, DNS, mail events, secret accesses, elevations) | 400 days | `SOC_EVENT_RETENTION_DAYS` (0 = keep) | Kept while a case, evidence row, insight or analyst override refers to it; alerts, findings, assets, people and indicators are not pruned by this rule |
 | Model-call log: prompt and answer text | 180 days | `SOC_LLM_LOG_RETENTION_DAYS` | Token counts and metadata are kept for budget reporting |
 | Access log | 400 days | `SOC_ACCESS_LOG_RETENTION_DAYS` | Every API request: who, method, path, status, client address, user agent, latency |
-| Audit chain | Never pruned by the platform | - | Export (JSON Lines with chain verification) to the organisation's archive / SIEM for long-term retention |
+| Audit chain | Never pruned by the platform (the database refuses changes and deletion) | - | Export to the organisation's archive / SIEM for long-term retention: JSON Lines with chain verification, JSON, CSV, Excel or a Word report, for a period, event type or actor; every export is itself audited. The Audit log screen states the retention of every data class from the settings in force |
+| Watch lists | Until removed by a lead (removed entries kept, marked removed) | - | Every upload and removal is audited with its values |
 | Generated reports | Kept until removed by the operator | - | Encrypted at rest |
 | Backups | The organisation's policy | - | - |
 

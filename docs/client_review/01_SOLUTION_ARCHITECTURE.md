@@ -148,7 +148,7 @@ Only the hosts of the tools the organisation enables are needed.
 |---|---|
 | `login.microsoftonline.com` | Entra sign-in token validation keys; every Microsoft connector's token |
 | `graph.microsoft.com`, `management.azure.com` | Entra ID, Azure role assignments, Sentinel, Defender for Office 365, Defender for Identity |
-| `api.securitycenter.microsoft.com` (or the regional host) | Defender for Endpoint |
+| `api.security.microsoft.com` (or the regional host) | Defender for Endpoint |
 | `outlook.office365.com` | Defender for Office 365 (Tenant Allow/Block List actions) |
 | The CrowdStrike API host of the organisation's cloud | CrowdStrike Falcon |
 | The Wiz API and authentication hosts | Wiz |

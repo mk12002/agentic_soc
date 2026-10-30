@@ -46,8 +46,9 @@ Between audiences: stop the server and run `python -m soc_platform reset-demo --
    routing, campaign; *Cloud misconfigurations*: route to owners, mark fixed, **Validate** → false closure caught.
 6. **Coverage / Shadow IT / Supplier risk** (3 min) - ATT&CK blind spots per enabled tool; unsanctioned services
    (WeTransfer, DeepSeek, AnyDesk); Krishna Logistics look-alike and bank-detail-change mail.
-7. **Governance** (2 min) - Audit (chain verified), Access (roles, service accounts, MFA), Reports → compliance
-   pack (sign in as auditor).
+7. **Governance** (2 min) - Watch lists (upload a block list, the case badge appears), Audit (chain verified, what it
+   keeps and for how long, export to Excel), Access (roles, service accounts, MFA), Reports → report style preview and
+   compliance pack (sign in as auditor).
 
 ## Likely questions
 

@@ -117,6 +117,19 @@ to someone else or take it back. The case list shows the owner and filters to *M
 **Analyst notes** keep the team's working notes on the case - kept permanently and never edited (a correction is a
 new note), each with author and time, and every assignment and note is in the audit trail.
 
+**Block and exception lists** (*Govern -> Watch lists*). A lead uploads an Excel workbook (.xlsx, every sheet) or a
+CSV of user names, e-mail addresses, host names, IP addresses, domains, URLs, file hashes or device ids - typed by
+their column (*Username*, *Hostname*, *IP address*...) or by a *Type* column, with an optional *Note* / *Reason*.
+*Preview* shows what would be added or removed and every row that cannot be read (with its sheet and row), changing
+nothing; an upload adds to a list or replaces it. A case that involves a listed item - an alert's user or host, a
+phishing recipient, reporter, clicker, sender, link or attachment - says so at the top (red for the block list),
+with the entry, its note and who added it when; the case list shows a badge and the investigation record a section.
+A domain also matches its sub-domains, a sender in it and a link to it; a bare user name matches an address only in
+the organisation's own domains. Cases are checked whenever they are shown, so a change applies to every case at
+once. A match is context: it never changes a severity, verdict, confidence or recommended action, and an
+exception-listed account is still investigated in full. Every upload and removal is audited (who, which file, what
+changed); removed entries are kept in the history.
+
 **No waiting for the model.** The scheduled jobs put a case on screen as soon as its verdict, evidence and
 recommendations are decided; the AI-written explanation is added a few seconds later (the case says so meanwhile),
 and for a batch all explanations are written in parallel. Nothing the model writes changes a decision.
@@ -137,7 +150,7 @@ and a unified cross-tool timeline.
 
 ### 1.5 Governed automation
 
-* **Autonomy levels L0-L4 per action type** (observe, notify, recommend, approve, autonomous). Default: every
+* **Autonomy levels L0-L4 per action type** (observe, enrich, recommend, approve, autonomous). Default: every
   action is L2 - the platform recommends, a person decides.
 * **Gates:** destructive actions are never autonomous; VIP / critical assets and blast radius force approval;
   hard blast-radius limits block; **four-eyes** actions need two different people - two leads when the platform recommended them (by default: isolate and release a
@@ -164,7 +177,7 @@ and a unified cross-tool timeline.
 * **Authorisation:** RBAC (analyst, lead, admin, automation admin, auditor) + **domain scoping** (a user can be
   limited to phishing, incident or vulnerability data; cross-domain views need all-domain access; each role acts
   only inside its own scope, so a phishing lead who is also an all-domain auditor approves phishing actions only) + **step-up
-  MFA** for approvals, policy, kill switch and access management + separation of duties everywhere (no
+  MFA** for approvals, policy, kill switch, access management and watch-list changes + separation of duties everywhere (no
   self-approval of four-eyes actions, policies, exceptions or access grants). Service accounts can never approve.
 * **Session control:** per-token revocation (log out) and revoke-all-sessions per user.
 * **Platform grants:** time-bound, justified, domain-scoped role assignments on top of Entra roles. A lead, admin
@@ -176,16 +189,25 @@ and a unified cross-tool timeline.
   feature and outcome. Structured JSON log lines (requests, audit events, model calls, outbound calls to tools, jobs,
   CLI commands) carry the same id, secrets masked, for the SIEM.
 * **AI usage & limits** (*Govern -> AI usage*): administrators set the monthly and daily token budgets, per-person
-  hourly / daily limits (overrides per role and per person; 0 = no model text), and per feature the model tier, the
-  longest answer and on/off - versioned and audited, in force for the next call. The screen shows use and cost per
-  feature and per person, how often answers were usable and how many statements the evidence check removed, and
-  advises small or large per feature from those figures. Over a limit the platform answers without the model and
-  says why.
+  hourly / daily limits (overrides per role and per person; 0 = no model text), and per feature the **model by name**
+  (gpt-4.1-nano, gpt-4.1-mini or gpt-4.1 by default; `SOC_LLM_MODELS` adds more as they are deployed), the longest
+  answer and on/off - versioned and audited, in force for the next call. *Check which models answer* sends each listed
+  model a tiny request and shows which ones the endpoint serves. The screen shows use and cost per feature and per
+  person, each model's price, how often answers were usable and how many statements the evidence check removed, and
+  advises a smaller or larger model per feature from those figures. Over a limit the platform answers without the
+  model and says why.
 * **Data protection:** raw tool payloads and reported emails **encrypted at rest** (Fernet, key rotation);
   retention job with legal hold for open cases (old telemetry events are pruned too, unless a case or insight cites
   them, so the context store stays bounded at client volume); PII pseudonymised before any LLM call.
-* **Audit:** append-only, **hash-chained** audit log (tamper-evident; verification endpoint; JSONL export);
-  append-only **access log** of every API call.
+* **Audit:** append-only, **hash-chained** audit log (tamper-evident; refused by the database as well as the
+  application; verification endpoint) and an append-only **access log** of every API call. The *Audit log* screen
+  states the facts about the log - records and period, who wrote them, the last full verification, what it records
+  by kind, how it is protected and anchored, that it is kept indefinitely, how long every other kind of data is kept,
+  and who may read and export it - all read from the log and the settings in force. **Export** in JSON Lines (chain
+  verification last; the SIEM / archive format), JSON, CSV, Excel (.xlsx, with an *About this export* sheet) or a
+  Word report, for the whole log or a time window, event type (`case.*` = prefix) or actor. Every format but Word
+  carries each record's hashes, so an unfiltered export can be re-verified outside the platform; CSV cells are
+  guarded against formula injection; every export is itself audited.
 * **Web hardening:** strict CSP, security headers, HSTS on TLS, per-client rate limiting (proxy-aware only for
   configured proxies), request-size cap enforced on the byte stream (chunked uploads included), input validation.
 * **Supply chain / code:** bandit (0 high / 0 medium), pip-audit (no known vulnerabilities), secrets never in git.
@@ -276,7 +298,7 @@ legitimate vendor, internal and marketing mail).
 | Natural-language query (VM-F15, U12) | "Which internet-facing hosts have KEV vulnerabilities?" → answer + the exact filter used + records |
 | New-CVE / KEV exposure (VM-F16, U02) | Automatic "are we exposed, where, how badly" when a CVE is published or KEV-listed |
 | Coverage (VM-F17) | Assets missing EDR or CMDB records, single-scanner assets, stale scans, match rate |
-| **Cloud posture (U03)** | Wiz misconfigurations consolidated per resource × rule, owner from CMDB or cloud subscription, SLA by severity (toxic combination on an exposed VM → 3 days), routed as tickets, fix claims validated against Wiz |
+| **Cloud posture (U03)** | Wiz misconfigurations consolidated per resource × rule, owner from CMDB or cloud subscription or the uploaded ownership mapping, SLA by severity (toxic combination on an exposed VM → 3 days), routed as tickets, fix claims validated against Wiz |
 
 ![](screenshots/11-cloud-posture.png)
 
@@ -408,7 +430,7 @@ sanctioned-service lists. One misconfigured tool is isolated with the reason; th
   `Retry-After` when the database is saturated; `scripts/measure_scale.py` (volume) and `scripts/load_test.py`
   (concurrent analysts on a real server) measure the client's environment before go-live.
 * **Reports** - the [report builder](#71-ai-report-builder) plus fixed exports (daily exposure, weekly VM,
-  management deck, investigation records); your own templates plug in.
+  management deck, investigation records), in the organisation's own style when one is set (section 7.0.1).
 * **Compliance evidence pack (U17)** - control tests with pass/fail (audit-chain integrity, four-eyes approvals,
   policy change control, MFA and access controls, LLM governance, encryption and retention, kill switch,
   integration freshness) + evidence JSON + full chained audit export + summary document, as one ZIP.
@@ -459,6 +481,17 @@ Every generated report shares one house style (`reporting/design.py`), so it can
   exceptions; the weekly management deck runs *week in numbers -> exposure -> priority vulnerabilities -> incidents ->
   phishing -> value scorecard -> decisions needed*.
 * Missing values read "not yet measured", never "None" or "n/a". `test_report_design.py` pins all of this.
+* **The organisation's own style** (*Reports -> Report style*, leads and administrators): upload a **Word template**
+  (.docx / .dotx: its styles, page set-up, header and footer are kept; its sample text removed), a **PowerPoint
+  template** (.pptx / .potx, 16:9: its master and layouts), a **logo** (cover, every page's header, title slide), a
+  **writing guide** or skill (.md / .txt: tone, terms and wording for model-written narrative), **brand settings**
+  (brand.json / .yaml) - or a **.zip style pack** with any of them - and set the organisation name, colours, font,
+  classification line and footer in the form. It applies to every Word report and deck, standard, described and
+  scheduled, and to the audit trail report. *Preview in Word* / *Preview as slides* show a sample before it reaches a
+  real report. Files are checked first (macros, document-type declarations and oversized files refused; a deck
+  template must be 16:9), kept encrypted in the database, and every change is a new, audited version; *Back to the
+  house style* undoes it all. The guide changes wording only: figures and citations come from the platform's records,
+  and the deterministic text (no model) is unchanged. `test_report_style.py` pins this.
 
 ### 7.1 AI report builder
 
@@ -519,3 +552,19 @@ Every API response on a variant is checked to contain no name from the built-in 
 **Scope note.** The sample estate exercises every workflow through the same code as production. What it cannot
 show is behaviour against the client's own tenants and volumes: each vendor connector must be connected and tested in
 the client's environment, and accuracy / latency targets measured on the client's data (see DEMO_GUIDE.md).
+
+### Ownership mapping (Cloud posture screen)
+
+Wiz reports cloud resources - storage accounts, cloud VMs, clusters - that a CMDB rarely holds, so their
+misconfigurations and vulnerabilities had nobody to route to. A lead, administrator or automation administrator
+uploads the mapping on *Cloud posture -> Ownership mapping*: an Excel workbook (.xlsx, every sheet) or a CSV whose
+header names a **Resource** / **Hostname** column (wildcards `*` `?`) and / or a **Subscription** / **Account** /
+**Project** column, the owning **Team** (required), and optionally **Owner**, **Environment**, **Criticality**
+(critical / high / medium / low), **Cloud** and **Resource type** to narrow a row. **Preview** lists every unusable row
+(with its sheet and row) and how many unowned misconfigurations and findings the file would give an owner, changing
+nothing; **Upload and apply** replaces the mapping as a new version and re-applies ownership at once. An exact name
+beats a pattern, a pattern beats a subscription. The mapping fills the gaps the CMDB leaves - ServiceNow and the
+ownership-file connector are asked first - and never overrides them. Criticality feeds the vulnerability priority as
+a CMDB criticality does. *Export CSV* downloads it; *Clear* empties it; every change is audited (`ownership.uploaded`,
+`ownership.cleared`). The page never fixes anything in Wiz or the cloud: it routes the work to the owning team as a
+ticket for approval and checks the fix against Wiz.

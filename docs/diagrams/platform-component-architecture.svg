@@ -215,9 +215,9 @@
 <text x="690.0" y="640" class="s">keys -&gt; scored hints (rapidfuzz)</text>
 <text x="690.0" y="655" class="s">auto 0.85, review 0.55 -&gt; queue</text>
 <rect x="996.0" y="604" width="304.0" height="64" rx="7" class="box"/>
-<text x="1006.0" y="622" class="t">identity.py</text>
-<text x="1006.0" y="640" class="s">user_ref(): UPN / SAM / SID keys</text>
-<text x="1006.0" y="655" class="s">built-in &amp; machine accounts out</text>
+<text x="1006.0" y="622" class="t">identity, watchlists, ownership</text>
+<text x="1006.0" y="640" class="s">UPN / SAM / SID keys; block /</text>
+<text x="1006.0" y="655" class="s">exception lists; owner mapping</text>
 <rect x="1312.0" y="604" width="304.0" height="64" rx="7" class="box"/>
 <text x="1322.0" y="622" class="t">cases.py (CaseService)</text>
 <text x="1322.0" y="640" class="s">cases, evidence, notes, owner,</text>
@@ -239,9 +239,9 @@
 <text x="1322.0" y="714" class="s">roles/perms, token checks; grants,</text>
 <text x="1322.0" y="729" class="s">API keys, revocation, kill switch</text>
 <rect x="364.0" y="752" width="304.0" height="64" rx="7" class="box"/>
-<text x="374.0" y="770" class="t">audit.py</text>
+<text x="374.0" y="770" class="t">audit.py + audit_export.py</text>
 <text x="374.0" y="788" class="s">hash-chained append-only log;</text>
-<text x="374.0" y="803" class="s">_lock_chain serialises appends</text>
+<text x="374.0" y="803" class="s">JSONL/JSON/CSV/XLSX/DOCX export</text>
 <rect x="680.0" y="752" width="304.0" height="64" rx="7" class="box"/>
 <text x="690.0" y="770" class="t">crypto.py</text>
 <text x="690.0" y="788" class="s">Fernet / MultiFernet; atomic</text>

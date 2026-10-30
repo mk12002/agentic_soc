@@ -21,3 +21,12 @@ def readable(text: str) -> str:
     out = _LIST.sub(items, text)
     out = re.sub(r"\[\]", "none", out)
     return re.sub(r"(?<=[=:(] )None\b|(?<=[=:(])None\b", "unknown", out)
+
+
+def unsafe_xml(raw: bytes) -> bool:
+    """True when an uploaded XML part (an .xlsx / .docx / .pptx part) must not be parsed: it declares a document type
+    or an entity (XXE, entity expansion), or it is in a multi-byte encoding (UTF-16 / UTF-32), where those
+    declarations would not show as plain bytes. Office writes its parts in UTF-8, so nothing real is refused."""
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff") or b"\x00" in raw:
+        return True
+    return b"<!DOCTYPE" in raw or b"<!ENTITY" in raw

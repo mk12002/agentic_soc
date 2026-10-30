@@ -40,12 +40,13 @@ audit-record count) or with the AI's wording are marked *read it off the screen*
 19. [AI usage & limits](#19-ai-usage--limits)
 20. [Reports](#20-reports)
 21. [Access](#21-access)
-22. [Audit log and Trace](#22-audit-log-and-trace)
-23. [Search](#23-search)
-24. [Questions that cut across every page](#24-questions-that-cut-across-every-page)
-25. [Cheat sheet: formulas and numbers](#25-cheat-sheet-formulas-and-numbers)
-26. [When something goes wrong live](#26-when-something-goes-wrong-live)
-27. [Claims you must not make](#27-claims-you-must-not-make)
+22. [Watch lists (block and exception lists)](#22-watch-lists-block-and-exception-lists)
+23. [Audit log and Trace](#23-audit-log-and-trace)
+24. [Search](#24-search)
+25. [Questions that cut across every page](#25-questions-that-cut-across-every-page)
+26. [Cheat sheet: formulas and numbers](#26-cheat-sheet-formulas-and-numbers)
+27. [When something goes wrong live](#27-when-something-goes-wrong-live)
+28. [Claims you must not make](#28-claims-you-must-not-make)
 
 ---
 
@@ -110,7 +111,7 @@ AI gathers and explains, code computes every figure and verdict, and a person ap
 - 56 ATT&CK techniques in the coverage model
 - 11 scheduled jobs
 - 14 self-checks
-- 820 platform tests on SQLite, 819 on PostgreSQL, and 205 phishing-engine tests
+- 896 platform tests on SQLite, 895 on PostgreSQL, and 205 phishing-engine tests
 
 **Say these limits first, before anyone asks.** It buys credibility.
 1. It has not yet run against a real tenant. Every connector is built to the vendor's documented API and is
@@ -140,7 +141,7 @@ Four groups:
 | Operate | Overview, Intelligence, Cases, Approvals |
 | Domains | Phishing, Vulnerabilities, Cloud posture |
 | Insight | ATT&CK coverage, Shadow IT, Supplier risk |
-| Govern | Integrations, Automation policy, AI usage, Reports, Access, Audit log |
+| Govern | Watch lists, Integrations, Automation policy, AI usage, Reports, Access, Audit log |
 
 - **The menu depends on your scope.**
   - Intelligence needs all-domain scope.
@@ -153,7 +154,7 @@ Four groups:
 
 ### Top bar
 - **Breadcrumb**, for example *Cases / Detail*.
-- **Search box**: global search over cases, people, hosts, indicators, findings and CVEs ([§23](#23-search)).
+- **Search box**: global search over cases, people, hosts, indicators, findings and CVEs ([§24](#24-search)).
 - **Red *Scheduler stopped* pill.** It appears only if the background job runner has stopped or is stuck. A stopped
   scheduler can't raise an alert of its own, so every screen says so instead.
 - ***Automation active* / *Automation halted* pill.** This is the kill switch's state ([§18](#18-automation-policy)).
@@ -866,6 +867,7 @@ criticality say whether it matters here."*
 - **"Why is everything past SLA?"** The sample scanner data first saw these findings in August and September 2026.
   The SLA counts from first seen. On live data it counts from the scanners' real dates.
 - **"Who is the owner?"** The host's support group from the CMDB (ServiceNow, or the ownership CSV), mapped to a team.
+  Where the CMDB has no answer, the ownership mapping uploaded on Cloud posture fills the gap.
 - **"Do you open tickets automatically?"** `vm.create_ticket` / `ticket.create` are actions like any other:
   recommended, then approved.
 
@@ -886,7 +888,10 @@ criticality say whether it matters here."*
     Wiz "toxic combination".
   - *Storage account allows public blob access*: acmebackups, **medium**, Cloud Platform.
 - **Route to owners:** creates a ticket action per team, waiting for approval. In the demo both are already routed.
+- **Ownership mapping** (bottom card): *"Wiz has no CMDB, and cloud resources are rarely in ServiceNow - so the cloud teams' own spreadsheet is uploaded here."* Rows name a resource or host (wildcards allowed) and / or a subscription / account, and the owning team; optionally owner, environment, criticality, cloud, resource type. **Preview** shows every unusable row and how many unowned misconfigurations and findings it would cover; **Upload and apply** re-applies ownership at once. Exact name beats pattern beats subscription; it never overrides the CMDB. Leads, admins and automation admins change it; audited and versioned. In the demo the CMDB already owns both resources, so the card shows *No mapping uploaded*.
 - **Mark fixed:** the owner claims the fix. **Validate:** asks Wiz whether it still sees the problem.
+
+**Say plainly:** *"This page never changes anything in Wiz or the cloud - it routes the fix to the owning team and proves it with Wiz."*
 
 **Demo it:** on acmebackups, **Mark fixed** → **Validate** → *"Validation: Still present (false closure - reopened)"*.
 *False closures* becomes 1, and the row shows *reopened 1*.
@@ -1066,6 +1071,18 @@ approved change.
 - **"How do we get alerted?"** Teams, Slack or a JSON webhook (for a SIEM or SOAR), within a minute, for findings
   rated high or above (configurable). Each finding is sent once per channel, and again only if it escalates. Webhook
   URLs are secrets: only the host is ever shown.
+- **"Will onboarding our tools go smoothly?"** Every connector was checked against the vendor's current documentation
+  - endpoints, sign-in, permissions, paging and limits - and the problems found were fixed and tested (for example
+  Microsoft Graph refuses an app's request for a user's device list, so devices are read from the audit log; CrowdStrike
+  forensic commands are asynchronous, so their output is read back). What only the client's instance can confirm is
+  listed per tool in the deployment guide: Delinea's API paths (documented only inside the product), whether actions may
+  touch admin accounts (needs a privileged Entra role), Office 365's purge running on a Microsoft beta API, and the
+  licences (Entra P1 / P2, Defender P2). Preflight checks each tool's sign-in, permissions and every stream before it
+  goes live, and says what to fix.
+- **"Which permissions do you need?"** Read-only first, per tool, listed in the deployment guide section 4; write
+  permissions only for the actions the client approves. Two to note: `GroupMember.Read.All` in Entra (without it Graph
+  hides group and role names) and, optionally, `Machine.ReadWrite.All` in Defender for Endpoint for the "which device
+  had this IP" lookup.
 
 ---
 
@@ -1143,13 +1160,21 @@ changes.
   Each row shows:
   - calls (refused by limits / not answered)
   - tokens in and out
-  - cost, and what it would cost on the other tier
+  - cost, and what it would have cost on the neighbouring model
   - **usable %**, and the share of statements the evidence check removed
   - p95 latency
-  - **Advice**: *try small*, *use large*, *keep* or *not enough data*, computed from those figures
-  - for admins: tier, answer cap, on / off
-- **Budgets:** monthly and daily tokens, a warning at 80 %, the longest answer per tier (small 1,500 / large 3,000
-  tokens), and the price per million tokens per tier.
+  - **Advice**: *try gpt-4.1-mini* (a smaller model), *use gpt-4.1* (a larger one), *keep* or *not enough data*,
+    computed from those figures
+  - for admins: **the model, by name** (a dropdown of the deployed models; *(default)* = the configured default for
+    that kind of work), answer cap, on / off
+- **Budgets:** monthly and daily tokens, a warning at 80 %, and the longest answer for smaller / larger models
+  (1,500 / 3,000 tokens).
+- **Models:** the models a feature can use - **gpt-4.1-nano, gpt-4.1-mini, gpt-4.1** by default - with their size,
+  their price per million tokens in and out (list prices: $0.10 / $0.40, $0.40 / $1.60, $2.00 / $8.00, editable) and
+  which work each is the default for. **Check which models answer** (admins) sends each a tiny request and shows
+  *Yes* with its latency, or *No* with the error. Run it before choosing: a feature set to a model your endpoint does
+  not serve falls back to the platform's own text on every call. More models are added with `SOC_LLM_MODELS` as
+  they are deployed.
 - **Limits per person:** everyone 100,000 tokens / hour and 400,000 / day by default. Overrides per role and per
   person; **0 = no model text for them**. Scheduled work counts only against the budgets, so one person can't starve
   it.
@@ -1161,10 +1186,13 @@ changes.
   cited answer, plus a note saying why. Every figure, verdict and action is identical.
   - Timeouts: 10 s to connect; 30 s to read a short answer, 120 s for long reviews.
   - After 3 failures a circuit breaker uses the deterministic path for 60 s.
-- **"Which model?"** Configurable. In the demo it is Azure AI Foundry, gpt-4.1-mini. In production, the endpoint the
-  organisation approves - including **the client's in-house LLM gateway**, through the OpenAI-compatible or Anthropic
-  provider. Endpoints not on the approved list are refused (fail closed); the model version is pinned and a mismatch
-  is logged.
+- **"Which model?"** Chosen per feature, by name, on this screen: gpt-4.1-nano, gpt-4.1-mini or gpt-4.1, more as they
+  are deployed. In the demo the endpoint is Azure AI Foundry with gpt-4.1-mini deployed - so press *Check which models
+  answer* before picking another. In production, the endpoint the organisation approves - including **the client's
+  in-house LLM gateway**, through the OpenAI-compatible or Anthropic provider. Endpoints not on the approved list are
+  refused (fail closed); model versions can be pinned per model and a mismatch is logged.
+- **"Can we add a model later?"** Yes: deploy it, add its name to `SOC_LLM_MODELS`, and it appears in every feature's
+  list with its price to fill in. No code change.
 - **"What does it cost?"** Measured at gpt-4.1-mini: about $0.002 per incident summary, $0.001 per phishing
   explanation or question, $0.004 per deep analysis. About **$5 / $26 / $150 a month** for a small / mid / large SOC.
   Auto-closed benign mail costs nothing.
@@ -1212,7 +1240,33 @@ changes.
   - Management deck (PowerPoint, all-domain scope only)
   - **Compliance evidence pack:** a ZIP of control tests, evidence JSON, the chained audit export and a summary. The
     screen says "N of M control tests passed".
-  - **Audit export:** the full hash-chained log as JSON Lines, with verification, for archiving or a SIEM.
+  - **Audit export:** the full hash-chained log as JSON Lines, with verification, for archiving or a SIEM. More
+    formats and filters are on the Audit log screen.
+- **Report style** (everyone sees it; leads and administrators change it):
+  - **What every report looks like:** the Word template, PowerPoint template (16:9), logo, writing guide and brand in
+    force - each *house style* until replaced, with the file, what was checked (a template's style count and page
+    size, a deck's layouts, a logo's pixel size), who uploaded it and when, and *Remove*.
+  - **Preview in Word / Preview as slides:** a short sample (made-up figures, labelled so) in the style in force.
+    Download one before and after a change.
+  - **Customise** (leads, admins):
+    - **Upload** one file: a Word template (.docx / .dotx), a PowerPoint template (.pptx / .potx), a logo
+      (.png / .jpg), a writing guide or skill (.md / .txt), brand settings (brand.json / .yaml) - or a **.zip style
+      pack** with any of them, applied as one version.
+    - **The form:** organisation name (header and footer), classification line, primary and accent colours, font,
+      footer text, and the writing guide.
+  - *Back to the house style* undoes everything; the history keeps every version, and each change is audited.
+
+  How each part is used:
+  - **Word template:** the base of every Word report. Its styles, page set-up, header and footer are kept. Its sample
+    body text is removed. The platform's header / footer are added only where the template has none.
+  - **PowerPoint template:** its master and layouts; its sample slides are removed. It must be 16:9 - the slides are
+    laid out for widescreen, and a 4:3 template is refused with how to fix it.
+  - **Logo:** on the Word cover band, every page's header and the title slide. It is re-encoded as a clean PNG.
+  - **Writing guide:** added to the prompt whenever the model writes report narrative (sections, commentary). It says
+    how to write - tone, terms, words to avoid. It can't change facts, figures or citations: the same guardrail still
+    removes any sentence with an unsupported figure. With no model, the platform's own text is used, unchanged.
+  - It applies to **every** Word report and deck - standard, described in words, scheduled - and the audit trail
+    report.
 
 ### The 17 data sources
 SOC overview, vulnerability posture, top vulnerabilities, cloud misconfigurations, reported phishing, supplier e-mail
@@ -1232,8 +1286,14 @@ coverage, shadow IT, control evidence, verdict quality, integration health, valu
   - and the other controls
 - **"Who can download a report?"** The download re-checks that the reader's scope covers every domain in the report,
   and the builder's scope. Case reports need access to the case.
-- **"Our own templates?"** The house style is generic until the organisation's Word and PowerPoint templates are
-  supplied; they plug in.
+- **"Can reports use our templates and branding?"** Yes - upload your Word and PowerPoint templates, logo and
+  colours under *Report style*, or one .zip with all of them. Preview it, and every report follows from then on.
+- **"What is a 'skill' or writing guide here?"** A short text file of house rules for wording: audience, British or
+  US English, terms to use or avoid. The model follows it for wording only; figures still come from the platform's
+  records, and every sentence must still cite them.
+- **"Is uploading a template a risk?"** Files are checked before use: macro-enabled files are refused, so are XML
+  document-type declarations (the trick behind XXE) and anything that unpacks to more than 60 MB. Logos are
+  re-encoded. Only leads and administrators can change the style, and every change is audited.
 
 ---
 
@@ -1252,16 +1312,18 @@ coverage, shadow IT, control evidence, verdict quality, integration health, valu
   - **The key is shown once.**
   - Last used, Revoke. *"Can never approve actions."*
 - **Role permissions:** the matrix, including the row *Never granted to service accounts*: approve_action,
-  approve_high_impact, approve_policy, manage_access, propose_policy, rollback_action.
+  approve_high_impact, approve_policy, manage_access, manage_ownership, manage_report_style, manage_watchlists,
+  propose_policy,
+  rollback_action.
 
 ### The five roles
 
 | Role | Can | Cannot |
 |---|---|---|
 | **Analyst** | read, investigate, request and approve routine actions, resolve entities, read audit | approve high-impact, roll back, policy, kill switch |
-| **Lead** | analyst's rights + approve high-impact, roll back, approve policy and configuration, kill switch, export evidence | manage access, manage connectors |
-| **Automation admin** | propose policy, manage connectors, kill switch, read audit | approve any action or its own policy (separation of duties) |
-| **Admin** | manage access, manage connectors, kill switch, export evidence, read audit | approve actions, approve policy |
+| **Lead** | analyst's rights + approve high-impact, roll back, approve policy and configuration, kill switch, export evidence, manage watch lists, manage the report style, manage the ownership mapping | manage access, manage connectors |
+| **Automation admin** | propose policy, manage connectors, kill switch, read audit, manage the ownership mapping | approve any action or its own policy (separation of duties) |
+| **Admin** | manage access, manage connectors, kill switch, export evidence, manage the report style, manage the ownership mapping, read audit | approve actions, approve policy |
 | **Auditor** | read everything in scope, read audit, export evidence | change anything |
 
 ### Rules to quote
@@ -1269,29 +1331,152 @@ coverage, shadow IT, control evidence, verdict quality, integration health, valu
 - A **lead, admin or automation admin** grant needs **a second administrator** and lasts **at most 90 days**.
 - **Each role acts only inside its own scope.** Someone who is a phishing lead and an all-domain auditor reads
   everything, but approves phishing actions only. A pen test found this merged once; a test pins it now.
-- **MFA is required** (step-up) for approving, rolling back, policy, the kill switch and access management.
+- **MFA is required** (step-up) for approving, rolling back, policy, the kill switch, access management and
+  watch-list changes.
 - **Break-glass:** a sealed emergency credential (only its hash is configured), exchanged for a 15-minute session.
   Every use is audited and raises an alert; guesses are throttled.
 
 ---
 
-## 22. Audit log and Trace
+## 22. Watch lists (block and exception lists)
+
+**Who sees it:** everyone who can read. Only a **lead** (*manage_watchlists*, with MFA) sees the upload card and the
+*Remove* buttons. An analyst, admin, auditor or API key cannot change a list. Use Lena.
+
+**What it is for:** the SOC names, in advance, what it wants called out. The **block list** holds known-bad users,
+hosts and indicators. The **exception list** holds known exceptions: test accounts, scanners and approved tools.
+When a case involves something on a list, the case says so.
+
+### Section by section
+- **Upload a list** (leads):
+  - **List:** Block list or Exception list.
+  - **How:** *Add the file's entries to the list*, or *Replace the list with the file*. Replace removes whatever the
+    file no longer has, and asks for confirmation.
+  - **File:** an Excel workbook (.xlsx; every sheet is read) or a CSV, up to 5 MB and 10,000 entries a list. An
+    old .xls is refused with "save it as .xlsx".
+  - **Why:** kept in the audit log, and used as the note for rows that have none.
+  - **Preview** shows what would be added, the type of each entry, what would be removed, and every value that cannot
+    be read with its sheet and row (for example *Contractors row 3: not-an-ip - not a valid IP address*). Nothing
+    changes. **Upload** applies it.
+- **Block list / Exception list** cards: each entry's value, type, note, source (file and sheet), who added it and
+  when. *Export CSV* downloads the list. *Remove* (leads) asks why, and the reason goes into the audit log.
+
+### What the spreadsheet can look like
+- A header row names the columns. Spelling and case are forgiving:
+  - users: *Username*, *UPN*, *Account*, *sAMAccountName*...
+  - e-mail addresses: *Email*, *Sender*, *Address*
+  - hosts: *Hostname*, *Computer*, *Device*, *Asset*, *FQDN*...
+  - *IP address*, *Domain*, *URL*
+  - hashes: *Hash*, *SHA256*, *MD5*
+- An untyped *Value* / *Indicator* / *IOC* column can have a *Type* column beside it (User, Host, IP, Domain, URL,
+  Hash, Email).
+- *Note* / *Reason* / *Comment* becomes the entry's note.
+- **Every identifier column in a row is read**, so a row with *Username* and *Hostname* lists both.
+- No header row: the first column is read and its type is recognised (an IP, a URL, an address, `DOMAIN\user`, a
+  hash). Anything else is *any identifier*.
+- `ACME\jdoe` becomes `jdoe`, `Jane <Jane.Doe@x.com>` becomes `jane.doe@x.com`, and IPs are written in one form.
+  Built-in accounts (SYSTEM, `HOST$`) are refused as users.
+- A value already on the *other* list is refused. It cannot be blocked and excepted at once.
+
+### How a case shows it
+- **Case page:** a banner at the top - red *On the block list*, blue *On the exception list*. For each match it shows:
+  - the person, host or indicator, and their role on the case (recipient, sender, host, user...)
+  - what it matched on (*user name jane.doe (jane.doe@...)*, *host web01*, *IP address 10.10.0.5*,
+    *sender address ...*, *domain ...*)
+  - the entry as written, its type and note, and who added it and when
+  - the line *"Context only: it does not change the severity, verdict or recommended actions."* The exception banner
+    adds *"An exception does not clear the case - judge it on the evidence."*
+- **Case list:** a red *Block list* / green *Exception list* badge under the case title.
+- **Investigation record (Word):** a *Watch lists* section with the same rows.
+
+### How matching works (know this)
+- **Users:** on their address or account name. A **bare user name** (`jane.doe`) also matches the local part of an
+  address, but **only in the organisation's own domains** - never an outside sender who happens to share it.
+- **Hosts:** on name, FQDN, short name, IP address and device ids (serial, MAC, EDR ids).
+- **Indicators:** on their value. A **domain** also matches its sub-domains, a sender address in it and a link to it.
+  So listing `payroll-update.support` flags the sender, the link domain and the URL of that phishing case.
+- A **typed** entry matches only its kind (a *Hostname* never matches a user). An untyped one matches any kind.
+- Cases are checked **whenever they are shown**, so an entry added or removed now applies to every case, old and new,
+  at once.
+
+**Demo it (3 minutes):**
+1. As Lena, upload a small workbook: *Users* sheet with `ACME\jane.doe`, *Hosts* sheet with `web01`.
+2. Preview it, then upload.
+3. Open *Cases*: the badges appear on every case involving Jane or web01.
+4. Open the phishing case: the red banner names Jane, as compromised, and the entry.
+5. Point out that severity, verdict and actions are unchanged.
+6. Open the *Audit log*: `watchlist.uploaded` is there with the file and the values.
+
+### Likely questions
+- **"Does a block-listed user make the case critical?"** No. The list is context, shown on the case. Severity,
+  verdict and actions come from the evidence by fixed rules, the same with or without the list. That is deliberate,
+  so a list can never quietly raise or lower a decision. If you want block-listed items to raise priority, that is a
+  rule we would add on purpose and test.
+- **"Does the exception list suppress alerts?"** No. An exception-listed account that is compromised is still
+  investigated and recommended for containment. Exceptions are what attackers hide behind, so the platform shows the
+  exception and leaves the judgement to the analyst.
+- **"Who can change the lists?"** Leads only, with MFA, never a service account. Every upload and removal is audited
+  with the values, the file name and the reason. Removed entries are kept in the history.
+- **"Can it take our existing spreadsheet?"** Yes, if it is .xlsx or CSV with a header the platform recognises. If a
+  column isn't recognised, rename the header, or add a *Type* column. Preview tells you exactly which rows failed.
+- **"Is uploading a spreadsheet a security risk?"** The parser is the platform's own and uses no macros or formulas.
+  It refuses a workbook that declares a DTD or entity, caps the size of every unpacked part (zip bombs) and caps the
+  file at 5 MB.
+
+---
+
+## 23. Audit log and Trace
 
 ### Audit log
-**Who sees it:** *read_audit*. Domain-scoped users see only the records about their domains.
+**Who sees it:** *read_audit*. Domain-scoped users see only the records about their domains. The **Export** card
+needs *export_evidence* with all-domain scope (Lead, Admin, Auditor). Use Audrey (auditor) or Lena.
 
 - **Pill:** *Chain verified · N records in the full log* (81 right after a reset; it grows with every action). If
   anything were altered: *Chain broken at #N*.
-- **Table:** the latest 300 records: sequence, time, actor (agent or person), event (`action.requested`,
+- **About this audit log** (every line is read from the log and the settings in force):
+  - **Records:** how many, and the first and last time (UTC).
+  - **Recorded by:** counts by actor type (agent, human, system).
+  - **Last full check:** *Verified up to #N at <time>*, from the hourly self-check. The health check verifies newer
+    records. Right after a reset it says *not run yet*, because no self-check has run.
+  - **Retention:** kept indefinitely. The platform never edits or deletes audit records, the retention job doesn't
+    touch them, and the database itself refuses to change or delete them.
+  - **Who can see it:** read - Admin, Analyst, Auditor, Automation admin, Lead. Export - Admin, Auditor, Lead.
+  - **What it records:** chips of record counts by kind (`action`, `case`, `phishing`, `watchlist`, `audit`...).
+  - **How it is protected:** append-only, hash-chained, verified, anchored, attributed, and exports audited (see
+    below).
+  - **How long other data is kept:** raw payloads and reported e-mails 180 days (an open case's e-mail is kept - legal
+    hold), model prompts and answers 180, access log 400, high-volume activity 400 (0 = keep). These are the
+    settings in force, not text. The retention job runs every 24 hours, and each run is in this log.
+- **Export the audit trail:**
+  - **Format:** JSON Lines (default; one record per line, the chain verification last - for a SIEM or an archive),
+    JSON, CSV, **Excel** (.xlsx, with an *About this export* sheet: who exported, when, filters, the chain status, how
+    to verify) or a **Word report** (summary, records by kind and actor, and the first 1,000 records).
+  - **Filters:** From / To date (UTC; *To* includes that day), event type (`action.approved`, or `case.*` for a
+    prefix), actor. Leave them empty for the whole log.
+  - Every format but Word carries each record's `prev_hash` and `hash`, so an **unfiltered export can be re-verified
+    outside the platform** (SHA-256 over the previous hash and the record). A filtered export says it is a selection.
+  - CSV cells that a spreadsheet would run as a formula are prefixed with `'`. Excel cells are always text.
+  - **Every export is itself audited** (`audit.export`, with format and filters).
+- **Latest records:** the newest 300: sequence, time, actor (agent or person), event (`action.requested`,
   `case.assessed`, `action.first_approval`...), subject, and **Trace** (all-domain only).
 
 **How it works (say this):**
-- **Append-only:** the application, a database trigger and the database role's grants all refuse update and delete.
+- **Append-only:** the application and a database trigger refuse update, delete and truncate. With a separate
+  runtime database role (`SOC_DB_RUNTIME_ROLE`, the production setting) the platform can only insert and select on it.
 - **SHA-256 hash-chained:** each record carries the hash of the one before, so changing or deleting any record breaks
   the chain.
 - The chain's head is shipped to the log platform hourly. Even a database owner can't rewrite history unnoticed;
   `python -m soc_platform audit verify --anchor SEQ:HASH` proves it against a shipped head.
 - Every successful write request is guaranteed at least one audit record, even from a route whose code forgot one.
+
+**Likely questions:**
+- **"How long do you keep the audit log?"** Indefinitely: the platform never deletes it. Your database backups and
+  archive policy decide the rest. Export it to your SIEM or archive (JSON Lines) on your own schedule.
+- **"Can we get it in Excel?"** Yes - *Format: Excel*, whole log or a period. For a regulator, the Word report reads
+  well, and the Excel or JSON export holds every record with its hashes.
+- **"How would we prove an export wasn't edited?"** An unfiltered export re-verifies on its own: recompute each hash
+  over the previous one. The *About this export* sheet says how. And the hourly anchors in your log platform pin the
+  chain's head.
 
 **After your four-eyes demo:** point at the two approval records of the isolation, with two different actors.
 
@@ -1312,7 +1497,7 @@ SIEM.
 
 ---
 
-## 23. Search
+## 24. Search
 
 The box in the top bar takes at least 2 characters and is scoped to what your role may see. It searches four groups:
 
@@ -1331,7 +1516,7 @@ The typed text is always treated literally (no injection).
 
 ---
 
-## 24. Questions that cut across every page
+## 25. Questions that cut across every page
 
 **"Is this hard-coded to the demo?"**
 - No. The test suite renames the entire organisation into three other generated estates - different people,
@@ -1377,7 +1562,7 @@ The typed text is always treated literally (no injection).
 - The organisation's own volumes are first seen in its environment.
 
 **"How was it tested?"**
-- 820 platform tests (SQLite, with PostgreSQL's rules enforced) and 819 on PostgreSQL; 205 engine tests.
+- 896 platform tests (SQLite, with PostgreSQL's rules enforced) and 895 on PostgreSQL; 205 engine tests.
 - 108 of 108 features verified feature by feature.
 - 24 penetration tests and 11 fuzzing properties.
 - Time-travel tests (0 / 45 / 400 days).
@@ -1392,14 +1577,14 @@ The typed text is always treated literally (no injection).
 **"What do you need from us?"**
 - API access per tool (read scopes first, dedicated service principals)
 - an Entra app registration
-- a CMDB / ownership source
+- a CMDB / ownership source - for cloud resources, the cloud teams' spreadsheet of subscription or resource -> team
 - representative historical data for tuning
 - decisions on hosting and residency
 - the LLM endpoint to use
 
 ---
 
-## 25. Cheat sheet: formulas and numbers
+## 26. Cheat sheet: formulas and numbers
 
 | Thing | Value |
 |---|---|
@@ -1431,7 +1616,7 @@ The typed text is always treated literally (no injection).
 
 ---
 
-## 26. When something goes wrong live
+## 27. When something goes wrong live
 
 | Symptom | Do / say |
 |---|---|
@@ -1447,7 +1632,7 @@ The typed text is always treated literally (no injection).
 
 ---
 
-## 27. Claims you must not make
+## 28. Claims you must not make
 
 - ❌ "It's running in production / on a real tenant." → ✅ "It runs on vendor-shaped data through the production code;
   live connection is per tool, through preflight and staged rollout."
@@ -1456,6 +1641,12 @@ The typed text is always treated literally (no injection).
   measured in shadow mode on your data."
 - ❌ "It isolated the laptop." → ✅ "In this demo, against the simulated tool, after two approvals."
 - ❌ "The kill switch stops everything." → ✅ "It stops automatic execution; pausing a tool stops every write to it."
+- ❌ "A block-listed user makes the case critical" / "the exception list suppresses alerts." → ✅ "A list match is shown
+  on the case as context; severity, verdict and actions come from the evidence, with or without the list."
+- ❌ "It reads any Excel file." → ✅ ".xlsx and CSV with a recognised header (or none); old .xls must be saved as
+  .xlsx. Preview shows every row it cannot read."
+- ❌ "The audit log is kept for N years." → ✅ "The platform never deletes it; how long you keep the database backups
+  and exported copies is your retention policy."
 - ❌ "Pen-tested." → ✅ "Internally pen-tested with 24 automated attack tests; an independent test is recommended
   before go-live."
 - ❌ Any number not on the screen or in these notes. Read it off the screen, or offer to confirm it.

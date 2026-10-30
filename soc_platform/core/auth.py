@@ -54,15 +54,19 @@ class Perm(str, Enum):
     MANAGE_CONNECTORS = "manage_connectors"
     MANAGE_ACCESS = "manage_access"      # role assignments, API keys, session revocation, retention
     EXPORT_EVIDENCE = "export_evidence"  # compliance evidence packs / full audit export (U17)
+    MANAGE_WATCHLISTS = "manage_watchlists"  # upload / remove block-list and exception-list entries
+    MANAGE_REPORT_STYLE = "manage_report_style"  # the organisation's report templates, logo, brand and writing guide
+    MANAGE_OWNERSHIP = "manage_ownership"  # the uploaded asset / cloud resource -> owning team mapping
 
 
 DOMAINS = ("phishing", "incident", "vulnerability")
 # Need a fresh strong authentication (MFA) - decisions with blast radius.
 STEP_UP_PERMS = {Perm.APPROVE_ACTION, Perm.APPROVE_HIGH_IMPACT, Perm.APPROVE_POLICY, Perm.KILL_SWITCH,
-                 Perm.MANAGE_ACCESS, Perm.ROLLBACK_ACTION}
+                 Perm.MANAGE_ACCESS, Perm.ROLLBACK_ACTION, Perm.MANAGE_WATCHLISTS}
 # Never granted to non-human (API-key) principals, whatever roles they hold: humans decide.
 HUMAN_ONLY_PERMS = {Perm.APPROVE_ACTION, Perm.APPROVE_HIGH_IMPACT, Perm.APPROVE_POLICY, Perm.MANAGE_ACCESS,
-                    Perm.PROPOSE_POLICY, Perm.ROLLBACK_ACTION}
+                    Perm.PROPOSE_POLICY, Perm.ROLLBACK_ACTION, Perm.MANAGE_WATCHLISTS, Perm.MANAGE_REPORT_STYLE,
+                    Perm.MANAGE_OWNERSHIP}
 
 
 ROLE_PERMS: dict[Role, set[Perm]] = {
@@ -70,12 +74,13 @@ ROLE_PERMS: dict[Role, set[Perm]] = {
                    Perm.RESOLVE_ENTITIES, Perm.READ_AUDIT},
     Role.LEAD: {Perm.READ, Perm.INVESTIGATE, Perm.REQUEST_ACTION, Perm.APPROVE_ACTION,
                 Perm.APPROVE_HIGH_IMPACT, Perm.ROLLBACK_ACTION, Perm.RESOLVE_ENTITIES,
-                Perm.APPROVE_POLICY, Perm.KILL_SWITCH, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE},
+                Perm.APPROVE_POLICY, Perm.KILL_SWITCH, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE,
+                Perm.MANAGE_WATCHLISTS, Perm.MANAGE_REPORT_STYLE, Perm.MANAGE_OWNERSHIP},
     # Configures automation but cannot approve actions or its own policy (separation of duties).
     Role.AUTOMATION_ADMIN: {Perm.READ, Perm.PROPOSE_POLICY, Perm.MANAGE_CONNECTORS, Perm.READ_AUDIT,
-                            Perm.KILL_SWITCH},
+                            Perm.KILL_SWITCH, Perm.MANAGE_OWNERSHIP},
     Role.ADMIN: {Perm.READ, Perm.MANAGE_CONNECTORS, Perm.READ_AUDIT, Perm.KILL_SWITCH, Perm.MANAGE_ACCESS,
-                 Perm.EXPORT_EVIDENCE},
+                 Perm.EXPORT_EVIDENCE, Perm.MANAGE_REPORT_STYLE, Perm.MANAGE_OWNERSHIP},
     Role.AUDITOR: {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE},
 }
 

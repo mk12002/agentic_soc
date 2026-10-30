@@ -10,7 +10,9 @@ from soc_platform.connectors.registry import ConfigField
 from soc_platform.connectors.tools._common import ToolConnector, Watermark
 
 GRAPH = "https://graph.microsoft.com"
-MDE = "https://api.securitycenter.microsoft.com"
+# Microsoft now documents api.security.microsoft.com (regional: us. / eu. / uk. / au.api.security.microsoft.com); the
+# token is still issued for the securitycenter resource whichever host is called
+MDE = "https://api.security.microsoft.com"
 ARM = "https://management.azure.com"
 
 APP_FIELDS = [

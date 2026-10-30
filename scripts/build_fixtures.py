@@ -180,8 +180,13 @@ def crowdstrike() -> None:
               params={"filter": "type:'domain'+value:'micros0ft-helpdesk.com'"}),
         route("GET", r"^/iocs/combined/indicator/v1$", {"resources": []}),
         route("POST", r"^/real-time-response/entities/sessions/v1$", {"resources": [{"session_id": "rtr-sess-001"}]}),
+        # RTR is asynchronous: the command is queued (cloud_request_id), its output is read back with a GET
         route("POST", r"^/real-time-response/entities/command/v1$",
-              {"resources": [{"stdout": "PID  NAME\n4120 powershell.exe\n5528 msedge.exe", "complete": True}]}),
+              {"resources": [{"session_id": "rtr-sess-001", "cloud_request_id": "rtr-req-001"}]}),
+        route("GET", r"^/real-time-response/entities/command/v1$",
+              {"resources": [{"stdout": "PID  NAME\n4120 powershell.exe\n5528 msedge.exe", "stderr": "",
+                              "complete": True}]}, params={"cloud_request_id": "*"}),
+        route("DELETE", r"^/real-time-response/entities/sessions/v1$", {}),
         route("POST", r"^/devices/entities/devices-actions/v2$", {"resources": [{"id": "ok"}], "errors": []}),
     ])
 

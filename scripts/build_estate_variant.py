@@ -452,8 +452,7 @@ def main(out: str, seed: int = 7, scale: float = 1.0, messy: bool = False, hando
             {"method": "GET", "path": rf"^/v1.0/users/{u['upn']}/authentication/methods$", "status": 200, "body": {"value": [
                 {"@odata.type": "#microsoft.graph.passwordAuthenticationMethod"},
                 {"@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"}]}},
-            {"method": "GET", "path": rf"^/v1.0/users/{u['upn']}/mailFolders/inbox/messageRules$", "status": 200, "body": {"value": []}},
-            {"method": "GET", "path": rf"^/v1.0/users/{u['upn']}/registeredDevices$", "status": 200, "body": {"value": []}}]
+            {"method": "GET", "path": rf"^/v1.0/users/{u['upn']}/mailFolders/inbox/messageRules$", "status": 200, "body": {"value": []}}]
 
     laptops = []
     net = next(v for k, v in mapping if k == "10.20.1.")

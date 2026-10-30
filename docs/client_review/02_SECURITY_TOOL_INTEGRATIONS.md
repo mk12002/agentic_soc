@@ -81,10 +81,13 @@ when the organisation approves the action type it enables.
 |---|---|
 | Used for | Who a person is (department, manager), sign-ins and risk, directory and Azure role assignments (privileged accounts), MFA methods, inbox rules |
 | Identity | Dedicated app registration (separate from the console sign-in registration) |
-| Read (Microsoft Graph application permissions, admin consent) | `User.Read.All`, `AuditLog.Read.All`, `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `RoleManagement.Read.Directory`, `UserAuthenticationMethod.Read.All`, `MailboxSettings.Read`; Azure RBAC **Reader** on the subscriptions (or a management group) for Azure role assignments |
+| Read (Microsoft Graph application permissions, admin consent) | `User.Read.All`, `AuditLog.Read.All`, `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory`, `UserAuthenticationMethod.Read.All`, `MailboxSettings.Read` (without the two membership permissions Graph returns group and role names blank); Azure RBAC **Reader** on the subscriptions (or a management group) for Azure role assignments |
 | Write | `User.RevokeSessions.All`, `User.EnableDisableAccount.All`, `IdentityRiskyUser.ReadWrite.All`, `User-PasswordProfile.ReadWrite.All` |
 | Egress | `graph.microsoft.com`, `management.azure.com`, `login.microsoftonline.com` |
-| Licence dependency | Entra ID P2 for risky users and risk detections (other data works without it) |
+| Licence dependency | Entra ID P1 for sign-in logs; P2 for risky users and risk detections (other data works without it) |
+| Limits kept | Graph allows 5 requests per 10 s per tenant for sign-in and audit logs, and 1 per second for Identity Protection; the connector paces those calls |
+| Partial access | An identity lookup still returns when one part is refused (Identity Protection without P2, a mailbox outside the app's scope): that part is listed as unavailable |
+| Admin targets | Disabling or resetting the password of an account that holds an admin role needs the service principal to hold an admin role at least as privileged (e.g. Privileged Authentication Administrator) - a Microsoft rule for sensitive properties |
 | Settings | `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_CERTIFICATE` (recommended) or `ENTRA_CLIENT_SECRET`, optional `ENTRA_AZURE_SUBSCRIPTIONS` |
 
 ### Microsoft Defender for Endpoint (`defender_endpoint`)
@@ -92,9 +95,9 @@ when the organisation approves the action type it enables.
 | | |
 |---|---|
 | Used for | Alerts with evidence, device inventory, vulnerability management (TVM), advanced hunting for lookups |
-| Read (WindowsDefenderATP application permissions) | `Alert.Read.All`, `Machine.Read.All`, `Vulnerability.Read.All`, `AdvancedQuery.Read.All`, `Ti.Read.All` |
+| Read (WindowsDefenderATP application permissions) | `Alert.Read.All`, `Machine.Read.All`, `Vulnerability.Read.All`, `AdvancedQuery.Read.All`, `Ti.Read.All`; `Machine.ReadWrite.All` only for the "which device had this IP" lookup (Microsoft requires it for that API; optional) |
 | Write | `Machine.Isolate`, `Machine.Scan`, `Machine.CollectForensics`, `Ti.ReadWrite.All` |
-| Egress | `api.securitycenter.microsoft.com` (or the regional host), `login.microsoftonline.com` |
+| Egress | `api.security.microsoft.com` (or a regional host such as `eu.api.security.microsoft.com`), `login.microsoftonline.com`; the token audience stays `api.securitycenter.microsoft.com` |
 | Licence dependency | Defender for Endpoint P2 (advanced hunting, TVM) |
 
 ### Microsoft Defender for Office 365 (`defender_office365`)
@@ -103,11 +106,11 @@ when the organisation approves the action type it enables.
 |---|---|
 | Used for | User-reported messages (the phishing workflow's input), e-mail alerts, message trace and campaign scope, who clicked, sender history |
 | Prerequisite | User-reported messages delivered to a dedicated reporting mailbox (Defender portal → User reported settings) |
-| Read (Microsoft Graph application permissions) | `Mail.Read` **scoped to the reporting mailbox only** (Exchange Online RBAC for Applications or an Application Access Policy, verified with `Test-ApplicationAccessPolicy`), `SecurityAlert.Read.All`, `ThreatHunting.Read.All` |
+| Read (Microsoft Graph application permissions) | `Mail.Read` **scoped to the reporting mailbox only** (Exchange Online RBAC for Applications - Microsoft's current method, replacing Application Access Policies - or, on a tenant still using them, an Application Access Policy; another mailbox proven denied before go-live), `SecurityAlert.Read.All`, `ThreatHunting.Read.All` |
 | Write | `SecurityAnalyzedMessage.ReadWrite.All` (remediation), `Mail.ReadWrite` (scoped; tagging), `Mail.Send` (scoped to the SOC mailbox; reporter feedback), `Exchange.ManageAsApp` with an Exchange role covering the Tenant Allow/Block List (block sender) |
 | Egress | `graph.microsoft.com`, `outlook.office365.com`, `login.microsoftonline.com` |
 | Licence dependency | Defender for Office 365 Plan 2 for advanced hunting and click telemetry |
-| Note | Remediation uses Microsoft Graph's `analyzedEmails/remediate`, a beta API at the time of writing |
+| Note | Remediation uses Microsoft Graph's `analyzedEmails/remediate`, a beta API (the only API for the purge). Block sender uses Exchange Online's admin endpoint (`InvokeCommand`, as the Exchange PowerShell module does) - the cmdlet is documented, the endpoint is not; the action can stay off |
 
 ### Microsoft Defender for Identity (`defender_identity`)
 
@@ -126,8 +129,8 @@ when the organisation approves the action type it enables.
 | | |
 |---|---|
 | Used for | Alerts, host inventory, Spotlight vulnerabilities, indicator lookups |
-| Read (API client scopes) | Alerts: Read, Hosts: Read, Spotlight vulnerabilities: Read, IOCs: Read |
-| Write | Hosts: Write (containment), Real time response: Write (collection; also needs an RTR response policy on the hosts) |
+| Read (API client scopes) | Alerts: Read, Hosts: Read, Vulnerabilities: Read (Spotlight), IOC Management: Read |
+| Write | Hosts: Write (containment), Real time response: Read (read-only collection - `ps`, `netstat`, `ls`; the hosts' response policy must allow RTR) |
 | Egress | The API host of the organisation's Falcon cloud (US-1, US-2, EU-1, ...) |
 | Licence dependency | Spotlight / Falcon Exposure Management for vulnerabilities |
 
@@ -171,6 +174,7 @@ when the organisation approves the action type it enables.
 | Egress | The organisation's Delinea servers (internal) |
 | Admin accounts | An optional, approved map (`account_owners`: admin account -> the person's UPN) links an admin account's activity to its owner; the admin account stays its own identity, an unmapped (shared) account gets no owner, and an owner is never guessed from the account name |
 | Note | API paths differ between Delinea versions and are settings; privileged-access data needs the organisation's explicit governance approval |
+| To confirm before go-live | Delinea's public documentation shows secret audits per secret; a tenant-wide audit list at the default path, and the rotation call, must be confirmed in the instance's own REST API reference (a scheduled *Secret Audit* report is the fallback, with a small connector change). Privilege Manager's API is documented only in each console's Swagger page |
 
 ### Rapid7 InsightVM / Nexpose (`rapid7`)
 
@@ -199,6 +203,7 @@ when the organisation approves the action type it enables.
 | ServiceNow | Integration user (web-service access only) with `itil` (ticket table) and `cmdb_read`; OAuth client credentials (where enabled on the instance) or Basic |
 | Jira | Integration user with *Browse projects*, *Create issues*, *Add comments*, *Transition issues* on the SOC project; API token |
 | Ownership CSV | A maintained spreadsheet on a mounted volume, used where no CMDB is usable |
+| Ownership mapping (console) | An Excel / CSV uploaded on the Cloud posture screen (resource / host pattern or subscription -> team), stored in the database, versioned and audited; fills the CMDB's gaps - Wiz cloud resources above all - and never overrides it |
 | Egress | `<instance>.service-now.com` / `<site>.atlassian.net` |
 
 ### Microsoft Sentinel (`sentinel`) and SIEM push (`generic_siem`)

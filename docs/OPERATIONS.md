@@ -45,15 +45,17 @@ Foundry (verified live):
 SOC_LLM_PROVIDER=azure_foundry
 SOC_LLM_ENDPOINT=https://<resource>.services.ai.azure.com/openai/v1
 SOC_LLM_API_KEY=<key>                      # or SOC_LLM_API_KEY_FILE=/run/secrets/llm_key
-SOC_LLM_DEPLOYMENT=gpt-4.1-mini            # SOC_LLM_DEPLOYMENT_SMALL for a cheaper routine tier
+SOC_LLM_DEPLOYMENT=gpt-4.1-mini            # the default model; SOC_LLM_DEPLOYMENT_SMALL for routine narrative
+SOC_LLM_MODELS=gpt-4.1-nano,gpt-4.1-mini,gpt-4.1   # the models offered per feature (name=deployment if they differ)
 SOC_LLM_APPROVED_ENDPOINTS=https://<resource>.services.ai.azure.com/openai/v1   # anything else is refused
-SOC_LLM_MODEL_VERSION=gpt-4.1-mini         # responses from another model are logged as a mismatch
+SOC_LLM_MODEL_VERSION=gpt-4.1-mini         # pins, one per model, comma-separated; another version is logged as a mismatch
 SOC_LLM_MONTHLY_TOKEN_BUDGET=50000000      # the starting monthly budget; administrators change it on the AI usage screen
 ```
 
 **Budgets and limits are set by administrators on the AI usage screen** (*Govern -> AI usage*): the monthly and daily
 token budgets, per-person hourly / daily limits (with role and person overrides; 0 = no model text for that person),
-and per feature the model tier, the longest answer and on/off. Each change is versioned and audited and applies to
+and per feature the model (by name, from `SOC_LLM_MODELS`), the longest answer and on/off; *Check which models
+answer* confirms which listed models the endpoint serves. Each change is versioned and audited and applies to
 the next model call. Over a limit the platform answers without the model and tells the person why. The same screen
 shows use and cost per feature and per person and advises small or large per feature from measured quality figures.
 Details and sizing: [LLM_TOKENS_AND_COST.md](LLM_TOKENS_AND_COST.md) sections 4 and 4b.
@@ -137,7 +139,7 @@ SOC_PUBLIC_URL=https://soc.example    # optional: messages link to the console
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` / `SOC_LLM_CONNECT_TIMEOUT_SECONDS` | 30 / 120 / 10 | Read timeout for small-tier (short) and large-tier (long answers, ~2,000 tokens) calls; connect timeout. One retry on 429 / 5xx |
+| `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` / `SOC_LLM_CONNECT_TIMEOUT_SECONDS` | 30 / 120 / 10 | Read timeout for smaller models / routine text (short) and larger models / reports (long answers, ~2,000 tokens) calls; connect timeout. One retry on 429 / 5xx |
 | `SOC_LLM_BREAKER_FAILURES` / `SOC_LLM_BREAKER_SECONDS` | 3 / 60 | Circuit breaker: skip the model after repeated failures, answer from the deterministic path |
 | `SOC_LLM_CONCURRENCY` | 4 | Model calls in flight at once for batches (finding narratives, report sections); keep under the provider's rate limit |
 | `SOC_BRIEF_CACHE_SECONDS` | 900 | Reuse an unchanged situation brief |
@@ -291,7 +293,7 @@ folder when done.
 |---|---|---|---|
 | Audit log | database, hash-chained | every change and decision: actions, approvals, policy and configuration changes, access grants, case work, agent recommendations, model use, exports. **Every successful write request leaves at least one event** - where a route's own code wrote none, a generic `api.<method>` event (who, which route, which ids) is added in the same transaction. | never pruned by the platform |
 | Access log | database | every API request: who, method, path, status, latency, client address | `SOC_ACCESS_LOG_RETENTION_DAYS` (400) |
-| Model calls | database (`llm_calls`) | every model call or refusal: feature, tier, who asked (or scheduled), prompt as sent (identities pseudonymised), answer, tokens, time, status, answer cap, statements the evidence check kept and removed **with the reason for each removal** | text `SOC_LLM_LOG_RETENTION_DAYS` (180), figures kept |
+| Model calls | database (`llm_calls`) | every model call or refusal: feature, model chosen and size, who asked (or scheduled), prompt as sent (identities pseudonymised), answer, tokens, time, status, answer cap, statements the evidence check kept and removed **with the reason for each removal** | text `SOC_LLM_LOG_RETENTION_DAYS` (180), figures kept |
 | Job runs | database | every scheduled or replayed run: outcome, attempts, error, summary | |
 | Application log | stdout (and `SOC_LOG_FILE`) | one structured line per request, audit event, model call, outbound call to a tool (host and path - never the query string, headers or body), job start and end, CLI command, warning and error | your log collector's retention |
 
@@ -379,12 +381,74 @@ events `*.processing_failed` with `final: true` (an item left to an analyst afte
   but approves phishing actions only, and a platform grant of auditor on all domains never widens a scoped lead.
   Decisions that span domains (the autonomy policy, compliance evidence export, correlated findings) need an
   all-domain role. `GET /api/v1/me` shows `role_scopes`.
-* Step-up MFA: with `SOC_REQUIRE_MFA=1` (default in prod) approvals, policy, kill switch and access management
-  need a token whose `amr` contains `mfa` (or the Conditional Access auth context `SOC_MFA_AUTH_CONTEXT`).
+* Step-up MFA: with `SOC_REQUIRE_MFA=1` (default in prod) approvals, policy, kill switch, access management and
+  watch-list changes need a token whose `amr` contains `mfa` (or the Conditional Access auth context `SOC_MFA_AUTH_CONTEXT`).
 * Service accounts: API keys (Access screen) - hashed, expiring (≤ 365 days), roles limited to analyst / auditor
   / automation_admin, and never able to approve, change policy or manage access. Shown once.
 * Suspected compromise of an operator: `POST /api/v1/admin/revoke-sessions` (all their tokens become invalid);
   a single token: `POST /api/v1/auth/logout`.
+
+## Ownership mapping (cloud resources and hosts the CMDB does not hold)
+
+* *Cloud posture -> Ownership mapping* (`GET /api/v1/ownership`, any reader; `GET /api/v1/ownership/export` as CSV).
+  Changing it needs `manage_ownership` - the **lead**, **admin** and **automation_admin** roles; a person, never an
+  API key.
+* **Upload** (`POST /api/v1/ownership/upload`, body `content_b64`, `filename`, `note`, `dry_run`): .xlsx or CSV, 5 MB,
+  10,000 rows. Columns (header, any case or spacing): `Resource` / `Hostname` / `Name` (wildcards) and / or
+  `Subscription` / `Account` / `Project`, `Team` (required), optional `Owner`, `Environment`, `Criticality`, `Cloud`,
+  `Resource type`, `Note`. `dry_run` returns every unusable row and the coverage (unowned misconfigurations and
+  findings it would give an owner). An upload replaces the mapping as a new version and re-applies ownership to
+  open misconfigurations and findings at once; the `vulnerability` job applies it at every refresh after.
+* **Clear** (`POST /api/v1/ownership/clear`, body `reason`). Versions are kept (`ownership_mappings`).
+* Precedence: ServiceNow and the `cmdb_csv` connector first; the mapping only where they give no team. Within the
+  mapping: exact name > name pattern > subscription; ties go to the earlier row.
+
+## Report style (templates, logo, brand, writing guide)
+
+* *Reports -> Report style* (`GET /api/v1/reports/style`, any reader). Changing it needs `manage_report_style` - the
+  **lead** and **admin** roles; a person, never an API key.
+* **Upload** (`POST /api/v1/reports/style/upload`, body `content_b64`, `filename`, `note`): a Word template
+  (.docx / .dotx), a PowerPoint template (.pptx / .potx, 16:9), a logo (.png / .jpg, at most 3 MB and 5000 px a side;
+  re-encoded as PNG), a writing guide (.md / .txt, at most 8,000 characters), brand settings (`brand.json` /
+  `brand.yaml`: organisation, primary, accent, font, classification, footer, guide), or a `.zip` style pack with any
+  of them (one per kind). Files up to 15 MB. Refused: macro-enabled files (.docm / .dotm / .pptm / .potm, or a
+  `vbaProject.bin` inside), XML parts declaring a DTD or entity, Office files or packs unpacking to more than 60 MB,
+  4:3 deck templates. A pack is applied as one version or not at all.
+* **Brand** (`POST /api/v1/reports/style`): `organisation`, `primary` / `accent` (six hex digits), `font`,
+  `classification`, `footer`, `guide`, `note`. `POST /api/v1/reports/style/remove` (`slot`: word, deck, logo, guide)
+  and `/reset` (back to the house style) are new versions too. Every change is audited (`report_style.changed`).
+* **Preview**: `GET /api/v1/reports/style/preview?format=docx|pptx` - a sample in the style in force; nothing stored.
+* With a Word template, its own fonts and paragraph styles apply to Word reports (the brand font is used where there
+  is no template, and on slides); the brand colours still colour the cover band, tiles and table headers. Heading
+  styles a template lacks are added in the house form.
+* Style files are kept in the database (`blobs`, under `report_style/`), encrypted with `SOC_DATA_KEY` like every
+  stored blob, whatever `SOC_BLOB_STORE` is: every replica and the scheduler render with the same files, and
+  `blobs reencrypt` re-keys them. A style file that cannot be read is skipped (that part uses the house style) and
+  logged as `report_style.file_unreadable`; the report is still produced.
+
+## Watch lists (block and exception lists)
+
+* *Govern -> Watch lists* (`GET /api/v1/watchlists`, any signed-in reader). Changing a list needs
+  `manage_watchlists` - the **lead** role; a person, never an API key, with step-up MFA.
+* **Upload** (`POST /api/v1/watchlists/{block|exception}/upload`, body `content_b64`, `filename`, `mode` add |
+  replace, `note`, `dry_run`): an Excel workbook (.xlsx; every sheet) or CSV / text, up to 5 MB and 10,000 entries a
+  list. Header names recognised (case and spacing ignored): user (`Username`, `UPN`, `Account`, `sAMAccountName`...),
+  e-mail (`Email`, `Sender`, `Address`), host (`Hostname`, `Computer`, `Device`, `Asset`, `FQDN`...), IP (`IP
+  address`...), `Domain`, `URL`, hash (`Hash`, `SHA256`, `MD5`...), untyped (`Value`, `Indicator`, `IOC`...) with an
+  optional `Type` column, and `Note` / `Reason` / `Comment`. Every identifier column of a row is read. No header:
+  first column = the value (its type recognised), the rest = the note. Old .xls files are refused (save as .xlsx).
+  Workbooks declaring a DTD or entity are refused, and parts are size-capped against zip bombs.
+* `dry_run` (the console's *Preview*) reports what would be added and removed and every rejected value with its
+  sheet and row, changing nothing. A value already on the other list is refused. `replace` removes entries the file
+  no longer has; removed entries stay in the table (`removed_at`, `removed_by`). Remove one entry:
+  `DELETE /api/v1/watchlists/entries/{id}?reason=`. Export a list: `GET /api/v1/watchlists/{name}/export` (CSV).
+* Matching (when a case or the case list is read, so a change applies to every case at once): users on their
+  address, account name or - for a bare user name - the local part of an address in `SOC_ORG_DOMAINS`; hosts on
+  name, FQDN, short name, IP and device ids; indicators on their value; a domain also matches its sub-domains, a
+  sender address in it and a link to it. A typed entry matches only its kind; an untyped one matches any.
+* A match is context only (case page, case list badge, investigation record): no severity, verdict, confidence or
+  action depends on it. Audit events: `watchlist.uploaded` (file, mode, values added / removed, counts),
+  `watchlist.entry_removed` (value, reason).
 
 ## Break-glass
 
@@ -438,7 +502,17 @@ write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` fo
   in batches of 500. An event a case, evidence, an insight or a resolution override refers to is kept; alerts,
   findings, assets, people and indicators are never pruned. The retention run's report (`events`) and audit entry
   say how many went; `dry_run` counts without deleting.
-* Audit export for archiving/SIEM: `GET /api/v1/audit/export` (JSON Lines with chain verification).
+* Audit export (`GET /api/v1/audit/export`, `export_evidence` with all-domain scope: lead, admin, auditor; the
+  *Audit log* screen's *Export* card): `format=jsonl` (default; the last line is the chain verification - for the
+  SIEM / archive), `json`, `csv`, `xlsx` (with an *About this export* sheet) or `docx` (a readable report with the
+  first 1,000 records). Filters: `start` / `end` (UTC dates or times; a date as `end` includes that day),
+  `event_type` (`case.*` = prefix), `actor_id`, `subject_id`, `since_seq`. Every format but Word carries each
+  record's `prev_hash` / `hash`; a filtered export says it is a selection. CSV cells starting `=`, `+`, `-`, `@` are
+  prefixed with `'`; Excel cells are text, never formulas (cells over 32,000 characters are cut, the JSON export has
+  them whole). Each export is audited as `audit.export` with its format and filters.
+* `GET /api/v1/audit/info` (readers of the audit log): the figures the *Audit log* screen states - records, period,
+  records by actor type and by kind, the last full verification, retention of the audit log and every other kind of
+  data (from the settings in force), protections, who may read and export, the export formats.
 * Compliance evidence pack: *Reports* → compliance (`POST /api/v1/reports/compliance`, auditor / lead / admin).
 
 ## Backups

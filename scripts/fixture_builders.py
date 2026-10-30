@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 
 import build_fixtures
 from build_fixtures import CVES, EXPOSURE, HOSTS, ORG, PAYLOAD_SHA, PHISH, TOR_IP, USERS, D, route, write
@@ -79,8 +80,9 @@ def defender_endpoint() -> None:
         route("GET", r"^/api/machines/[^/]+/alerts$", {"value": []}),
         # one machine by its device id (the investigation looks a host up by the id it already holds)
         *[route("GET", rf"^/api/machines/{m['id']}$", m) for m in machines],
-        route("GET", r"^/api/machines/findbyip$", {"value": by_fqdn(j["fqdn"])}, params={"ip": j["ip"], "timestamp": r"~^\d{4}-\d\d-\d\dT"}),
-        route("GET", r"^/api/machines/findbyip$", {"value": []}),
+        route("GET", rf"^/api/machines/findbyip\(ip='{re.escape(j['ip'])}',timestamp=\d{{4}}-\d\d-\d\dT[^)]*\)$",
+              {"value": by_fqdn(j["fqdn"])}),
+        route("GET", r"^/api/machines/findbyip\(.*\)$", {"value": []}),
         route("GET", r"^/api/alerts$", {"value": alerts}),
         route("GET", r"^/api/vulnerabilities/machinesVulnerabilities$", {"value": vulns}),
         route("GET", rf"^/api/files/{PAYLOAD_SHA}$", {"sha256": PAYLOAD_SHA, "globalPrevalence": 3,
@@ -231,6 +233,13 @@ def entra() -> None:
         route("GET", r"^/v1.0/identityProtection/riskyUsers$", {"value": []}, params={"$filter": "*"}),
         route("GET", r"^/v1.0/identityProtection/riskyUsers$", {"value": risky}),
         route("GET", r"^/v1.0/identityProtection/riskDetections$", {"value": detections}),
+        # the identity lookup's device question (Graph's per-user device lists refuse application permissions)
+        route("GET", r"^/v1.0/auditLogs/directoryAudits$", {"value": [
+            {"id": "da-dev-001", "activityDateTime": f"{D}09:17:00Z", "activityDisplayName": "Add registered owner to device",
+             "category": "Device", "result": "success", "initiatedBy": {"app": {"displayName": "Device Registration Service"}},
+             "targetResources": [{"type": "Device", "id": "dev-2", "displayName": "DESKTOP-7H2K9Q"},
+                                 {"type": "User", "id": j["id"], "userPrincipalName": j["upn"]}]}]},
+              params={"$filter": "~Add registered owner to device"}),
         route("GET", r"^/v1.0/auditLogs/directoryAudits$", {"value": audits}),
     ]
     for k, x in USERS.items():
@@ -239,9 +248,6 @@ def entra() -> None:
             member.append({"@odata.type": "#microsoft.graph.directoryRole", "displayName": "Exchange Administrator"})
         if k == "raj":
             member.append({"@odata.type": "#microsoft.graph.group", "displayName": "VIP-Executives"})
-        devices = ([{"id": "dev-1", "displayName": "JANE-LT01", "registrationDateTime": "2025-02-01T00:00:00Z"},
-                    {"id": "dev-2", "displayName": "DESKTOP-7H2K9Q", "registrationDateTime": f"{D}09:17:00Z"}]
-                   if k == "jane" else [])
         routes += [
             route("GET", rf"^/v1.0/users/{x['upn']}$", next(v for v in users if v["userPrincipalName"] == x["upn"])),
             route("GET", rf"^/v1.0/users/{x['upn']}/transitiveMemberOf$", {"value": member}),
@@ -249,7 +255,6 @@ def entra() -> None:
                 {"@odata.type": "#microsoft.graph.passwordAuthenticationMethod"},
                 {"@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod"}]}),
             route("GET", rf"^/v1.0/users/{x['upn']}/mailFolders/inbox/messageRules$", {"value": rules if k == "jane" else []}),
-            route("GET", rf"^/v1.0/users/{x['upn']}/registeredDevices$", {"value": devices}),
         ]
     # Azure Resource Manager (management.azure.com): subscriptions and who holds which Azure role on them
     prod, dev = "11111111-2222-3333-4444-000000000001", "11111111-2222-3333-4444-000000000002"

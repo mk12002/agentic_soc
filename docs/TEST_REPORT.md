@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-22 (rounds 15-29; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-30 (rounds 15-31; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,78 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 29 (2026-10-22) - latest results: the demo script checked claim by claim
+## 0. Round 31 (2026-10-30) - latest results: code review of every module, and the ownership mapping upload
+
+Aim: two requests. (1) Review all the code for bugs and gaps. (2) Wiz has no CMDB, so cloud resources had no owning
+team: let a lead upload a file of resource / subscription -> owning team.
+
+| Found or built | Fix and check | Evidence |
+|---|---|---|
+| The hardened .xlsx / .docx / .pptx reader refused a DTD only when written in ASCII: the same declaration in a UTF-16 part passed the byte check | One check for both readers (`core/text.unsafe_xml`): UTF-16 byte-order marks and NUL bytes are refused with the DTD / entity check (watch lists, ownership mapping, report templates) | UTF-16 workbook test in `test_watchlists.py` |
+| A single cell in column XFD made every row 16,384 cells wide | Columns past 256 are ignored | `test_a_cell_far_to_the_right_is_ignored_instead_of_widening_every_row` |
+| A listed IP written differently by a tool (an IPv6 address in long form or upper case) did not match | Addresses are compared in canonical form on both sides | `test_ip_addresses_match_whatever_form_a_tool_wrote_them_in` |
+| A tiny PNG declaring gigapixels reached the decoder | Refused as a decompression bomb with the logo's size rule | `test_a_tiny_png_claiming_gigapixels_is_refused_not_decoded` |
+| The audit export's "how to verify" text did not state the hash recipe exactly (timestamp form, key order, escaping) | The recipe is a constant, written into every export; a test re-verifies an export using that text alone | `test_the_written_recipe_alone_re_verifies_an_export_without_the_platforms_code` |
+| An event-type filter containing `%`, `_` or `\` acted as a wildcard | Escaped in the prefix match | `test_an_event_type_prefix_with_like_wildcards_or_backslashes_matches_literally` |
+| A quote in a user, host or indicator name could change a vendor query (Graph / Defender OData filters, CrowdStrike FQL) or a URL path | Every value is escaped for its query language (`odata_str`, `fql_str`, `path_part` in `connectors/tools/_common.py`) | `test_a_quote_in_a_name_is_escaped_in_every_vendor_query_and_cannot_change_it` |
+| The forensic collection action accepted any CrowdStrike RTR command | Read-only commands only (a precondition and a check in the call); a failure to close the session is logged, not raised over the collected output | RTR test in `test_tool_onboarding.py` |
+| An Avanan sign-in answer without a token raised a bare `KeyError` | A connector error that names the likely cause (base URL / region) | 4 cases in `test_tool_onboarding.py` |
+| The browser tour's clean-up failed when Windows still held the demo database open | Retries, then a note (the tour itself had passed) | browser tour |
+| **Ownership mapping** (`core/ownership.py`, *Cloud posture* screen): Excel / CSV upload of resource name or pattern, subscription, cloud, resource type -> team, owner, environment, criticality; preview with how many unowned misconfigurations and findings it would cover; export; clear; versions; `manage_ownership` (lead, automation admin, admin; never an API key); audited | Fills only the gaps the CMDBs leave (ServiceNow, then `cmdb_csv`) and never overrides them; exact name beats pattern beats subscription; cloud and type narrow a row; every unusable row named with sheet and row; the same hostile-file refusals as watch lists | `test_ownership.py` (7 tests) |
+
+Nothing changes in Wiz or the cloud: cloud posture still notifies, routes and validates.
+
+**In the browser.** The browser tour: 35 screenshots, **0 problems, 0 accessibility notes**. The ownership card renders
+on the Cloud posture screen. Lint, bandit, `pip_audit`, the supply-chain check and the pre-commit scan are clean.
+
+**Counts:** 896 passed, 16 skipped on SQLite; 895 passed, 17 skipped on PostgreSQL 16 (912 collected; 18 new tests).
+The demo is unchanged, because the mapping starts empty.
+
+## 0.00000 Round 30 (2026-10-29): watch lists, audit exports, report style, models by name, tool onboarding review
+
+Aim: five client requests. (1) Upload a **block list** and an **exception list** - users, hosts, IP addresses,
+domains, URLs, hashes, as Excel sheets - and have every case that involves a listed item say so. (2) Export the
+audit trail in the formats reviewers ask for, and state the facts about the audit log (retention, protection,
+access) on its screen. (3) Upload templates, a logo, brand settings and a writing guide (a "skill") so reports
+follow the client's design and style. (4) Choose AI models by name (gpt-4.1-nano, gpt-4.1-mini, gpt-4.1) instead of
+"small / large", with room for more. (5) Check every tool integration against the vendor's current
+documentation so onboarding has no surprises, and flag what must be confirmed.
+
+| Built | How it was checked | Evidence |
+|---|---|---|
+| Watch lists (`core/watchlists.py`, *Govern -> Watch lists*): .xlsx (every sheet) or CSV upload with preview, add / replace, remove, CSV export; lead only (`manage_watchlists`, MFA, never an API key); every change audited with its values | Parsing of a workbook written by a real spreadsheet library (openpyxl, committed as `tests/data/watchlist_sample.xlsx`) and of an Excel-style shared-strings workbook; typed columns, a *Type* column, header-less lists, `DOMAIN\user`, `Name <address>`, numeric cells; every rejected value with sheet and row | `test_watchlists.py` (10 tests) |
+| The .xlsx reader is the platform's own (no new dependency): a part declaring a DTD or entity is refused (XXE / entity expansion), unpacked parts and the file are size-capped, old .xls refused with a fix | Hostile workbook, fake zip, old Excel and an oversized file each refused with a reason | `test_unreadable_or_hostile_files_are_refused_with_a_reason` |
+| Matching on the case's people (address, account name; a bare name only in the organisation's domains), hosts (name, FQDN, short name, IP, device ids) and indicators (a domain also its sub-domains, senders and links); case page banner, case list badge, investigation record section | Identifiers taken from the estate's own cases (no sample names in the test); severity, verdict, confidence and actions of every case compared before and after an upload - identical; an outside sender sharing a listed user name is not matched; *replace* and removal apply to every case at once | `test_watchlists.py` |
+| Audit exports (`core/audit_export.py`): JSON Lines (default, unchanged), JSON, CSV, Excel, Word; filters by period, event type (prefix), actor, subject; every export audited | An unfiltered JSON export re-verified outside the platform (each hash recomputed); every .xlsx part parsed as XML and the workbook opened by openpyxl (outside the repo); CSV formula guard; control characters and 40,000-character cells handled; permission and all-domain scope enforced | `test_audit_export.py` (8 tests) |
+| Report style (`reporting/style.py`, *Reports -> Report style*): Word template (.docx / .dotx), PowerPoint template (.pptx / .potx, 16:9), logo, brand (organisation, colours, font, classification, footer), writing guide; a .zip style pack; preview; reset; lead / admin only, versioned and audited; applied to every Word report and deck through a context (no mixing between concurrent reports) | Templates made in-test (incl. .dotx / .potx content types and a template without heading styles), the template's header kept and its sample text removed, the deck's sample slide removed, a 4:3 deck refused, a logo on cover / header / title slide and re-encoded as PNG; macro, DTD, zip-bomb and unknown files refused with nothing half-applied; files stored in `blobs`; the guide reaches the model prompt below the grounding rules while figures stay identical with and without the model | `test_report_style.py` (17 tests); `test_report_design.py` unchanged and passing |
+| Models by name (`usage_policy.models()`, `SOC_LLM_MODELS`): each feature picks gpt-4.1-nano, gpt-4.1-mini or gpt-4.1 (more by setting); prices per model; advice names the model to try; *Check which models answer*; per-model version pins; older tier-based policies read as the matching models | The chosen model reaches the Azure, OpenAI-compatible and Anthropic providers; defaults follow the configured deployment (one deployment still serves everything); an undeployed model is refused on save; a legacy saved policy is upgraded on read; the model check is admin-only and logged per model | `test_llm_usage.py` (7 new tests; 3 updated from tiers to models) |
+| Tool onboarding review: every connector's endpoints, sign-in, permissions, paging and limits checked against the vendor's current documentation | Fixed: Defender for Endpoint `findbyip` called as the documented OData function (and its `Machine.ReadWrite.All` permission listed); Entra device registrations read from the audit log (Graph's per-user device lists refuse application permissions, which would have failed every identity lookup), each optional part of an identity lookup failing on its own (Identity Protection without P2, a mailbox outside the app's scope), `GroupMember.Read.All` listed (without it group and role names come back blank), Graph's per-tenant limits for audit logs and Identity Protection kept; CrowdStrike RTR output read back and the session closed (commands are asynchronous - the collection returned nothing); NVD asked with both dates in windows of at most 120 days (a start date alone is refused); Avanan tokens renewed from their own ~30-minute expiry and on a 401; the Defender for Endpoint host moved to `api.security.microsoft.com` (token audience unchanged). Flagged for confirmation: Delinea paths and rotation call, Privilege Manager API (per-console Swagger only), the Office 365 block-sender endpoint (undocumented) and remediation (Graph beta), admin targets needing a privileged role, Rapid7 cloud API v4, Sentinel's move to the Defender portal | `test_tool_onboarding.py` (10 tests, each tied to the documented vendor behaviour); fixtures regenerated from the builders (only the changed routes); `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 4 and the review pack updated |
+| *About this audit log* on the Audit screen (`GET /api/v1/audit/info`): records and period, by actor and kind, last full verification, retention of the log and of every other data class from the settings in force, protections, who may read and export | Figures equal the settings and the log's own counts | `test_the_audit_facts_are_read_from_the_log_and_the_settings` |
+
+**In the browser.** The browser tour (Chrome; every screen, light + dark, layout audited at 1440 / 1280 / 1024 / 768 px,
+axe-core accessibility scan, stored-XSS probe, every on-screen count cross-checked against the API; the Watch lists
+screen added to its route list) first found 14 layout problems, all in this round's screens: the report-style form's
+fields clipped at half width, the new model table needing 107 px of sideways scroll at 1280 px, and model names breaking
+at their hyphens. Fixed (the style cards and the model table take full rows; model names do not wrap); the final tour:
+35 screenshots, **0 problems, 0 accessibility notes**. A functional run through the console as lead, auditor, analyst
+and administrator (35 checks: preview and upload of an Excel and a CSV list, case badges and banner, removal, the
+investigation record's section, a style pack, brand, both previews, a report built in the style, reset, every audit
+export format and a filtered one, read-only views per role, model choice and the model check, markup in a list note and
+the organisation name shown as text) passed 35 of 35 with no browser error after fixing a **bug that predates this
+round**: the console's download helper parsed any response whose type contained "json", so JSON Lines and JSON
+downloads (the Reports screen's audit export among them) never started; downloads now take the response as it is.
+Every downloaded file was opened: the .xlsx by openpyxl, the .docx / .pptx by python-docx / python-pptx, the JSON
+exports' chain verification reads `ok`.
+
+Found and fixed on the way: upper-case URL schemes and hashes were not recognised as URLs / hashes (tests written
+first); FEATURES.md still called autonomy level L1 "notify" (the code: enrich). Checked in a browser: the new screen,
+the case banner and badges, the upload preview and the Audit screen as lead, analyst and auditor (no console errors).
+
+**Counts:** 878 passed, 16 skipped on SQLite; 877 passed, 17 skipped on PostgreSQL 16 (894 collected:
+52 new tests since round 29, and 6 more cases from the existing sweeps over every route). The demo is unchanged (both lists start
+empty). Lint and bandit clean.
+
+## 0.0000 Round 29 (2026-10-22): the demo script checked claim by claim
 
 Aim: make every statement in the client demo video script true of the running system. Each claim was checked against
 a freshly reset demo (every screen's API answer) and against the code; where the system fell short, the system was

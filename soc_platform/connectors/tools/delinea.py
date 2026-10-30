@@ -172,7 +172,9 @@ MANIFESTS = [
                 ConfigField("account_owners", "Approved admin-account -> person map, e.g. {\"adm-first.last\": "
                             "\"first.last@example.com\"}; shared accounts stay unmapped", required=False, kind="map")],
         actions=_ss_actions, confidence="Medium",
-        to_confirm="API access approval - privileged access data needs extra governance",
+        to_confirm="API access approval (privileged access data needs extra governance); the audit and sessions paths "
+                   "and the rotation call against the instance's own REST API reference - a tenant-wide secret-audit "
+                   "list is not in Delinea's public documentation",
         fake_settings={"user_domain": "acme-demo.com", "base_url": "https://pam.acme-demo.com/SecretServer"},
         focus_areas=("incident",)),
     ConnectorManifest(
@@ -184,7 +186,8 @@ MANIFESTS = [
                 ConfigField("client_secret", "API client secret", secret=True),
                 ConfigField("user_domain", "UPN suffix", required=False),
                 ConfigField("events_path", "Elevation events endpoint (default /Tms/api/v1/events/elevation)", required=False)],
-        confidence="Medium", to_confirm="API access approval and available event granularity",
+        confidence="Medium", to_confirm="API access approval; the elevation-events and token paths from the console's "
+                                         "own Swagger page (Help > API Reference) - not in public documentation",
         fake_settings={"user_domain": "acme-demo.com", "base_url": "https://pam.acme-demo.com/SecretServer"},
         focus_areas=("incident",)),
 ]

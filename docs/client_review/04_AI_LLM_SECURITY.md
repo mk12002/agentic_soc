@@ -52,7 +52,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 
 ## 3 Where the LLM is used
 
-| Feature | Triggered by | Default tier |
+| Feature | Triggered by | Default model size |
 |---|---|---|
 | Incident summary | Scheduled (each investigated incident) | Large |
 | Phishing explanation | Scheduled (each reported e-mail not auto-closed) | Small |
@@ -63,11 +63,19 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Report plan / report sections | A person building a report | Small / large |
 | Daily exposure and weekly VM report commentary | Scheduled | Small |
 
+Administrators choose the model for each feature **by name** on the AI usage screen, from the models deployed on the
+organisation's endpoint (by default gpt-4.1-nano, gpt-4.1-mini and gpt-4.1; more are added with `SOC_LLM_MODELS`). The
+size above is only the default: the configured default deployment for that kind of work. *Check which models answer*
+sends each listed model a request of a few dozen tokens, so a model the endpoint does not serve is found before it is
+chosen. The organisation's **report writing guide** (Reports → Report style) is added to report-narrative prompts as
+wording rules below the grounding rules: it shapes tone and terms only, and uncited statements and unsupported figures
+are still removed.
+
 ## 4 Model hosting
 
 | Option | Setting | Use |
 |---|---|---|
-| The organisation's LLM gateway, OpenAI-compatible endpoint (recommended) | `SOC_LLM_PROVIDER=openai_compatible` | One configuration reaches every model the gateway offers (for example Claude, Gemini or OpenAI models), selected by model name per tier |
+| The organisation's LLM gateway, OpenAI-compatible endpoint (recommended) | `SOC_LLM_PROVIDER=openai_compatible` | One configuration reaches every model the gateway offers (for example Claude, Gemini or OpenAI models), selected by model name per feature |
 | The organisation's gateway exposing the Claude Messages API | `SOC_LLM_PROVIDER=anthropic` | Claude models |
 | Azure OpenAI / Azure AI Foundry in the organisation's subscription | `SOC_LLM_PROVIDER=azure_foundry` | OpenAI models in the organisation's Azure tenancy |
 | No LLM | `SOC_LLM_PROVIDER=none` (default) | Deterministic, cited text everywhere |

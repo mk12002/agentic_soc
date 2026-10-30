@@ -1,7 +1,7 @@
 """Governed, evidence-grounded LLM access (NFR-11, IM-T05, IM-T11, VM-T07, R02, R11).
 
 Every model call in the platform goes through ``LLMGateway``:
-  * approved endpoints only, pinned model version, tiered routing (small/large)
+  * approved endpoints only, pinned model versions, per-feature model choice (the AI usage policy)
   * personal data pseudonymised before the prompt leaves the platform
   * prompt and response logged to ``llm_calls``; monthly token budget enforced
   * ``grounded()`` returns claims that each cite evidence ids; claims citing
@@ -148,14 +148,18 @@ class Provider(ABC):
     name = "none"
 
     @abstractmethod
-    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
-        """``max_tokens``: the most the answer may contain (from the AI usage policy); None = the provider's default."""
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None,
+                 model: str | None = None) -> Completion | None:
+        """``max_tokens``: the most the answer may contain (from the AI usage policy); None = the provider's default.
+        ``model``: the deployment / model id the policy chose for this feature; None = the provider's own per-tier
+        default."""
 
 
 class NullProvider(Provider):
     """No model configured: callers use their deterministic fallback."""
 
-    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None,
+                 model: str | None = None) -> Completion | None:
         return None
 
 
@@ -172,8 +176,9 @@ class AzureOpenAIProvider(Provider):
         self.key = secret("SOC_LLM_API_KEY")
         check_endpoint(settings, self.endpoint)
 
-    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None) -> Completion | None:
-        deployment = self.deployments.get(tier) or self.deployments["large"]
+    def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None,
+                 model: str | None = None) -> Completion | None:
+        deployment = model or self.deployments.get(tier) or self.deployments["large"]
         if not (self.endpoint and deployment and self.key):
             return None
         url = f"{self.endpoint}/openai/deployments/{deployment}/chat/completions?api-version={self.api_version}"
@@ -220,13 +225,30 @@ class UserLimitExceeded(BudgetExceeded):
     pass
 
 
-def _accepts_max_tokens(provider: Any) -> bool:
+def _accepts(provider: Any, param: str) -> bool:
     import inspect
 
     try:
-        return "max_tokens" in inspect.signature(provider.complete).parameters
+        return param in inspect.signature(provider.complete).parameters
     except (TypeError, ValueError):
         return False
+
+
+def _accepts_max_tokens(provider: Any) -> bool:
+    return _accepts(provider, "max_tokens")
+
+
+def pinned_ok(pins: str | None, chosen: str | None, answered: str) -> bool:
+    """``SOC_LLM_MODEL_VERSION`` pins one version per model, comma-separated, each written as the model's name and
+    its version (``gpt-4.1-mini-2025-04-14``). A call is off its pin when a pin belongs to the model the policy chose
+    and the model that answered is not that version. Without a chosen model (a provider's own default) any pin must
+    match, as before."""
+    entries = [p.strip() for p in (pins or "").split(",") if p.strip()]
+    if not entries:
+        return True
+    if chosen:
+        entries = [p for p in entries if p == chosen or (p.startswith(chosen + "-") and p[len(chosen) + 1:][:1].isdigit())]
+    return not entries or any(p in answered for p in entries)
 
 
 class LLMGateway:
@@ -354,15 +376,18 @@ class LLMGateway:
         refused = self._refusal(workflow)
         if refused:
             self.notice = refused[1]
-            self._log(workflow, prompt, refused[1], 0, 0, "none", status=refused[0], tier=rule["tier"])
+            self._log(workflow, prompt, refused[1], 0, 0, "none", status=refused[0], tier=rule["tier"],
+                      requested_model=rule["model"])
             raise (UserLimitExceeded if refused[0] == "user_limit" else BudgetExceeded)(f"{refused[1]} ({workflow})")
         if _Breaker.is_open():
             self._log(workflow, prompt, "model endpoint failing - circuit open, deterministic path used", 0, 0, "none",
-                      status="circuit_open", tier=rule["tier"])
+                      status="circuit_open", tier=rule["tier"], requested_model=rule["model"])
             return None, None
         kwargs: dict[str, Any] = {"tier": rule["tier"]}
         if rule["max_output_tokens"] and _accepts_max_tokens(self.provider):
             kwargs["max_tokens"] = int(rule["max_output_tokens"])
+        if rule.get("deployment") and _accepts(self.provider, "model"):
+            kwargs["model"] = rule["deployment"]
         started = time.perf_counter()
         try:
             out = self.provider.complete(system, prompt, **kwargs)
@@ -370,18 +395,19 @@ class LLMGateway:
             _Breaker.record(False)
             self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error",
                       latency_ms=round((time.perf_counter() - started) * 1000), tier=rule["tier"],
-                      max_tokens=kwargs.get("max_tokens"))
+                      max_tokens=kwargs.get("max_tokens"), requested_model=rule["model"])
             return None, None
         latency = round((time.perf_counter() - started) * 1000)
         if out is None:
             return None, None
         _Breaker.record(True)
-        pinned = self.settings.llm_model_version
         parsed = _parse_json(out.text)
         status = ("unparseable" if parsed is None else
-                  "ok" if not pinned or pinned in out.model else "model_version_mismatch")
+                  "ok" if pinned_ok(self.settings.llm_model_version, rule["model"] if kwargs.get("model") else None,
+                                    out.model) else "model_version_mismatch")
         row = self._log(workflow, prompt, out.text, out.prompt_tokens, out.completion_tokens, out.model, status=status,
-                        latency_ms=latency, tier=rule["tier"], max_tokens=kwargs.get("max_tokens"))
+                        latency_ms=latency, tier=rule["tier"], max_tokens=kwargs.get("max_tokens"),
+                        requested_model=rule["model"])
         if parsed is None:
             return None, row
         return json.loads(red.restore(json.dumps(parsed))), row
@@ -434,8 +460,44 @@ class LLMGateway:
                         "dropped_unsupported_figures": len(claims) - len(checked) + removed}
         return deterministic_grounded(evidence)
 
+    def probe(self, models: list[dict[str, str]]) -> list[dict[str, Any]]:
+        """Ask each listed model for a one-word answer, so an administrator sees which ones the endpoint really
+        serves before choosing them for a feature. A few dozen tokens each, logged as ``llm.model_check`` and counted
+        against the budgets like any other call (refused when over them)."""
+        out = []
+        for m in models:
+            started = time.perf_counter()
+            refused = self._refusal("llm.model_check")
+            if refused:
+                out.append({"model": m["name"], "ok": False, "detail": refused[1]})
+                continue
+            kwargs: dict[str, Any] = {"tier": m["size"]}
+            if _accepts(self.provider, "model"):
+                kwargs["model"] = m["deployment"]
+            if _accepts_max_tokens(self.provider):
+                kwargs["max_tokens"] = 20
+            prompt = 'Reply with the JSON object {"ok": true} and nothing else.'
+            try:
+                c = self.provider.complete("You check that a model endpoint answers.", prompt, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - the outcome is the point: reported and logged, never raised
+                ms = round((time.perf_counter() - started) * 1000)
+                self._log("llm.model_check", prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error",
+                          latency_ms=ms, tier=m["size"], requested_model=m["name"])
+                out.append({"model": m["name"], "ok": False, "latency_ms": ms,
+                            "detail": f"{type(exc).__name__}: {str(exc)[:200]}"})
+                continue
+            ms = round((time.perf_counter() - started) * 1000)
+            if c is None:
+                out.append({"model": m["name"], "ok": False, "detail": "no model configured (SOC_LLM_PROVIDER / endpoint / key)"})
+                continue
+            self._log("llm.model_check", prompt, c.text, c.prompt_tokens, c.completion_tokens, c.model, status="ok",
+                      latency_ms=ms, tier=m["size"], requested_model=m["name"])
+            out.append({"model": m["name"], "ok": True, "latency_ms": ms, "answered_by": c.model})
+        return out
+
     def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str,
-             latency_ms: int | None = None, tier: str | None = None, max_tokens: int | None = None) -> LLMCall:
+             latency_ms: int | None = None, tier: str | None = None, max_tokens: int | None = None,
+             requested_model: str | None = None) -> LLMCall:
         from soc_platform.core.observability import current_trace, event
 
         actor = getattr(self.actor, "id", self.actor) if self.actor is not None else None
@@ -443,11 +505,13 @@ class LLMGateway:
             row = LLMCall(workflow=workflow, provider=self.provider.name, model=model, prompt_redacted=prompt,
                           response=response, prompt_tokens=pt, completion_tokens=ct, status=status, grounded=True,
                           latency_ms=latency_ms, tier=tier, actor=str(actor)[:256] if actor else None,
-                          max_tokens=max_tokens, trace_id=current_trace())
+                          max_tokens=max_tokens, trace_id=current_trace(),
+                          requested_model=(requested_model or None) and requested_model[:64])
             self.s.add(row)
             self.s.flush()
         event("llm.call", 30 if status in ("error", "unparseable", "model_version_mismatch") else 20,
-              call_id=row.id, workflow=workflow, tier=tier, status=status, model=model, prompt_tokens=pt,
+              call_id=row.id, workflow=workflow, tier=tier, requested_model=requested_model, status=status,
+              model=model, prompt_tokens=pt,
               completion_tokens=ct, latency_ms=latency_ms, actor=row.actor,
               detail=response[:300] if status not in ("ok", "model_version_mismatch") else None)
         return row

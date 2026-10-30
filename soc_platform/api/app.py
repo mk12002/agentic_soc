@@ -1026,18 +1026,197 @@ def admin_retention(dry_run: bool = True, p: Principal = Depends(need(Perm.MANAG
 
 
 @app.get("/api/v1/audit/export")
-def audit_export(since_seq: int = Query(0, ge=0, le=2**31 - 1), p: Principal = Depends(need(Perm.EXPORT_EVIDENCE, "*")), s: Session = Depends(db_session, scope="function")):
-    """JSON Lines export of the hash-chained audit log for external archiving / SIEM (NFR-04). The whole chain is
-    needed to verify it, so this requires all-domain scope."""
-    from fastapi.responses import PlainTextResponse
+def audit_export(format: str = Query("jsonl", pattern="^(jsonl|json|csv|xlsx|docx)$"),
+                 since_seq: int = Query(0, ge=0, le=2**31 - 1), start: str | None = Query(None, max_length=40),
+                 end: str | None = Query(None, max_length=40), event_type: str | None = Query(None, max_length=64),
+                 actor_id: str | None = Query(None, max_length=256), subject_id: str | None = Query(None, max_length=64),
+                 p: Principal = Depends(need(Perm.EXPORT_EVIDENCE, "*")), s: Session = Depends(db_session, scope="function")):
+    """The hash-chained audit log for archiving, a SIEM or a reviewer (NFR-04): JSON Lines (default), JSON, CSV, Excel
+    or a Word report, optionally narrowed to a time window (``start`` / ``end``, dates or times in UTC), an event type
+    (``case.*`` = a prefix), an actor or a subject. The whole chain is needed to verify it, so this requires
+    all-domain scope. Every export is itself audited."""
+    from fastapi.responses import Response
 
-    from soc_platform.core.retention import export_audit
+    from soc_platform.core.audit_export import export
 
-    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="audit.export", subject_type="audit",
-                       subject_id="audit_log", payload={"since_seq": since_seq})
-    body = "".join(export_audit(s, since_seq=since_seq))
-    return PlainTextResponse(body, media_type="application/x-ndjson",
-                             headers={"Content-Disposition": 'attachment; filename="audit_log.jsonl"'})
+    filters = {"since_seq": since_seq, "start": start, "end": end, "event_type": event_type, "actor_id": actor_id,
+               "subject_id": subject_id}
+    try:
+        body, media, name = export(s, format, by=p.id, filters=filters)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    AuditLog(s).append(actor_type="human" if not p.is_service else "system", actor_id=p.id, event_type="audit.export",
+                       subject_type="audit", subject_id="audit_log",
+                       payload={"format": format, **{k: v for k, v in filters.items() if v not in (None, "", 0)}})
+    return Response(body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/api/v1/audit/info")
+def audit_info(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
+    """Facts about the audit log: size, span, last full verification, what it records, how long it and the other
+    data are kept, how it is protected, who may read and export it, and the export formats."""
+    from soc_platform.core.audit_export import info
+
+    return info(s, get_settings())
+
+
+# ----------------------------------------------------------------------------- watch lists
+
+
+class WatchlistUpload(BaseModel):
+    content_b64: str = Field(min_length=4, max_length=7_000_000)     # the file, base64 (.xlsx, .csv or .txt; 5 MB)
+    filename: str = Field(default="", max_length=200)
+    mode: str = Field(default="add", pattern="^(add|replace)$")
+    note: str = Field(default="", max_length=500)
+    dry_run: bool = False
+
+
+@app.get("/api/v1/watchlists")
+def watchlists(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    """The block list and the exception list, every active entry with who added it, when and why."""
+    from soc_platform.core.watchlists import WatchlistService
+
+    return WatchlistService(s).view()
+
+
+@app.post("/api/v1/watchlists/{name}/upload")
+def watchlist_upload(name: str, body: WatchlistUpload, p: Principal = Depends(need(Perm.MANAGE_WATCHLISTS)),
+                     s: Session = Depends(db_session, scope="function")):
+    """Upload an Excel workbook or CSV to a list: ``add`` its entries, or ``replace`` the list with it. ``dry_run``
+    shows what would change and every rejected value, changing nothing."""
+    import base64
+    import binascii
+
+    from soc_platform.core.watchlists import WatchlistService
+
+    try:
+        data = base64.b64decode(body.content_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(400, "the file content is not valid base64") from exc
+    try:
+        return WatchlistService(s).upload(name, data, p, filename=body.filename, mode=body.mode, note=body.note,
+                                          dry_run=body.dry_run)
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+@app.delete("/api/v1/watchlists/entries/{eid}")
+def watchlist_remove(eid: str, reason: str = Query("", max_length=500), p: Principal = Depends(need(Perm.MANAGE_WATCHLISTS)),
+                     s: Session = Depends(db_session, scope="function")):
+    from soc_platform.core.watchlists import WatchlistService, entry_dict
+
+    try:
+        return {**entry_dict(WatchlistService(s).remove(eid, p, reason)), "removed": True}
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+# ----------------------------------------------------------------------------- ownership mapping
+
+
+class OwnershipUpload(BaseModel):
+    content_b64: str = Field(min_length=4, max_length=7_000_000)     # the file, base64 (.xlsx or .csv; 5 MB)
+    filename: str = Field(default="", max_length=200)
+    note: str = Field(default="", max_length=500)
+    dry_run: bool = False
+
+
+def _ownership_coverage(s: Session, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """What a mapping would give an owner: open misconfigurations and findings that have no team today."""
+    from soc_platform.core.ownership import match
+    from soc_platform.domains.vulnerability.misconfig import OPEN
+    from soc_platform.domains.vulnerability.models import CloudMisconfiguration, ConsolidatedFinding
+
+    mis = s.execute(select(CloudMisconfiguration).where(CloudMisconfiguration.status.in_(OPEN),
+                                                        CloudMisconfiguration.platform_team.is_(None))).scalars().all()
+    got_mis = [m.resource_name for m in mis if match(rows, {"resource_name": m.resource_name, "subscription": m.subscription,
+                                                            "cloud": m.cloud, "resource_type": m.resource_type})]
+    fins = s.execute(select(ConsolidatedFinding).where(ConsolidatedFinding.platform_team.is_(None),
+                                                       ConsolidatedFinding.status.in_(("open", "reopened")))).scalars().all()
+    got_fin = [f.asset_name for f in fins if match(rows, {"hostname": f.asset_name})]
+    return {"misconfigurations_without_owner": len(mis), "misconfigurations_covered": len(got_mis),
+            "findings_without_owner": len(fins), "findings_covered": len(got_fin),
+            "still_without_owner": sorted({m.resource_name for m in mis} - set(got_mis)
+                                          | ({f.asset_name for f in fins} - set(got_fin)))[:50]}
+
+
+def _apply_ownership(s: Session) -> dict[str, Any]:
+    """Re-run ownership on open misconfigurations and findings, so an upload takes effect at once."""
+    out: dict[str, Any] = {}
+    for name, fn in (("misconfigurations", lambda: _misconfig(s).enrich_ownership()),
+                     ("findings", lambda: _services(s)["vulnerability"].enrich_ownership())):
+        try:
+            out[name] = fn()
+        except Exception as exc:  # noqa: BLE001 - the mapping is saved; the next refresh applies it
+            import logging
+
+            logging.getLogger(__name__).warning("ownership not re-applied to %s: %s", name, type(exc).__name__)
+            out[name] = {"error": "not applied now - the next refresh applies it"}
+    return out
+
+
+@app.get("/api/v1/ownership")
+def ownership(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    """The uploaded ownership mapping in force (resource / host / subscription -> owning team), with its history."""
+    from soc_platform.core.ownership import OwnershipStore
+
+    return OwnershipStore(s).view()
+
+
+@app.post("/api/v1/ownership/upload")
+def ownership_upload(body: OwnershipUpload, p: Principal = Depends(need(Perm.MANAGE_OWNERSHIP)),
+                     s: Session = Depends(db_session, scope="function")):
+    """Replace the ownership mapping with an Excel workbook or CSV. ``dry_run`` shows what it holds, every unusable
+    row and how many unowned misconfigurations and findings it would cover, changing nothing."""
+    import base64
+    import binascii
+
+    from soc_platform.core.ownership import OwnershipStore
+
+    try:
+        data = base64.b64decode(body.content_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(400, "the file content is not valid base64") from exc
+    try:
+        out = OwnershipStore(s).upload(data, p, filename=body.filename, note=body.note, dry_run=body.dry_run,
+                                       coverage=lambda rows: _ownership_coverage(s, rows))
+    except Exception as exc:
+        raise _err(exc) from exc
+    if not body.dry_run:
+        out["applied"] = _apply_ownership(s)
+    return out
+
+
+@app.post("/api/v1/ownership/clear")
+def ownership_clear(body: ReasonBody, p: Principal = Depends(need(Perm.MANAGE_OWNERSHIP)),
+                    s: Session = Depends(db_session, scope="function")):
+    from soc_platform.core.ownership import OwnershipStore
+
+    try:
+        v = OwnershipStore(s).clear(p, body.reason[:500])
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"version": v.id, "cleared": True}
+
+
+@app.get("/api/v1/ownership/export")
+def ownership_export(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    from soc_platform.core.ownership import OwnershipStore
+
+    return PlainTextResponse("﻿" + OwnershipStore(s).export_csv(), media_type="text/csv",
+                             headers={"Content-Disposition": 'attachment; filename="ownership_mapping.csv"'})
+
+
+@app.get("/api/v1/watchlists/{name}/export")
+def watchlist_export(name: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    from soc_platform.core.watchlists import WatchlistService
+
+    try:
+        body = WatchlistService(s).export_csv(name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return PlainTextResponse("﻿" + body, media_type="text/csv",
+                             headers={"Content-Disposition": f'attachment; filename="{name}_list.csv"'})
 
 
 class PushedAlerts(BaseModel):
@@ -1306,7 +1485,8 @@ def audit(subject_id: str | None = None, actor_id: str | None = None, event_type
 
 
 def _llm_call_row(c: Any, *, full: bool = False) -> dict[str, Any]:
-    out = {"id": c.id, "ts": c.ts.isoformat(), "workflow": c.workflow, "tier": c.tier, "status": c.status,
+    out = {"id": c.id, "ts": c.ts.isoformat(), "workflow": c.workflow, "tier": c.tier,
+           "requested_model": c.requested_model, "status": c.status,
            "actor": c.actor, "provider": c.provider, "model": c.model, "prompt_tokens": c.prompt_tokens,
            "completion_tokens": c.completion_tokens, "latency_ms": c.latency_ms, "claims_kept": c.claims_kept,
            "claims_dropped": c.claims_dropped, "max_tokens": c.max_tokens, "trace_id": c.trace_id}
@@ -1503,9 +1683,14 @@ def list_cases(domain: str | None = None, status: str | None = None, assignee: s
     if status:
         q = q.where(Case.status.in_(status.split(",")))
     q = _assignee_filter(q, assignee, p)
+    from soc_platform.core.watchlists import WatchlistService
+
+    cases = list(s.execute(q).scalars())
+    listed = WatchlistService(s).case_matches([c.id for c in cases], get_settings().org_domains)
     return [{"id": c.id, "domain": c.domain, "title": c.title, "status": c.status, "severity": c.severity,
-             "verdict": c.verdict, "confidence": c.confidence, "assignee": c.assignee, "created_at": _iso(c.created_at)}
-            for c in s.execute(q).scalars()]
+             "verdict": c.verdict, "confidence": c.confidence, "assignee": c.assignee, "created_at": _iso(c.created_at),
+             "watchlists": sorted({m["list"] for m in listed.get(c.id, [])})}
+            for c in cases]
 
 
 @app.get("/api/v1/cases/summary")
@@ -1769,13 +1954,32 @@ class LlmPolicyBody(BaseModel):
 
 @app.get("/api/v1/admin/llm/policy")
 def llm_policy_get(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
-    """The AI usage policy in force (budgets, per-user limits, per-feature tiers), its defaults and its history."""
+    """The AI usage policy in force (budgets, per-user limits, per-feature model), the models that can be chosen,
+    its defaults and its history."""
     from soc_platform.llm.usage_policy import KNOWN_WORKFLOWS, ROLES, TIERS, UsagePolicyStore, defaults
 
     st = UsagePolicyStore(s, get_settings())
-    return {"policy": st.active(), "defaults": defaults(get_settings()), "history": st.history(),
+    pol = st.active()
+    return {"policy": pol, "defaults": defaults(get_settings()), "history": st.history(),
             "workflows": {k: {"default_tier": v[0], "triggered_by": v[1], "description": v[2]}
-                          for k, v in KNOWN_WORKFLOWS.items()}, "roles": list(ROLES), "tiers": list(TIERS)}
+                          for k, v in KNOWN_WORKFLOWS.items()}, "roles": list(ROLES), "tiers": list(TIERS),
+            "models": pol["models"], "default_models": pol["default_models"]}
+
+
+@app.post("/api/v1/admin/llm/models/check")
+def llm_models_check(p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session, scope="function")):
+    """Send one tiny request to each listed model: which ones the endpoint really serves (a model that is not
+    deployed would make every call of a feature fall back to the platform's own text)."""
+    from soc_platform.llm.usage_policy import models
+
+    s.commit()                                     # no write lock held while the endpoint answers
+    gw = llm(s, p)
+    results = (gw.probe(models(get_settings())) if gw is not None else
+               [{"model": m["name"], "ok": False, "detail": "no model provider is configured (SOC_LLM_PROVIDER)"}
+                for m in models(get_settings())])
+    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="llm.models_checked", subject_type="llm_policy",
+                       subject_id="models", payload={"results": [{k: r.get(k) for k in ("model", "ok")} for r in results]})
+    return {"results": results}
 
 
 @app.post("/api/v1/admin/llm/policy")
@@ -2188,6 +2392,116 @@ def _custom_report_allowed(p: Principal, metrics: dict[str, Any]) -> bool:
         return True
     needed = set(metrics.get("domains") or []) | set(metrics.get("scope") or ["*"])
     return "*" not in needed and needed <= set(p.domains)
+
+
+# ----------------------------------------------------------------------------- report style
+
+
+class StyleBody(BaseModel):
+    organisation: str | None = Field(default=None, max_length=200)
+    primary: str | None = Field(default=None, max_length=20)
+    accent: str | None = Field(default=None, max_length=20)
+    font: str | None = Field(default=None, max_length=80)
+    classification: str | None = Field(default=None, max_length=200)
+    footer: str | None = Field(default=None, max_length=400)
+    guide: str | None = Field(default=None, max_length=20_000)
+    note: str = Field(default="", max_length=2000)
+
+
+class StyleUpload(BaseModel):
+    content_b64: str = Field(min_length=4, max_length=21_000_000)    # the file, base64 (15 MB)
+    filename: str = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=2000)
+
+
+class StyleSlot(BaseModel):
+    slot: str = Field(max_length=20)
+    note: str = Field(default="", max_length=2000)
+
+
+class StyleNote(BaseModel):
+    note: str = Field(default="", max_length=2000)
+
+
+@app.get("/api/v1/reports/style")
+def report_style(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    """The report style in force (brand, logo, templates, writing guide - files described, never returned) and its
+    history."""
+    from soc_platform.reporting.style import ReportStyleStore
+
+    out = ReportStyleStore(s).view()
+    for meta in (out["style"].get("files") or {}).values():
+        meta.pop("ref", None)                       # where a file is stored is not the reader's business
+    return out
+
+
+@app.post("/api/v1/reports/style")
+def report_style_set(body: StyleBody, p: Principal = Depends(need(Perm.MANAGE_REPORT_STYLE)),
+                     s: Session = Depends(db_session, scope="function")):
+    """Set the brand: organisation name, colours, font, classification line, footer, writing guide (lead, admin)."""
+    from soc_platform.reporting.style import ReportStyleStore
+
+    try:
+        row = ReportStyleStore(s).set_brand(body.model_dump(exclude={"note"}), p, body.note)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"version": row.id}
+
+
+@app.post("/api/v1/reports/style/upload")
+def report_style_upload(body: StyleUpload, p: Principal = Depends(need(Perm.MANAGE_REPORT_STYLE)),
+                        s: Session = Depends(db_session, scope="function")):
+    """Upload a Word or PowerPoint template, a logo, a writing guide (skill), brand settings, or a .zip style pack
+    holding any of them. Every file is validated; nothing is applied unless all of it is usable."""
+    import base64
+    import binascii
+
+    from soc_platform.reporting.style import ReportStyleStore
+
+    try:
+        data = base64.b64decode(body.content_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(400, "the file content is not valid base64") from exc
+    try:
+        return ReportStyleStore(s).upload(body.filename, data, p, body.note)
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+@app.post("/api/v1/reports/style/remove")
+def report_style_remove(body: StyleSlot, p: Principal = Depends(need(Perm.MANAGE_REPORT_STYLE)),
+                        s: Session = Depends(db_session, scope="function")):
+    from soc_platform.reporting.style import ReportStyleStore
+
+    try:
+        return {"version": ReportStyleStore(s).remove(body.slot, p, body.note).id}
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+@app.post("/api/v1/reports/style/reset")
+def report_style_reset(body: StyleNote, p: Principal = Depends(need(Perm.MANAGE_REPORT_STYLE)),
+                       s: Session = Depends(db_session, scope="function")):
+    from soc_platform.reporting.style import ReportStyleStore
+
+    try:
+        return {"version": ReportStyleStore(s).reset(p, body.note).id}
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+@app.get("/api/v1/reports/style/preview")
+def report_style_preview(format: str = Query("docx", pattern="^(docx|pptx)$"), _: Principal = Depends(need(Perm.READ)),
+                         s: Session = Depends(db_session, scope="function")):
+    """A short sample Word report or deck in the style in force (sample figures; nothing stored)."""
+    from fastapi.responses import Response
+
+    from soc_platform.reporting.style import preview
+
+    media = ("application/vnd.openxmlformats-officedocument.presentationml.presentation" if format == "pptx" else
+             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    return Response(preview(s, format), media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="report_style_preview.{format}"'})
 
 
 @app.get("/api/v1/reports/templates")

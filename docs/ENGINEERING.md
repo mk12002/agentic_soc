@@ -878,22 +878,26 @@ It is rebuilt on demand and never stored. An event not in the store cannot appea
 
 ### 12.1 Structure (`llm/gateway.py`)
 
-`LLMGateway` wraps a `Provider` (`complete(system, user, tier) -> Completion(text, prompt_tokens, completion_tokens,
-model)`).
+`LLMGateway` wraps a `Provider` (`complete(system, user, *, tier, max_tokens=None, model=None) ->
+Completion(text, prompt_tokens, completion_tokens, model)`).
 
 **Providers:**
 - `openai_compatible` (OpenAI, vLLM, Ollama, LM Studio)
 - `azure_foundry` (the same protocol on Azure AI Foundry / Azure OpenAI v1, `api-key` header): the live-tested one
 - `anthropic` (official SDK; server-side refusal fallback for the large tier)
 
-**Tiers:**
-- `large` for summaries, deep analysis and reports
-- `small` for routine narrative and planners (`SOC_LLM_DEPLOYMENT_SMALL`)
+**Models:** each feature uses a model **by name**, chosen by an administrator on the AI usage screen from the
+deployment's list (`SOC_LLM_MODELS`; default gpt-4.1-nano, gpt-4.1-mini, gpt-4.1). The code asks only for a size -
+`large` for summaries, deep analysis and reports, `small` for routine narrative and planners - which sets the default
+model (`SOC_LLM_DEPLOYMENT` / `SOC_LLM_DEPLOYMENT_SMALL`), the timeout and the default answer cap. The gateway passes the
+chosen deployment to the provider (`model=`); a model the endpoint does not serve fails that call and the
+deterministic text is used, so *Check which models answer* exists to find that before choosing.
 
 ### 12.2 Controls on every call
 
 1. **Approved endpoints only.** A provider refuses an endpoint not in `SOC_LLM_APPROVED_ENDPOINTS` (fail closed).
-2. **Pinned model.** A response from a different model version is logged as a mismatch.
+2. **Pinned models.** `SOC_LLM_MODEL_VERSION` pins one version per model (comma-separated, `<name>-<version>`); a
+   response from another version of the chosen model is logged as a mismatch.
 3. **Pseudonymisation** (`llm/redaction.py`):
    - Internal e-mails, known names, phone numbers, Indian PAN and Aadhaar, and Luhn-valid card numbers become tokens
      (`<USER_1>`...), restored in the answer, including when the model drops the brackets.
@@ -1732,6 +1736,13 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 97 | Image dependencies hash-locked on Linux in the base image (`pip-compile --generate-hashes`), constrained by `platform.lock`; images and CI actions pinned by digest / commit; releases signed | Constraints by version only; tags | A version pin does not stop a changed file; a moved tag runs other code (the scan action's tag had been removed upstream) | `supply_chain.py image-lock` needs Docker; `check` keeps the locks in step |
 | 98 | Privileged platform grants need a second administrator and end within 90 days; rollback is a policy-governed action; turning the kill switch off needs a lead | Trust administrators; rollback as an immediate undo | One administrator could create a lead from a second account; one lead could release a host whose isolation needed two | Standing privileged access belongs in Entra PIM |
 | 99 | Four-eyes is two people even when an agent recommended the action: two different leads approve, the first approval is recorded and audited | Count the agent as the first pair of eyes (one lead approves) | An agent's recommendation is not a human check; the documents and the client review promise two people, and one compromised lead account could otherwise isolate hosts or reset passwords alone |
+| 100 | Block / exception watch lists are context only: a match is shown on the case, the case list and the investigation record, matched when a case is read; no severity, verdict, confidence or action depends on it | Raise severity for block-listed items; suppress or close exception-listed ones; stamp matches as evidence when the case is built | An exception list is what an insider would use to hide; a list silently moving a decision breaks "same evidence, same result". Reading at view time makes a change apply to every case at once without re-running pipelines | Raising priority for block-listed items is a deliberate rule to add and test if the client wants it |
+| 101 | Excel uploads (watch lists) and the audit trail's .xlsx export use the platform's own small OOXML reader / writer (DTDs refused, parts size-capped; inline-string cells only) | Add openpyxl | A new dependency means relocking the hash-pinned images; the files needed are simple; refusing DTDs closes XXE and entity expansion at the boundary | A workbook feature the reader does not know (formulas' cached values are read, charts ignored) is simply not read |
+| 102 | The organisation's report style is applied through a context variable (`design.STYLE`, set by `style.use_style`) around each render; its files live in the `blobs` table whatever `SOC_BLOB_STORE` is | Module-level settings swapped per report; files on the file store | Reports render concurrently (API threads, the scheduler): a swapped global would mix one report's brand into another's; the scheduler and every API replica must render with the same files | The writing guide reaches the prompt as wording rules below the grounding rules - it cannot change a figure or a citation |
+| 103 | Models are chosen per feature by name from the deployment's list; code keeps asking for a size; older tier-based policies are read as their size's default model | Keep small / large in the policy; free-text model names | Administrators think in model names, and a name that is not deployed must be impossible to pick; the size still sets timeouts and answer caps; nothing saved before needs migrating |
+| 105 | Cloud-resource ownership is an uploaded, versioned mapping in the database that fills the CMDB's gaps | Ask for a CSV on a mounted volume (the `cmdb_csv` connector); a tag-based rule engine | Wiz resources are rarely in a CMDB; a host file is not shared by replicas and needs a deployment to change; teams already keep this in a spreadsheet; cloud names need resource / subscription / cloud / type matching | Never overrides a CMDB answer; criticality feeds priority like a CMDB's |
+| 106 | Every investigation value entering a vendor query is escaped for that query language | Trust values taken from tools | A quote in a real name (`o'brien@`) broke Graph look-ups, and a crafted host or user name could rewrite an OData / FQL filter or a URL path | `odata_str`, `fql_str`, `path_part` in `connectors/tools/_common.py`; KQL already used `kql_str` |
+| 104 | Each connector was checked against the vendor's current documentation before onboarding, and a fixture answers only the request the vendor accepts | Trust fixtures that answered whatever the code sent | Fixtures had accepted calls a tenant refuses (Graph's per-user device lists with app permissions, MDE `findbyip` as query parameters, NVD with one date, RTR output read synchronously) - green tests, broken onboarding | Paths a vendor documents only inside the tenant (Delinea Privilege Manager, Secret Server's audit list) stay settings and are flagged to confirm |
 ---
 
 ## 26. Known limitations and trade-offs

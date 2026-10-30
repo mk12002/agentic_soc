@@ -44,14 +44,14 @@ async function api(path, opts = {}) {
     toast((typeof d === 'string' ? d : (d && d.message) || JSON.stringify(d)).slice(0, 300), true);
     throw new Error(t);
   }
-  return (r.headers.get('content-type') || '').includes('json') ? r.json() : r;
+  return !opts.raw && (r.headers.get('content-type') || '').includes('json') ? r.json() : r;
 }
 const post = (p, body) => api(p, {method: 'POST', body: body === undefined ? undefined : JSON.stringify(body)});
 const can = p => ((window.ME && window.ME.permissions) || []).includes(p);
 const inDomain = d => { const ds = (window.ME && window.ME.domains) || []; return ds.includes('*') || (d !== '*' && ds.includes(d)); };
 
 async function dl(path) {
-  const r = await api(path);
+  const r = await api(path, {raw: true});     // a file: never parsed, even when it is JSON or JSON Lines
   const b = await r.blob();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(b);
@@ -84,6 +84,7 @@ const I = {
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
   play: '<path d="M7 5l12 7-12 7z"/>',
   back: '<path d="M15 6l-6 6 6 6"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
 };
 const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${I[n] || ''}</svg>`;
 
@@ -198,7 +199,7 @@ const NAV = [
     ['cloud', 'Cloud posture', 'cloud', 'vulnerability']]],
   ['Insight', [['coverage', 'ATT&CK coverage', 'coverage'], ['shadow-it', 'Shadow IT', 'shadow', 'incident'],
     ['suppliers', 'Supplier risk', 'supplier', 'phishing']]],
-  ['Govern', [['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['ai-usage', 'AI usage', 'ai'], ['reports', 'Reports', 'reports'],
+  ['Govern', [['watchlists', 'Watch lists', 'list'], ['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['ai-usage', 'AI usage', 'ai'], ['reports', 'Reports', 'reports'],
     ['access', 'Access', 'access'], ['audit', 'Audit log', 'audit']]],
 ];
 const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity', search: 'Search'};

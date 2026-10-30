@@ -163,7 +163,7 @@ async function Cases(id) {
     : CASE_FILTER === 'all' ? csum.total : (csum.by_domain[CASE_FILTER] || 0);
   const rows = cs.map(c => `
     <tr class="click" data-fn="goTo" data-args="${arg('#/cases/' + c.id)}"><td>${chip(c.severity)}</td>
-      <td><div class="t-title">${esc(c.title)}</div><div class="t-sub">${esc(cap(c.domain))}</div></td>
+      <td><div class="t-title">${esc(c.title)}</div><div class="t-sub">${esc(cap(c.domain))}${wlBadges(c.watchlists)}</div></td>
       <td>${esc(cap(c.verdict || 'pending'))}</td><td class="num">${c.confidence != null ? pct(c.confidence) : '–'}</td>
       <td>${esc(cap(c.status))}</td><td class="small">${c.assignee ? esc(c.assignee) : '<span class="muted">unassigned</span>'}</td><td class="muted">${dt(c.created_at)}</td></tr>`);
   const actions = (can('investigate') && inDomain('incident') ? btn('Run incident pipeline', 'runInc', [], '', 'play') : '') +
@@ -249,6 +249,7 @@ async function CaseDetail(id) {
         ${can('investigate') && c.assignee !== ME.id.toLowerCase() ? btn('Take case', 'assignCase', [id, 'me'], 'sm') : ''}
         ${can('investigate') && c.assignee && (c.assignee === ME.id.toLowerCase() || can('approve_high_impact')) ? btn('Unassign', 'assignCase', [id, ''], 'sm ghost') : ''}</p></div>
       <div class="actions"><a class="btn primary" href="#/story/${encodeURIComponent(id)}">${icon('intel')}Attack story</a>${btn('Investigation record', 'dl', [`/api/v1/cases/${encodeURIComponent(id)}/report`], '', 'download')}</div></div>
+    ${wlCallout(v.watchlists)}
     ${un.length ? `<div class="callout"><b>Incomplete picture.</b>&nbsp;Unavailable sources: ${un.map(u => esc(u.source)).join(', ')}. Conclusions below exclude them.</div>` : ''}
     <div class="grid g-2">
       <div class="stack">
@@ -557,7 +558,7 @@ async function vmAsk() {
 
 async function Cloud() {
   const __g = GEN;
-  const r = await api('/api/v1/vm/misconfigurations'), m = r.metrics;
+  const [r, own] = await Promise.all([api('/api/v1/vm/misconfigurations'), api('/api/v1/ownership')]), m = r.metrics;
   setMainG(__g, page('Cloud posture', 'Wiz misconfigurations run through the remediation lifecycle: owner, SLA, ticket, and closure validated against Wiz.',
     can('request_action') ? btn('Route to owners', 'misRoute', [], 'primary') : '',
     `<div class="grid g-kpi">${kpi('Open', nf(m.open))}${kpi('Past SLA', nf(m.overdue), '', m.overdue > 0)}${kpi('False closures', nf(m.false_closures), 'fix claimed, Wiz still reports it', m.false_closures > 0)}
@@ -572,7 +573,54 @@ async function Cloud() {
       <td>${chip(x.severity)}</td><td class="small">${esc(x.rule)}</td><td><div class="t-title">${esc(x.resource)}</div><div class="t-sub">${esc(x.resource_type)} · ${esc(x.cloud)} ${esc(x.subscription)}</div></td>
       <td class="small">${esc(x.platform_team || 'Unknown owner')}</td><td class="nowrap">${esc(cap(x.status))}${x.reopened ? ` ${chip('reopened ' + x.reopened, 'high plain')}` : ''}</td>
       <td class="mono small nowrap" style="${x.overdue ? 'color:var(--crit)' : ''}">${day(x.sla_due)}</td>
-      <td><div class="inline">${can('investigate') ? btn('Mark fixed', 'misVerb', [x.id, 'fixed'], 'sm') + btn('Validate', 'misVerb', [x.id, 'validate'], 'sm') : ''}</div></td></tr>`), {empty: 'No misconfigurations'}), {flush: true})}</div>`));
+      <td><div class="inline">${can('investigate') ? btn('Mark fixed', 'misVerb', [x.id, 'fixed'], 'sm') + btn('Validate', 'misVerb', [x.id, 'validate'], 'sm') : ''}</div></td></tr>`), {empty: 'No misconfigurations'}), {flush: true})}</div>
+    <div class="mt">${ownershipCard(own, r.items.filter(x => !x.platform_team).length)}</div>`));
+}
+function ownershipCard(o, unowned) {
+  const manage = can('manage_ownership'), SHOW = 200;
+  const head = o.count ? `Version ${nf(o.version)} · ${nf(o.count)} row(s) from ${esc(o.filename || 'an upload')} · by ${esc(o.set_by)} on ${day(o.set_at)}${o.note ? ` - ${esc(o.note)}` : ''}`
+    : 'No mapping uploaded - owners come only from the CMDB connectors.';
+  const rows = table(['Resource / host', 'Subscription / account', 'Cloud · type', 'Team', 'Owner', 'Env · criticality'], o.rows.slice(0, SHOW).map(x => `<tr>
+      <td class="mono small" style="overflow-wrap:anywhere;max-width:240px">${esc(x.name || '-')}</td><td class="mono small" style="overflow-wrap:anywhere;max-width:200px">${esc(x.subscription || '-')}</td>
+      <td class="small">${esc([x.cloud, x.resource_type].filter(Boolean).join(' · ') || 'any')}</td><td class="small strong">${esc(x.team)}</td>
+      <td class="small">${esc(x.owner || '')}</td><td class="small">${esc([x.environment, x.criticality].filter(Boolean).join(' · '))}</td></tr>`), {empty: 'No rows.'})
+    + (o.count > SHOW ? `<div class="t-sub" style="padding:8px 16px">The first ${nf(SHOW)} of ${nf(o.count)} are shown - export the mapping for all of them.</div>` : '');
+  const form = manage ? `<div class="stack" style="gap:10px;padding:12px 16px">
+      <input type="file" id="own-file" class="input" style="padding:5px" aria-label="Excel or CSV ownership file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
+      <input class="input" id="own-note" maxlength="500" aria-label="Why" placeholder="Why (kept in the audit log)">
+      <div class="inline" style="gap:8px">${btn('Preview', 'ownUpload', [true], '')}${btn('Upload and apply', 'ownUpload', [false], 'primary')}${o.count ? btn('Clear the mapping', 'ownClear', [], 'ghost') : ''}</div>
+      <div class="t-sub">Excel (.xlsx - every sheet) or CSV, up to ${nf(o.max_rows)} rows; an upload replaces the mapping (the history is kept). A header row names the columns:
+        <b>Resource</b> / <b>Hostname</b> (wildcards <span class="mono">*</span> <span class="mono">?</span> allowed) and/or <b>Subscription</b> / <b>Account</b> / <b>Project</b>, the <b>Team</b> (required),
+        and optionally <b>Owner</b>, <b>Environment</b>, <b>Criticality</b> (critical, high, medium, low), <b>Cloud</b> and <b>Resource type</b> to narrow a row.
+        An exact name beats a pattern, a pattern beats a subscription. It fills the gaps the CMDB leaves and never overrides it.</div>
+      <div id="own-out"></div></div>` : '';
+  return card(`Ownership mapping <span class="muted">(${nf(o.count)})</span>`,
+    `<div class="small muted" style="padding:12px 16px 4px">${head}${unowned ? ` · <b>${nf(unowned)}</b> open misconfiguration(s) have no owner` : ''}</div>${form}${rows}`,
+    {flush: true, sub: 'which team owns which cloud resources and hosts - for what the CMDB does not hold (Wiz resources)',
+     right: btn('Export CSV', 'dl', ['/api/v1/ownership/export'], 'sm', 'download')});
+}
+async function ownUpload(dry) {
+  const f = ($('#own-file') || {}).files?.[0];
+  if (!f) { toast('Choose an Excel or CSV file first', true); return; }
+  if (f.size > 5e6) { toast('The file is larger than 5 MB - split it', true); return; }
+  if (!dry && !confirm(`Replace the ownership mapping with ${f.name}? The previous version stays in the history.`)) return;
+  const bytes = new Uint8Array(await f.arrayBuffer()); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const r = await post('/api/v1/ownership/upload', {content_b64: btoa(bin), filename: f.name, note: $('#own-note').value.trim(), dry_run: !!dry});
+  const c = r.coverage || {};
+  const html = `<div class="callout ${r.problem_count ? '' : 'info'}"><div><b>${dry ? 'Preview - nothing has changed yet' : 'Uploaded and applied'}.</b>
+      ${nf(r.rows)} row(s) for ${nf(Object.keys(r.by_team).length)} team(s): ${nf(r.added)} new, ${nf(r.removed)} no longer in the file.
+      ${c.misconfigurations_without_owner != null ? `It gives an owner to ${nf(c.misconfigurations_covered)} of ${nf(c.misconfigurations_without_owner)} unowned misconfiguration(s) and ${nf(c.findings_covered)} of ${nf(c.findings_without_owner)} unowned finding(s).` : ''}
+      ${(c.still_without_owner || []).length ? `<div class="small mt">Still without an owner: <span class="mono">${c.still_without_owner.map(esc).join(', ')}</span></div>` : ''}
+      ${r.problem_count ? `<div class="small strong mt">${nf(r.problem_count)} row(s) cannot be used:</div><ul class="small" style="margin:4px 0;padding-left:18px">${r.problems.slice(0, 50).map(p => `<li>${esc(p.where || '')}: <span class="mono">${esc(p.value)}</span> - ${esc(p.problem)}</li>`).join('')}</ul>` : ''}</div></div>`;
+  if (!dry) { toast('Ownership mapping updated - owners re-applied'); await Cloud(); }
+  const out = $('#own-out'); if (out) out.innerHTML = html;
+}
+async function ownClear() {
+  const why = prompt('Clear the ownership mapping? Owners then come only from the CMDB. Why?');
+  if (why === null) return;
+  await post('/api/v1/ownership/clear', {reason: why});
+  toast('Ownership mapping cleared'); Cloud();
 }
 async function misRoute() { const r = await post('/api/v1/vm/misconfigurations/route'); toast(Object.keys(r.routed).length ? `Routed to ${Object.keys(r.routed).join(', ')} - tickets await approval` : 'Nothing new to route'); Cloud(); }
 async function misVerb(id, verb) { const r = await post(`/api/v1/vm/misconfigurations/${id}/${verb}`); toast(r.result ? `Validation: ${cap(r.result)}${r.false_closure ? ' (false closure - reopened)' : ''}` : `Marked ${cap(r.status)}`); Cloud(); }
@@ -811,14 +859,14 @@ async function AiUsage() {
   const wf = f => { const r = (P.workflows || {})[f.workflow] || {};
     return `<tr><td><div class="t-title mono small">${esc(f.workflow)}</div><div class="t-sub">${esc(f.description)} · ${esc(f.triggered_by === 'person' ? 'asked by a person' : 'scheduled')}</div></td>
       <td class="num small">${nf(f.calls)}${f.refused ? `<div class="t-sub">${nf(f.refused)} refused by limits</div>` : ''}${f.failed ? `<div class="t-sub" style="color:var(--high)">${nf(f.failed)} not answered (endpoint down / slow)</div>` : ''}</td><td class="num small">${tok(f.mean_in)} / ${tok(f.mean_out)}</td>
-      <td class="num small">${usd(f.cost)}<div class="t-sub">${usd(f.cost_on_other_tier)} on ${esc(f.other_tier)}</div></td>
+      <td class="num small">${usd(f.cost)}${f.alternative ? `<div class="t-sub">${usd(f.cost_on_alternative)} on ${esc(f.alternative)}</div>` : ''}</td>
       <td class="num small">${f.usable_rate == null ? '–' : pct(f.usable_rate)}${f.claims_dropped_rate == null ? '' : `<div class="t-sub">${pct(f.claims_dropped_rate)} statements dropped</div>`}</td>
       <td class="num small">${f.p95_ms == null ? '–' : (f.p95_ms / 1000).toFixed(1) + ' s'}</td>
       <td>${status(ADV_K[f.advice] || 'info', cap(f.advice))}<div class="t-sub">${esc(f.why)}</div></td>
-      <td>${edit ? `<select id="wt-${esc(f.workflow)}" aria-label="Tier for ${esc(f.workflow)}" data-orig="${esc(r.tier || '')}"><option value="">${esc(f.code_default_tier)} (default)</option>${pol.tiers.map(t => `<option value="${t}"${r.tier === t ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <td>${edit ? `<select id="wt-${esc(f.workflow)}" aria-label="Model for ${esc(f.workflow)}"><option value="">${esc(f.default_model)} (default)</option>${pol.models.map(m => `<option value="${esc(m.name)}"${r.model === m.name ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
         <input class="input" style="width:90px;margin-top:4px" id="wm-${esc(f.workflow)}" aria-label="Output cap for ${esc(f.workflow)}" placeholder="cap ${esc(P.max_output_tokens[f.tier] || '')}" value="${esc(r.max_output_tokens || '')}">
         <label class="inline small" style="margin-top:4px"><input type="checkbox" id="we-${esc(f.workflow)}"${r.enabled === false ? '' : ' checked'}> on</label>`
-        : `<span class="tag">${esc(f.tier)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}`}</td></tr>`; };
+        : `<span class="tag" style="white-space:nowrap">${esc(f.model)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}`}</td></tr>`; };
   const lim = (id, v, ph, label) => `<input class="input" style="width:100%;max-width:130px" id="${id}" aria-label="${esc(label || id)}" value="${v == null ? '' : esc(v)}" placeholder="${esc(ph || '')}"${edit ? '' : ' readonly'}>`;
   const roleRows = pol.roles.map(r => { const v = (P.roles || {})[r] || {}; return `<tr><td class="small">${esc(cap(r))}</td><td>${lim('rh-' + r, v.hourly_tokens, 'everyone', cap(r) + ' per hour')}</td><td>${lim('rd-' + r, v.daily_tokens, 'everyone', cap(r) + ' per day')}</td></tr>`; });
   const row2 = (label, a, b) => `<tr><td class="small">${label}</td><td>${a}</td><td>${b || ''}</td></tr>`;
@@ -829,20 +877,26 @@ async function AiUsage() {
       ${card('Today', bar(b.today_used, b.daily_tokens), {sub: 'resets at midnight UTC'})}
       ${kpi('Cost, last 30 days', usd(u.cost_total), 'at the prices set below')}
     </div>
-    <div class="mt">${card('By feature - which model each uses, and whether it should', table(['Feature', {h: 'Calls', num: 1}, {h: 'Tokens in / out', num: 1}, {h: 'Cost', num: 1}, {h: 'Usable', num: 1}, {h: 'p95', num: 1}, 'Advice', 'Tier · cap · on'], u.features.map(wf)),
+    <div class="mt">${card('By feature - which model each uses, and whether it should', table(['Feature', {h: 'Calls', num: 1}, {h: 'Tokens in / out', num: 1}, {h: 'Cost', num: 1}, {h: 'Usable', num: 1}, {h: 'p95', num: 1}, 'Advice', 'Model · cap · on'], u.features.map(wf)),
       {flush: true, sub: 'advice is computed from these figures: usable answers, statements the evidence check removed, answer length'})}</div>
     <div class="grid g-2e mt">
       ${card('Budgets', table(['', 'Value', ''], [
           row2('Monthly tokens', lim('lp-month', P.monthly_tokens, '', 'Monthly tokens')),
           row2('Daily tokens', lim('lp-day', P.daily_tokens, '', 'Daily tokens')),
           row2('Warn at (fraction of the month)', lim('lp-alert', P.alert_at, '', 'Warn at')),
-          row2('Longest answer: small / large tier', lim('lp-cs', P.max_output_tokens.small, '', 'Small tier longest answer'), lim('lp-cl', P.max_output_tokens.large, '', 'Large tier longest answer')),
-          row2('Small tier $ per million: in / out', lim('lp-psi', P.prices.small.input, '', 'Small tier input price'), lim('lp-pso', P.prices.small.output, '', 'Small tier output price')),
-          row2('Large tier $ per million: in / out', lim('lp-pli', P.prices.large.input, '', 'Large tier input price'), lim('lp-plo', P.prices.large.output, '', 'Large tier output price'))]), {flush: true, sub: 'tokens; 0 = no cap'})}
+          row2('Longest answer: smaller / larger models', lim('lp-cs', P.max_output_tokens.small, '', 'Longest answer, smaller models'), lim('lp-cl', P.max_output_tokens.large, '', 'Longest answer, larger models'))]), {flush: true, sub: 'tokens; 0 = no cap'})}
       ${card('Limits per person', `<div class="small muted" style="margin-bottom:6px">Questions, deep analysis and reports a person asks for. Scheduled work counts only against the budgets. 0 = no model text for them.</div>
         ${table(['Who', 'Per hour', 'Per day'], [row2('<b>Everyone</b>', lim('lu-h', P.user_default.hourly_tokens, '', 'Everyone per hour'), lim('lu-d', P.user_default.daily_tokens, '', 'Everyone per day')), ...roleRows], {flush: true})}
         <label class="small" style="display:block;margin-top:10px" for="lusers">Per person (overrides the role), one per line: <span class="mono">name@company.com | per hour | per day</span></label>
         <textarea id="lusers" rows="4" class="mono" style="width:100%"${edit ? '' : ' readonly'}>${esc(userOver)}</textarea>`, {sub: 'tokens; a role overrides everyone'})}
+    </div>
+    <div class="mt">
+      ${card('Models', `<div class="small muted" style="margin-bottom:6px">The models a feature can use - the ones deployed on your endpoint (<span class="mono">SOC_LLM_MODELS</span> adds more). Prices are USD per million tokens and only drive the cost figures.</div>
+        ${table(['Model', 'Size', {h: '$ in / M', num: 1}, {h: '$ out / M', num: 1}, 'Answers?'], pol.models.map((m, i) => { const pr = P.prices[m.name] || {input: 0, output: 0};
+          return `<tr><td class="mono small">${esc(m.name)}${m.deployment !== m.name ? `<div class="t-sub">deployment ${esc(m.deployment)}</div>` : ''}${Object.values(pol.default_models).includes(m.name) ? `<div class="t-sub">default for ${esc(Object.entries(pol.default_models).filter(([, v]) => v === m.name).map(([k]) => k === 'small' ? 'routine narrative' : 'summaries and reports').join(', '))}</div>` : ''}</td>
+            <td class="small">${esc(m.size === 'small' ? 'smaller' : 'larger')}</td><td class="num">${lim('mpi-' + i, pr.input, '', m.name + ' input price')}</td><td class="num">${lim('mpo-' + i, pr.output, '', m.name + ' output price')}</td>
+            <td class="small" id="mchk-${i}">–</td></tr>`; }), {flush: true})}
+        ${edit ? `<div class="mt">${btn('Check which models answer', 'checkModels', [], 'sm')}</div>` : ''}`, {sub: 'a feature set to a model your endpoint does not serve falls back to the platform\'s own text'})}
     </div>
     ${edit ? `<div class="form-row mt"><input class="input" id="lp-note" aria-label="Why" placeholder="Why (kept in the history and the audit log)">${btn('Save limits and model choices', 'saveLlmPolicy', [], 'primary')}</div><div id="lpout"></div>` : `<div class="small muted mt">Only an administrator changes these.</div>`}
     <div class="grid g-2e mt">
@@ -855,21 +909,28 @@ async function AiUsage() {
 async function loadCalls() {
   const q = new URLSearchParams({limit: '50'}); if ($('#lc-wf').value) q.set('workflow', $('#lc-wf').value); if ($('#lc-st').value) q.set('status', $('#lc-st').value);
   const xs = await api('/api/v1/admin/llm/calls?' + q.toString());
-  $('#lcalls').innerHTML = table(['When', 'Feature', 'Outcome', {h: 'Tokens', num: 1}, ''], xs.map(c => `<tr><td class="mono small">${dt(c.ts)}</td><td class="mono small">${esc(c.workflow)}<div class="t-sub">${esc(c.actor || 'scheduled')} · ${esc(c.tier || '')}</div></td>
+  $('#lcalls').innerHTML = table(['When', 'Feature', 'Outcome', {h: 'Tokens', num: 1}, ''], xs.map(c => `<tr><td class="mono small">${dt(c.ts)}</td><td class="mono small">${esc(c.workflow)}<div class="t-sub">${esc(c.actor || 'scheduled')} · ${esc(c.requested_model || c.tier || '')}</div></td>
     <td>${status(c.status === 'ok' ? 'ok' : 'medium', c.status)}${c.claims_dropped ? `<div class="t-sub">${nf(c.claims_dropped)} removed</div>` : ''}</td><td class="num small">${nf((c.prompt_tokens || 0) + (c.completion_tokens || 0))}</td>
     <td>${c.trace_id ? `<a href="#/trace/${encodeURIComponent(c.trace_id)}">Trace</a>` : ''}</td></tr>`), {flush: true, empty: 'No model calls match'});
+}
+async function checkModels() {
+  const r = await post('/api/v1/admin/llm/models/check', {});
+  window.__llmpol.models.forEach((m, i) => { const x = r.results.find(y => y.model === m.name), el = $('#mchk-' + i); if (!el || !x) return;
+    el.innerHTML = x.ok ? `${status('ok', 'Yes')}<div class="t-sub">${nf(x.latency_ms)} ms${x.answered_by ? ' · ' + esc(x.answered_by) : ''}</div>` : `${status('high', 'No')}<div class="t-sub" style="white-space:normal">${esc(x.detail || '')}</div>`; });
+  toast(`${r.results.filter(x => x.ok).length} of ${r.results.length} models answered`);
 }
 async function saveLlmPolicy() {
   const pol = window.__llmpol, P = JSON.parse(JSON.stringify(pol.policy));
   const num = (id, fl) => { const v = ($('#' + id).value || '').trim(); if (v === '') return null; const n = fl ? parseFloat(v) : parseInt(v, 10); return Number.isNaN(n) ? v : n; };
   P.monthly_tokens = num('lp-month') ?? 0; P.daily_tokens = num('lp-day') ?? 0; P.alert_at = num('lp-alert', true) ?? 0.8;
   P.max_output_tokens = {small: num('lp-cs'), large: num('lp-cl')};
-  P.prices = {small: {input: num('lp-psi', true), output: num('lp-pso', true)}, large: {input: num('lp-pli', true), output: num('lp-plo', true)}};
+  P.prices = {}; pol.models.forEach((m, i) => { P.prices[m.name] = {input: num('mpi-' + i, true) ?? 0, output: num('mpo-' + i, true) ?? 0}; });
+  delete P.models; delete P.default_models;
   P.user_default = {hourly_tokens: num('lu-h') ?? 0, daily_tokens: num('lu-d') ?? 0};
   P.roles = {}; pol.roles.forEach(r => { const h = num('rh-' + r), d = num('rd-' + r); if (h != null || d != null) P.roles[r] = {...(h != null ? {hourly_tokens: h} : {}), ...(d != null ? {daily_tokens: d} : {})}; });
   P.users = {}; ($('#lusers').value || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(l => { const [who, h, d] = l.split('|').map(x => (x || '').trim()); const o = {}; if (h !== '') o.hourly_tokens = parseInt(h, 10); if (d !== '' && d !== undefined) o.daily_tokens = parseInt(d, 10); P.users[who] = o; });
   P.workflows = {}; Object.keys(pol.workflows).forEach(w => { const t = $(`[id="wt-${w}"]`), m = $(`[id="wm-${w}"]`), e = $(`[id="we-${w}"]`); if (!t) return; const r = {};
-    if (t.value) r.tier = t.value; if ((m.value || '').trim()) r.max_output_tokens = parseInt(m.value, 10); if (!e.checked) r.enabled = false; if (Object.keys(r).length) P.workflows[w] = r; });
+    if (t.value) r.model = t.value; if ((m.value || '').trim()) r.max_output_tokens = parseInt(m.value, 10); if (!e.checked) r.enabled = false; if (Object.keys(r).length) P.workflows[w] = r; });
   try { await post('/api/v1/admin/llm/policy', {policy: P, note: $('#lp-note').value.trim()}); toast('AI usage policy saved - in force for the next model call'); AiUsage(); }
   catch (e) { let d; try { d = JSON.parse(e.message).detail; } catch (x) { d = null; } if (d) $('#lpout').innerHTML = `<div class="callout danger mt"><div class="small">${esc(d)}</div></div>`; }
 }
@@ -896,7 +957,7 @@ async function approvePolicy(id) { await post(`/api/v1/policy/proposals/${id}/ap
 // ================================================================= Reports
 async function Reports() {
   const __g = GEN;
-  const [tp, llmSt, cases] = await Promise.all([api('/api/v1/reports/templates'), api('/api/v1/llm/status'), api('/api/v1/cases')]);
+  const [tp, llmSt, cases, rs] = await Promise.all([api('/api/v1/reports/templates'), api('/api/v1/llm/status'), api('/api/v1/cases'), api('/api/v1/reports/style')]);
   window.__rcases = cases.filter(c => c.status !== 'closed' && ['critical', 'high'].includes(c.severity));
   const kinds = [['daily_exposure', 'Daily exposure report', 'Word · VM-F13', 'vulnerability'], ['weekly_vm', 'Weekly vulnerability report', 'Word · VM-F13', 'vulnerability'],
     ['weekly_mgmt', 'Management deck', 'PowerPoint · all domains', '*']];
@@ -914,8 +975,61 @@ async function Reports() {
     ${tp.templates.some(t => !t.standard) ? `<h2 class="section-h">Saved reports</h2><div class="grid g-3">${tp.templates.filter(t => !t.standard).map(tcard).join('')}</div>` : ''}
     <h2 class="section-h">Exports</h2><div class="grid g-3">${kinds.filter(([, , , d]) => d === '*' ? window.ME.domains.includes('*') : inDomain(d)).map(([k, t, s]) => card(t, `<p class="small muted" style="margin-top:0">${esc(s)}</p>${btn('Generate', 'report', [k], '', 'download')}`)).join('')}
       ${can('export_evidence') ? card('Compliance evidence pack', `<p class="small muted" style="margin-top:0">Control tests, evidence JSON, chained audit export and summary (ZIP) · U17</p>${btn('Generate pack', 'compliancePack', [], '', 'download')}<div id="comp"></div>`) : ''}
-      ${can('export_evidence') ? card('Audit export', `<p class="small muted" style="margin-top:0">Full hash-chained audit log as JSON Lines with verification, for archiving or SIEM.</p>${btn('Export', 'dl', ['/api/v1/audit/export'], '', 'download')}`) : ''}
-    </div>`));
+      ${can('export_evidence') ? card('Audit export', `<p class="small muted" style="margin-top:0">Full hash-chained audit log as JSON Lines with verification, for archiving or SIEM. More formats and filters on the Audit log screen.</p>${btn('Export', 'dl', ['/api/v1/audit/export'], '', 'download')}`) : ''}
+    </div>
+    <h2 class="section-h">Report style</h2>${styleCard(rs)}`));
+}
+function styleCard(rs) {
+  const S = rs.style, F = S.files || {}, manage = can('manage_report_style');
+  const sw = c => `<span style="display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;background:#${esc(c)};border:1px solid var(--border)"></span>`;
+  const part = (slot, label) => { const f = F[slot]; return `<div class="list-row"><div class="grow"><div class="t-title">${esc(label)}</div>
+      <div class="t-sub">${f ? `${esc(f.name)} · ${esc(f.detail)} · ${esc(f.by)} ${dt(f.at)}` : 'house style'}</div></div>${manage && f ? btn('Remove', 'styleRemove', [slot], 'sm ghost') : ''}</div>`; };
+  const field = (id, label, v, ph, extra = '') => `<label class="small" for="${id}">${label}</label><input class="input" id="${id}" value="${esc(v || '')}" placeholder="${esc(ph || '')}"${manage ? '' : ' readonly'}${extra}>`;
+  return `<div class="stack">
+    ${card('What every report looks like', `<p class="small muted" style="margin-top:0">Applied to every Word report and PowerPoint deck - standard, described and scheduled - and the audit trail report. Figures and citations never change; only the look and, for model-written text, the wording.</p>
+      ${part('word', 'Word template')}${part('deck', 'PowerPoint template (16:9)')}${part('logo', 'Logo')}
+      <div class="list-row"><div class="grow"><div class="t-title">Writing guide</div><div class="t-sub">${S.guide ? `${nf(S.guide.length)} characters - used when the model writes report narrative` : 'none - the model writes in plain report English'}</div></div>${manage && S.guide ? btn('Remove', 'styleRemove', ['guide'], 'sm ghost') : ''}</div>
+      <div class="list-row"><div class="grow"><div class="t-title">Brand</div><div class="t-sub">${esc(S.organisation || 'Agentic SOC')} · ${sw(S.primary)} ${sw(S.accent)} · ${esc(S.font)} · ${esc(S.classification)}</div></div></div>
+      <div class="inline mt" style="gap:8px;flex-wrap:wrap">${btn('Preview in Word', 'dl', ['/api/v1/reports/style/preview?format=docx'], '', 'download')}${btn('Preview as slides', 'dl', ['/api/v1/reports/style/preview?format=pptx'], '', 'download')}${manage && rs.custom ? btn('Back to the house style', 'styleReset', [], 'ghost') : ''}</div>`,
+      {sub: rs.version ? `version ${esc(rs.version)}` : 'house style'})}
+    ${manage ? card('Customise', `<div class="stack" style="gap:10px">
+      <label class="small" for="st-file"><b>Upload</b> a Word template (.docx / .dotx), a PowerPoint template (.pptx / .potx), a logo (.png / .jpg), a writing guide or skill (.md / .txt), brand settings (brand.json / .yaml) - or a <b>.zip style pack</b> with any of them.</label>
+      <input type="file" id="st-file" class="input" style="padding:5px" accept=".docx,.dotx,.pptx,.potx,.png,.jpg,.jpeg,.md,.markdown,.txt,.json,.yaml,.yml,.zip">
+      <div class="inline" style="gap:8px">${btn('Upload', 'styleUpload', [], 'primary')}<span class="small muted">Checked before use: macros, document-type declarations and oversized files are refused; a deck template must be 16:9.</span></div>
+      <div id="st-out"></div>
+      <div class="grid g-2" style="gap:10px">
+        <div class="stack" style="gap:4px">${field('st-org', 'Organisation name (header and footer)', S.organisation, 'Agentic SOC', ' maxlength="80"')}</div>
+        <div class="stack" style="gap:4px">${field('st-cls', 'Classification line', S.classification, '', ' maxlength="80"')}</div>
+        <div class="stack" style="gap:4px">${field('st-pri', 'Primary colour (hex)', S.primary, '1F2A44', ' maxlength="7"')}</div>
+        <div class="stack" style="gap:4px">${field('st-acc', 'Accent colour (hex)', S.accent, '2563EB', ' maxlength="7"')}</div>
+        <div class="stack" style="gap:4px">${field('st-font', 'Font', S.font, 'Calibri', ' maxlength="40"')}</div>
+        <div class="stack" style="gap:4px">${field('st-foot', 'Footer text', S.footer, 'The house footer', ' maxlength="160"')}</div>
+      </div>
+      <label class="small" for="st-guide">Writing guide - tone, terms and wording for model-written narrative (it cannot change a fact, a figure or a citation)</label>
+      <textarea id="st-guide" rows="5" maxlength="8000" placeholder="e.g. Write for executives. British English. Say 'incident', never 'breach', unless confirmed. Lead with the business impact.">${esc(S.guide || '')}</textarea>
+      <div class="form-row"><input class="input" id="st-note" maxlength="500" aria-label="Why" placeholder="Why (kept in the history and the audit log)">${btn('Save', 'styleSave', [], 'primary')}</div></div>`, {sub: 'leads and administrators · every change is versioned and audited'}) : ''}
+  </div>`;
+}
+async function styleUpload() {
+  const f = $('#st-file').files[0]; if (!f) { toast('Choose a file first', true); return; }
+  if (f.size > 15e6) { toast('The file is larger than 15 MB', true); return; }
+  const bytes = new Uint8Array(await f.arrayBuffer()); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const r = await post('/api/v1/reports/style/upload', {content_b64: btoa(bin), filename: f.name, note: $('#st-note').value.trim()});
+  toast('Report style updated');
+  await Reports();
+  const out = $('#st-out'); if (out) out.innerHTML = `<div class="callout info"><div class="small">Applied: ${r.applied.map(a => `<b>${esc(a.slot)}</b> from ${esc(a.file)} (${esc(a.detail)})`).join('; ')}. Use <i>Preview</i> to see it.</div></div>`;
+}
+async function styleSave() {
+  const v = id => $('#' + id).value.trim();
+  await post('/api/v1/reports/style', {organisation: v('st-org'), classification: v('st-cls'), primary: v('st-pri'), accent: v('st-acc'),
+    font: v('st-font'), footer: v('st-foot'), guide: $('#st-guide').value, note: v('st-note')});
+  toast('Report style saved'); Reports();
+}
+async function styleRemove(slot) { await post('/api/v1/reports/style/remove', {slot}); toast('Removed - the house style applies to that part'); Reports(); }
+async function styleReset() {
+  if (!confirm('Go back to the house style? Templates, logo, brand and writing guide stop applying (the history keeps them).')) return;
+  await post('/api/v1/reports/style/reset', {}); toast('Back to the house style'); Reports();
 }
 function caseSelect(id) {
   const cs = window.__rcases || [];
@@ -1002,12 +1116,99 @@ async function newKey() {
 // ================================================================= Audit
 async function Audit() {
   const __g = GEN;
-  const [v, xs] = await Promise.all([api('/api/v1/audit/verify'), api('/api/v1/audit?limit=300')]);
+  const all = window.ME.domains.includes('*');
+  const [v, xs, info] = await Promise.all([api('/api/v1/audit/verify'), api('/api/v1/audit?limit=300'), api('/api/v1/audit/info')]);
+  const lv = info.last_full_verification;
+  const every = s => s % 3600 ? `${Math.round(s / 60)} minutes` : s === 3600 ? 'hour' : `${s / 3600} hours`;
+  const about = card('About this audit log', `<dl class="kv">
+      <dt>Records</dt><dd>${nf(info.records)}${info.first_ts ? ` · ${dt(info.first_ts)} to ${dt(info.last_ts)} UTC` : ''}</dd>
+      <dt>Recorded by</dt><dd>${Object.entries(info.by_actor_type).map(([k, n]) => `${esc(cap(k))} ${nf(n)}`).join(' · ') || '–'}</dd>
+      <dt>Last full check</dt><dd>${lv ? (lv.ok ? `Verified up to #${esc(lv.seq)} at ${dt(lv.at)} UTC` : `<b>Broken</b> at #${esc(lv.first_bad_seq)}`) : 'not run yet'}${info.self_check_seconds ? ` · runs every ${every(info.self_check_seconds)} with the self-check; the health check verifies newer records` : ''}</dd>
+      <dt>Retention</dt><dd>${esc(cap(info.retention.audit))}.</dd>
+      <dt>Who can see it</dt><dd>Read: ${info.access.read.map(r => esc(cap(r))).join(', ')} · export: ${info.access.export.map(r => esc(cap(r))).join(', ')}<div class="t-sub">${esc(cap(info.access.scope))}.</div></dd>
+    </dl>
+    <h3 class="small strong" style="margin:14px 0 6px">What it records</h3>${info.by_category.map(c => `<span class="tag">${esc(c.category)} ${nf(c.records)}</span>`).join(' ') || empty('Nothing yet')}
+    <h3 class="small strong" style="margin:14px 0 6px">How it is protected</h3><ul class="small" style="margin:0;padding-left:18px">${info.protection.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+    <h3 class="small strong" style="margin:14px 0 6px">How long other data is kept</h3>
+    ${table(['Data', {h: 'Kept (days)', num: 1}, 'Note'], info.retention.other.map(r => `<tr><td class="small" style="white-space:normal">${esc(r.data)}</td><td class="num">${r.days == null ? 'always' : nf(r.days)}</td><td class="small muted" style="white-space:normal">${esc(r.note)}</td></tr>`))}
+    <div class="t-sub">The retention job runs every ${every(info.retention.job_seconds || 86400)}; every run is recorded in this log.</div>`, {sub: 'read from the log and the settings in force'});
+  const exp = can('export_evidence') && all ? card('Export the audit trail', `<div class="stack" style="gap:10px">
+      <label class="small" for="ax-f">Format</label><select id="ax-f">${info.formats.map(f => `<option value="${esc(f.format)}">${esc(f.label)}</option>`).join('')}</select>
+      <div class="inline" style="gap:10px;flex-wrap:wrap"><label class="small">From (UTC) <input type="date" class="input" id="ax-from"></label><label class="small">To, inclusive <input type="date" class="input" id="ax-to"></label></div>
+      <input class="input" id="ax-ev" maxlength="64" aria-label="Event type" placeholder="Event type (optional), e.g. action.approved or case.*">
+      <input class="input" id="ax-actor" maxlength="256" aria-label="Actor" placeholder="Actor (optional), e.g. lena@acme-demo.com">
+      <div>${btn('Download', 'auditExport', [], 'primary', 'download')}</div>
+      <div class="t-sub">Leave the filters empty for the whole log. Every format but Word carries each record's hash, so an unfiltered export can be re-verified outside the platform; Word is a readable report with the first ${nf(info.docx_max_rows)} records. Each export is itself recorded here.</div></div>`)
+    : card('Export the audit trail', empty(all ? 'Exports need the export_evidence permission (lead, administrator or auditor).' : 'Exports need all-domain access: the whole chain is needed to verify it.'));
   setMainG(__g, page('Audit log', 'Append-only and hash-chained: every retrieval, inference, recommendation, approval and action, attributed to an agent or a person.',
-    v.ok ? `<span class="status-pill"><span class="dot"></span>Chain verified · ${nf(v.records)} records in the full log${window.ME.domains.includes('*') ? '' : ' (you see those about your domains)'}</span>` : `<span class="status-pill halt"><span class="dot"></span>Chain broken at #${esc(v.first_bad_seq)}</span>`,
-    card(null, table([{h: '#', num: 1}, 'Time', 'Actor', 'Event', 'Subject', 'Trace'], xs.map(x => `<tr><td class="num mono small muted">${x.seq}</td><td class="mono small">${dt(x.ts)}</td>
+    v.ok ? `<span class="status-pill"><span class="dot"></span>Chain verified · ${nf(v.records)} records in the full log${all ? '' : ' (you see those about your domains)'}</span>` : `<span class="status-pill halt"><span class="dot"></span>Chain broken at #${esc(v.first_bad_seq)}</span>`,
+    `<div class="grid g-2 mb">${about}${exp}</div>` + card('Latest records',table([{h: '#', num: 1}, 'Time', 'Actor', 'Event', 'Subject', 'Trace'], xs.map(x => `<tr><td class="num mono small muted">${x.seq}</td><td class="mono small">${dt(x.ts)}</td>
       <td class="small">${esc(x.actor_type)} · ${esc(x.actor_id)}</td><td class="mono small">${esc(x.event_type)}</td><td class="small muted">${esc(x.subject_type)} ${esc(x.subject_id)}</td>
-      <td class="mono small">${x.trace_id && window.ME.domains.includes('*') ? `<a href="#/trace/${encodeURIComponent(x.trace_id)}" title="Everything this request or job did">${esc(x.trace_id.slice(0, 14))}…</a>` : ''}</td></tr>`)), {flush: true, sub: 'a trace links every record one request or job run caused'})));
+      <td class="mono small">${x.trace_id && window.ME.domains.includes('*') ? `<a href="#/trace/${encodeURIComponent(x.trace_id)}" title="Everything this request or job did">${esc(x.trace_id.slice(0, 14))}…</a>` : ''}</td></tr>`)), {flush: true, sub: 'the newest 300 · a trace links every record one request or job run caused'})));
+}
+function auditExport() {
+  const q = new URLSearchParams({format: $('#ax-f').value});
+  [['start', '#ax-from'], ['end', '#ax-to'], ['event_type', '#ax-ev'], ['actor_id', '#ax-actor']].forEach(([k, s]) => { const x = $(s).value.trim(); if (x) q.set(k, x); });
+  return dl('/api/v1/audit/export?' + q);
+}
+
+// ================================================================= Watch lists
+const WL = {block: 'Block list', exception: 'Exception list'};
+const wlBadges = ls => (ls || []).map(l => ` <span class="chip ${l === 'block' ? 'critical' : 'ok'}" style="margin-left:4px">${esc(WL[l] || l)}</span>`).join('');
+function wlCallout(ms) {
+  if (!(ms || []).length) return '';
+  return ['block', 'exception'].map(k => [k, ms.filter(m => m.list === k)]).filter(([, xs]) => xs.length).map(([k, xs]) =>
+    `<div class="callout ${k === 'block' ? 'danger' : 'info'}" style="margin-bottom:12px"><div><b>${k === 'block' ? 'On the block list' : 'On the exception list'}</b> - this case involves ${xs.length === 1 ? 'an entry' : `${xs.length} entries`} on the organisation's ${esc(WL[k].toLowerCase())}:
+      <ul class="small" style="margin:6px 0 4px;padding-left:18px">${xs.map(m => `<li><b>${m.kind === 'asset' || m.kind === 'identity' ? entLink(m.entity_id, m.name) : esc(m.name)}</b> (${esc(m.role)}) · matched on ${esc(m.matched_on)} · entry <span class="mono">${esc(m.entry.written || m.entry.value)}</span> (${esc(m.entry.kind_label)})${m.entry.note ? ` - “${esc(m.entry.note)}”` : ''} · added by ${esc(m.entry.added_by)} on ${day(m.entry.added_at)}</li>`).join('')}</ul>
+      <div class="t-sub">Context only: it does not change the severity, verdict or recommended actions.${k === 'exception' ? ' An exception does not clear the case - judge it on the evidence.' : ''}</div></div></div>`).join('');
+}
+async function Watchlists() {
+  const __g = GEN;
+  const r = await api('/api/v1/watchlists');
+  const manage = can('manage_watchlists'), SHOW = 300;
+  const what = {block: 'Users, hosts, addresses and indicators the SOC wants called out wherever they appear - a case involving one says so in red.',
+    exception: 'Known exceptions - test accounts, scanners, approved tools. A case involving one says so, so the analyst knows; it is still investigated in full.'};
+  const listCard = l => card(`${esc(l.label)} <span class="muted">(${nf(l.count)})</span>`,
+    `<div class="small muted" style="padding:12px 16px 4px">${esc(what[l.name])}${Object.keys(l.by_kind).length ? ` · ${Object.entries(l.by_kind).map(([k, n]) => `${nf(n)} ${esc(r.kinds[k] || k)}`).join(', ')}` : ''}</div>` +
+    table(['Value', 'Type', 'Note', 'From', 'Added', ''], l.entries.slice(0, SHOW).map(e => `<tr><td class="mono small" style="overflow-wrap:anywhere;max-width:280px">${esc(e.value)}</td><td class="small">${esc(e.kind_label)}</td>
+      <td class="small" style="white-space:normal">${esc(e.note)}</td><td class="small muted" style="white-space:normal">${esc(e.source)}</td><td class="small muted">${esc(e.added_by)}<br>${day(e.added_at)}</td>
+      <td>${manage ? btn('Remove', 'wlRemove', [e.id, e.value], 'sm ghost') : ''}</td></tr>`), {empty: 'Nothing on this list yet.'}) +
+    (l.count > SHOW ? `<div class="t-sub" style="padding:8px 16px">The first ${nf(SHOW)} of ${nf(l.count)} are shown - export the list for all of them.</div>` : ''),
+    {flush: true, right: btn('Export CSV', 'dl', [`/api/v1/watchlists/${l.name}/export`], 'sm', 'download')});
+  const up = manage ? card('Upload a list', `<div class="stack" style="gap:10px">
+      <div class="inline" style="gap:10px;flex-wrap:wrap"><select id="wl-list" aria-label="List">${Object.entries(WL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+        <select id="wl-mode" aria-label="How"><option value="add">Add the file's entries to the list</option><option value="replace">Replace the list with the file</option></select></div>
+      <input type="file" id="wl-file" class="input" style="padding:5px" aria-label="Excel or CSV file" accept=".xlsx,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
+      <input class="input" id="wl-note" maxlength="500" aria-label="Why" placeholder="Why (kept in the audit log; the note for rows that have none)">
+      <div class="inline" style="gap:8px">${btn('Preview', 'wlUpload', [true], '')}${btn('Upload', 'wlUpload', [false], 'primary')}</div>
+      <div class="t-sub">Excel (.xlsx - every sheet is read) or CSV, up to ${nf(r.max_file_mb)} MB and ${nf(r.max_entries)} entries a list. A header row names the columns:
+        <b>Username</b>, <b>Email</b>, <b>Hostname</b>, <b>IP address</b>, <b>Domain</b>, <b>URL</b>, <b>Hash</b> - or <b>Value</b> with a <b>Type</b> column - and optionally <b>Note</b> or <b>Reason</b>.
+        Without a header the first column is read and its type recognised. Preview shows what would change and every value that cannot be read, changing nothing.</div>
+      <div id="wl-out"></div></div>`, {sub: 'leads · every change is audited'}) : '';
+  setMainG(__g, page('Watch lists', 'Block and exception lists of users, hosts, IP addresses, domains, URLs and file hashes. Cases are checked against them whenever they are shown, so a change applies to every case at once; a match is shown on the case and in the case list, and never changes a severity, verdict or action.', '',
+    `${up ? `<div class="mb">${up}</div>` : ''}<div class="stack">${r.lists.map(listCard).join('')}</div>`));
+}
+async function wlUpload(dry) {
+  const f = $('#wl-file').files[0]; if (!f) { toast('Choose an Excel or CSV file first', true); return; }
+  if (f.size > 5e6) { toast('The file is larger than 5 MB - split it', true); return; }
+  const list = $('#wl-list').value, mode = $('#wl-mode').value, note = $('#wl-note').value.trim();
+  if (!dry && mode === 'replace' && !confirm(`Replace the whole ${WL[list].toLowerCase()} with ${f.name}? Entries not in the file are removed (kept in the history).`)) return;
+  const bytes = new Uint8Array(await f.arrayBuffer()); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const r = await post(`/api/v1/watchlists/${list}/upload`, {content_b64: btoa(bin), filename: f.name, mode, note, dry_run: !!dry});
+  const kinds = Object.entries(r.added_by_kind).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ');
+  const html = `<div class="callout ${r.problems.length ? '' : 'info'}"><div><b>${dry ? 'Preview - nothing has changed yet' : 'Uploaded'}.</b> ${esc(r.label)}: ${nf(r.added.length)} to add${kinds ? ` (${kinds})` : ''}, ${nf(r.already_listed)} already listed, ${nf(r.removed.length)} to remove - it will hold ${nf(r.count_after)}.
+      ${r.added.length ? `<details class="mt"><summary class="small">Entries to add</summary><div class="small mono" style="white-space:normal">${r.added.slice(0, 200).map(a => esc(`${a.value} (${a.kind})`)).join(', ')}${r.added.length > 200 ? ' …' : ''}</div></details>` : ''}
+      ${r.removed.length ? `<details class="mt"><summary class="small">Entries to remove</summary><div class="small mono" style="white-space:normal">${r.removed.slice(0, 200).map(esc).join(', ')}</div></details>` : ''}
+      ${r.problems.length ? `<div class="small strong mt">${nf(r.problems.length)} value(s) cannot be listed:</div><ul class="small" style="margin:4px 0;padding-left:18px">${r.problems.slice(0, 50).map(p => `<li>${p.where ? esc(p.where) + ': ' : ''}<span class="mono">${esc(p.value)}</span> - ${esc(p.problem)}</li>`).join('')}</ul>` : ''}</div></div>`;
+  if (!dry) { toast(`${WL[list]} updated`); await Watchlists(); }
+  const out = $('#wl-out'); if (out) out.innerHTML = html;
+}
+async function wlRemove(id, value) {
+  const reason = prompt(`Remove ${value} from the list? Say why (kept in the audit log).`);
+  if (reason === null) return;
+  await api(`/api/v1/watchlists/entries/${encodeURIComponent(id)}?reason=${encodeURIComponent(reason)}`, {method: 'DELETE'});
+  toast('Removed'); Watchlists();
 }
 
 // ================================================================= Trace (diagnostics)
@@ -1149,7 +1350,7 @@ async function approveBundle(id) {
 // ================================================================= registry
 window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
-  policy: Policy, reports: Reports, access: Access, audit: Audit};
+  policy: Policy, reports: Reports, access: Access, audit: Audit, watchlists: Watchlists};
 Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
-  campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
-  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey});
+  campaign, vmAsk, misRoute, misVerb, ownUpload, ownClear, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
+  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, styleUpload, styleSave, styleRemove, styleReset});

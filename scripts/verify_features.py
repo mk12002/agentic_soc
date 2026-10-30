@@ -448,7 +448,14 @@ def run_browser_tour(with_llm: bool = False, shots: Path | None = None) -> tuple
         else:
             shutil.rmtree(tmp / "reports", ignore_errors=True)
             for f in tmp.glob("soc.db*"):
-                f.unlink(missing_ok=True)
+                for _ in range(20):          # Windows: the server's file handle closes a moment after it exits
+                    try:
+                        f.unlink(missing_ok=True)
+                        break
+                    except PermissionError:
+                        time.sleep(0.5)
+                else:
+                    print(f"note: {f} is still in use; left for the OS to clean up", file=sys.stderr)
 
 
 def main() -> int:

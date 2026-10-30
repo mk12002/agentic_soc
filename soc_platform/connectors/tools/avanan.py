@@ -41,6 +41,18 @@ def overall_verdict(combined: dict[str, Any]) -> str | None:
     return next((v for v in VERDICT_ORDER if v in seen), min(seen, default=None))
 
 
+def _jwt_exp(token: str) -> float | None:
+    """The ``exp`` of a JWT access token (read, not verified - only to know when to renew it)."""
+    import base64
+    import json
+
+    try:
+        part = token.split(".")[1]
+        return float(json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))["exp"])
+    except (IndexError, ValueError, KeyError, TypeError):
+        return None
+
+
 class HecAuth(Auth):
     """HEC Smart API: POST /auth/external with clientId/accessKey -> bearer token, plus request id header."""
 
@@ -54,9 +66,19 @@ class HecAuth(Auth):
                            timeout=30)
             if r.status_code >= 400:
                 raise ConnectorError(f"Avanan auth failed {r.status_code}")
-            self._tok, self._exp = r.json()["data"]["token"], time.time() + 3000
+            try:
+                tok = r.json()["data"]["token"]
+            except (ValueError, KeyError, TypeError) as exc:      # an HTML page or another shape: say so, not KeyError
+                raise ConnectorError("Avanan auth answered without a token (check the base URL and region)") from exc
+            if not isinstance(tok, str) or not tok:
+                raise ConnectorError("Avanan auth answered without a token (check the base URL and region)")
+            exp = _jwt_exp(tok)
+            self._tok, self._exp = tok, exp - 120 if exp else time.time() + 25 * 60   # ~30 min tokens
         headers["Authorization"] = f"Bearer {self._tok}"
         headers["x-av-req-id"] = str(uuid.uuid4())
+
+    def invalidate(self) -> None:
+        self._tok, self._exp = None, 0.0
 
 
 class AvananConnector(ToolConnector):

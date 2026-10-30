@@ -15,8 +15,10 @@ from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import (
     ConnectorAction,
     need,
+    odata_str,
     ok_lookup,
     parse_ts,
+    path_part,
     sev_name,
     source_verdict,
     targets_of,
@@ -43,7 +45,7 @@ class DefenderEndpointConnector(MicrosoftConnector):
     streams = ("alerts", "machines", "vulnerabilities")
     lookups = ("host", "ip", "hash", "domain", "user")
     read_scopes = ("Alert.Read.All", "Machine.Read.All", "Vulnerability.Read.All", "AdvancedQuery.Read.All",
-                   "Ti.Read.All")
+                   "Ti.Read.All", "Machine.ReadWrite.All (only for 'which device had this IP' - findbyip requires it)")
     write_scopes = ("Machine.Isolate", "Machine.Scan", "Machine.CollectForensics", "Ti.ReadWrite.All")
 
     def fetch_page(self, stream: str, cursor: str | None) -> Page:
@@ -127,11 +129,11 @@ class DefenderEndpointConnector(MicrosoftConnector):
                     except ConnectorError:
                         ms = []       # retired or offboarded id: fall back to the name
                 if not ms:
-                    ms = self.get("/api/machines", params={"$filter": f"computerDnsName eq '{value.lower()}'"}).get("value", [])
+                    ms = self.get("/api/machines", params={"$filter": f"computerDnsName eq {odata_str(value.lower())}"}).get("value", [])
                 if not ms:
                     # a short name: only that host or its FQDN - never another machine whose name merely starts so
                     # (web01 must not match web010)
-                    ms = [m for m in self.get("/api/machines", params={"$filter": f"startswith(computerDnsName,'{value.lower()}')"}).get("value", [])
+                    ms = [m for m in self.get("/api/machines", params={"$filter": f"startswith(computerDnsName,{odata_str(value.lower())})"}).get("value", [])
                           if str(m.get("computerDnsName", "")).lower().split(".")[0] == value.lower().split(".")[0]]
                 recs = [self._machine(m) for m in ms]
                 alerts = []
@@ -143,18 +145,19 @@ class DefenderEndpointConnector(MicrosoftConnector):
                 return ok_lookup(self, recs + alerts, summary, recs[0].deep_link if recs else None, found=bool(ms),
                                  endpoint_alerts=len(alerts), risk=[m.get("riskScore") for m in ms])
             if entity_type == "ip":
-                ms = self.get("/api/machines/findbyip", params={"ip": value, "timestamp": _ts(context.get("at"))}).get("value", [])
+                # an OData function call, not query parameters; the time must be within the last 30 days
+                ms = self.get(f"/api/machines/findbyip(ip={odata_str(value)},timestamp={_ts(context.get('at'))})").get("value", [])
                 return ok_lookup(self, [self._machine(m) for m in ms], f"{len(ms)} device(s) used IP {value}")
             if entity_type == "hash":
-                f = self.get(f"/api/files/{value}")
+                f = self.get(f"/api/files/{path_part(value)}")
                 return ok_lookup(self, [], f"file prevalence={f.get('globalPrevalence')}, "
                                            f"determination={f.get('determinationType')}, signer={f.get('signer')}",
                                  malicious=str(f.get("determinationType", "")).lower() == "malware")
             if entity_type == "domain":
-                st = self.get(f"/api/domains/{value}/stats")
+                st = self.get(f"/api/domains/{path_part(value)}/stats")
                 return ok_lookup(self, [], f"domain seen on {st.get('orgPrevalence', 0)} device(s) in the org")
             if entity_type == "user":
-                ms = self.get(f"/api/users/{value.split('@')[0]}/machines").get("value", [])
+                ms = self.get(f"/api/users/{path_part(value.split('@')[0])}/machines").get("value", [])
                 return ok_lookup(self, [self._machine(m) for m in ms], f"user logged on to {len(ms)} device(s)")
             raise ValueError(entity_type)
 
@@ -246,7 +249,7 @@ MANIFEST = ConnectorManifest(
     factory=lambda s, t: DefenderEndpointConnector(s, t, rate_per_sec=1.5, burst=20),  # MDE: 100 calls/min per app
     live_transport=mde_transport,
     config=APP_FIELDS + [ConfigField("user_domain", "UPN suffix for alert users", required=False),
-                         ConfigField("mde_base", "API base (regional endpoints)", required=False, kind="url")],
+                         ConfigField("mde_base", "API base: https://api.security.microsoft.com (default) or a regional host such as https://eu.api.security.microsoft.com", required=False, kind="url")],
     actions=_actions, confidence="High",
     to_confirm="Licence tier (P2 for advanced hunting/TVM); app permissions; hunting quota",
     fake_settings={"user_domain": "acme-demo.com", "tenant_id": "demo-tenant"},

@@ -342,13 +342,23 @@ secret. Application permissions on Microsoft Graph, admin-consented:
 
 | Read (required) | Write (only for approved actions) |
 |---|---|
-| `User.Read.All`, `AuditLog.Read.All`, `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `RoleManagement.Read.Directory`, `UserAuthenticationMethod.Read.All`, `MailboxSettings.Read` | `User.RevokeSessions.All`, `User.EnableDisableAccount.All`, `IdentityRiskyUser.ReadWrite.All`, `User-PasswordProfile.ReadWrite.All` |
+| `User.Read.All`, `AuditLog.Read.All`, `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory`, `UserAuthenticationMethod.Read.All`, `MailboxSettings.Read` | `User.RevokeSessions.All`, `User.EnableDisableAccount.All`, `IdentityRiskyUser.ReadWrite.All`, `User-PasswordProfile.ReadWrite.All` |
+
+`GroupMember.Read.All` and `RoleManagement.Read.Directory` are both needed: with `User.Read.All` alone Graph returns a
+person's groups and directory roles with every name blank, and the privileged-role check would find nothing.
+
+**Accounts with admin roles:** Graph permissions alone do not let an app disable an administrator or reset their
+password - Microsoft requires the caller to hold an administrator role at least as privileged as the target's. To
+let approved actions reach admin accounts, assign the service principal *Privileged Authentication Administrator*
+(or handle admin accounts manually and say so in the runbook); otherwise those actions fail on admin targets with
+403 and the failure is recorded on the action.
 
 Azure role assignments: give the same service principal the **Reader** role on the Azure subscriptions (or on a
 management group above them).
 
-**Licences:** Entra ID P2 for Identity Protection (risky users / risk detections); without it those streams return
-nothing and the rest works.
+**Licences:** Entra ID P1 (or P2) to read sign-in logs through Graph; P2 for Identity Protection (risky users / risk
+detections). Without P2 those reads are refused: the streams report it, and an identity lookup lists the part as
+*unavailable* and still returns everything else.
 
 **Settings:** `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_CERTIFICATE` (one PEM with the private key and the
 certificate, mounted as `ENTRA_CLIENT_CERTIFICATE_FILE`; recommended) or `ENTRA_CLIENT_SECRET`, optional `ENTRA_AZURE_SUBSCRIPTIONS`
@@ -359,6 +369,14 @@ certificate, mounted as `ENTRA_CLIENT_CERTIFICATE_FILE`; recommended) or `ENTRA_
 **Notes:** sign-ins are read from the v1.0 API (`isInteractive`, `riskEventTypes_v2`, Conditional Access status,
 device compliance). If Azure is unreadable the identity data still loads (tested).
 
+**Microsoft's limits the connector keeps to** (per tenant, whatever else the app does): sign-in and audit logs 5
+requests per 10 seconds; Identity Protection 1 request per second (its throttling replies carry no `Retry-After`). The
+connector paces those two families separately from its overall budget, so a busy investigation queues rather than
+being throttled.
+
+**Newly registered devices** come from the directory audit log (*Add registered owner to device*): Graph's per-user
+device lists (`registeredDevices`, `ownedDevices`) do not accept application permissions.
+
 ### 4.3 Microsoft Defender for Endpoint (`defender_endpoint`)
 
 **Used for:** alerts (with evidence: files, IPs, URLs), device inventory, TVM vulnerabilities, advanced hunting for
@@ -368,16 +386,23 @@ lookups; actions: isolate / release, AV scan, collect investigation package, cus
 
 | Read | Write (only for approved actions) |
 |---|---|
-| `Alert.Read.All`, `Machine.Read.All`, `Vulnerability.Read.All`, `AdvancedQuery.Read.All`, `Ti.Read.All` | `Machine.Isolate`, `Machine.Scan`, `Machine.CollectForensics`, `Ti.ReadWrite.All` |
+| `Alert.Read.All`, `Machine.Read.All`, `Vulnerability.Read.All`, `AdvancedQuery.Read.All`, `Ti.Read.All`; **`Machine.ReadWrite.All`** for "which device had this IP" | `Machine.Isolate`, `Machine.Scan`, `Machine.CollectForensics`, `Ti.ReadWrite.All` |
+
+`Machine.ReadWrite.All` is what Microsoft requires for the *find devices by internal IP* API (it can also edit device
+tags). If the client will not grant it, leave it out: that one lookup reports *permission denied* and everything else
+works; the IP is still resolved from the other tools.
 
 **Licences:** Defender for Endpoint P2 (advanced hunting, TVM).
 
 **Settings:** `DEFENDER_ENDPOINT_TENANT_ID`, `DEFENDER_ENDPOINT_CLIENT_ID`, `DEFENDER_ENDPOINT_CLIENT_CERTIFICATE`
 (recommended) or `DEFENDER_ENDPOINT_CLIENT_SECRET`,
 optional `DEFENDER_ENDPOINT_USER_DOMAIN` (UPN suffix for bare account names), optional `DEFENDER_ENDPOINT_MDE_BASE`
-for a regional endpoint (e.g. `https://api-eu.securitycenter.microsoft.com`).
+for a regional host (`https://eu.api.security.microsoft.com`, `us.`, `uk.`, `au.`; government clouds use their own).
 
-**Egress:** `api.securitycenter.microsoft.com` (or the regional host), `login.microsoftonline.com`.
+**Egress:** `api.security.microsoft.com` (or the regional host), `login.microsoftonline.com`. The token is issued for
+the `https://api.securitycenter.microsoft.com` resource whichever host is called (as Microsoft documents).
+
+**Limits:** 100 calls a minute and 1,500 an hour per API; the connector stays under them.
 
 ### 4.4 Microsoft Defender for Office 365 (`defender_office365`)
 
@@ -398,10 +423,13 @@ that cannot be fetched is retried on the next run.
 |---|---|
 | `Mail.Read` (scoped to the reporting mailbox - see below), `SecurityAlert.Read.All`, `ThreatHunting.Read.All` | `SecurityAnalyzedMessage.ReadWrite.All` (remediation), `Mail.ReadWrite` (scoped; tagging), `Mail.Send` (scoped; reporter feedback), `Exchange.ManageAsApp` on Office 365 Exchange Online + an Exchange role that includes the Tenant Allow/Block List cmdlets (block sender) |
 
-**Scope the mailbox permissions** so the app can read only the reporting mailbox: Exchange Online RBAC for
-Applications (current Microsoft guidance) or an Application Access Policy
-(`New-ApplicationAccessPolicy -AppId <app id> -PolicyScopeGroupId <mail-enabled group containing the reporting
-mailbox> -AccessRight RestrictAccess`). Verify with `Test-ApplicationAccessPolicy` that another mailbox is denied.
+**Scope the mailbox permissions** so the app can read only the reporting mailbox. Microsoft's current method is
+**RBAC for Applications** in Exchange Online (it replaces Application Access Policies, which are legacy): a management
+scope containing the reporting mailbox, and the roles *Application Mail.Read*, *Application Mail.ReadWrite* and
+*Application Mail.Send* assigned to the app's service principal over that scope - then the tenant-wide Graph
+`Mail.*` grants can be removed. A tenant still on Application Access Policies can use
+`New-ApplicationAccessPolicy -AppId <app id> -PolicyScopeGroupId <group with the reporting mailbox> -AccessRight
+RestrictAccess`. Either way, prove that another mailbox is denied before go-live.
 
 **Licences:** Defender for Office 365 Plan 2 for advanced hunting and click telemetry.
 
@@ -410,8 +438,15 @@ mailbox> -AccessRight RestrictAccess`). Verify with `Test-ApplicationAccessPolic
 
 **Egress:** `graph.microsoft.com`, `outlook.office365.com`, `login.microsoftonline.com`.
 
-**Notes:** remediation uses Graph's `analyzedEmails/remediate`, which is a **beta** Graph API at the time of writing;
-if Microsoft changes it, only `_remediate` in `soc_platform/connectors/tools/defender_office365.py` changes.
+**Notes:**
+- Remediation uses Graph's `analyzedEmails/remediate`, a **beta** Graph API (Microsoft does not support beta APIs in
+  production). It is the only API for the purge; each remediation appears in the Defender portal's Action center. If
+  Microsoft changes it, only `_remediate` in `soc_platform/connectors/tools/defender_office365.py` changes.
+- **Block sender** adds a Tenant Allow/Block List entry through Exchange Online's admin endpoint
+  (`adminapi/beta/<tenant>/InvokeCommand` running `New-TenantAllowBlockListItems`) - the same endpoint the Exchange
+  Online PowerShell module uses. Microsoft documents the cmdlet, not this endpoint, and there is no Graph API for the
+  list. If the client does not accept that, leave the block-sender action switched off and block senders in the
+  portal; nothing else depends on it.
 
 ### 4.5 Microsoft Defender for Identity (`defender_identity`)
 
@@ -442,11 +477,19 @@ RTR forensic collection.
 
 | Read | Write (only for approved actions) |
 |---|---|
-| Alerts: Read, Hosts: Read, Spotlight vulnerabilities: Read, IOCs (Indicators of Compromise): Read | Hosts: Write (containment), Real time response: Write (collection; also needs an RTR response policy on the hosts) |
+| Alerts: Read, Hosts: Read, Vulnerabilities: Read (Spotlight), IOC Management: Read | Hosts: Write (containment), Real time response: Read (read-only collection - `ps`, `netstat`, `ls`; the hosts' response policy must also allow RTR) |
+
+RTR commands are asynchronous: the connector queues each one, reads its output back until complete (at most a minute
+per command) and closes the session. Verify the RTR scope in the tenant's API client screen: CrowdStrike groups the
+read-only commands under *Real time response*; active-responder commands are not used - the platform itself refuses any collection command outside ps, netstat, ls, ipconfig, env, filehash, getsid, history, mount and eventlog, so granting a wider RTR scope later does not widen what it runs.
 
 **Settings:** `CROWDSTRIKE_CLIENT_ID`, `CROWDSTRIKE_CLIENT_SECRET`, `CROWDSTRIKE_BASE_URL` = the client's cloud
-(`https://api.crowdstrike.com` US-1, `https://api.us-2.crowdstrike.com`, `https://api.eu-1.crowdstrike.com`, ...),
-optional `CROWDSTRIKE_USER_DOMAIN`.
+(`https://api.crowdstrike.com` US-1, `https://api.us-2.crowdstrike.com`, `https://api.eu-1.crowdstrike.com`,
+`https://api.laggar.gcw.crowdstrike.com` US-GOV-1), optional `CROWDSTRIKE_USER_DOMAIN`. Use the client's own cloud's URL (the connector does not follow redirects to
+another cloud); a wrong one fails preflight's sign-in check.
+
+**Limits:** the alert query API refuses an offset past 10,000 - the connector restarts from its watermark instead; host
+inventory uses the scroll API, which has no such limit.
 
 **Egress:** the base URL host.
 
@@ -473,8 +516,13 @@ corporate CA via `SSL_CERT_FILE` over setting `false`).
 
 **Egress:** the console host and port (usually on-premises).
 
-**Notes:** the findings stream reads each asset's vulnerabilities and each vulnerability definition once (cached)
-plus its solution text; the first full sync of a large console takes a while - run it outside office hours.
+**Notes:** the findings stream reads each asset's vulnerabilities (one call per asset) and each vulnerability
+definition once (cached) plus its solution text. On a console with tens of thousands of assets a full sync takes
+hours: run the first one outside office hours, and size `SOC_JOB_VM_SECONDS` above the measured sync time (preflight
+shows the volume). If that is too slow, use the CSV export fallback below.
+
+**Only the on-premises console's v3 API is supported.** A client on the cloud-only Insight platform API (v4,
+`<region>.api.insight.rapid7.com`, `X-Api-Key`) needs a small connector change - confirm which one the client runs.
 
 ### 4.8 Wiz (`wiz`)
 
@@ -490,6 +538,10 @@ optional `WIZ_LOOKUP_MAX_PAGES`.
 
 **Egress:** the API host, the auth host.
 
+**Notes:** the connector's GraphQL queries (`cloudResources`, `vulnerabilityFindings`, `issuesV2`) are checked against
+the tenant by preflight: a field Wiz has renamed or retired fails preflight with Wiz's own error, before go-live. Pages
+are 500 rows (Wiz's maximum).
+
 ### 4.9 Avanan / Check Point Harmony Email & Collaboration (`avanan`)
 
 **Used for:** Avanan's security events and per-message verdicts (reconciled with Defender's), quarantine / restore.
@@ -501,9 +553,11 @@ region-specific gateway URL shown with the key.
 **Settings:** `AVANAN_API_URL` (the regional gateway, e.g. `https://cloudinfra-gw.portal.checkpoint.com`),
 `AVANAN_CLIENT_ID`, `AVANAN_ACCESS_KEY`.
 
-**Egress:** the gateway host.
+**Egress:** the gateway host. The default gateway is the EU one (`cloudinfra-gw.portal.checkpoint.com`); US tenants
+use `cloudinfra-gw-us.portal.checkpoint.com` and other regions their own - take it from the API key screen.
 
-**Notes:** security events name the e-mail only by entity id, so the connector reads each event's entity for sender,
+**Notes:** access tokens last about 30 minutes; the connector renews them from their own expiry (and once more on a
+401). Security events name the e-mail only by entity id, so the connector reads each event's entity for sender,
 recipients, subject and Message-ID. The overall verdict is the worst verdict any Avanan engine gave. If the HEC API is
 not licensed, set `AVANAN_FALLBACK=shared_mailbox` and have Avanan's reports delivered to the reporting mailbox.
 
@@ -526,6 +580,10 @@ fails, blocked queries only. `dns_sync: all` stores every query (small tenants o
 and shadow IT query Umbrella live, whatever the setting.
 
 **Egress:** `api.umbrella.com`.
+
+**Paging:** the Reporting API pages with `offset` / `limit`; Cisco does not publish a maximum offset. The connector
+reads security-category queries only by default and resumes from the newest event, so a page window stays small; if
+the client stores every query (`dns_sync: all`) on a large tenant, run preflight to see the daily volume first.
 
 ### 4.11 Thinkst Canary (`canary`)
 
@@ -557,8 +615,19 @@ elevation events.
 
 **Endpoint paths differ between Delinea versions**, so they are settings: `DELINEA_SECRET_SERVER_AUDIT_PATH`
 (default `/api/v1/secret-audits`), `DELINEA_SECRET_SERVER_SESSIONS_PATH` (default `/api/v1/launched-sessions`),
-`DELINEA_PRIVILEGE_MANAGER_EVENTS_PATH` (default `/Tms/api/v1/events/elevation`). Confirm them against the client's
-version's REST API reference before go-live.
+`DELINEA_PRIVILEGE_MANAGER_EVENTS_PATH` (default `/Tms/api/v1/events/elevation`).
+
+> **Must be confirmed on the client's instance before go-live - these are the least certain integrations.**
+> - Delinea's public documentation shows secret audits **per secret** (`/api/v1/secrets/{id}/audits`); a tenant-wide
+>   secret-audit list at the default path could not be confirmed from it. Check the instance's own REST API reference
+>   (*Help → REST API*). If there is no tenant-wide list, the usual route is to run the built-in *Secret Audit* report
+>   through the Reports API on a schedule; that needs a small connector change.
+> - The rotation call (`POST /api/v1/secrets/{id}/change-password`) must be checked against the same reference; keep
+>   the rotate action switched off until it has been tried on a test secret.
+> - Privilege Manager documents its API only in each console's Swagger page (*Help → API Reference*, visible to the
+>   Privilege Manager Administrators role). Read the elevation-events path and the token path there, and set them.
+> Preflight reads each stream - the secret-audit and elevation-event paths - and reports a wrong path (404); the
+> launched-sessions path is used only in investigations, so check it once by hand.
 
 **Admin accounts:** optional `DELINEA_SECRET_SERVER_ACCOUNT_OWNERS` - the approved map of admin account to the
 person who owns it, as JSON (`{"adm-jane": "jane.doe@client.com"}`). A mapped account's activity is linked to its
@@ -594,7 +663,8 @@ field names for criticality or environment, map them in `normalize` / `owner_for
 Only if the client tickets in Jira instead of ServiceNow (enable one of them). Integration user with *Browse
 projects*, *Create issues*, *Add comments*, *Transition issues* on the SOC project; an API token.
 Settings: `JIRA_BASE_URL` (`https://<site>.atlassian.net`), `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`.
-Uses the current `/rest/api/3/search/jql` endpoint. Egress: the site host.
+Uses the current `/rest/api/3/search/jql` endpoint (the old `/search` was removed by Atlassian). Atlassian API
+tokens now expire (at most a year): note the expiry date and rotate the token before it. Egress: the site host.
 
 ### 4.15 Ownership CSV (`cmdb_csv`) - fallback CMDB
 
@@ -605,6 +675,8 @@ or pipes; headers in any case or spacing, and the usual aliases (`Host Name`, `S
 `Serial`, `Subscription ID`) are recognised. A file with neither a hostname nor a subscription column is reported in
 the log and assigns no owners. The file is re-read when it changes; no restart is needed.
 
+**Prefer the console upload for cloud resources** (*Cloud posture -> Ownership mapping*): the same idea without a file on the host - Excel or CSV, stored in the database (so every replica and the scheduler use it), previewed, versioned and audited, with resource / subscription / cloud / resource-type matching that cloud names need (the file connector cuts names at the first dot). Wiz has no CMDB of its own: ask the cloud teams for a sheet of subscription or resource -> owning team before go-live (`docs/OPERATIONS.md` - Ownership mapping).
+
 ### 4.16 Microsoft Sentinel (`sentinel`) and generic SIEM push (`generic_siem`)
 
 **Sentinel (pull):** app registration with **Microsoft Sentinel Reader** on the workspace (Azure RBAC). Settings:
@@ -612,6 +684,13 @@ the log and assigns no owners. The file is re-read when it changes; no restart i
 `SENTINEL_RESOURCE_GROUP`, `SENTINEL_WORKSPACE`. Egress: `management.azure.com`. Each incident's entities
 (accounts, hosts, IPs, URLs, file hashes) are read with *Incidents - List Entities*, so a Sentinel incident joins the
 cases of the hosts and people it names (the same Reader role covers it).
+
+**Defender portal move:** Microsoft retires Sentinel in the Azure portal on 31 March 2027; from then on Sentinel is
+used in the Defender portal, where Sentinel and Defender XDR incidents share one incident model. The connector reads
+incidents through the Azure SecurityInsights REST API (`api-version 2024-03-01`), which the move does not retire as
+far as Microsoft has announced. Confirm with the client whether its workspace is already onboarded to the Defender
+portal, and re-run this connector's preflight after the move. (The Defender connectors read only their own service's
+Graph alerts, so no incident is read twice.)
 
 **Any other SIEM/SOAR (push):** create an API key (analyst role, incident domain) and have the SIEM POST
 `{"alerts": [ ... ]}` to `https://soc.client.com/api/v1/ingest/alerts` with header `X-API-Key`. Replays are
@@ -626,7 +705,9 @@ on a partial rejection (an `ingest.rejected` line is also logged).
 
 ### 4.17 Public intelligence (`nvd`, `epss`, `cisa_kev`) and threat-intel fusion (`threat_intel`)
 
-- **NVD / EPSS / CISA KEV:** no account needed; an NVD API key (`NVD_API_KEY`, free from NIST) raises the rate limit.
+- **NVD / EPSS / CISA KEV:** no account needed; an NVD API key (`NVD_API_KEY`, free from NIST) raises the rate limit
+  from 5 to 50 requests per 30 seconds. With `since` set, the NVD connector asks in windows of at most 120 days with
+  both `lastModStartDate` and `lastModEndDate` - NVD refuses one without the other or a longer range.
   Egress: `services.nvd.nist.gov`, `api.first.org`, `www.cisa.gov`. Verified live.
 - **Threat-intel fusion:** each source is optional and used only when its key is present:
   `THREAT_INTEL_VIRUSTOTAL_API_KEY`, `..._ABUSEIPDB_API_KEY`, `..._OTX_API_KEY`, `..._GREYNOISE_API_KEY`,
@@ -641,7 +722,7 @@ on a partial rejection (an `ingest.rejected` line is also logged).
 | Host | For |
 |---|---|
 | `login.microsoftonline.com` | Entra sign-in and every Microsoft connector's token |
-| `graph.microsoft.com`, `management.azure.com`, `api.securitycenter.microsoft.com`, `outlook.office365.com` | Entra, Azure roles, Sentinel, Defender for Endpoint, Defender for Office 365, Defender for Identity |
+| `graph.microsoft.com`, `management.azure.com`, `api.security.microsoft.com` (or regional), `outlook.office365.com` | Entra, Azure roles, Sentinel, Defender for Endpoint, Defender for Office 365, Defender for Identity |
 | CrowdStrike API host of the client's cloud | CrowdStrike |
 | Wiz API and auth hosts | Wiz |
 | Check Point regional gateway | Avanan |
@@ -704,7 +785,7 @@ backend endpoint exposes:
 | Only a vendor-native Gemini API (`generateContent`) and nothing else | - (needs a small provider class, 5.7) | Gemini |
 
 **Recommended:** `openai_compatible` against the gateway's OpenAI-compatible endpoint. One configuration reaches all
-three vendors, and the platform's two tiers can even use different vendors.
+three vendors, and different features can even use different vendors' models.
 
 ### 5.4 Configuration: OpenAI-compatible gateway (recommended)
 
@@ -712,10 +793,11 @@ three vendors, and the platform's two tiers can even use different vendors.
 SOC_LLM_PROVIDER=openai_compatible
 SOC_LLM_ENDPOINT=https://llm-gateway.client.internal/v1        # base URL; /chat/completions is appended
 SOC_LLM_API_KEY_FILE=/run/secrets/llm_gateway_key              # the key the gateway issued to this application
-SOC_LLM_DEPLOYMENT=<large-tier model name as the gateway names it>
-SOC_LLM_DEPLOYMENT_SMALL=<small-tier model name>
+SOC_LLM_MODELS=<model names as the gateway names them, comma-separated>   # offered per feature on the AI usage screen
+SOC_LLM_DEPLOYMENT=<default model for summaries and reports>
+SOC_LLM_DEPLOYMENT_SMALL=<default model for routine narrative>
 SOC_LLM_APPROVED_ENDPOINTS=https://llm-gateway.client.internal/v1   # anything else is refused at start-up
-SOC_LLM_MODEL_VERSION=<the large model's id as returned in responses>  # optional pin; a different model is logged as a mismatch
+SOC_LLM_MODEL_VERSION=<model-version pins, comma-separated>      # optional; a different version is logged as a mismatch
 SOC_LLM_MONTHLY_TOKEN_BUDGET=50000000                          # see 5.6
 
 # how the gateway wants to be called (no code changes):
@@ -731,12 +813,16 @@ The platform sends `{"model", "temperature": 0.1, "messages": [system, user], "r
 `SOC_LLM_JSON_MODE=0` the `response_format` field is left out and the JSON requirement is written into the system
 instruction instead; replies are parsed tolerantly (the first JSON object in the reply) either way.
 
-**Choosing models for the two tiers** (names depend on how the client's gateway exposes them):
+**Choosing models** (names depend on how the client's gateway exposes them). `SOC_LLM_MODELS` lists the models an
+administrator can pick per feature on the AI usage screen (default: gpt-4.1-nano, gpt-4.1-mini, gpt-4.1; more are
+added to the list as the client deploys them, `name=id` where the gateway's id differs). The two defaults:
 
-| Tier | Used for | Pick |
+| Default | Used for | Pick |
 |---|---|---|
-| large (`SOC_LLM_DEPLOYMENT`) | case and incident summaries, attack story, deep analysis, reports, report planning | the strongest reasoning model the client allows (a Claude Opus/Sonnet-class, GPT-4.1-class or Gemini Pro-class model) |
-| small (`SOC_LLM_DEPLOYMENT_SMALL`) | routine narrative, notifications, short commentary | a fast, cheap model (Claude Haiku-class, GPT mini-class, Gemini Flash-class) |
+| `SOC_LLM_DEPLOYMENT` | case and incident summaries, attack story, deep analysis, reports | the strongest reasoning model the client allows (a Claude Opus/Sonnet-class, GPT-4.1-class or Gemini Pro-class model) |
+| `SOC_LLM_DEPLOYMENT_SMALL` | routine narrative, notifications, short commentary, planners | a fast, cheap model (Claude Haiku-class, GPT mini-class, Gemini Flash-class) |
+
+After go-live, *AI usage -> Models -> Check which models answer* confirms which listed models the endpoint serves.
 
 Requirements for a model to be suitable: reliable JSON output, instruction following for citations
 (`[E1]`-style evidence ids), and a context window larger than the biggest prompt measured in
@@ -765,7 +851,7 @@ calls; `SOC_LLM_SERVER_FALLBACK=0` turns it off (a refusal then simply uses the 
 
 | Setting | Default | Set it to |
 |---|---|---|
-| `SOC_LLM_MONTHLY_TOKEN_BUDGET` | 50,000,000 | the starting monthly allocation. After go-live, administrators manage the monthly and daily budgets, per-person limits and each feature's tier and answer cap on the **AI usage** screen (no restart; versioned, audited). Enter the client's per-model prices there so cost is shown in its terms. Measured tokens per component: `docs/LLM_TOKENS_AND_COST.md`. |
+| `SOC_LLM_MONTHLY_TOKEN_BUDGET` | 50,000,000 | the starting monthly allocation. After go-live, administrators manage the monthly and daily budgets, per-person limits and each feature's model and answer cap on the **AI usage** screen (no restart; versioned, audited). Enter the client's per-model prices there so cost is shown in its terms. Measured tokens per component: `docs/LLM_TOKENS_AND_COST.md`. |
 | `SOC_LLM_MAX_TOKENS_FIELD` | `max_tokens` | `max_completion_tokens` if the gateway or model rejects `max_tokens` (the answer cap the AI usage policy sets) |
 | `SOC_LLM_CONCURRENCY` | 4 | at most the gateway's per-application concurrency |
 | `SOC_LLM_TIMEOUT_SECONDS` / `SOC_LLM_TIMEOUT_LARGE_SECONDS` / `SOC_LLM_CONNECT_TIMEOUT_SECONDS` | 30 / 120 / 10 | raise the large timeout if the gateway queues requests |
@@ -782,8 +868,9 @@ the platform sends in each prompt. Nothing in the platform fine-tunes or trains 
 | Situation | Change | Where |
 |---|---|---|
 | The gateway requires an OAuth / Entra ID access token per call instead of a static key | a provider subclass that obtains and caches the token (the connectors' `entra_app_auth` / `OAuth2ClientCredentials` in `soc_platform/connectors/http.py` can be reused) and returns it from `_headers()` | `soc_platform/llm/providers/openai_compatible.py` |
-| The gateway speaks neither the OpenAI nor the Claude protocol (e.g. only Gemini `generateContent`, or a proprietary JSON) | a new `Provider` with one method `complete(system, user, tier) -> Completion`, registered in `build_provider` | `soc_platform/llm/providers/<name>.py`, `soc_platform/llm/gateway.py` |
+| The gateway speaks neither the OpenAI nor the Claude protocol (e.g. only Gemini `generateContent`, or a proprietary JSON) | a new `Provider` with one method `complete(system, user, *, tier, max_tokens=None, model=None) -> Completion` (`model`: the model the AI usage policy chose), registered in `build_provider` | `soc_platform/llm/providers/<name>.py`, `soc_platform/llm/gateway.py` |
 | The gateway returns token usage under other field names | adjust the `usage` parsing in the provider | same file |
+| The gateway answers only as a stream (server-sent events) and cannot return one complete response | read the stream to its end inside the provider and return the assembled text and usage as one `Completion` (the platform needs the whole answer before the citation check, so nothing is shown to the analyst token by token) | the provider in use |
 
 Each is a small, isolated change (the existing providers are about 50 lines each); the gateway, guardrails,
 redaction and fallbacks stay as they are. Add a test like `test_openai_compatible_provider` in
@@ -831,7 +918,7 @@ redaction and fallbacks stay as they are. Add a test like `test_openai_compatibl
 |---|---|---|
 | 1 | Entra | users resolve to people; Access screen roles; sign-in risk visible |
 | 2 | Defender for Endpoint and/or CrowdStrike | hosts resolve across both EDRs (one host, two tools); Unresolved queue reviewed |
-| 3 | ServiceNow CMDB (or ownership CSV) | owners and criticality on hosts |
+| 3 | ServiceNow CMDB (or ownership CSV), plus the ownership mapping upload for cloud resources | owners and criticality on hosts; every open Wiz misconfiguration has a team |
 | 4 | Defender for Office 365 (reporting mailbox), Avanan | a test report (an internal simulation mail) becomes a case with verdict and scope |
 | 5 | Rapid7, Wiz, NVD/EPSS/KEV | one finding per host + CVE across scanners; priorities; campaigns |
 | 6 | Umbrella, Canary, Delinea, Sentinel / SIEM push | incident clusters; attack story across tools |
@@ -896,5 +983,8 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 | ITSM system (ServiceNow or Jira), ticket table, CMDB field names | ticketing, ownership |
 | SIEM (Sentinel or another) | incident ingestion |
 | Approved threat-intel sources | enrichment |
-| The in-house LLM gateway: protocol, auth method, model names per tier, concurrency and token allocation, whether it passes `response_format` | section 5 |
+| The in-house LLM gateway: protocol, auth method, the model names to offer per feature (`SOC_LLM_MODELS`), concurrency and token allocation, whether it passes `response_format`, whether it can answer without streaming (it offers both GPT and Claude models, so the model names for `SOC_LLM_MODELS` come from it) | section 5 |
+| Delinea: the instance's REST API reference (secret-audit and sessions paths, the rotation call) and Privilege Manager's Swagger page (elevation-events and token paths) | 4.12 |
+| Whether approved actions may target admin accounts (needs a privileged Entra role on the connector's service principal) | 4.2 |
+| Rapid7: on-premises console (v3 API, supported) or the cloud Insight platform API (v4, needs a connector change) | 4.7 |
 | Which action types may be executed, and at which autonomy level | section 6 |

@@ -55,7 +55,9 @@ An **agentic SOC platform**: one investigation and automation layer over an orga
 - **Governance**: RBAC + domain scope + step-up MFA, four-eyes, versioned autonomy policy, durable kill switch,
   hash-chained audit log, encryption at rest, retention with legal hold, self-check.
 - **Teamwork and alerting**: case owner (take / assign), append-only analyst notes, global search over cases, every
-  tool identifier, findings and CVEs, and Teams / Slack / webhook notifications for findings above a threshold.
+  tool identifier, findings and CVEs, Teams / Slack / webhook notifications for findings above a threshold, and
+  block / exception watch lists (uploaded as Excel or CSV by a lead) flagged on every case that involves a listed item,
+  and an uploaded ownership mapping (resource / host / subscription -> owning team) for what the CMDB does not hold.
 - Every connector has **fake mode** (vendor-shaped fixtures through the same parsing code) so the whole platform runs
   and demos with no tenant access.
 - **Phishing ML engine** (`soc_platform/domains/phishing/engine/`, ~24k lines, earlier code base): 7-agent ML swarm
@@ -196,6 +198,14 @@ soc_platform/
   core/observability.py  trace ids (TRACE contextvar, traced(), accept_trace), structured logging (configure_logging,
                          event(), secrets masked) - every request, audit event, model call, outbound call, job, CLI
   core/notify.py         Notification table + Teams/Slack/JSON webhook delivery (notify job); HTTPS-only config
+  core/watchlists.py     block / exception lists (users, hosts, IPs, domains, URLs, hashes): .xlsx / CSV upload with
+                         preview (own hardened .xlsx reader - no DTD, size caps), case_matches() read when a case /
+                         the case list / the investigation record is built; context only, never decisional
+  core/ownership.py      the uploaded ownership mapping (`ownership_mappings`, versioned): .xlsx / CSV rows of resource
+                         or host name (wildcards) and / or subscription -> team, owner, environment, criticality;
+                         match() exact > pattern > subscription; fills the CMDB's gaps in both enrich_ownership()s
+  core/audit_export.py   audit exports (jsonl / json / csv / xlsx / docx, filtered) + info() for the Audit screen;
+                         .xlsx written without a library (text cells only), CSV cells formula-guarded
   domains/phishing/      service.py (pipeline), models.py, supplier.py, agents/{decompose,analyzer,investigation}.py, engine/
   domains/incident/service.py
   domains/vulnerability/ service.py, misconfig.py, models.py
@@ -207,6 +217,8 @@ soc_platform/
   llm/redaction.py       pseudonymisation before any prompt leaves; restore after
   llm/providers/         openai_compatible (also azure_foundry), anthropic_provider
   reporting/             builder.py (17 sources, 7 standard reports, planner), reports.py, compliance.py,
+                         style.py (the organisation's report style: templates, logo, brand, writing guide; uploads
+                         validated; use_style() sets design.STYLE around every render - render inside it),
                          value.py (value scorecard: benefit KPIs vs baseline / target; ValueInput in models.py),
                          design.py (house style for every .docx / .pptx: cover, tiles, tables, charts, header /
                          footer with page X of Y), charts.py (PNG donut / stacked / columns / bars, nice axis steps)
@@ -317,8 +329,10 @@ fingerprints hash the evidence.
 - A route that calls the model on a person's behalf builds its gateway with `llm(s, p)` (their limits apply) and
   returns `_with_notice(out, gw)`; scheduled work uses `llm(s)`. A new feature name goes into
   `usage_policy.KNOWN_WORKFLOWS` (tier, who triggers it, description) or it cannot be configured.
-- Providers implement `complete(system, user, *, tier, max_tokens=None)`; the gateway passes the cap only to providers
-  whose signature accepts it. Small tier for routine narrative, large for summaries/deep analysis/reports.
+- Providers implement `complete(system, user, *, tier, max_tokens=None, model=None)`; the gateway passes the cap and
+  the chosen model only to providers whose signature accepts them. Code asks for a size (small for routine narrative,
+  large for summaries / deep analysis / reports); the AI usage policy maps each feature to a model by name
+  (`usage_policy.models()`: `SOC_LLM_MODELS`, default gpt-4.1-nano / gpt-4.1-mini / gpt-4.1).
 
 **Diagnostics and audit**
 - Every request / job run / CLI command runs under a trace id (`core/observability.TRACE`); audit events, access-log
@@ -371,7 +385,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   under concurrent analysts), `test_recording.py` (record-and-sanitise leaves no identity and replays),
   `test_real_world.py` (an empty tenant; every tool down at once - every pipeline, screen, report still works),
   `test_observability.py` (trace ids, write-audit guarantee, model-call diagnosis, job traces, log lines, masking),
-  `test_llm_usage.py` (budgets, per-person limits, tier routing, answer caps, tier advice, the admin API),
+  `test_llm_usage.py` (budgets, per-person limits, per-feature model by name, model list and pins, answer caps,
+  model advice, the model check, the admin API),
   `test_connector_admin.py` (isolation, strict config, stages, preflight, propose / approve / pause / restore /
   export / import through the store and the API, hot reload, supplier / sanctioned lists, the scaffold),
   `test_data_tolerance.py` (malformed vendor fields and times, SIEM batches, ownership CSVs, unreadable e-mail, settings, policy documents),
@@ -386,14 +401,24 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   digests / commit SHAs everywhere; schema rights only in init-db; Compose production defaults),
   `test_go_live_hardening.py` (fail-closed settings, dev sign-in never with live tools, LLM allow-list, credential
   origin, Bearer service keys, alert metrics, audit anchors),
-  `test_value_scorecard.py` (benefit KPIs, baselines, capacity, permissions), `test_report_design.py` (house style:
+  `test_value_scorecard.py` (benefit KPIs, baselines, capacity, permissions),
+  `test_watchlists.py` (Excel / CSV parsing incl. an openpyxl-written workbook in `tests/data/`, hostile files,
+  matching on every case kind, no outside-address match, lead-only + audited changes, nothing decisional moves),
+  `test_ownership.py` (forgiving headers, unusable rows named, exact > pattern > subscription, cloud / type narrowing,
+  versions and audit, permissions, fills the CMDB's gaps without overriding it, the console API),
+  `test_audit_export.py` (every format, re-verifying an export outside the platform, filters, formula guard, scope),
+  `test_report_style.py` (brand, Word / PowerPoint templates incl. .dotx / .potx, logo, writing guide in prompts only,
+  style packs, hostile files, permissions, preview), `test_tool_onboarding.py` (vendor API behaviour found by checking
+  every connector against its documentation: MDE findbyip form, Entra devices / partial lookups / Graph limits, RTR
+  async output and read-only commands only, NVD date windows, Avanan token expiry and token-less answers, quotes in
+  names escaped in every OData / FQL query and URL path), `test_report_design.py` (house style:
   header / footer / page fields, charts, no 'None' / 'n/a', 16:9 decks),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 820 platform tests passing on SQLite and 819 on PostgreSQL (836 collected; skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 2 on PostgreSQL), 205
+- Current counts (keep docs in sync when they change): 896 platform tests passing on SQLite and 895 on PostgreSQL (912 collected; skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 2 on PostgreSQL), 205
   engine tests, 108/108 features verified with `--browser --engine --live --llm` (round 25); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
@@ -550,6 +575,16 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   settings explicitly (a Rapid7 `verify_tls` and the SIEM `field_map` both had this bug).
 - **Never name the client's in-house LLM platform** in the repo - its name contains the client's abbreviation. Call it
   "the client's in-house LLM (gateway)".
+- **Check a vendor's documentation, not only its happy path, before calling an integration done.** The onboarding
+  review found calls that fixtures happily answered but a tenant would refuse: Graph's per-user device lists reject
+  application permissions (and one refused read failed the whole identity lookup), MDE's `findbyip` is an OData
+  function call, CrowdStrike RTR commands are asynchronous (output is read back by `cloud_request_id`), NVD needs both
+  `lastModStartDate` and `lastModEndDate` within 120 days. A fixture must answer only the request the vendor accepts.
+- **Escape every investigation value that enters a vendor query.** Host, user and indicator names were put straight
+  into OData / FQL filters and URL paths: `o'brien@...` broke the Graph look-ups, and a crafted name could rewrite the
+  filter. Use `odata_str` (Graph, MDE), `fql_str` (CrowdStrike) and `path_part` (URL segments) from
+  `connectors/tools/_common.py`. Uploaded XML is checked with `core/text.unsafe_xml` (DTD / entity, or a UTF-16 / 32
+  encoding that would hide one from a byte check).
 - **Equal timestamps on Windows**: the clock advances in ~15 ms steps, so "newest first" by time alone is random
   within a tick - make times strictly increasing (case notes, `JobRun.ordinal`).
 - **`demo` expectations** in the guides (7+3 cases, 37 approvals, 6 open vulnerabilities; the same with or without the ML engine) are real; if you change fixtures or

@@ -75,7 +75,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Internal mail domains | Every domain the organisation uses (drives pseudonymisation, "internal" logic and threat-intel withholding) |
 | Key suppliers | The organisation's suppliers and their domains (supplier impersonation and payment-diversion detection) |
 | Sanctioned services | The SaaS the organisation has approved (everything else seen in DNS is reported as shadow IT) |
-| Ownership | CMDB access or a maintained ownership spreadsheet |
+| Ownership | CMDB access or a maintained ownership spreadsheet; for cloud resources (Wiz has no CMDB), a sheet of subscription or resource -> owning team, uploaded in the console |
 | Retention periods | Raw data, telemetry, AI logs, access log |
 
 ### LLM (optional, can follow later)
@@ -146,7 +146,7 @@ immediately (section 6).
 
 | Activity | Result at the time of writing |
 |---|---|
-| Platform test suite on SQLite and PostgreSQL 16 | 820 on SQLite, 819 on PostgreSQL (one SQLite-file check skips there) |
+| Platform test suite on SQLite and PostgreSQL 16 | 896 on SQLite, 895 on PostgreSQL (one SQLite-file check skips there) |
 | Phishing ML engine tests | 205 passing |
 | Feature verification (including a real-browser tour, live public feeds and a live LLM) | 108 of 108 features verified |
 | Penetration suite, input fuzzing, static analysis, dependency audit | No open findings |
@@ -235,7 +235,7 @@ Confirmed before the platform is promoted beyond the read-only stage:
 | 3 | Role holders (propose vs approve separated), break-glass custodians | Phase 0 |
 | 4 | Retention periods per data class | Phase 0 |
 | 5 | Threat-intelligence sources permitted to receive external indicators | Phase 2 |
-| 6 | LLM gateway, models per tier, token allocation, pseudonymisation stays on | Phase 2 |
+| 6 | LLM gateway, the models offered per feature (`SOC_LLM_MODELS`, checked with *Check which models answer*), token allocation, pseudonymisation stays on | Phase 2 |
 | 7 | Notification channels and the severity threshold | Phase 2 |
 | 8 | Success-criteria targets (section 5) | Before phase 3 |
 | 9 | Action types approved for human-approved execution, and their write permissions | Phase 4 |

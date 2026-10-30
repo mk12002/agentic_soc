@@ -460,11 +460,34 @@
    "body": {
     "resources": [
      {
+      "session_id": "rtr-sess-001",
+      "cloud_request_id": "rtr-req-001"
+     }
+    ]
+   },
+   "status": 200
+  },
+  {
+   "method": "GET",
+   "path": "^/real-time-response/entities/command/v1$",
+   "body": {
+    "resources": [
+     {
       "stdout": "PID  NAME\n4120 powershell.exe\n5528 msedge.exe",
+      "stderr": "",
       "complete": true
      }
     ]
    },
+   "status": 200,
+   "params": {
+    "cloud_request_id": "*"
+   }
+  },
+  {
+   "method": "DELETE",
+   "path": "^/real-time-response/entities/sessions/v1$",
+   "body": {},
    "status": 200
   },
   {

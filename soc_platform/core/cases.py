@@ -319,6 +319,7 @@ class CaseService:
                            "facts": [c for c in claims if c.get("kind") == "fact"],
                            "inferences": [c for c in claims if c.get("kind") != "fact"]},
             "entities": entities,
+            "watchlists": self._watchlists(case_id),
             "timeline": timeline,
             "evidence": dict(by_dim),
             "actions": [{"id": a.id, "action_type": a.action_type, "status": a.status, "level": a.autonomy_level,
@@ -338,6 +339,14 @@ class CaseService:
             "audit": [{"seq": r.seq, "ts": r.ts.isoformat(), "actor": f"{r.actor_type}:{r.actor_id}",
                        "event": r.event_type} for r in reversed(self.audit.query(subject_id=case_id, limit=500))],
         }
+
+    def _watchlists(self, case_id: str) -> list[dict[str, Any]]:
+        """People, hosts and indicators of this case on the block / exception list (context only: no figure,
+        verdict or action depends on it)."""
+        from soc_platform.config import get_settings
+        from soc_platform.core.watchlists import WatchlistService
+
+        return WatchlistService(self.s).case_matches([case_id], get_settings().org_domains).get(case_id, [])
 
     def _get(self, case_id: str) -> Case:
         case = self.s.get(Case, case_id)

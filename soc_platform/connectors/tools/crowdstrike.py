@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from soc_platform.connectors.base import LookupResult, Page
+from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.http import HttpTransport, OAuth2ClientCredentials
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import (
     ConnectorAction,
     ToolConnector,
     Watermark,
+    fql_str,
     need,
     ok_lookup,
     parse_ts,
@@ -40,8 +41,9 @@ class CrowdStrikeConnector(ToolConnector):
     dimension = "endpoint"
     streams = ("alerts", "hosts", "vulnerabilities")
     lookups = ("host", "hash", "domain", "ip", "user")
-    read_scopes = ("Alerts:read", "Hosts:read", "Spotlight vulnerabilities:read", "IOCs:read")
-    write_scopes = ("Hosts:write", "Real time response:write")
+    read_scopes = ("Alerts:read", "Hosts:read", "Vulnerabilities (Spotlight):read", "IOC Management:read")
+    # containment, and read-only RTR commands (ps, netstat, ls) - the host's response policy must also allow RTR
+    write_scopes = ("Hosts:write", "Real time response:read")
     page_size = 100
 
     # ------------------------------------------------------------------ streams
@@ -186,12 +188,12 @@ class CrowdStrikeConnector(ToolConnector):
                 devs = (self.post("/devices/entities/devices/v2", json={"ids": [aid]}).get("resources", []) if aid else [])
                 devs = [d for d in devs if d.get("device_id") == aid]
                 if not devs:          # no device id known (or it was retired): the host name, as Falcon reports it
-                    ids = self.get("/devices/queries/devices/v1", params={"filter": f"hostname:'{value}'"}).get("resources") or []
+                    ids = self.get("/devices/queries/devices/v1", params={"filter": f"hostname:{fql_str(value)}"}).get("resources") or []
                     devs = self.post("/devices/entities/devices/v2", json={"ids": ids}).get("resources", []) if ids else []
                 recs = [self._host(d) for d in devs]
                 alerts = []
                 for d in devs:
-                    q = self.get("/alerts/queries/alerts/v2", params={"filter": f"device.device_id:'{d['device_id']}'"})
+                    q = self.get("/alerts/queries/alerts/v2", params={"filter": f"device.device_id:{fql_str(d['device_id'])}"})
                     aids = q.get("resources") or []
                     if aids:
                         alerts += [self._alert(a) for a in
@@ -202,14 +204,14 @@ class CrowdStrikeConnector(ToolConnector):
                                  found=bool(devs), endpoint_alerts=len(alerts),
                                  contained=any(d.get("status") == "contained" for d in devs))
             if entity_type == "user":
-                q = self.get("/alerts/queries/alerts/v2", params={"filter": f"user_name:'{value.split('@')[0]}'"})
+                q = self.get("/alerts/queries/alerts/v2", params={"filter": f"user_name:{fql_str(value.split('@')[0])}"})
                 aids = q.get("resources") or []
                 alerts = [self._alert(a) for a in self.post("/alerts/entities/alerts/v2", json={"composite_ids": aids})
                           .get("resources", [])] if aids else []
                 return ok_lookup(self, alerts, f"{len(alerts)} Falcon alert(s) for user {value}",
                                  endpoint_alerts=len(alerts))
             itype = {"hash": "sha256", "domain": "domain", "ip": "ipv4"}[entity_type]
-            body = self.get("/iocs/combined/indicator/v1", params={"filter": f"type:'{itype}'+value:'{value.lower()}'"})
+            body = self.get("/iocs/combined/indicator/v1", params={"filter": f"type:'{itype}'+value:{fql_str(value.lower())}"})
             iocs = body.get("resources") or []
             summary = (f"custom IOC present: action={iocs[0].get('action')}, severity={iocs[0].get('severity')}"
                        if iocs else f"no custom IOC for {value}")
@@ -232,24 +234,74 @@ class CrowdStrikeConnector(ToolConnector):
         return {"released": ids, "response": body}
 
     def rtr_collect(self, params: dict, targets: list) -> dict:
-        """Evidence-preserving collection over RTR (replaces the custom polling agent, IM-T09)."""
+        """Evidence-preserving collection over RTR (replaces the custom polling agent, IM-T09). RTR commands are
+        asynchronous: each is queued (``cloud_request_id``) and its output read back until complete; the session is
+        closed afterwards."""
         out = {}
-        commands = params.get("commands") or ["ps", "netstat", "ls C:\\Windows\\Temp"]
+        commands = params.get("commands") or list(RTR_DEFAULT)
+        if _not_read_only(commands):
+            raise ConnectorError(f"RTR collection runs read-only commands only ({', '.join(sorted(RTR_READ_ONLY))})")
         for aid in targets_of(targets, "asset", "crowdstrike_aid"):
             sess = self.post("/real-time-response/entities/sessions/v1", json={"device_id": aid, "origin": "soc_platform"})
-            sid = ((sess.get("resources") or [{}])[0]).get("session_id", "fixture-session")
+            sid = ((sess.get("resources") or [{}])[0]).get("session_id")
+            if not sid:
+                raise ConnectorError(f"RTR session for {aid} was not opened (is the host online, and RTR allowed by its "
+                                     "response policy?)")
             results = []
-            for cmd in commands:
-                base = cmd.split()[0]
-                r = self.post("/real-time-response/entities/command/v1",
-                              json={"base_command": base, "command_string": cmd, "session_id": sid})
-                results.append({"command": cmd, "response": r})
+            try:
+                for cmd in commands:
+                    queued = self.post("/real-time-response/entities/command/v1",
+                                       json={"base_command": cmd.split()[0], "command_string": cmd, "session_id": sid})
+                    rid = ((queued.get("resources") or [{}])[0]).get("cloud_request_id")
+                    results.append({"command": cmd, **self._rtr_result(rid)})
+            finally:
+                try:
+                    self.req("DELETE", "/real-time-response/entities/sessions/v1", params={"session_id": sid})
+                except ConnectorError as exc:      # the session expires on its own; never hide the collection's outcome
+                    from soc_platform.core.observability import event
+
+                    event("connector.rtr_session_not_closed", 30, connector=self.name, error=type(exc).__name__)
             out[aid] = results
         return {"collected": out}
+
+    def _rtr_result(self, request_id: str | None, *, wait_s: float = 60.0) -> dict[str, Any]:
+        """A queued RTR command's output, read until complete (bounded wait)."""
+        import time
+
+        if not request_id:
+            return {"complete": False, "error": "the command was not queued"}
+        deadline = time.monotonic() + wait_s
+        while True:
+            r = ((self.get("/real-time-response/entities/command/v1",
+                           params={"cloud_request_id": request_id, "sequence_id": 0}).get("resources") or [{}])[0])
+            if r.get("complete") or time.monotonic() > deadline:
+                return {"complete": bool(r.get("complete")), "stdout": r.get("stdout", ""), "stderr": r.get("stderr", ""),
+                        "cloud_request_id": request_id}
+            time.sleep(2)
+
+
+# Read-only RTR commands (CrowdStrike's "Real time response: read" scope). Collection never runs anything else, even
+# if the API client is later given the active-responder scope.
+RTR_READ_ONLY = frozenset({"ps", "netstat", "ls", "ipconfig", "env", "filehash", "getsid", "history", "mount",
+                           "eventlog"})
+RTR_DEFAULT = ("ps", "netstat", "ls C:\\Windows\\Temp")
+
+
+def _not_read_only(commands: Any) -> list[str]:
+    """The commands that are not read-only RTR commands (all of them when ``commands`` is not a list)."""
+    if not isinstance(commands, (list, tuple)) or not commands:
+        return ["commands must be a list of read-only RTR commands"]
+    return [str(c)[:80] for c in commands
+            if not isinstance(c, str) or not c.strip() or c.split()[0].lower() not in RTR_READ_ONLY]
 
 
 def _preconditions_has_aid(params: dict, targets: list) -> list[str]:
     return [] if targets_of(targets, "asset", "crowdstrike_aid") else ["target asset has no CrowdStrike agent id"]
+
+
+def _preconditions_collect(params: dict, targets: list) -> list[str]:
+    bad = _not_read_only(params.get("commands") or list(RTR_DEFAULT))
+    return _preconditions_has_aid(params, targets) + ([f"not a read-only RTR command: {', '.join(bad)}"] if bad else [])
 
 
 def _actions(c: CrowdStrikeConnector) -> list:
@@ -260,7 +312,7 @@ def _actions(c: CrowdStrikeConnector) -> list:
                         preconditions=_preconditions_has_aid),
         ConnectorAction("endpoint.collect_forensics", c, c.rtr_collect,
                         description="Real Time Response read-only collection (ps/netstat/file listing)",
-                        preconditions=_preconditions_has_aid),
+                        preconditions=_preconditions_collect),
     ]
 
 

@@ -3,15 +3,16 @@
 All figures are computed deterministically by the domain services; this module only
 lays them out. Narrative commentary comes from the LLM gateway (grounded on the
 computed figures, which are passed as evidence) or from deterministic sentences when
-no model is configured. the client's own templates can be supplied: a ``.docx`` template is
-used as the base document (its styles/header/footer are kept) and a ``.pptx``
-template supplies the slide master.
+no model is configured. Every report is laid out in the organisation's report style (``reporting/style.py``:
+templates, logo, brand, writing guide), set on the Reports screen; without one, the house style.
 """
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from pptx.util import Inches
 from sqlalchemy.orm import Session
@@ -20,11 +21,27 @@ from soc_platform.core.models import utcnow
 from soc_platform.domains.vulnerability.models import ReportRun
 from soc_platform.llm.gateway import LLMGateway
 
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _styled(fn: F) -> F:
+    """Render the report inside the organisation's report style."""
+    @functools.wraps(fn)
+    def run(self: Any, *args: Any, **kwargs: Any) -> Any:
+        from soc_platform.reporting.style import use_style
+
+        with use_style(self.s):
+            return fn(self, *args, **kwargs)
+    return run  # type: ignore[return-value]
+
 
 def _commentary(llm: LLMGateway | None, workflow: str, question: str, facts: dict[str, Any]) -> tuple[str, str]:
+    from soc_platform.reporting import design as D
+    from soc_platform.reporting.style import guide_instruction
+
     evidence = [{"id": f"E{i + 1}", "claim": f"{k}: {v}", "source": "computed"} for i, (k, v) in enumerate(facts.items())]
     if llm is not None:
-        g = llm.grounded(workflow, question, evidence, tier="small")
+        g = llm.grounded(workflow, question + guide_instruction(D.writing_guide()), evidence, tier="small")
         if g.get("source") == "llm" and g.get("claims"):
             return " ".join(c["text"] for c in g["claims"]), "llm (grounded on computed figures)"
     return _deterministic_commentary(facts), "deterministic"
@@ -173,6 +190,7 @@ class ReportService:
 
     # ------------------------------------------------------------------ VM-F13 daily exposure
 
+    @_styled
     def daily_exposure(self, vm: Any, *, by: str = "system:scheduler") -> ReportRun:
         from soc_platform.reporting import design as D
 
@@ -226,6 +244,7 @@ class ReportService:
 
     # ------------------------------------------------------------------ VM-F13 weekly VM report
 
+    @_styled
     def weekly_vm(self, vm: Any, *, by: str = "system:scheduler") -> ReportRun:
         from sqlalchemy import select
 
@@ -280,6 +299,7 @@ class ReportService:
 
     # ------------------------------------------------------------------ weekly management presentation
 
+    @_styled
     def weekly_management_deck(self, vm: Any, incident: Any | None = None, phishing: Any | None = None, *,
                                by: str = "system:scheduler") -> ReportRun:
 
@@ -290,7 +310,7 @@ class ReportService:
         report = "Weekly management update"
         prs = D.new_deck(self.templates.get("weekly_mgmt_pptx"))
         D.title_slide(prs, "SOC weekly management update", f"Week ending {v['now']:%d %B %Y}",
-                      "Every figure is computed from the connected security tools  ·  " + D.CLASSIFICATION)
+                      "Every figure is computed from the connected security tools  ·  " + D.classification())
         h = incident.handover(hours=24 * 7) if incident is not None else None
         p = phishing.metrics() if phishing is not None else None
         n = 1
@@ -374,6 +394,7 @@ class ReportService:
 
     # ------------------------------------------------------------------ IM-F12 / U15 investigation record & evidence pack
 
+    @_styled
     def investigation_report(self, view: dict[str, Any], *, by: str) -> ReportRun:
         from soc_platform.reporting import design as D
 
@@ -407,6 +428,13 @@ class ReportService:
         D.section(d, "Entities")
         D.table(d, ["Kind", "Role", "Name", "Seen by"], [[e["kind"], e["role"], e["name"], ", ".join(e["seen_by"])] for e in view["entities"]],
                 widths_cm=[2.2, 2.6, 6.6, 6.0])
+        if view.get("watchlists"):
+            D.section(d, "Watch lists", "On the organisation's block or exception list when this record was made. "
+                                        "Context only: no severity, verdict or action depends on it.")
+            D.table(d, ["List", "On the case", "Matched on", "Entry note", "Added by"],
+                    [[m["list_label"], f"{m['name']} ({m['role']})", m["matched_on"], m["entry"]["note"],
+                      f"{m['entry']['added_by']}, {m['entry']['added_at'][:10]}"] for m in view["watchlists"]],
+                    widths_cm=[2.4, 4.4, 4.4, 3.4, 3.2])
         D.section(d, "Timeline")
         D.table(d, ["Time (UTC)", "Source", "Event"], [[x["ts"], x.get("tool"), x["title"]] for x in view["timeline"]],
                 widths_cm=[4.2, 3.0, 10.2], empty="No timeline events.")
