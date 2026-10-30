@@ -186,6 +186,19 @@ def test_each_feature_uses_the_model_and_answer_cap_the_policy_sets(session):
                                                           ("small", "gpt-4.1-mini")]
 
 
+def test_one_small_deployment_serving_every_size_gives_large_work_room_to_finish(session):
+    """With only gpt-4.1-mini deployed, every feature was capped at the small answer size: a deep analysis (large
+    work) was cut off at 1,500 tokens mid-JSON and reported "no usable answer". Without a model chosen for the
+    feature, the cap follows the size of the work; an administrator's choice of model still brings its own cap."""
+    st = settings(llm_deployment="gpt-4.1-mini")
+    m = NamedModel()
+    g = LLMGateway(session, st, provider=m)
+    g.grounded("intelligence.deep_analysis", "q", EVIDENCE, tier="large")
+    g.grounded("phishing.explanation", "q", EVIDENCE, tier="small")
+    assert m.calls == [{"tier": "small", "max_tokens": 3_000, "model": "gpt-4.1-mini"},
+                       {"tier": "small", "max_tokens": 1_500, "model": "gpt-4.1-mini"}]
+
+
 def test_the_chosen_model_reaches_every_built_in_provider(monkeypatch):
     from soc_platform.llm import gateway as gwmod
     from soc_platform.llm.providers import openai_compatible

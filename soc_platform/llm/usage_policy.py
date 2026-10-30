@@ -308,7 +308,12 @@ def rule_for(policy: dict[str, Any], workflow: str, asked_tier: str) -> dict[str
         name = (policy.get("default_models") or {}).get(tier if tier in TIERS else "large")
     m = cat.get(name) or {"name": name or "", "deployment": None,
                           "size": r.get("tier") if r.get("tier") in TIERS else asked_tier if asked_tier in TIERS else "large"}
-    cap = r.get("max_output_tokens") or (policy.get("max_output_tokens") or {}).get(m["size"])
+    # A model chosen for the feature brings its size's cap. Without a choice the default model serves the size of work
+    # the code asks for, and the cap follows that work: one small deployment serving both sizes (the usual demo and
+    # many gateways) otherwise capped a deep analysis at the small answer size and cut its JSON off mid-sentence.
+    caps = policy.get("max_output_tokens") or {}
+    work = r.get("tier") if r.get("tier") in TIERS else asked_tier if asked_tier in TIERS else "large"
+    cap = r.get("max_output_tokens") or caps.get(m["size"] if r.get("model") in cat else work)
     return {"model": m["name"], "deployment": m["deployment"], "tier": m["size"], "max_output_tokens": cap,
             "enabled": r.get("enabled", True)}
 

@@ -889,7 +889,9 @@ Completion(text, prompt_tokens, completion_tokens, model)`).
 **Models:** each feature uses a model **by name**, chosen by an administrator on the AI usage screen from the
 deployment's list (`SOC_LLM_MODELS`; default gpt-4.1-nano, gpt-4.1-mini, gpt-4.1). The code asks only for a size -
 `large` for summaries, deep analysis and reports, `small` for routine narrative and planners - which sets the default
-model (`SOC_LLM_DEPLOYMENT` / `SOC_LLM_DEPLOYMENT_SMALL`), the timeout and the default answer cap. The gateway passes the
+model (`SOC_LLM_DEPLOYMENT` / `SOC_LLM_DEPLOYMENT_SMALL`), the timeout and the default answer cap. The cap follows the
+size of the work unless an administrator chose the feature's model (then that model's size): one small deployment serving
+both sizes once capped a deep analysis at 1,500 tokens and cut its answer off mid-JSON. The gateway passes the
 chosen deployment to the provider (`model=`); a model the endpoint does not serve fails that call and the
 deterministic text is used, so *Check which models answer* exists to find that before choosing.
 
