@@ -1,29 +1,12 @@
-# Live demo in 20-23 minutes - run sheet
+# Live demo in 20-23 minutes - speaking script
 
-A timed path through the platform for a live audience. It covers every important feature and concept, in an order
-that tells one story. For the detail behind any screen (every section, every formula, the long Q&A) keep
-[LIVE_DEMO_NOTES.md](LIVE_DEMO_NOTES.md) open in another window; the § references below point into it.
+Read the plain paragraphs aloud. Lines starting with **▶** are what you click or point at - do them, don't say them.
+Each section shows its clock time; if you're behind, see *Running long or short* at the end. The detail behind every
+screen (formulas, every section, the long Q&A) is in [LIVE_DEMO_NOTES.md](LIVE_DEMO_NOTES.md) - keep it open in
+another window.
 
-Figures are those of a freshly reset demo (see LIVE_DEMO_NOTES.md - they were read from one). Anything that moves with
-the day (risk decay, SLA ages, timings, audit counts, AI wording) is *read it off the screen*.
-
-**Timing at a glance** (target 21 minutes, 2 minutes of slack):
-
-| # | Clock | Segment | Concept it proves |
-|---|---|---|---|
-| 1 | 0:00 - 1:30 | Opening | one layer over existing tools; code decides, AI explains, people approve |
-| 2 | 1:30 - 2:45 | Overview | value measured against a baseline, never invented |
-| 3 | 2:45 - 6:45 | Phishing case | end-to-end investigation, two independent analyses, cited evidence |
-| 4 | 6:45 - 9:00 | Attack story | cross-tool reconstruction that argues against itself |
-| 5 | 9:00 - 10:00 | Entity 360 | one person from every tool; explainable risk |
-| 6 | 10:00 - 11:45 | Incident case | exposure-informed triage: same alert, different severity |
-| 7 | 11:45 - 13:30 | Approvals | nothing changes without a person; four-eyes live |
-| 8 | 13:30 - 15:00 | Intelligence | correlation rules and the read-only analyst assistant |
-| 9 | 15:00 - 16:30 | Vulnerabilities | four scanners → one record; priority; closure proved by the tool |
-| 10 | 16:30 - 17:45 | Watch lists | the SOC's own block / exception lists on every case, context only |
-| 11 | 17:45 - 19:30 | Govern | safe rollout per tool, autonomy policy and kill switch, AI by model name |
-| 12 | 19:30 - 20:30 | Reports and audit | figures that can't drift, client style, tamper-evident trail |
-| 13 | 20:30 - 21:30 | Close | limits, what's next |
+The figures below are those of a freshly reset demo. Anything that moves with the day - risk scores, SLA ages,
+timings, audit counts, the AI's wording - read off the screen rather than from this page.
 
 ---
 
@@ -33,282 +16,552 @@ the day (risk decay, SLA ages, timings, audit counts, AI wording) is *read it of
   `sign-in: development sign-in on`.
 - [ ] Three browser profiles signed in: **Lena** (Lead, all domains - your main window), **Alice** (Lead, all domains -
   the second approver), **Ada** (Admin, all domains).
-- [ ] Check: **Cases** *All 10 · Phishing 7 · Incident 3*; **Approvals** 37; **Vulnerabilities** 6.
-- [ ] Open the case *Reported: Action required: your password expires today*, then its **Attack story**, once (warms
-  it). With the AI on, run **Deep analysis** once so it is cached.
-- [ ] Open these as tabs in Lena's window, in this order, so you never hunt for a page: Overview · the phishing case ·
-  Cases · Approvals · Intelligence · Vulnerabilities · Watch lists · Integrations · Automation policy · Reports · Audit
-  log. Ada's window: AI usage.
+- [ ] Check: **Cases** shows *All 10 · Phishing 7 · Incident 3*; **Approvals** 37; **Vulnerabilities** 6.
+- [ ] Open the case *Reported: Action required: your password expires today*, then its **Attack story**, once to warm
+  it. With the AI on, run **Deep analysis** once so it is cached.
+- [ ] Tabs in Lena's window, in this order: Overview · the phishing case · Cases · Approvals · Intelligence ·
+  Vulnerabilities · Watch lists · Integrations · Automation policy · Reports · Audit log. Ada's window: AI usage.
 - [ ] A small watch-list workbook on the desktop: sheet *Users* with a *Username* header and `ACME\jane.doe`; sheet
   *Hosts* with a *Hostname* header and `web01`.
-- [ ] Approve nothing beforehand; every approval moves counts on several pages.
+- [ ] Approve nothing beforehand - every approval moves counts on several pages.
 - [ ] 1920 × 1080, about 90 % zoom, light theme.
 
 ---
 
-## 1. Opening - 0:00 to 1:30 (no clicks; Overview on screen)
+## Every tab, in a sentence or two
 
-**Say:**
-> "Your SOC already has strong tools. The time goes into gathering, correlating and documenting across them. This
-> platform is one investigation and automation layer on top of the tools you already own - 21 connectors, three
-> workflows: phishing, incidents and vulnerabilities, plus an intelligence layer across all three."
+The sidebar has four groups. Use these when someone asks *"what's that tab?"*, or to fill time. The section number
+says where the script demonstrates it; *(on request)* means it isn't in the timed path.
 
-**The three rules - say them slowly; most questions come back to one of them:**
-1. **Every figure, score, verdict and severity is computed in code.** Same evidence, same answer.
-2. **The AI only explains.** Every sentence must cite evidence or it is removed, and with the AI off you get the same
-   numbers, verdicts and actions.
-3. **Nothing changes in a security tool until a person approves it.** The default for every action is *recommend*.
+### Operate - the daily work
 
-**Say the limits up front (it buys credibility):**
-> "What you're seeing runs on vendor-shaped sample data through the production code. It hasn't run on your tenant yet
-> - that happens tool by tool, read-only first. Accuracy on your mail and alerts is measured in shadow mode against
-> your analysts' decisions."
+**Overview** (section 2).
+This is the front page: the last fourteen days across phishing, incidents and vulnerabilities - open cases, actions
+waiting for approval, the automation rate, and the value scorecard. Every figure is computed from stored records.
+
+**Intelligence** (section 8).
+This looks across all three workflows at once. It has a situation brief, the correlated findings raised by thirteen
+fixed rules, the riskiest people and machines with their scores, and an assistant you can ask questions in plain
+English. The assistant only explains - it can't act.
+
+**Cases** (sections 3 and 6).
+Every investigation, phishing and incidents together. You can filter by domain or by owner, take a case yourself, and
+open any case for its evidence, its reasoning and its recommended actions.
+
+**Approvals** (section 7).
+Every action the platform wants to take, waiting for a person. You can filter by domain or by your own cases, and *Why
+and what* shows the evidence and the impact without leaving the list. Nothing here runs until the right person
+approves it.
+
+### Domains - one screen per workflow
+
+**Phishing** *(on request)*.
+Everything about reported e-mail: how many were reported, how many closed automatically, campaigns, who clicked and who
+clicked more than once, and how long containment took. You can also upload a suspicious e-mail here and get a full
+case in seconds.
+
+**Vulnerabilities** (section 9).
+Findings from four scanners merged into one record per machine and vulnerability, ranked by real-world risk, with the
+owner and the deadline. Every vulnerability opens to show exactly why it got its priority.
+
+**Cloud posture** *(on request; "ahead of time" item 2)*.
+Cloud misconfigurations found by Wiz, each routed to the owning team with a deadline and a ticket. When a team says
+it's fixed, the platform asks Wiz again before it believes them.
+
+### Insight - where you stand
+
+**ATT&CK coverage** *(on request; "ahead of time" item 3)*.
+This maps the attacker techniques in the MITRE ATT&CK framework against the tools you have switched on. It shows what
+you can see, what you can't - the blind spots - what only one tool can see, and which detections have actually fired.
+
+**Shadow IT** *(on request)*.
+From DNS traffic, this shows the online services people use that aren't on your approved list, and any risky sites
+that were reached or blocked.
+
+**Supplier risk** *(on request; "ahead of time" item 4)*.
+For your key suppliers, this watches for look-alike domains, impersonation and payment-diversion attempts - the signs
+that a supplier's mailbox has been taken over.
+
+### Govern - control and proof
+
+**Watch lists** (section 10).
+Your SOC's own block and exception lists - users, machines, IP addresses, domains, links and file hashes. Every case is
+checked against them, and a match is shown as context only.
+
+**Integrations** (section 11).
+Where each tool is connected and rolled out stage by stage, with preflight checks, data freshness and the scheduled
+jobs. A change is proposed by one person and approved by another, and any tool can be paused at once.
+
+**Automation policy** (section 11).
+How much each kind of action may do on its own - today, everything is recommend only. Policy changes need a second
+person, and the kill switch is here.
+
+**AI usage** (section 11).
+Which AI model each feature uses, the monthly and daily budgets, per-person limits, and what it all costs.
+
+**Reports** (section 12).
+The standard reports, ready to run, or describe a report in words and the platform plans it. Every figure is computed
+in code, and reports follow your own templates and style.
+
+**Access** *(on request)*.
+For administrators: who has which role, granted with a reason and an end date; keys for service accounts, shown only
+once; and a table of exactly what every role can do. An administrator can't approve actions - that's a different job.
+
+**Audit log** (section 12).
+Every look-up, recommendation, approval and action, by a person or by the platform, in a chain that can't be quietly
+changed - and it can be exported and checked independently.
+
+---
+
+## 1. Opening - 0:00 to 1:30
+
+**▶ Overview on screen. No clicks.**
+
+Your SOC already has strong tools. Where the time goes is everything in between - gathering evidence from each tool,
+connecting it, and writing it up.
+
+What I'm going to show you is one investigation and automation layer that sits on top of the tools you already own.
+It connects to twenty-one of them, and it runs three workflows - phishing, incidents and vulnerabilities - with an
+intelligence layer that looks across all three.
+
+Before I click anything, there are three rules this platform lives by. Most questions you'll have come back to one of
+them.
+
+First: every figure, every score, every verdict and every severity is computed in code. The same evidence always gives
+the same answer.
+
+Second: the AI only explains. Every sentence it writes has to point at a piece of evidence, or it's removed. And if you
+switch the AI off, you get exactly the same numbers, verdicts and recommended actions.
+
+Third: nothing changes in any of your security tools until a person approves it. That's the default for every single
+action.
+
+And one honest point up front. What you're seeing runs on sample data shaped exactly like your vendors' data, going
+through the production code. It hasn't run on your tenant yet. That happens one tool at a time, read-only first. And
+accuracy on your own mail and alerts is measured in shadow mode, against your analysts' decisions.
 
 ---
 
 ## 2. Overview - 1:30 to 2:45
 
-**Click:** nothing - point.
+**▶ Point at the tiles: Open cases 8, Awaiting approval 37, Automation rate 0 %.**
 
-- **Tiles:** *Open cases 8* (2 of 10 auto-closed), *Awaiting approval 37*, *Automation rate 0 %*.
-  > "Zero percent automation is by design. Automation is switched on per action type, by a two-person decision,
-  > when the evidence says it's safe."
-- **Value scorecard:** 8 benefit measures - phishing handling time, time to contain a click, alert to decision,
-  time to a validated fix, findings past SLA, report hours, analyst capacity freed, agreement with analysts.
-  > "Each row says where its number comes from. Until you give it a baseline it says *awaiting baseline* - it never
-  > invents a saving."
-- **Automation quality gate** under the table: agreement ≥ 90 % and missed threats ≤ 2 %; *not yet met*.
-  > "This is the evidence you'd want before automating anything."
-- **Data quality:** asset and identity match rate, unresolved queue 0. One sentence:
-  > "Every tool's records are resolved to one host and one person. Ambiguous matches go to a review queue, never
-  > guessed."
+This is the overview. Eight open cases - two more were closed automatically. Thirty-seven actions waiting for a
+decision. And an automation rate of zero percent.
+
+That zero is deliberate. Automation is switched on one action type at a time, by a two-person decision, and only when
+the evidence says it's safe.
+
+**▶ Point at the Value scorecard.**
+
+This scorecard tracks the benefits you'd actually care about - how long a phishing report takes to handle, how fast a
+clicked link is contained, time from alert to decision, time to a proven fix, and so on. Each row says where its
+number comes from. And until you give it your baseline, it says *awaiting baseline*. It never invents a saving.
+
+**▶ Point at the Automation quality gate under the table.**
+
+This line is the evidence you'd want before automating anything: at least ninety percent agreement with your analysts,
+and no more than two percent missed threats. Today it says *not yet met* - and that's the honest answer.
+
+**▶ Point at Data quality.**
+
+And one more thing here. Every tool's records are matched to one host and one person. When a match is ambiguous, it
+goes to a review queue. It's never guessed.
 
 ---
 
 ## 3. Phishing case - 2:45 to 6:45 (the centrepiece)
 
-**Click:** the tab with *Reported: Action required: your password expires today*. (Detail: LIVE_DEMO_NOTES §6.)
+**▶ Open the tab with *Reported: Action required: your password expires today*.** (Detail: LIVE_DEMO_NOTES §6.)
 
-**Tell the story the platform worked out by itself (point at each as you go):**
-1. **Verdict: malicious, 95 %, critical.** A sender imitating Microsoft (`micros0ft` with a zero), failed DMARC,
-   display name mismatch, pressure language, a link domain rated malicious by three intelligence sources.
-2. **Analysis card - two independent verdicts side by side:** seven offline ML models (one per e-mail component) and
-   fixed, named rules. The more severe counts.
-   > "The models run inside the platform - no e-mail leaves for analysis. Links are never opened or fetched."
-3. **Campaign scope:** every recipient of the same campaign found (8).
-4. **Who clicked:** Jane clicked through; another click was **blocked by Safe Links - and a blocked click is not
-   counted as a click.**
-5. **Impact on Jane:** the EDRs, Entra and DNS were queried in parallel: PowerShell on her laptop reaching the
-   phishing domain, a sign-in from an anonymising network, a new inbox forwarding rule, a new device.
-6. **Control disagreement:** both e-mail security tools had passed the message - recorded as evidence.
+Let me show you one case from start to finish. Someone reported this e-mail. Everything you're about to see, the
+platform worked out on its own.
 
-**Show grounding (15 seconds, it lands well):** hover a reference like **E3** in the Assessment - the popover shows tool,
-time and record; click it and the evidence row lights up.
-> "Facts and inferences are kept apart, and every statement points at a record."
+**▶ Point at the verdict.**
 
-**Recommended actions (9):** scroll to the table.
-> "Contain first, communicate last. Purge, isolation, password reset and domain block need two different people.
-> Purge and password reset are destructive - never automatic, whatever the policy says."
+The verdict is malicious, ninety-five percent, critical. And here's why. The sender is imitating Microsoft - look
+closely, that's "micros0ft" with a zero. It failed DMARC. The display name doesn't match the sender. The wording
+pushes you to act now. And the link goes to a domain that three intelligence sources rate as malicious.
 
-Point at the right column in one breath: *Entities* (with *seen by* - which tools), *Analyst decision* (feeds the
-quality measures), *Analyst notes* (append-only), *Timeline* and *Audit trail*.
+**▶ Point at the Analysis card.**
+
+This verdict comes from two independent analyses, side by side. On one side, seven machine-learning models - one for
+each part of the e-mail. On the other, a set of fixed, named rules. Whichever is more severe wins.
+
+Two things matter here. The models run inside the platform - no e-mail leaves your environment to be analysed. And no
+link is ever opened or fetched.
+
+**▶ Point at campaign scope and who clicked.**
+
+It then worked out the whole campaign: eight people received the same e-mail. And it checked who clicked. Jane
+clicked through. Someone else's click was blocked by Safe Links - and a blocked click is not counted as a click.
+
+**▶ Point at the impact on Jane.**
+
+Then it looked at what happened to Jane - asking the endpoint tools, Entra and DNS all at the same time. On her
+laptop, PowerShell reached the phishing domain. There was a sign-in from an anonymising network. A new inbox
+forwarding rule. And a new device registered to her account.
+
+**▶ Point at the control disagreement.**
+
+And notice this: both of your e-mail security tools let this message through. The platform records that as evidence
+in its own right.
+
+**▶ Hover a reference like E3 in the Assessment, then click it.**
+
+Every statement here points at a record. Hover over a reference and you see the tool, the time and the record. Click it
+and the evidence lights up. Facts and inferences are kept apart, so you always know which is which.
+
+**▶ Scroll to Recommended actions.**
+
+Here are the nine recommended actions, in order - contain first, communicate last. Purging the campaign, isolating the
+laptop, resetting the password and blocking the domain all need two different people to approve. And purge and
+password reset are treated as destructive - they can never run automatically, whatever the policy says.
+
+**▶ Sweep down the right-hand column.**
+
+Down the side: every entity involved and which tools saw it, the analyst's decision - which feeds the quality
+measures you saw on the overview - notes that can only be added to, never edited, the timeline, and the audit trail.
 
 ---
 
 ## 4. Attack story - 6:45 to 9:00
 
-**Click:** **Attack story** on the case. (LIVE_DEMO_NOTES §8.)
+**▶ Click Attack story on the case.** (LIVE_DEMO_NOTES §8.)
 
-- **Read the computed reason aloud:** *"Confirmed compromise - 8 kill-chain stages reached (1 more blocked),
-  corroborated by 9 tools; benign explanations rejected."*
-  > "This verdict is a rule, not the AI: three or more stages including a deep one, three or more tools, and no
-  > benign explanation left standing."
-- **Kill chain:** observed / blocked / *checked - none* / *blind spot*.
-  > "Privilege escalation was blocked by the privilege manager. And 'not found' always says which tools looked - a
-  > stage no tool can see is a blind spot, never 'clean'."
-- **Benign explanations tested** - the most persuasive section:
-  > "It argues against itself: legitimate e-mail? Rejected. Travel or VPN? Rejected - anonymising network. Legitimate
-  > IT script? Rejected - it reached the phishing domain. Privileged secret access was normal duty? Unlikely - confirm
-  > with its owner."
-- **Response plan:** Contain → Preserve evidence → Eradicate → Recover → Communicate; *Approve selected* still goes
-  through the policy and four-eyes for each action.
-- **Deep analysis** (only if AI is on and it's cached): one sentence.
-  > "An optional second opinion from the model on exactly this evidence, pseudonymised. If it disagrees, it says so
-  > in red - the platform's verdict does not change."
+Now the same incident, rebuilt across every tool as one attack story.
+
+**▶ Point at the reason line at the top.**
+
+Look at the line at the top: confirmed compromise - eight kill-chain stages reached, one more blocked, corroborated by
+nine tools, benign explanations rejected.
+
+That verdict is a rule, not the AI. Three or more stages including a deep one, three or more tools agreeing, and no
+innocent explanation left standing.
+
+**▶ Point at the kill chain.**
+
+Each stage is marked observed, blocked, checked and nothing found, or blind spot. Privilege escalation here was
+blocked by the privilege manager. And when something isn't found, it always tells you which tools looked. A stage no
+tool can see is called a blind spot - it's never called clean.
+
+**▶ Point at Benign explanations tested.**
+
+This is the part people find most convincing. The platform argues against itself. Could this be a legitimate e-mail?
+Rejected. Could the odd sign-in be travel or a VPN? Rejected - it came from an anonymising network. Could the script
+be legitimate IT work? Rejected - it reached the phishing domain. Was the privileged secret accessed as part of normal
+duties? Unlikely - and it tells you to confirm with the secret's owner.
+
+**▶ Point at the Response plan.**
+
+The response plan follows the same order: contain, preserve evidence, eradicate, recover, communicate. You can approve
+several at once, but each action still goes through the policy and the two-person rule.
+
+**▶ Only if the AI is on and Deep analysis is cached - scroll to it.**
+
+And this is an optional second opinion from the model, on exactly this evidence, with identities pseudonymised. If it
+disagrees, it says so in red. The platform's verdict doesn't change.
 
 ---
 
 ## 5. Entity 360 - 9:00 to 10:00
 
-**Click:** `jane.doe@acme-demo.com` in the story. (LIVE_DEMO_NOTES §9.)
+**▶ Click `jane.doe@acme-demo.com` in the story.** (LIVE_DEMO_NOTES §9.)
 
-- **Seen by 10 tools.** *Identifiers* lists every key that tied them together (Entra id, UPN, SID, SAM name).
-  > "The 'jane.doe' in the EDR and the 'ACME\jane.doe' in the vault are known to be the same person."
-- **Risk 100/100 - Why this score:** each signal with its points and source (deception hit +50, endpoint alert +40,
-  risky sign-in +30...).
-  > "Score = 100 × (1 − e^(−points/60)): every signal raises it, each by less, so one noisy alert can't make someone
-  > critical. Activity halves every 7 days; open exposures and incidents don't decay until fixed."
+This is Jane, as one person, seen by ten tools. The identifiers show how they were tied together - her Entra ID, her
+e-mail address, her Windows account. So the "jane.doe" in the endpoint tool and the "ACME backslash jane.doe" in the
+password vault are known to be the same person.
+
+**▶ Point at Why this score.**
+
+Her risk is a hundred out of a hundred, and every point is explained: the deception hit, the endpoint alert, the
+risky sign-in, each with its source. Every signal raises the score, but each one by a little less, so a single noisy
+alert can't make someone critical. Activity fades by half every week. Open exposures and open incidents don't fade
+until they're fixed.
 
 ---
 
 ## 6. Incident case - 10:00 to 11:45
 
-**Click:** Cases tab → **Unusual outbound connection from web server**. (LIVE_DEMO_NOTES §7.)
+**▶ Cases tab → open *Unusual outbound connection from web server*.** (LIVE_DEMO_NOTES §7.)
 
-- Point at **Why high** in the Assessment:
-  > "The tool rated this alert **low**. web01 carries Log4Shell, a CISA known-exploited vulnerability - one level up.
-  > It's internet-facing and business-critical in the CMDB - at least high. The same alert on a patched laptop
-  > would stay low. The platform knows because it holds the vulnerability and CMDB data too."
-- **Needs review, 55 %:** only two independent areas agree.
-  > "It's honest that a person should look - and still recommends containment."
-- **Evidence** came from parallel enrichment: every relevant tool asked at once, 20-second deadline; a tool that
-  doesn't answer shows as *unavailable*, never as "nothing found".
+Now an incident, to show why the platform needs all your data in one place.
+
+**▶ Point at Why high in the Assessment.**
+
+The tool that raised this alert rated it low. But this server, web01, has Log4Shell - a vulnerability CISA lists as
+actively exploited. That moves it up a level. It's also internet-facing, and the CMDB says it's business-critical. So
+it's at least high.
+
+The same alert on a fully patched laptop would have stayed low. The platform can only make that call because it holds
+the vulnerability data and the CMDB data alongside the alert.
+
+**▶ Point at Needs review, 55 %.**
+
+And it's honest about its confidence: only two independent areas agree, so it marks this for a person to review - and
+still recommends containment.
+
+**▶ Point at the Evidence.**
+
+All this evidence came from asking every relevant tool at the same time, with a twenty-second deadline. If a tool
+doesn't answer, it shows as unavailable - never as "nothing found".
 
 ---
 
 ## 7. Approvals and four-eyes - 11:45 to 13:30
 
-**Click:** Approvals tab. (LIVE_DEMO_NOTES §10.)
+**▶ Approvals tab.** (LIVE_DEMO_NOTES §10.)
 
-> "Every write the platform wants to make arrives here - what, which targets, why, under which policy. There is no
-> other path to a tool."
+Every change the platform wants to make in one of your tools arrives here: what it wants to do, to which targets, why,
+and under which policy. There is no other path to a tool.
 
-1. Approve an **email.reporter_feedback** row → it runs (against the simulated mail system).
-2. Approve an **endpoint.isolate** row → toast *"First approval recorded - a second lead must approve"*.
-3. Switch to **Alice's** window → Approvals → approve the same row → it runs.
+**▶ Click Why and what on an endpoint.isolate row.**
 
-> "Same person can't give both approvals. API keys can never approve. Preconditions are re-checked at the moment it
-> runs, a retry can never isolate a host twice, and a reversible action records its reverse."
+And you don't have to open the case to decide. This shows the evidence the action is based on, exactly what will
+happen, whether it can be undone, and who recommended it.
+
+**▶ Approve an email.reporter_feedback row.**
+
+A routine action like thanking the person who reported the e-mail runs as soon as it's approved - here, against the
+simulated mail system.
+
+**▶ Approve the endpoint.isolate row.**
+
+Isolating a laptop is different. My approval is recorded - and it waits. A second lead has to approve.
+
+**▶ Switch to Alice's window → Approvals → approve the same row.**
+
+Alice approves - and now it runs.
+
+The same person can never give both approvals. An API key can never approve anything. Preconditions are checked again
+at the moment it runs, a retry can never isolate a host twice, and anything reversible records how to reverse it.
 
 ---
 
 ## 8. Intelligence - 13:30 to 15:00
 
-**Click:** Intelligence tab. (LIVE_DEMO_NOTES §4.)
+**▶ Intelligence tab.** (LIVE_DEMO_NOTES §4.)
 
-- **Situation brief:** the chip says *AI narrative* or *Platform summary* - say which, and that the figures are the
-  same either way.
-- **Correlated findings (20):** expand the top one (the phishing compromise chain) - rule name, evidence, next steps.
-  > "13 fixed correlation rules across every domain - compromise chain, privileged access after compromise, exposed
-  > host under attack, supplier fraud, repeat clicker... The AI may write the paragraph, never the finding."
-- **Ask the analyst:** type `Is jane.doe@acme-demo.com compromised and what should we do first?`
-  > "The question becomes look-ups from a fixed, read-only list; the answer is written only from their results, and a
-  > sentence without a valid citation is removed. The assistant can't take any action."
+The intelligence layer looks across all three workflows.
+
+**▶ Point at the chip on the Situation brief.**
+
+This brief is labelled - read the chip: *AI narrative* or *Platform summary*. Either way, the figures in it are the
+same.
+
+**▶ Expand the top correlated finding - the phishing compromise chain.**
+
+These are correlated findings - twenty of them right now. Each comes from one of thirteen fixed rules: a compromise
+chain like this one, privileged access after a compromise, an exposed server under attack, supplier fraud, a repeat
+clicker. The AI may write the paragraph. It never decides the finding.
+
+**▶ Point at Risk by user and host on the right.**
+
+On the right, the people and machines most at risk right now - Jane at the top, then her laptop. Each score is built
+from signals across every tool, and fades as they age. Click any name and you get the full picture you saw for Jane
+earlier.
+
+**▶ Type in Ask the analyst: `Is jane.doe@acme-demo.com compromised and what should we do first?`**
+
+And you can simply ask. Behind the scenes, the question becomes look-ups from a fixed, read-only list. The answer is
+written only from what those look-ups returned, and any sentence without a valid source is removed. The assistant
+can't take any action.
 
 ---
 
 ## 9. Vulnerabilities - 15:00 to 16:30
 
-**Click:** Vulnerabilities tab. (LIVE_DEMO_NOTES §13.)
+**▶ Vulnerabilities tab.** (LIVE_DEMO_NOTES §13.)
 
-- Point at **Seen by** on the Log4Shell row: rapid7, crowdstrike, wiz, defender_endpoint.
-  > "Four scanners, four names for the same server - one record per host and CVE."
-- **Priority:**
-  > "CVSS says how bad a bug could be; EPSS and KEV say whether it's being exploited; exposure and criticality say
-  > whether it matters here. Known-exploited and internet-facing is always P1. The owner comes from the CMDB."
-- **Ask about exposure:** type `which internet facing hosts have KEV vulnerabilities?` → *2 findings on 1 asset*; point
-  at the **Filter used** line.
-  > "The question becomes a filter that runs on the database - the answer is data, not generated text."
-- **Closure is proved, not claimed** (say it; click only if ahead of time): *Sync tickets* reopens a finding whose
-  ticket was closed while the scanner still sees it - a *false closure*. Cloud posture does the same with Wiz.
+**▶ Point at Seen by on the Log4Shell row.**
+
+Look at this row. Four scanners - Rapid7, CrowdStrike, Wiz and Defender - each with its own name for the same server.
+The platform turns that into one record per server and vulnerability.
+
+**▶ Click the CVE to open the finding.**
+
+And every finding opens. Here's how its priority was worked out. The CVSS score says how bad a bug could be. EPSS and
+the CISA list say whether it's actually being exploited. Exposure and criticality say whether it matters here. Each
+one shows exactly what it added. Anything known-exploited and internet-facing is always top priority. The owner comes
+from the CMDB.
+
+**▶ Back to the list. Type in Ask about exposure: `which internet facing hosts have KEV vulnerabilities?`**
+
+You can ask questions here too. The answer: two findings on one server. And look at the line underneath - *filter
+used*. Your question became a filter on the database. The answer is data, not generated text.
+
+**▶ Say it; click Sync tickets only if you're ahead of time.**
+
+And a fix is proved, not claimed. If someone closes a ticket while the scanner still sees the vulnerability, the
+platform reopens it and calls it a false closure. Cloud posture does the same with Wiz.
 
 ---
 
 ## 10. Watch lists - 16:30 to 17:45
 
-**Click:** Watch lists tab, as Lena. (LIVE_DEMO_NOTES §22.)
+**▶ Watch lists tab, as Lena.** (LIVE_DEMO_NOTES §22.)
 
-1. List: *Block list*. Choose the workbook. **Preview** → what would be added, with each entry's type; nothing has
-   changed yet.
-2. **Upload**.
-3. Cases tab → the red *Block list* badges on every case involving Jane or web01.
-4. Open the phishing case → the banner names Jane, what matched (`ACME\jane.doe` → her address) and who listed it.
+Your SOC keeps its own lists - accounts to watch, hosts that are allowed to do unusual things. Those come in here.
 
-> "Excel or CSV, users, hosts, IPs, domains, URLs, hashes. A match is shown on the case - context only: severity,
-> verdict and actions don't change, and an exception never clears a case. Leads only, with MFA, every change audited."
+**▶ List: Block list. Choose the workbook. Click Preview.**
+
+I'll load a spreadsheet. Preview shows exactly what would be added, and what kind of entry each one is. Nothing has
+changed yet.
+
+**▶ Click Upload. Then the Cases tab.**
+
+Now look at the cases: every case involving Jane or web01 carries a red *Block list* badge.
+
+**▶ Open the phishing case and point at the banner.**
+
+And on the case, it says who matched, what matched - "ACME backslash jane.doe" became her e-mail address - and who put
+it on the list.
+
+It takes Excel or CSV, and users, hosts, IP addresses, domains, links and file hashes. A match is context only.
+Severity, verdict and actions don't change, and an exception never clears a case. Only leads can change these lists,
+with MFA, and every change is audited.
 
 ---
 
 ## 11. Govern - 17:45 to 19:30 (three screens, about 35 seconds each)
 
-**Integrations** (LIVE_DEMO_NOTES §17): point at the **Stage** column and **Self-check 14 of 14**.
-> "Each tool goes live on its own: Fixtures → Record → Read → Recommend → Automate. Before a live stage, preflight
-> checks sign-in, every data stream's permission, parsing, freshness and the clock, and names the fix. Secrets live in
-> your vault - this screen only says *Set* or *Not set*. A change is proposed by one person and approved by another,
-> no restart, and any tool can be paused instantly."
-(If time: click **Preflight** on CrowdStrike.)
+**▶ Integrations tab. Point at the Stage column and Self-check 14 of 14.** (LIVE_DEMO_NOTES §17.)
 
-**Automation policy** (§18): the 26 action types, all at **L2**.
-> "Autonomy is per action type, versioned, two-person. Destructive actions, VIP targets and big blast radius can never
-> run on their own. The kill switch stops every automatic execution across every server - pausing a tool stops every
-> write to it."
+Now, how this goes live safely. Each tool is switched on by itself, in stages: sample data, then recording, then
+read-only, then recommend, and only then automate.
 
-**AI usage** - Ada's window (§19): point at a feature's **model dropdown** (gpt-4.1-nano / gpt-4.1-mini / gpt-4.1),
-the monthly and daily **budgets**, and **usable %**.
-> "You choose the model per feature, by name, and can add more. Budgets and per-person limits; over a limit, or with
-> the model down, people get the platform's own cited text - nothing that matters changes. Recommended: gpt-4.1-mini for
-> routine text and gpt-4.1 for reports and deep analysis - about $21 a month at your volume."
+Before any live stage, a preflight check tests the sign-in, the permission for every data stream, that the data can
+be read, that it's fresh, and that the clocks agree - and if something's wrong, it names the fix. Your secrets stay in
+your vault; this screen only ever says *set* or *not set*. A change is proposed by one person and approved by
+another, with no restart. And any tool can be paused instantly.
+
+**▶ If time: click Preflight on CrowdStrike.**
+
+**▶ Automation policy tab. Point at the action types, all at L2.** (§18.)
+
+Autonomy is set per action type, it's versioned, and changing it takes two people. Today every action is at level
+two - recommend only. Destructive actions, important people as targets, and anything with a large blast radius can
+never run on their own. The kill switch stops every automatic action on every server at once. And pausing a tool
+stops every change to that tool.
+
+**▶ Ada's window: AI usage. Point at a model dropdown, the budgets and usable %.** (§19.)
+
+And you stay in control of the AI. You pick the model for each feature, by name, and you can add more. There are
+monthly and daily budgets, and limits per person. If someone goes over a limit, or the model is down, they get the
+platform's own cited text instead - nothing that matters changes. Our recommendation is GPT-4.1 mini for routine text
+and GPT-4.1 for reports and deep analysis. At your volume, that's about twenty-one dollars a month.
 
 ---
 
 ## 12. Reports and audit - 19:30 to 20:30
 
-**Reports** (§20): point at the **standard reports** and **Report style**.
-> "Every figure in a report is computed and handed to the writer as numbered facts; a sentence with a figure that
-> isn't in them is removed. Upload your Word and PowerPoint templates, logo and writing guide, and every report
-> follows your house style."
+**▶ Reports tab. Point at the standard reports and Report style.** (§20.)
 
-**Audit log** (§23): point at *Chain verified* and the two approval records of the isolation you just did - two
-different actors.
-> "Append-only and SHA-256 hash-chained: changing any record breaks the chain, and the database itself refuses edits.
-> Export it as JSON Lines, CSV, Excel or a Word report - an unfiltered export can be re-verified outside the
-> platform."
-(If time: click **Trace** on a model-call row: the exact pseudonymised prompt, the answer, and every sentence the
-evidence check removed.)
+Reports. Every figure in a report is calculated first and handed to the writer as numbered facts. A sentence with a
+figure that isn't in those facts is removed. And you can upload your own Word and PowerPoint templates, your logo and
+your writing guide, so every report comes out in your house style.
+
+**▶ Audit log tab. Point at *Chain verified* and the two approval records for the isolation.** (§23.)
+
+And here's the trail of everything that happened - including the two approvals for that laptop isolation, by two
+different people. This log can only be added to. Every record is chained to the one before it, so changing any record
+breaks the chain - and the database itself refuses edits. You can export it to JSON, CSV, Excel or a Word report, and a
+full export can be checked again outside the platform.
+
+**▶ If time: click Trace on a model-call row.**
+
+And this shows exactly what the AI was sent, with identities pseudonymised, what it answered, and every sentence the
+evidence check removed.
 
 ---
 
 ## 13. Close - 20:30 to 21:30
 
-> "To sum up: one layer over the tools you have. Code computes every figure and verdict, the AI explains with
-> citations and can be switched off, and nothing touches a tool without a person - by default, for every action.
-> Development is complete. Next is your environment and sign-in, then your tools connected read-only one at a
-> time, and a shadow-mode pilot measured against your analysts."
+So, to sum up. One layer over the tools you already have. Code computes every figure and every verdict. The AI
+explains, with sources, and it can be switched off. And nothing touches a tool without a person - by default, for
+every action.
 
-Then go to the deck's last slide (*Next steps and what we need to go live*) and open for questions.
+Development is complete. The next steps are your environment and your sign-in, then your tools connected read-only,
+one at a time, and then a pilot in shadow mode, measured against your own analysts.
 
----
-
-## If you are running long or short
-
-| Behind by | Cut |
-|---|---|
-| 1 min | Entity 360 (§5) - say the risk formula on the attack story instead |
-| 2 min | the Ask-the-analyst question (§8); the exposure question (§9) |
-| 3+ min | Watch lists upload (§10) - just say it and show the Watch lists page; AI usage (§11) - one sentence |
-
-**Ahead of time? Add, in this order:** upload `artifacts/phishing/corpus/html_attachment_phish.eml` on *Phishing →
-Analyse a message* (a new malicious case appears in seconds) · Cloud posture: **Mark fixed → Validate** on acmebackups →
-*false closure - reopened* (say: *"it never changes Wiz or the cloud - it routes the fix and proves it"*; the *Ownership mapping* card is where the cloud teams' spreadsheet of subscription → team is uploaded, since Wiz has no CMDB) · ATT&CK coverage (93.8 %, 0 blind spots, 4 single-source) · Supplier risk (a look-alike
-supplier domain and the real supplier's mailbox likely compromised) · Shadow IT.
+**▶ Go to the deck's last slide - *Next steps and what we need to go live* - and open for questions.**
 
 ---
 
-## The ten questions you will get (answers in one breath)
+## Running long or short
 
-| Question | Answer |
-|---|---|
-| Is the AI deciding? | No. Verdicts, scores, severities and findings are fixed rules in code; the AI writes cited narrative only, and with it off every number is the same. |
-| Does our e-mail go to OpenAI? | The ML models run offline in the platform. The optional narrative sees only the evidence, with identities pseudonymised, sent only to the approved endpoint - your own LLM gateway in production. |
-| Do you click the links? | Never. Nothing fetches a URL taken from an e-mail. |
-| How accurate is it? | On our small labelled test set, the models plus rules got every verdict right - a regression check, not a claim. Real accuracy is measured in shadow mode on your mail. |
-| What if a tool is down? | Its evidence shows as *unavailable* and everything else keeps working; tested with every tool down at once. |
-| Can it act on its own? | Not by default - every action is L2, recommend. Automation is per action type, two-person, and destructive actions never run on their own. |
-| What does the kill switch stop? | Every automatic execution, on every server, surviving restarts. A person's explicit approval still runs; pause a tool to stop every write to it. |
-| Where does it run? | In your environment - Azure or on premises - with PostgreSQL; stored e-mails and reports are encrypted at rest. Outbound only to your tools, your LLM endpoint and webhooks. |
-| What do you need from us? | The deck's last slide: environment, Entra app registration, one read-only service account per tool and the reporting mailbox, LLM gateway access, licence confirmations, tool owners and two SOC leads. |
-| Is it hard-coded to the demo? | No. The test suite renames the whole organisation into other generated estates and requires the same results with zero leaked demo names. |
+**Behind by about a minute:** skip Entity 360 (section 5). On the attack story, just say: *"Jane's risk is a hundred
+out of a hundred, and every point is explained."*
 
-**Never say:** "it runs on a real tenant", "the AI decides", "99 % accurate", "it isolated the laptop" (say: "in this
-demo, against the simulated tool, after two approvals"), "the kill switch stops everything", or any number not on the
-screen. And never name the client or its in-house LLM platform - say "your organisation" and "your LLM gateway".
+**Behind by two minutes:** also skip typing the question to the analyst (section 8) and the exposure question
+(section 9). Just say they exist.
+
+**Behind by three or more:** also skip the watch-list upload (section 10) - show the Watch lists page and say what it
+does - and cover AI usage (section 11) in one sentence.
+
+**Ahead of time? Add these, in this order:**
+
+1. **A live phishing upload.** ▶ *Phishing → Analyse a message*, upload
+   `artifacts/phishing/corpus/html_attachment_phish.eml`. Say: *"A new malicious case appears in seconds."*
+2. **Proving a cloud fix.** ▶ *Cloud posture → Mark fixed → Validate* on acmebackups. It comes back *false closure -
+   reopened*. Say: *"It never changes Wiz or the cloud. It routes the fix to the owner, and proves whether it
+   happened."* Then point at the *Ownership mapping* card: *"Wiz has no CMDB, so the cloud teams upload their
+   subscription-to-team spreadsheet here."*
+3. **ATT&CK coverage.** Say: *"Ninety-three point eight percent coverage, no blind spots, and four techniques only one
+   tool can see."*
+4. **Supplier risk.** Say: *"A look-alike supplier domain - and the real supplier's mailbox is probably compromised."*
+5. **Shadow IT.**
+
+---
+
+## The ten questions you will get
+
+**"Is the AI making the decisions?"**
+No. Verdicts, scores, severities and findings are fixed rules in code. The AI writes the explanation, with sources,
+and that's all. Switch it off and every number stays the same.
+
+**"Does our e-mail go to OpenAI?"**
+The machine-learning models run offline, inside the platform. The optional narrative only sees the evidence, with
+identities pseudonymised, and only goes to the endpoint you've approved - in production, that's your own LLM gateway.
+
+**"Do you click the links?"**
+Never. Nothing in the platform fetches a link taken from an e-mail.
+
+**"How accurate is it?"**
+On our small labelled test set, the models and rules together got every verdict right - but that's a regression
+check, not a claim. Real accuracy is measured in shadow mode, on your own mail.
+
+**"What happens if one of our tools is down?"**
+Its evidence shows as unavailable, and everything else keeps working. We've tested it with every tool down at once.
+
+**"Can it act on its own?"**
+Not by default. Every action is at level two - recommend. Automation is switched on per action type, by two people,
+and destructive actions never run on their own.
+
+**"What does the kill switch stop?"**
+Every automatic action, on every server, and it survives restarts. A person's explicit approval still runs. To stop
+every change to a tool, you pause that tool.
+
+**"Where does it run?"**
+In your environment - Azure or on-premises - on PostgreSQL. Stored e-mails and reports are encrypted. It only connects
+out to your tools, your LLM endpoint, and the notification channels you configure.
+
+**"What do you need from us?"**
+It's on the last slide: an environment, an Entra app registration, one read-only service account per tool and the
+reporting mailbox, access to your LLM gateway, licence confirmations, the tool owners, and two SOC leads.
+
+**"Is it hard-coded to this demo?"**
+No. Our test suite renames the whole organisation into other generated companies and requires the same results, with
+not a single demo name leaking through.
+
+---
+
+## Never say
+
+- "It runs on a real tenant."
+- "The AI decides."
+- "Ninety-nine percent accurate."
+- "It isolated the laptop." Say instead: *"In this demo, against the simulated tool, after two approvals."*
+- "The kill switch stops everything."
+- Any number that isn't on the screen.
+- The client's name or its in-house LLM platform - say *"your organisation"* and *"your LLM gateway"*.
