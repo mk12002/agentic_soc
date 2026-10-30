@@ -228,9 +228,12 @@ The platform recommends actions; nothing runs until a person with the right role
 
 1. Window 1: `ann@acme-demo.com`, Analyst. **Approvals** → find an **Isolate host** (`endpoint.isolate`) action
    (the row names its case) and open **Why and what**: the evidence it cites, the host's criticality, that isolation
-   is reversible and needs four eyes. Press *Approve*. It is refused: an analyst cannot approve a high-impact action.
+   is reversible and needs four eyes. Instead of *Approve* the row says **"Needs a lead's approval"**: an analyst
+   cannot approve a high-impact action (the API refuses it too; Ann may still *Reject* it). Take the action's case
+   (*Take case* on the case page) and open the **My cases** tab: only the actions on cases Ann owns.
 2. Window 2 (private): `lena@acme-demo.com`, Lead. **Approvals** → approve the same action. It does **not** run: the
-   row shows "First approval by lena@acme-demo.com - a second lead must approve". Approving again as Lena is refused.
+   row shows "First approval by lena@acme-demo.com - a second lead must approve", and Lena's own row says "You
+   approved first - a second lead must approve" in place of the Approve button.
 3. Window 3 (another browser profile): `alice@acme-demo.com`, Lead. Approve it: it executes (in fake mode, against
    the fixture EDR).
 4. Approve a normal action as Ann (e.g. **Create ticket**) to show that routine work does not wait for a Lead.

@@ -459,3 +459,70 @@ def test_an_action_outside_the_callers_domains_has_no_context(client, seeded):
     assert client.get("/api/v1/actions/does-not-exist/context", headers=lead).status_code == 404
     seen = client.get("/api/v1/actions", headers=ph_only).json()
     assert seen and all(x["case"] is None or x["case"]["domain"] == "phishing" for x in seen)
+
+
+def test_a_vulnerability_finding_opens_with_everything_known_about_it(client, seeded):
+    """The findings list had nothing to click: one finding now answers what the CVE is, how its priority was
+    computed (the components add up to the score), what each scanner reports, who owns it and how to fix it."""
+    a = tok(client, "ann", "analyst")
+    findings = client.get("/api/v1/vm/findings", headers=a).json()
+    by_cve = {}
+    for x in findings:
+        by_cve.setdefault(x["cve"], []).append(x)
+    f = next(xs[0] for xs in by_cve.values() if len(xs) > 1)        # a CVE present on more than one asset
+    d = client.get(f"/api/v1/vm/findings/{f['id']}", headers=a).json()
+    assert (d["cve"], d["asset"], d["priority"], d["asset_id"]) == (f["cve"], f["asset"], f["priority"], f["asset_id"])
+    assert d["intel"] and d["intel"]["description"] and d["intel"]["cvss"] is not None
+    parts = sum(v for k, v in d["factors"].items() if k.endswith("_component"))
+    assert abs(parts - d["score"]) < 0.002, (parts, d["score"])
+    assert set(d["sources"]) == set(f["sources"]) and all("status" in s for s in d["sources"].values())
+    assert {o["asset"] for o in d["other_assets"]} == {x["asset"] for x in by_cve[f["cve"]] if x["id"] != f["id"]}
+    assert client.get("/api/v1/vm/findings/does-not-exist", headers=a).status_code == 404
+    ph_only = {"Authorization": "Bearer " + client.get("/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing").json()["token"]}
+    assert client.get(f"/api/v1/vm/findings/{f['id']}", headers=ph_only).status_code in {403, 404}
+
+
+def test_a_scanners_list_of_fix_steps_reads_as_words_not_python(client, seeded):
+    """Falcon sends remediation as a list of steps, stored as "['Update nginx to the latest version']" and shown that
+    way on the finding and in the owner's remediation ticket."""
+    from soc_platform.domains.vulnerability.service import _fix_text
+
+    assert _fix_text(["Update nginx to the latest version", None, " "]) == "Update nginx to the latest version"
+    assert _fix_text(["Step one", "Step two"]) == "Step one; Step two" and _fix_text([]) is None and _fix_text("x") == "x"
+    from sqlalchemy import select
+
+    from soc_platform.core.db import get_database
+    from soc_platform.domains.vulnerability.models import ConsolidatedFinding
+
+    with get_database().session() as s:                   # what is stored is what the remediation ticket carries
+        stored = [r for (r,) in s.execute(select(ConsolidatedFinding.remediation)) if r]
+    assert stored and not [r for r in stored if "['" in r or r.startswith("[")], stored
+
+
+def test_my_cases_shows_only_the_actions_on_cases_i_have_taken(client, seeded):
+    """The approvals queue held every case's actions: an analyst could not see the ones on the cases they own."""
+    me = tok(client, "Mia.Owner@acme-demo.com", "analyst")              # owners are compared without case
+    waiting = "status=recommended,pending_approval"
+    acts = client.get(f"/api/v1/actions?{waiting}", headers=me).json()
+    case_id = next(x["case_id"] for x in acts if x["case"] and not x["case"]["assignee"])
+    assert client.get(f"/api/v1/actions?{waiting}&mine=true", headers=me).json() == []
+    assert client.get(f"/api/v1/actions/summary?{waiting}", headers=me).json()["mine"] == 0
+    assert client.post(f"/api/v1/cases/{case_id}/assign", headers=me, json={"assignee": "Mia.Owner@acme-demo.com"}).status_code == 200
+    mine = client.get(f"/api/v1/actions?{waiting}&mine=true", headers=me).json()
+    expected = {x["id"] for x in client.get(f"/api/v1/actions?{waiting}", headers=me).json() if x["case_id"] == case_id}
+    assert mine and {x["id"] for x in mine} == expected
+    assert all(x["case"]["assignee"] == "mia.owner@acme-demo.com" for x in mine)
+    assert client.get(f"/api/v1/actions/summary?{waiting}", headers=me).json()["mine"] == len(expected)
+    other = tok(client, "otto@acme-demo.com", "analyst")                 # someone else's queue is unchanged
+    assert client.get(f"/api/v1/actions?{waiting}&mine=true", headers=other).json() == []
+
+
+def test_every_action_says_whether_it_needs_a_lead(client, seeded):
+    """The screen shows "Needs a lead's approval" instead of a button an analyst would be refused on: that rests on
+    every waiting action carrying the policy's high-impact decision, and the server refusing the analyst."""
+    a, lead = tok(client, "ann", "analyst"), tok(client, "lena", "lead")
+    acts = client.get("/api/v1/actions?status=recommended,pending_approval", headers=lead).json()
+    assert all(isinstance((x["result"] or {}).get("high_impact"), bool) for x in acts)
+    high = next(x for x in acts if x["result"]["high_impact"])
+    r = client.post(f"/api/v1/actions/{high['id']}/approve", headers=a, json={})
+    assert r.status_code == 403 and "approve_high_impact" in r.text

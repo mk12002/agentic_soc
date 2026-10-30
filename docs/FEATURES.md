@@ -67,12 +67,19 @@ protection (a slow page can never paint over the page you moved to), accessible 
   by age; Phishing: who clicked, most active reporters, how reports were handled; Approvals: waiting by domain and by
   action type; Cloud posture: by severity and by owner (overdue / on time). Inline SVG and CSS bars coloured by
   meaning (critical red, safe green), following light and dark themes, labels wrapped never cut.
+* **Every vulnerability finding opens** - the CVE in the findings list leads to the finding: NVD description, CVSS,
+  EPSS and CISA KEV status, how the priority score was computed (each input and what it added), what each scanner
+  reports with a link into the tool, the fix, the remediation campaign, owner and team, history (first / last seen,
+  reopenings, fix validations, exceptions) and the same CVE on other assets (`GET /api/v1/vm/findings/{id}`).
 * **Approvals carry their context** - every waiting action names what it was raised on (the case, with its
   severity and title, or the remediation campaign and its CVE) and, for a ticket, the team it goes to. **Why and
   what** opens in the row: the evidence the action cites (numbered and worded as on its case), what the tool will
   be asked to do (targets with their criticality, the full ticket text), reversible or destructive, blast radius,
   the policy reasons and who recommended it - read from records, so an approver decides without leaving the list
-  (`GET /api/v1/actions/{id}/context`).
+  (`GET /api/v1/actions/{id}/context`). A **My cases** tab narrows the queue to actions on the cases you have
+  taken (`?mine=true`). A person sees *Approve* only where their approval can count: an analyst sees "Needs a
+  lead's approval" on high-impact actions, and the first approver of a four-eyes action sees that a second lead
+  must approve (the server enforces both regardless).
 
 ### 1.2 Shared context store and entity resolution
 

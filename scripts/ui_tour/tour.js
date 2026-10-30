@@ -211,6 +211,16 @@ async function visit(page, hash, name, full = true) {
   await page.fill('#vq', 'which internet facing hosts have KEV vulnerabilities?');
   await page.click('[data-fn="vmAsk"]'); await page.waitForTimeout(1200);
   await shot(page, '10-vulnerabilities');
+  {                                             // a finding opens from its CVE: the detail, its score as the API has it
+    const first = (await call(lead, 'GET', '/api/v1/vm/findings'))[0];
+    if (!first) problems.push('vulnerabilities: no finding to open');
+    else {
+      await page.click(`a[href="#/vulnerabilities/${first.id}"]`); await settle(page);
+      const shown = await page.$eval('.kpi .value', e => e.textContent.trim()).catch(() => '');
+      if (shown !== Number(first.score).toFixed(3)) problems.push(`screen/API mismatch - finding "priority score": screen ${shown}, API ${first.score}`);
+      await shot(page, '10b-vulnerability-detail');
+    }
+  }
   await visit(page, 'cloud', '11-cloud-posture', false);
   await visit(page, 'coverage', '12-attack-coverage');
   await visit(page, 'shadow-it', '13-shadow-it');

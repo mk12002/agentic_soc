@@ -210,7 +210,7 @@ async function CaseDetail(id) {
       ${(x.policy_reasons || []).slice(1).map(r => `<div class="t-sub">${esc(r)}</div>`).join('')}</td>
     <td class="small wrap" style="min-width:110px">${moreList(x.targets.map(t => esc(t.name || t.recipient || t.id)))}</td>
     <td>${astat(x)}${x.approver ? `<div class="t-sub">${esc(x.approver)}</div>` : ''}</td>
-    <td><div class="inline" style="flex-wrap:wrap;gap:6px">${['recommended', 'pending_approval'].includes(x.status) && can('approve_action') ? btn('Approve', 'act', [x.id, 'approve', id], 'sm primary') + btn('Reject', 'act', [x.id, 'reject', id], 'sm') :
+    <td><div class="inline" style="flex-wrap:wrap;gap:6px">${['recommended', 'pending_approval'].includes(x.status) ? decideButtons(x, id) :
       x.status === 'executed' && can('rollback_action') ? btn('Roll back', 'act', [x.id, 'rollback', id], 'sm') : ''}</div></td></tr>`;
   const intel = v.intelligence || {};
   // phishing: which analysis ran, the trained models' verdict next to the rules', and every model's score
@@ -339,27 +339,39 @@ let APPROVAL_FILTER = 'all';
 let APPROVAL_OFFSET = 0;
 async function Approvals() {
   const __g = GEN;
-  const [xs, sm] = await Promise.all([api('/api/v1/actions?status=recommended,pending_approval' + (APPROVAL_FILTER === 'all' ? '' : '&domain=' + encodeURIComponent(APPROVAL_FILTER)) + (APPROVAL_OFFSET ? '&offset=' + APPROVAL_OFFSET : '')),
+  const scope = APPROVAL_FILTER === 'all' ? '' : APPROVAL_FILTER === 'mine' ? '&mine=true' : '&domain=' + encodeURIComponent(APPROVAL_FILTER);
+  const [xs, sm] = await Promise.all([api('/api/v1/actions?status=recommended,pending_approval' + scope + (APPROVAL_OFFSET ? '&offset=' + APPROVAL_OFFSET : '')),
     api('/api/v1/actions/summary?status=recommended,pending_approval')]);
   const doms = Object.keys(sm.by_domain).sort();
-  const total = APPROVAL_FILTER === 'all' ? sm.total : (sm.by_domain[APPROVAL_FILTER] || 0);
+  const count = f => f === 'all' ? sm.total : f === 'mine' ? (sm.mine || 0) : (sm.by_domain[f] || 0);
+  const total = count(APPROVAL_FILTER);
   const types = Object.entries(sm.by_type || {}).slice(0, 8);
   setMainG(__g, page('Approvals', 'Actions the platform recommends. Nothing here runs until someone with the right role approves it; four-eyes actions need two different people.', '',
     `<div class="grid g-2">
       ${card('Waiting by domain', donut(sm.by_domain), {sub: `${nf(sm.total)} actions awaiting a decision`})}
       ${card('Waiting by action type', hbars(types.map(([t, n]) => ({label: t, values: {actions: n}})), ['actions'], {label: 'actions by type', empty: 'Nothing is waiting'}))}
     </div><div class="mt"></div>` +
-    card(null, `<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="seg">${['all', ...doms].map(f =>
-      `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}">${esc(cap(f))} <span class="muted">${f === 'all' ? sm.total : (sm.by_domain[f] || 0)}</span></button>`).join('')}</div></div>` +
+    card(null, `<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="seg">${['all', 'mine', ...doms].map(f =>
+      `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}"${f === 'mine' ? ' title="Actions on the cases you have taken"' : ''}>${esc(f === 'mine' ? 'My cases' : cap(f))} <span class="muted">${count(f)}</span></button>`).join('')}</div></div>` +
       table(['Action', 'Targets', 'Rationale', 'Policy', ''], xs.map(x => `<tr>
       <td class="nowrap"><div class="t-title mono">${esc(x.action_type)}</div><div class="t-sub">${esc(cap(x.domain))} · L${esc(x.level)}</div></td>
       <td class="small wrap">${actTargets(x)}</td><td class="small wrap">${esc(x.rationale)}${actOrigin(x)}</td>
       <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}${(x.result || {}).awaiting_second_approval && x.status === 'pending_approval' ? `<div class="t-sub" style="color:var(--high)">First approval by ${esc(x.approver)} - a second lead must approve</div>` : ''}</td>
-      <td><div class="inline" style="flex-wrap:wrap;gap:6px">${can('approve_action') ? btn('Approve', 'act', [x.id, 'approve'], 'sm primary') + btn('Reject', 'act', [x.id, 'reject'], 'sm') : ''}
+      <td><div class="inline" style="flex-wrap:wrap;gap:6px">${decideButtons(x)}
         <button class="btn sm ghost" data-fn="actDetail" data-args="${arg(x.id)}" aria-expanded="false" aria-controls="ad-${esc(x.id)}">Why and what</button></div></td></tr>
       <tr class="adetail" id="ad-${esc(x.id)}" hidden><td colspan="5"><div class="adbox" aria-live="polite"></div></td></tr>`),
-      {empty: 'Nothing is waiting for approval.'}) +
+      {empty: APPROVAL_FILTER === 'mine' ? 'Nothing is waiting on the cases you have taken. Take a case from Cases to see its actions here.' : 'Nothing is waiting for approval.'}) +
       pager(APPROVAL_OFFSET, xs.length, total, 'approvalPage', 'actions'), {flush: true})));
+}
+// Approve / Reject only where this person's approval can count: a high-impact action needs a lead, and the first
+// approver of a four-eyes action waits for someone else (the server refuses both anyway; the screen says so up front)
+function decideButtons(x, ...back) {
+  if (!['recommended', 'pending_approval'].includes(x.status) || !can('approve_action')) return '';
+  const r = x.result || {}, reject = btn('Reject', 'act', [x.id, 'reject', ...back], 'sm');
+  if (r.high_impact && !can('approve_high_impact')) return `<span class="small muted" title="High-impact action: a lead approves it">Needs a lead's approval</span>${reject}`;
+  if (r.awaiting_second_approval && x.status === 'pending_approval' && String(x.approver || '').toLowerCase() === String(window.ME.id || '').toLowerCase())
+    return `<span class="small muted">You approved first - a second lead must approve</span>`;
+  return btn('Approve', 'act', [x.id, 'approve', ...back], 'sm primary') + reject;
 }
 // what an action was raised on: its case (severity and title) or, for a remediation ticket, its campaign
 const actOrigin = x => x.case ? `<div class="t-sub origin">${chip(x.case.severity)} ${caseLink(x.case.id, x.case.title)}</div>`
@@ -455,7 +467,8 @@ async function Suppliers() {
 // ================================================================= Vulnerabilities
 // a list a person can take in at real-tenant volume: the count, the first few, how many more (the rest on hover)
 const names = (xs, n = 6) => !xs || !xs.length ? 'none' : `<b>${nf(xs.length)}</b> · ${moreList(xs.map(esc), n, ', ', k => `and ${nf(k)} more`)}`;
-async function Vulnerabilities() {
+async function Vulnerabilities(id) {
+  if (id) return VulnDetail(id);
   const __g = GEN;
   const [m, f, cov] = await Promise.all([api('/api/v1/vm/metrics'), api('/api/v1/vm/findings'), api('/api/v1/vm/coverage')]);
   const acts = (can('investigate') ? btn('Refresh from scanners', 'vmRefresh', [], '', 'refresh') + btn('Sync tickets', 'ticketSync', [], '') : '') + go('#/cloud', 'Cloud posture', 'btn');
@@ -475,13 +488,66 @@ async function Vulnerabilities() {
       ${card('Coverage gaps', `<dl class="kv"><dt>No EDR</dt><dd>${names(cov.missing_edr)}</dd><dt>Not in CMDB</dt><dd>${names(cov.not_in_cmdb)}</dd><dt>Resolution queue</dt><dd>${nf(cov.unresolved_queue)}</dd></dl>`)}
     </div>
     <div class="mt">${card(`Findings <span class="muted">(${f.length})</span>`, table(['Priority', 'CVE', 'Asset', 'Owner', 'SLA due', 'Seen by', 'Status', ''], f.map(x => `<tr>
-      <td>${pchip(x.priority)}</td><td class="mono">${esc(x.cve)}</td><td><div class="t-title">${esc(x.asset)}</div>${x.internet_exposed ? '<div class="t-sub">internet-exposed</div>' : ''}</td>
+      <td>${pchip(x.priority)}</td><td class="mono"><a href="#/vulnerabilities/${encodeURIComponent(x.id)}" title="Details: CVE, priority, scanners, fix">${esc(x.cve)}</a></td>
+      <td><div class="t-title">${x.asset_id ? entLink(x.asset_id, x.asset) : esc(x.asset)}</div>${x.internet_exposed ? '<div class="t-sub">internet-exposed</div>' : ''}</td>
       <td class="small">${esc(x.team || 'unknown')}</td><td class="mono small">${day(x.sla_due)}</td><td class="small muted">${esc(Object.keys(x.sources).join(', '))}</td><td>${esc(cap(x.status))}</td>
       <td>${x.campaign_id ? '<span class="muted small">In campaign</span>' : can('request_action') ? btn('Start campaign', 'campaign', [x.cve], 'sm') : ''}</td></tr>`), {empty: 'No findings - refresh from scanners.'}), {flush: true})}</div>`));
 }
 async function vmRefresh() { toast('Refreshing from scanners…'); await post('/api/v1/vm/refresh'); toast('Vulnerability data refreshed'); Vulnerabilities(); }
 async function ticketSync() { const r = await post('/api/v1/vm/tickets/sync'); toast(`Tickets checked ${r.checked} · verified ${r.verified} · false closures ${r.false_closures}`); }
-async function campaign(cve) { const r = await post('/api/v1/vm/campaigns', {cve, notify_via: 'ticket'}); toast(`Campaign created for ${cve}; notifications await approval`); Vulnerabilities(); return r; }
+async function campaign(cve) { const r = await post('/api/v1/vm/campaigns', {cve, notify_via: 'ticket'}); toast(`Campaign created for ${cve}; notifications await approval`); Vulnerabilities(...route().params); return r; }
+// how each input moved the priority score (the components are computed by the platform and add up to the score)
+const PRIORITY_INPUTS = [['cvss_component', 'CVSS base score', f => f.cvss], ['epss_component', 'Exploit likelihood (EPSS)', f => f.epss != null ? pct(f.epss, 1) : null],
+  ['kev_component', 'Known exploited (CISA KEV)', f => f.kev ? 'yes' : 'no'], ['exposure_component', 'Internet-exposed', f => f.internet_exposed ? 'yes' : 'no'],
+  ['criticality_component', 'Asset criticality', f => f.asset_criticality], ['ransomware_component', 'Used in ransomware', f => f.ransomware_use ? 'yes' : 'no']];
+// the official pages behind the figures: NVD (description, CVSS), CISA's KEV catalogue, FIRST's EPSS score -
+// built from a well-formed CVE id only
+const cveSources = (cve, i) => {
+  if (!/^CVE-\d{4}-\d{4,7}$/.test(cve || '')) return '';
+  const a = (href, label) => `<a target="_blank" rel="noopener noreferrer" href="${esc(href)}">${esc(label)}</a>`;
+  return `<div class="small strong mt-s">Sources</div><div class="inline small" style="flex-wrap:wrap;gap:6px 14px">
+    ${a(`https://nvd.nist.gov/vuln/detail/${cve}`, 'NVD record (description, CVSS)')}
+    ${i.kev ? a(`https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext=${cve}`, 'CISA KEV catalogue') : ''}
+    ${a(`https://api.first.org/data/v1/epss?cve=${cve}`, 'FIRST EPSS score')}
+    ${a(`https://www.cve.org/CVERecord?id=${cve}`, 'CVE.org record')}</div>`;
+};
+async function VulnDetail(id) {
+  const __g = GEN;
+  const f = await api('/api/v1/vm/findings/' + encodeURIComponent(id));
+  const i = f.intel || {}, fx = f.factors || {};
+  const overdue = f.sla_due && f.status !== 'closed' && new Date(f.sla_due) < new Date();
+  const inputs = PRIORITY_INPUTS.filter(([k]) => fx[k] != null).map(([k, label, v]) => `<tr><td>${esc(label)}</td><td class="mono">${esc(v(fx) ?? '–')}</td><td class="num mono">+${esc(Number(fx[k]).toFixed(3))}</td></tr>`);
+  const others = Object.entries(fx).filter(([k, v]) => k.endsWith('_component') && !PRIORITY_INPUTS.some(([p]) => p === k) && v != null)
+    .map(([k, v]) => `<tr><td>${esc(cap(k.replace(/_component$/, '').replace(/_/g, ' ')))}</td><td></td><td class="num mono">+${esc(Number(v).toFixed(3))}</td></tr>`);
+  const seen = Object.entries(f.sources || {}).map(([t, d]) => `<tr><td><span class="tag">${esc(t)}</span></td><td>${esc(cap(d.status || '–'))}</td>
+    <td class="mono small">${dt(d.last_seen)}</td><td class="mono small">${esc(d.cvss ?? '–')}</td><td class="small">${esc(d.product || '–')}${d.tool_exception ? '<div class="t-sub">exception held in the tool</div>' : ''}</td>
+    <td>${d.deep_link ? `<a target="_blank" rel="noopener noreferrer" href="${esc(safeUrl(d.deep_link))}">open in tool</a>` : ''}</td></tr>`);
+  const acts = f.campaign ? '' : can('request_action') && f.status !== 'closed' ? btn('Start campaign', 'campaign', [f.cve], 'primary') : '';
+  setMainG(__g, `<div class="page-head"><div class="ph-main"><div class="inline" style="margin-bottom:8px">${pchip(f.priority)}${i.kev ? chip('known exploited', 'critical') : ''}${f.internet_exposed ? chip('internet-exposed', 'high plain') : ''}<span class="tag">${esc(cap(f.status))}</span></div>
+      <h1 class="mono">${esc(f.cve)}</h1><p>${esc(f.title || f.product || '')}${f.title && f.product ? ' · ' + esc(f.product) : ''} on ${f.asset_id ? entLink(f.asset_id, f.asset) : esc(f.asset)}</p></div>
+      ${acts ? `<div class="actions">${acts}</div>` : ''}</div>
+    <div class="grid g-kpi">${kpi('Priority score', Number(f.score).toFixed(3), esc(f.priority) + ' · computed below')}${kpi('CVSS', i.cvss ?? '–', esc(cap(i.severity || '')))}
+      ${kpi('Exploit likelihood', i.epss != null ? pct(i.epss, 1) : '–', i.epss_percentile != null ? 'EPSS, ' + pct(i.epss_percentile, 0) + ' percentile' : 'EPSS')}
+      ${kpi('CISA KEV', i.kev ? 'Listed' : 'Not listed', i.kev ? `added ${esc(i.kev_date_added || '–')}${i.kev_due ? ' · federal due ' + esc(i.kev_due) : ''}` : '', !!i.kev)}
+      ${kpi('SLA due', day(f.sla_due), overdue ? 'past due' : f.sla_due ? 'open' : '', overdue)}</div>
+    <div class="grid g-2 mt"><div class="stack">
+      ${card('About this vulnerability', `<div class="prose">${esc(i.description || 'No description from NVD yet.')}</div>${i.ransomware_use ? '<div class="t-sub" style="color:var(--high);margin-top:6px">Known to be used in ransomware campaigns (CISA KEV).</div>' : ''}
+        ${cveSources(f.cve, i)}
+        ${(i.exploit_refs || []).length ? `<div class="small strong mt-s">Public exploit references <span class="muted" style="font-weight:400">(links NVD tags “Exploit”)</span></div>${moreList(i.exploit_refs.map(u => `<a target="_blank" rel="noopener noreferrer" style="overflow-wrap:anywhere" href="${esc(safeUrl(u))}">${esc(u)}</a>`), 3)}` : ''}`,
+        {sub: i.fetched_at ? 'NVD, EPSS and CISA KEV · fetched ' + dt(i.fetched_at) : 'NVD, EPSS and CISA KEV'})}
+      ${card('Why this priority', table(['Input', 'Value', 'Adds'], [...inputs, ...others, `<tr><td class="strong">Priority score</td><td>${pchip(f.priority)}</td><td class="num mono strong">${esc(Number(f.score).toFixed(3))}</td></tr>`]), {flush: true, sub: 'computed by the platform, not the model'})}
+      ${card('Seen by', table(['Scanner', 'Status', 'Last seen', 'CVSS', 'Product', ''], seen, {empty: 'No scanner record'}), {flush: true, sub: 'one finding, consolidated from every tool that reports it'})}
+    </div><div class="stack">
+      ${card('Fix', `<div class="prose">${esc(f.remediation || 'No fix published by the scanners yet - apply the vendor fix or upgrade.')}</div>
+        <div class="t-sub mt-s">${f.campaign ? `In remediation campaign “${esc(f.campaign.title)}” · ${esc(cap(f.campaign.status))}${f.campaign.target_date ? ' · target ' + day(f.campaign.target_date) : ''}` : 'Not in a remediation campaign yet.'}</div>`)}
+      ${card('Ownership', `<dl class="kv"><dt>Owner</dt><dd>${esc(f.owner || 'unknown')}</dd><dt>Team</dt><dd>${esc(f.team || 'unknown')}</dd><dt>Environment</dt><dd>${esc(f.environment || '–')}</dd>
+        <dt>Criticality</dt><dd>${esc(f.criticality || '–')}</dd><dt>Location</dt><dd>${esc(f.location || '–')}</dd></dl>`)}
+      ${card('History', `<dl class="kv"><dt>First seen</dt><dd>${dt(f.first_seen)}</dd><dt>Last seen</dt><dd>${dt(f.last_seen)}</dd><dt>Reopened</dt><dd>${nf(f.reopened_count)} time(s)</dd>${f.closed_at ? `<dt>Closed</dt><dd>${dt(f.closed_at)}</dd>` : ''}</dl>
+        ${f.validations.length ? `<div class="small strong mt-s">Fix validations</div>` + f.validations.map(v => `<div class="list-row small"><span class="grow">${esc(cap(v.result))}${v.false_closure ? ' - <b>false closure</b> (ticket closed, scanners still see it)' : ''}</span><span class="muted">${dt(v.checked_at)}</span></div>`).join('') : ''}
+        ${f.exceptions.length ? `<div class="small strong mt-s">Exceptions</div>` + f.exceptions.map(e => `<div class="list-row small"><span class="grow">${esc(cap(e.status))}: ${esc(e.justification)}<div class="t-sub">${esc(e.requested_by)}${e.approver ? ' · approved by ' + esc(e.approver) : ''} · until ${day(e.expires_at)}</div></span></div>`).join('') : ''}`)}
+      ${card(`Same CVE on other assets <span class="muted">(${f.other_assets.length})</span>`, f.other_assets.map(o => `<div class="list-row">${pchip(o.priority)}<span class="grow"><a href="#/vulnerabilities/${encodeURIComponent(o.id)}">${esc(o.asset)}</a><div class="t-sub">${esc(o.team || 'unknown team')}</div></span><span class="small muted">${esc(cap(o.status))}</span></div>`).join('') || empty('Only this asset'))}
+    </div></div>`);
+}
 async function vmAsk() {
   const q = $('#vq').value.trim(); if (!q) return;
   const r = await post('/api/v1/vm/query', {question: q});

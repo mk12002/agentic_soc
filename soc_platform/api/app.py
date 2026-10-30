@@ -1123,7 +1123,7 @@ def action_catalog(_: Principal = Depends(need(Perm.READ)), s: Session = Depends
 
 
 @app.get("/api/v1/actions")
-def list_actions(status: str | None = None, case_id: str | None = None, domain: str | None = None,
+def list_actions(status: str | None = None, case_id: str | None = None, domain: str | None = None, mine: bool = False,
                  offset: int = Query(0, ge=0, le=10_000_000), p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     if case_id:
         from soc_platform.core.cases import actions_for_case
@@ -1137,6 +1137,8 @@ def list_actions(status: str | None = None, case_id: str | None = None, domain: 
         q = q.where(ActionRequest.status.in_(status.split(",")))
     if domain:
         q = q.where(ActionRequest.domain == domain)
+    if mine:                                                     # actions on the cases the caller has taken
+        q = q.where(ActionRequest.case_id.in_(_my_cases(p)))
     if "*" not in p.domains:
         q = q.where(ActionRequest.domain.in_(sorted(p.domains)))  # "platform" actions are cross-domain
     rows = list(s.execute(q).scalars())
@@ -1156,7 +1158,8 @@ def _campaigns(s: Session, ids: list[str]) -> dict[str, Any]:
 def _origin(p: Principal, case: Case | None, campaign: Any) -> dict[str, Any]:
     """What an action was raised on: its case (when the caller may see it) or, for a remediation ticket, its campaign."""
     return {"case": {"id": case.id, "title": case.title, "severity": case.severity, "verdict": case.verdict,
-                     "status": case.status, "domain": case.domain} if case is not None and p.in_domain(case.domain) else None,
+                     "status": case.status, "domain": case.domain, "assignee": case.assignee}
+            if case is not None and p.in_domain(case.domain) else None,
             "campaign": {"id": campaign.id, "title": campaign.title, "cve": campaign.cve, "status": campaign.status}
             if campaign is not None else None}
 
@@ -1216,7 +1219,18 @@ def actions_summary(status: str | None = None, p: Principal = Depends(need(Perm.
     if "*" not in p.domains:
         qt = qt.where(ActionRequest.domain.in_(sorted(p.domains)))
     by_type = dict(sorted(((t, n) for t, n in s.execute(qt).all()), key=lambda x: (-x[1], x[0])))
-    return {"total": sum(by.values()), "by_domain": by, "by_type": by_type, "list_limit": 500}
+    qm = select(func.count()).select_from(ActionRequest).where(ActionRequest.case_id.in_(_my_cases(p)))
+    if status:
+        qm = qm.where(ActionRequest.status.in_(status.split(",")))
+    if "*" not in p.domains:
+        qm = qm.where(ActionRequest.domain.in_(sorted(p.domains)))
+    return {"total": sum(by.values()), "by_domain": by, "by_type": by_type, "mine": s.execute(qm).scalar() or 0,
+            "list_limit": 500}
+
+
+def _my_cases(p: Principal) -> Any:
+    """The cases the caller has taken (owners are stored in lower case)."""
+    return select(Case.id).where(func.lower(Case.assignee) == p.id.lower())
 
 
 def _action(a: ActionRequest) -> dict[str, Any]:
@@ -1904,10 +1918,58 @@ def vm_findings(priority: str | None = None, status: str = "open,reopened", _: P
         .order_by(ConsolidatedFinding.priority_score.desc())
     if priority:
         q = q.where(ConsolidatedFinding.priority_band.in_(priority.split(",")))
-    return [{"id": f.id, "cve": f.cve, "asset": f.asset_name, "priority": f.priority_band, "score": f.priority_score,
+    return [{"id": f.id, "cve": f.cve, "asset": f.asset_name, "asset_id": f.asset_id, "priority": f.priority_band, "score": f.priority_score,
              "factors": f.priority_factors, "status": f.status, "team": f.platform_team, "owner": f.owner,
              "sla_due": f.sla_due.isoformat() if f.sla_due else None, "sources": f.sources,
              "internet_exposed": f.internet_exposed, "campaign_id": f.campaign_id} for f in s.execute(q).scalars()]
+
+
+@app.get("/api/v1/vm/findings/{fid}")
+def vm_finding(fid: str, _: Principal = Depends(need(Perm.READ, "vulnerability")), s: Session = Depends(db_session, scope="function")):
+    """One finding in full: the CVE (NVD / EPSS / KEV), how its priority was computed, what each scanner reports,
+    ownership, the fix, the same CVE on other assets, its campaign, exceptions and fix validations."""
+    from soc_platform.core.text import readable
+    from soc_platform.domains.vulnerability.models import (
+        ConsolidatedFinding,
+        RemediationCampaign,
+        ValidationResult,
+        VulnException,
+        VulnIntel,
+    )
+
+    f = s.get(ConsolidatedFinding, fid)
+    if f is None:
+        raise HTTPException(404, "unknown finding")
+    intel = s.get(VulnIntel, f.cve)
+    camp = s.get(RemediationCampaign, f.campaign_id) if f.campaign_id else None
+    iso = lambda d: d.isoformat() if d else None
+    others = s.execute(select(ConsolidatedFinding).where(ConsolidatedFinding.cve == f.cve, ConsolidatedFinding.id != f.id)
+                       .order_by(ConsolidatedFinding.priority_score.desc(), ConsolidatedFinding.id)).scalars()
+    return {"id": f.id, "cve": f.cve, "title": f.title, "product": f.product, "status": f.status,
+            "asset": f.asset_name, "asset_id": f.asset_id, "internet_exposed": f.internet_exposed,
+            "environment": f.environment, "criticality": f.criticality, "location": f.location,
+            "owner": f.owner, "team": f.platform_team, "sla_due": iso(f.sla_due), "first_seen": iso(f.first_seen),
+            "last_seen": iso(f.last_seen), "closed_at": iso(f.closed_at), "reopened_count": f.reopened_count,
+            "priority": f.priority_band, "score": f.priority_score, "factors": f.priority_factors,
+            "remediation": readable(f.remediation) if f.remediation else None,
+            "sources": {t: {k: v for k, v in (d or {}).items() if k in {"status", "last_seen", "deep_link", "cvss", "product",
+                                                                        "tool_exception"}} for t, d in sorted((f.sources or {}).items())},
+            "intel": None if intel is None else {
+                "description": intel.description, "cvss": intel.cvss, "severity": intel.severity, "epss": intel.epss,
+                "epss_percentile": intel.epss_percentile, "kev": intel.kev, "kev_date_added": intel.kev_date_added,
+                "kev_due": intel.kev_due, "ransomware_use": intel.ransomware_use, "exploit_refs": intel.exploit_refs[:10],
+                "fetched_at": iso(intel.fetched_at)},
+            "campaign": None if camp is None else {"id": camp.id, "title": camp.title, "status": camp.status,
+                                                   "target_date": iso(camp.target_date)},
+            "other_assets": [{"id": o.id, "asset": o.asset_name, "priority": o.priority_band, "status": o.status,
+                              "team": o.platform_team} for o in others],
+            "exceptions": [{"status": e.status, "justification": e.justification, "requested_by": e.requested_by,
+                            "approver": e.approver, "expires_at": iso(e.expires_at)}
+                           for e in s.execute(select(VulnException).where(VulnException.finding_id == f.id)
+                                              .order_by(VulnException.created_at.desc())).scalars()],
+            "validations": [{"result": v.result, "false_closure": v.false_closure, "checked_at": iso(v.checked_at)}
+                            for v in s.execute(select(ValidationResult).where(ValidationResult.finding_id == f.id)
+                                               .order_by(ValidationResult.checked_at.desc()).limit(20)).scalars()]}
 
 
 @app.get("/api/v1/vm/affected/{cve}")

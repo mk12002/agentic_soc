@@ -242,7 +242,8 @@ def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
     rep = J(c.post("/api/v1/reports/build", headers=lead, json={"template_id": "vm_weekly"}))
     ids = {"cid": next(x["id"] for x in cases if x["domain"] == "phishing"),
            "eid": J(c.get("/api/v1/intelligence/risk/top", headers=lead))[0]["entity_id"], "rid": rep["id"], "cve": api["cfg"]["campaign_cve"],
-           "aid": next(x["id"] for x in J(c.get("/api/v1/actions", headers=lead)) if x["domain"] == "phishing")}
+           "aid": next(x["id"] for x in J(c.get("/api/v1/actions", headers=lead)) if x["domain"] == "phishing"),
+           "fid": J(c.get("/api/v1/vm/findings", headers=lead))[0]["id"]}
     by_domain = {d: {x["id"] for x in cases if x["domain"] == d} for d in ("phishing", "incident", "vulnerability")}
     org = api["cfg"]["org"]
     roles = {"lead": lead, "analyst": H(f"alice@{org}", "analyst"), "auditor": H(f"audrey@{org}", "auditor"),
