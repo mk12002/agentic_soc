@@ -1,4 +1,4 @@
-# Live demo in 20-23 minutes - speaking script
+# Live demo in about 25 minutes - speaking script
 
 Read the plain paragraphs aloud. Lines starting with **▶** are what you click or point at - do them, don't say them.
 Each section shows its clock time; if you're behind, see *Running long or short* at the end. The detail behind every
@@ -7,6 +7,24 @@ another window.
 
 The figures below are those of a freshly reset demo. Anything that moves with the day - risk scores, SLA ages,
 timings, audit counts, the AI's wording - read off the screen rather than from this page.
+
+**Timing at a glance** (about 24 minutes, with a minute of slack):
+
+1. Opening - 0:00
+2. Overview - 1:30
+3. Phishing case - 2:45
+4. Attack story - 6:45
+5. Entity 360 - 9:00
+6. Incident case - 10:00
+7. Approvals and four-eyes - 11:30
+8. Intelligence - 13:15
+9. Vulnerabilities - 14:45
+10. Cloud posture - 16:00
+11. Insight: ATT&CK coverage, Shadow IT, Supplier risk - 17:00
+12. Watch lists - 19:15
+13. Govern - 20:15
+14. Reports and audit - 22:00
+15. Close - 23:00 to 24:00
 
 ---
 
@@ -20,7 +38,8 @@ timings, audit counts, the AI's wording - read off the screen rather than from t
 - [ ] Open the case *Reported: Action required: your password expires today*, then its **Attack story**, once to warm
   it. With the AI on, run **Deep analysis** once so it is cached.
 - [ ] Tabs in Lena's window, in this order: Overview · the phishing case · Cases · Approvals · Intelligence ·
-  Vulnerabilities · Watch lists · Integrations · Automation policy · Reports · Audit log. Ada's window: AI usage.
+  Vulnerabilities · Cloud posture · ATT&CK coverage · Shadow IT · Supplier risk · Watch lists · Integrations ·
+  Automation policy · Reports · Audit log. Ada's window: AI usage.
 - [ ] A small watch-list workbook on the desktop: sheet *Users* with a *Username* header and `ACME\jane.doe`; sheet
   *Hosts* with a *Hostname* header and `web01`.
 - [ ] Approve nothing beforehand - every approval moves counts on several pages.
@@ -55,7 +74,7 @@ approves it.
 
 ### Domains - one screen per workflow
 
-**Phishing** *(on request)*.
+**Phishing** *(on request; "ahead of time" item 2)*.
 Everything about reported e-mail: how many were reported, how many closed automatically, campaigns, who clicked and who
 clicked more than once, and how long containment took. You can also upload a suspicious e-mail here and get a full
 case in seconds.
@@ -64,50 +83,50 @@ case in seconds.
 Findings from four scanners merged into one record per machine and vulnerability, ranked by real-world risk, with the
 owner and the deadline. Every vulnerability opens to show exactly why it got its priority.
 
-**Cloud posture** *(on request; "ahead of time" item 2)*.
+**Cloud posture** (section 10).
 Cloud misconfigurations found by Wiz, each routed to the owning team with a deadline and a ticket. When a team says
 it's fixed, the platform asks Wiz again before it believes them.
 
 ### Insight - where you stand
 
-**ATT&CK coverage** *(on request; "ahead of time" item 3)*.
+**ATT&CK coverage** (section 11).
 This maps the attacker techniques in the MITRE ATT&CK framework against the tools you have switched on. It shows what
 you can see, what you can't - the blind spots - what only one tool can see, and which detections have actually fired.
 
-**Shadow IT** *(on request)*.
+**Shadow IT** (section 11).
 From DNS traffic, this shows the online services people use that aren't on your approved list, and any risky sites
 that were reached or blocked.
 
-**Supplier risk** *(on request; "ahead of time" item 4)*.
+**Supplier risk** (section 11).
 For your key suppliers, this watches for look-alike domains, impersonation and payment-diversion attempts - the signs
 that a supplier's mailbox has been taken over.
 
 ### Govern - control and proof
 
-**Watch lists** (section 10).
+**Watch lists** (section 12).
 Your SOC's own block and exception lists - users, machines, IP addresses, domains, links and file hashes. Every case is
 checked against them, and a match is shown as context only.
 
-**Integrations** (section 11).
+**Integrations** (section 13).
 Where each tool is connected and rolled out stage by stage, with preflight checks, data freshness and the scheduled
 jobs. A change is proposed by one person and approved by another, and any tool can be paused at once.
 
-**Automation policy** (section 11).
+**Automation policy** (section 13).
 How much each kind of action may do on its own - today, everything is recommend only. Policy changes need a second
 person, and the kill switch is here.
 
-**AI usage** (section 11).
+**AI usage** (section 13).
 Which AI model each feature uses, the monthly and daily budgets, per-person limits, and what it all costs.
 
-**Reports** (section 12).
+**Reports** (section 14).
 The standard reports, ready to run, or describe a report in words and the platform plans it. Every figure is computed
 in code, and reports follow your own templates and style.
 
-**Access** *(on request)*.
+**Access** *(on request; "ahead of time" item 3)*.
 For administrators: who has which role, granted with a reason and an end date; keys for service accounts, shown only
 once; and a table of exactly what every role can do. An administrator can't approve actions - that's a different job.
 
-**Audit log** (section 12).
+**Audit log** (section 14).
 Every look-up, recommendation, approval and action, by a person or by the platform, in a chain that can't be quietly
 changed - and it can be exported and checked independently.
 
@@ -281,7 +300,7 @@ until they're fixed.
 
 ---
 
-## 6. Incident case - 10:00 to 11:45
+## 6. Incident case - 10:00 to 11:30
 
 **▶ Cases tab → open *Unusual outbound connection from web server*.** (LIVE_DEMO_NOTES §7.)
 
@@ -308,7 +327,7 @@ doesn't answer, it shows as unavailable - never as "nothing found".
 
 ---
 
-## 7. Approvals and four-eyes - 11:45 to 13:30
+## 7. Approvals and four-eyes - 11:30 to 13:15
 
 **▶ Approvals tab.** (LIVE_DEMO_NOTES §10.)
 
@@ -338,7 +357,7 @@ at the moment it runs, a retry can never isolate a host twice, and anything reve
 
 ---
 
-## 8. Intelligence - 13:30 to 15:00
+## 8. Intelligence - 13:15 to 14:45
 
 **▶ Intelligence tab.** (LIVE_DEMO_NOTES §4.)
 
@@ -369,7 +388,7 @@ can't take any action.
 
 ---
 
-## 9. Vulnerabilities - 15:00 to 16:30
+## 9. Vulnerabilities - 14:45 to 16:00
 
 **▶ Vulnerabilities tab.** (LIVE_DEMO_NOTES §13.)
 
@@ -393,11 +412,97 @@ used*. Your question became a filter on the database. The answer is data, not ge
 **▶ Say it; click Sync tickets only if you're ahead of time.**
 
 And a fix is proved, not claimed. If someone closes a ticket while the scanner still sees the vulnerability, the
-platform reopens it and calls it a false closure. Cloud posture does the same with Wiz.
+platform reopens it and calls it a false closure.
 
 ---
 
-## 10. Watch lists - 16:30 to 17:45
+## 10. Cloud posture - 16:00 to 17:00
+
+**▶ Cloud posture tab.**
+
+The same idea, for your cloud. Wiz finds misconfigurations - not software bugs, but settings that leave something
+open. Here there are two.
+
+**▶ Point at the two rows: the exposed VM on web01, and public blob access on acmebackups.**
+
+A virtual machine that's exposed to the internet, with a critical vulnerability and a highly privileged identity -
+that's high, and it goes to the Web Platform team. And a storage account that allows public access to its files -
+medium, for the Cloud Platform team. Each has an owner, a deadline, and a ticket waiting for approval. You saw those
+tickets in the approvals queue, in plain words, saying exactly what to fix.
+
+**▶ On acmebackups: click Mark fixed, then Validate.**
+
+Now say the team tells us it's fixed. The platform doesn't take their word for it - it asks Wiz again. Wiz still sees
+the problem, so it's marked a false closure and reopened.
+
+It never changes Wiz or your cloud. It routes the fix to the right owner, and proves whether it happened.
+
+**▶ Point at the Ownership mapping card.**
+
+And because Wiz has no CMDB, your cloud teams can upload their spreadsheet of which subscription belongs to which
+team, right here.
+
+---
+
+## 11. Insight - 17:00 to 19:15 (three screens, about 45 seconds each)
+
+These next three screens answer a different question: not *what's happening*, but *where do we stand*.
+
+**▶ ATT&CK coverage tab.**
+
+This is MITRE ATT&CK - the public catalogue of how attackers operate, from getting in through to stealing data or
+causing damage. Each column is a stage of an attack, and each box is a technique.
+
+**▶ Point at the four tiles.**
+
+For every technique, the platform asks two questions. Could we see it, with the tools you have switched on? And have
+we seen it - has a detection actually fired? Right now that's ninety-three point eight percent coverage, and no
+priority blind spots: nothing important that none of your tools can see.
+
+But look at this: four techniques only one tool can see. Password spraying and MFA fatigue - only Entra. Hiding
+command traffic in DNS, and uploading data to cloud storage - only Umbrella. If one of those tools goes down, you're
+blind to them.
+
+**▶ Point at the Exfiltration column.**
+
+And the weakest stage is data leaving the company - fifty percent. That's exactly the kind of finding that should
+drive a tool decision.
+
+**▶ Hover any box.**
+
+Hover over any technique and it tells you which tools detect it, and how often it's fired. Switch a tool off, and this
+map changes immediately - so you can see what you'd lose before you lose it.
+
+**▶ Shadow IT tab.**
+
+From DNS traffic, this shows the online services people use that aren't on your approved list. Here, five of them,
+used by four people. AnyDesk is flagged high risk - remote-access software is a favourite of attackers. Then
+WeTransfer, DeepSeek, NordVPN and MEGA.
+
+**▶ Point at Risky destinations.**
+
+And risky sites: the phishing domain from our case was reached, and a fake Flash-update site was blocked. The traffic
+is counted and summarised; the individual requests aren't stored.
+
+**▶ Supplier risk tab.**
+
+And this one protects you from your suppliers' problems. For each key supplier, the platform watches for look-alike
+domains, impersonation and payment-diversion attempts.
+
+**▶ Point at Krishna Logistics.**
+
+Krishna Logistics is critical. Someone registered a look-alike domain - one letter different, an "l" where there
+should be an "i". There are requests to change bank details, and the advice is right there: verify by phone, using a
+number you already have. And one message passed the supplier's own authentication - which means the real supplier's
+mailbox is probably compromised.
+
+**▶ Point at Microsoft (cloud provider).**
+
+And the domain from our phishing case shows up here too, imitating Microsoft. One finding, seen from every angle.
+
+---
+
+## 12. Watch lists - 19:15 to 20:15
 
 **▶ Watch lists tab, as Lena.** (LIVE_DEMO_NOTES §22.)
 
@@ -423,7 +528,7 @@ with MFA, and every change is audited.
 
 ---
 
-## 11. Govern - 17:45 to 19:30 (three screens, about 35 seconds each)
+## 13. Govern - 20:15 to 22:00 (three screens, about 35 seconds each)
 
 **▶ Integrations tab. Point at the Stage column and Self-check 14 of 14.** (LIVE_DEMO_NOTES §17.)
 
@@ -453,7 +558,7 @@ and GPT-4.1 for reports and deep analysis. At your volume, that's about twenty-o
 
 ---
 
-## 12. Reports and audit - 19:30 to 20:30
+## 14. Reports and audit - 22:00 to 23:00
 
 **▶ Reports tab. Point at the standard reports and Report style.** (§20.)
 
@@ -475,7 +580,7 @@ evidence check removed.
 
 ---
 
-## 13. Close - 20:30 to 21:30
+## 15. Close - 23:00 to 24:00
 
 So, to sum up. One layer over the tools you already have. Code computes every figure and every verdict. The AI
 explains, with sources, and it can be switched off. And nothing touches a tool without a person - by default, for
@@ -496,21 +601,20 @@ out of a hundred, and every point is explained."*
 **Behind by two minutes:** also skip typing the question to the analyst (section 8) and the exposure question
 (section 9). Just say they exist.
 
-**Behind by three or more:** also skip the watch-list upload (section 10) - show the Watch lists page and say what it
-does - and cover AI usage (section 11) in one sentence.
+**Behind by three minutes:** also skip Shadow IT (section 11) - say it in one sentence from the tab descriptions -
+and skip the Mark fixed / Validate clicks on Cloud posture (section 10): just say the platform asks Wiz again.
+
+**Behind by four or more:** also skip the watch-list upload (section 12) - show the Watch lists page and say what it
+does - and cover AI usage (section 13) in one sentence.
 
 **Ahead of time? Add these, in this order:**
 
 1. **A live phishing upload.** ▶ *Phishing → Analyse a message*, upload
    `artifacts/phishing/corpus/html_attachment_phish.eml`. Say: *"A new malicious case appears in seconds."*
-2. **Proving a cloud fix.** ▶ *Cloud posture → Mark fixed → Validate* on acmebackups. It comes back *false closure -
-   reopened*. Say: *"It never changes Wiz or the cloud. It routes the fix to the owner, and proves whether it
-   happened."* Then point at the *Ownership mapping* card: *"Wiz has no CMDB, so the cloud teams upload their
-   subscription-to-team spreadsheet here."*
-3. **ATT&CK coverage.** Say: *"Ninety-three point eight percent coverage, no blind spots, and four techniques only one
-   tool can see."*
-4. **Supplier risk.** Say: *"A look-alike supplier domain - and the real supplier's mailbox is probably compromised."*
-5. **Shadow IT.**
+2. **The Phishing tab.** Say: *"Everything about reported e-mail in one place - how many were reported, how many
+   closed on their own, the campaigns, and who clicked more than once."*
+3. **Access, in Ada's window.** Say: *"Roles are granted with a reason and an end date, and an administrator can't
+   approve actions - that's a different job."*
 
 ---
 
