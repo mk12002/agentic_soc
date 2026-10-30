@@ -492,7 +492,7 @@ async function vmAsk() {
 
 async function Cloud() {
   const __g = GEN;
-  const r = await api('/api/v1/vm/misconfigurations'), m = r.metrics;
+  const [r, own] = await Promise.all([api('/api/v1/vm/misconfigurations'), api('/api/v1/ownership')]), m = r.metrics;
   setMainG(__g, page('Cloud posture', 'Wiz misconfigurations run through the remediation lifecycle: owner, SLA, ticket, and closure validated against Wiz.',
     can('request_action') ? btn('Route to owners', 'misRoute', [], 'primary') : '',
     `<div class="grid g-kpi">${kpi('Open', nf(m.open))}${kpi('Past SLA', nf(m.overdue), '', m.overdue > 0)}${kpi('False closures', nf(m.false_closures), 'fix claimed, Wiz still reports it', m.false_closures > 0)}
@@ -507,7 +507,54 @@ async function Cloud() {
       <td>${chip(x.severity)}</td><td class="small">${esc(x.rule)}</td><td><div class="t-title">${esc(x.resource)}</div><div class="t-sub">${esc(x.resource_type)} · ${esc(x.cloud)} ${esc(x.subscription)}</div></td>
       <td class="small">${esc(x.platform_team || 'Unknown owner')}</td><td class="nowrap">${esc(cap(x.status))}${x.reopened ? ` ${chip('reopened ' + x.reopened, 'high plain')}` : ''}</td>
       <td class="mono small nowrap" style="${x.overdue ? 'color:var(--crit)' : ''}">${day(x.sla_due)}</td>
-      <td><div class="inline">${can('investigate') ? btn('Mark fixed', 'misVerb', [x.id, 'fixed'], 'sm') + btn('Validate', 'misVerb', [x.id, 'validate'], 'sm') : ''}</div></td></tr>`), {empty: 'No misconfigurations'}), {flush: true})}</div>`));
+      <td><div class="inline">${can('investigate') ? btn('Mark fixed', 'misVerb', [x.id, 'fixed'], 'sm') + btn('Validate', 'misVerb', [x.id, 'validate'], 'sm') : ''}</div></td></tr>`), {empty: 'No misconfigurations'}), {flush: true})}</div>
+    <div class="mt">${ownershipCard(own, r.items.filter(x => !x.platform_team).length)}</div>`));
+}
+function ownershipCard(o, unowned) {
+  const manage = can('manage_ownership'), SHOW = 200;
+  const head = o.count ? `Version ${nf(o.version)} · ${nf(o.count)} row(s) from ${esc(o.filename || 'an upload')} · by ${esc(o.set_by)} on ${day(o.set_at)}${o.note ? ` - ${esc(o.note)}` : ''}`
+    : 'No mapping uploaded - owners come only from the CMDB connectors.';
+  const rows = table(['Resource / host', 'Subscription / account', 'Cloud · type', 'Team', 'Owner', 'Env · criticality'], o.rows.slice(0, SHOW).map(x => `<tr>
+      <td class="mono small" style="overflow-wrap:anywhere;max-width:240px">${esc(x.name || '-')}</td><td class="mono small" style="overflow-wrap:anywhere;max-width:200px">${esc(x.subscription || '-')}</td>
+      <td class="small">${esc([x.cloud, x.resource_type].filter(Boolean).join(' · ') || 'any')}</td><td class="small strong">${esc(x.team)}</td>
+      <td class="small">${esc(x.owner || '')}</td><td class="small">${esc([x.environment, x.criticality].filter(Boolean).join(' · '))}</td></tr>`), {empty: 'No rows.'})
+    + (o.count > SHOW ? `<div class="t-sub" style="padding:8px 16px">The first ${nf(SHOW)} of ${nf(o.count)} are shown - export the mapping for all of them.</div>` : '');
+  const form = manage ? `<div class="stack" style="gap:10px;padding:12px 16px">
+      <input type="file" id="own-file" class="input" style="padding:5px" aria-label="Excel or CSV ownership file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
+      <input class="input" id="own-note" maxlength="500" aria-label="Why" placeholder="Why (kept in the audit log)">
+      <div class="inline" style="gap:8px">${btn('Preview', 'ownUpload', [true], '')}${btn('Upload and apply', 'ownUpload', [false], 'primary')}${o.count ? btn('Clear the mapping', 'ownClear', [], 'ghost') : ''}</div>
+      <div class="t-sub">Excel (.xlsx - every sheet) or CSV, up to ${nf(o.max_rows)} rows; an upload replaces the mapping (the history is kept). A header row names the columns:
+        <b>Resource</b> / <b>Hostname</b> (wildcards <span class="mono">*</span> <span class="mono">?</span> allowed) and/or <b>Subscription</b> / <b>Account</b> / <b>Project</b>, the <b>Team</b> (required),
+        and optionally <b>Owner</b>, <b>Environment</b>, <b>Criticality</b> (critical, high, medium, low), <b>Cloud</b> and <b>Resource type</b> to narrow a row.
+        An exact name beats a pattern, a pattern beats a subscription. It fills the gaps the CMDB leaves and never overrides it.</div>
+      <div id="own-out"></div></div>` : '';
+  return card(`Ownership mapping <span class="muted">(${nf(o.count)})</span>`,
+    `<div class="small muted" style="padding:12px 16px 4px">${head}${unowned ? ` · <b>${nf(unowned)}</b> open misconfiguration(s) have no owner` : ''}</div>${form}${rows}`,
+    {flush: true, sub: 'which team owns which cloud resources and hosts - for what the CMDB does not hold (Wiz resources)',
+     right: btn('Export CSV', 'dl', ['/api/v1/ownership/export'], 'sm', 'download')});
+}
+async function ownUpload(dry) {
+  const f = ($('#own-file') || {}).files?.[0];
+  if (!f) { toast('Choose an Excel or CSV file first', true); return; }
+  if (f.size > 5e6) { toast('The file is larger than 5 MB - split it', true); return; }
+  if (!dry && !confirm(`Replace the ownership mapping with ${f.name}? The previous version stays in the history.`)) return;
+  const bytes = new Uint8Array(await f.arrayBuffer()); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const r = await post('/api/v1/ownership/upload', {content_b64: btoa(bin), filename: f.name, note: $('#own-note').value.trim(), dry_run: !!dry});
+  const c = r.coverage || {};
+  const html = `<div class="callout ${r.problem_count ? '' : 'info'}"><div><b>${dry ? 'Preview - nothing has changed yet' : 'Uploaded and applied'}.</b>
+      ${nf(r.rows)} row(s) for ${nf(Object.keys(r.by_team).length)} team(s): ${nf(r.added)} new, ${nf(r.removed)} no longer in the file.
+      ${c.misconfigurations_without_owner != null ? `It gives an owner to ${nf(c.misconfigurations_covered)} of ${nf(c.misconfigurations_without_owner)} unowned misconfiguration(s) and ${nf(c.findings_covered)} of ${nf(c.findings_without_owner)} unowned finding(s).` : ''}
+      ${(c.still_without_owner || []).length ? `<div class="small mt">Still without an owner: <span class="mono">${c.still_without_owner.map(esc).join(', ')}</span></div>` : ''}
+      ${r.problem_count ? `<div class="small strong mt">${nf(r.problem_count)} row(s) cannot be used:</div><ul class="small" style="margin:4px 0;padding-left:18px">${r.problems.slice(0, 50).map(p => `<li>${esc(p.where || '')}: <span class="mono">${esc(p.value)}</span> - ${esc(p.problem)}</li>`).join('')}</ul>` : ''}</div></div>`;
+  if (!dry) { toast('Ownership mapping updated - owners re-applied'); await Cloud(); }
+  const out = $('#own-out'); if (out) out.innerHTML = html;
+}
+async function ownClear() {
+  const why = prompt('Clear the ownership mapping? Owners then come only from the CMDB. Why?');
+  if (why === null) return;
+  await post('/api/v1/ownership/clear', {reason: why});
+  toast('Ownership mapping cleared'); Cloud();
 }
 async function misRoute() { const r = await post('/api/v1/vm/misconfigurations/route'); toast(Object.keys(r.routed).length ? `Routed to ${Object.keys(r.routed).join(', ')} - tickets await approval` : 'Nothing new to route'); Cloud(); }
 async function misVerb(id, verb) { const r = await post(`/api/v1/vm/misconfigurations/${id}/${verb}`); toast(r.result ? `Validation: ${cap(r.result)}${r.false_closure ? ' (false closure - reopened)' : ''}` : `Marked ${cap(r.status)}`); Cloud(); }
@@ -1239,5 +1286,5 @@ window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, 
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit, watchlists: Watchlists};
 Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
-  campaign, vmAsk, misRoute, misVerb, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
+  campaign, vmAsk, misRoute, misVerb, ownUpload, ownClear, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
   rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, styleUpload, styleSave, styleRemove, styleReset});

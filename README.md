@@ -112,7 +112,7 @@ Per-tool setup and permissions: [docs/CONNECTORS.md](docs/CONNECTORS.md); deploy
 | Exposure / cloud | Rapid7 InsightVM/Nexpose, Wiz, CrowdStrike Spotlight, Defender TVM |
 | Vulnerability intel | NIST NVD, FIRST EPSS, CISA KEV |
 | Threat intel | VirusTotal, AbuseIPDB, OTX, URLhaus, ThreatFox, MalwareBazaar, GreyNoise, Shodan (fused) |
-| ITSM / CMDB | ServiceNow (tickets + CMDB), Jira, CSV / cloud-subscription ownership mapping |
+| ITSM / CMDB | ServiceNow (tickets + CMDB), Jira, CSV / cloud-subscription ownership mapping, and an ownership mapping uploaded in the console (Excel / CSV) for cloud resources the CMDB does not hold |
 | SIEM | Microsoft Sentinel, generic webhook (`POST /api/v1/ingest/alerts`) |
 
 **Adding a tool:** `python -m soc_platform connector new <name> --category <cat> --tool "Vendor Product"` writes a
@@ -168,6 +168,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | [docs/RUN_GUIDE.md](docs/RUN_GUIDE.md) | Run the complete system: setup, configuration, loading the sample data, ingesting live during a demo, resetting, Docker, troubleshooting |
 | [docs/ENGINEERING.md](docs/ENGINEERING.md) | Every engineering choice: architecture, stack, connector SDK, entity resolution, data model, domains, intelligence, action layer, LLM gateway, security, reliability, performance, testing, deployment, decision log |
 | [docs/PRESENTER_GUIDE.md](docs/PRESENTER_GUIDE.md) | Everything needed to present, demo and defend the platform: walkthroughs, formulas, guardrails, hard questions, limits |
+| [docs/LIVE_DEMO_20MIN.md](docs/LIVE_DEMO_20MIN.md) | A timed 20-23 minute live demo: the order, what to click and say per segment, what to cut when running long, the ten likely questions |
 | [docs/LIVE_DEMO_NOTES.md](docs/LIVE_DEMO_NOTES.md) | Presenter's notes for a live demo: every page and section, what it computes, the demo's values, likely questions |
 | [docs/FEATURES.md](docs/FEATURES.md) | Complete feature list with screenshots |
 | [docs/LLM_TOKENS_AND_COST.md](docs/LLM_TOKENS_AND_COST.md) | Measured tokens per component, unit costs, monthly cost by SOC size, budget sizing |

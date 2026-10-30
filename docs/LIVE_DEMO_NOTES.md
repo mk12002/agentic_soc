@@ -111,7 +111,7 @@ AI gathers and explains, code computes every figure and verdict, and a person ap
 - 56 ATT&CK techniques in the coverage model
 - 11 scheduled jobs
 - 14 self-checks
-- 878 platform tests on SQLite, 877 on PostgreSQL, and 205 phishing-engine tests
+- 896 platform tests on SQLite, 895 on PostgreSQL, and 205 phishing-engine tests
 
 **Say these limits first, before anyone asks.** It buys credibility.
 1. It has not yet run against a real tenant. Every connector is built to the vendor's documented API and is
@@ -867,6 +867,7 @@ criticality say whether it matters here."*
 - **"Why is everything past SLA?"** The sample scanner data first saw these findings in August and September 2026.
   The SLA counts from first seen. On live data it counts from the scanners' real dates.
 - **"Who is the owner?"** The host's support group from the CMDB (ServiceNow, or the ownership CSV), mapped to a team.
+  Where the CMDB has no answer, the ownership mapping uploaded on Cloud posture fills the gap.
 - **"Do you open tickets automatically?"** `vm.create_ticket` / `ticket.create` are actions like any other:
   recommended, then approved.
 
@@ -887,7 +888,10 @@ criticality say whether it matters here."*
     Wiz "toxic combination".
   - *Storage account allows public blob access*: acmebackups, **medium**, Cloud Platform.
 - **Route to owners:** creates a ticket action per team, waiting for approval. In the demo both are already routed.
+- **Ownership mapping** (bottom card): *"Wiz has no CMDB, and cloud resources are rarely in ServiceNow - so the cloud teams' own spreadsheet is uploaded here."* Rows name a resource or host (wildcards allowed) and / or a subscription / account, and the owning team; optionally owner, environment, criticality, cloud, resource type. **Preview** shows every unusable row and how many unowned misconfigurations and findings it would cover; **Upload and apply** re-applies ownership at once. Exact name beats pattern beats subscription; it never overrides the CMDB. Leads, admins and automation admins change it; audited and versioned. In the demo the CMDB already owns both resources, so the card shows *No mapping uploaded*.
 - **Mark fixed:** the owner claims the fix. **Validate:** asks Wiz whether it still sees the problem.
+
+**Say plainly:** *"This page never changes anything in Wiz or the cloud - it routes the fix to the owning team and proves it with Wiz."*
 
 **Demo it:** on acmebackups, **Mark fixed** → **Validate** → *"Validation: Still present (false closure - reopened)"*.
 *False closures* becomes 1, and the row shows *reopened 1*.
@@ -1308,7 +1312,8 @@ coverage, shadow IT, control evidence, verdict quality, integration health, valu
   - **The key is shown once.**
   - Last used, Revoke. *"Can never approve actions."*
 - **Role permissions:** the matrix, including the row *Never granted to service accounts*: approve_action,
-  approve_high_impact, approve_policy, manage_access, manage_report_style, manage_watchlists, propose_policy,
+  approve_high_impact, approve_policy, manage_access, manage_ownership, manage_report_style, manage_watchlists,
+  propose_policy,
   rollback_action.
 
 ### The five roles
@@ -1316,9 +1321,9 @@ coverage, shadow IT, control evidence, verdict quality, integration health, valu
 | Role | Can | Cannot |
 |---|---|---|
 | **Analyst** | read, investigate, request and approve routine actions, resolve entities, read audit | approve high-impact, roll back, policy, kill switch |
-| **Lead** | analyst's rights + approve high-impact, roll back, approve policy and configuration, kill switch, export evidence, manage watch lists, manage the report style | manage access, manage connectors |
-| **Automation admin** | propose policy, manage connectors, kill switch, read audit | approve any action or its own policy (separation of duties) |
-| **Admin** | manage access, manage connectors, kill switch, export evidence, manage the report style, read audit | approve actions, approve policy |
+| **Lead** | analyst's rights + approve high-impact, roll back, approve policy and configuration, kill switch, export evidence, manage watch lists, manage the report style, manage the ownership mapping | manage access, manage connectors |
+| **Automation admin** | propose policy, manage connectors, kill switch, read audit, manage the ownership mapping | approve any action or its own policy (separation of duties) |
+| **Admin** | manage access, manage connectors, kill switch, export evidence, manage the report style, manage the ownership mapping, read audit | approve actions, approve policy |
 | **Auditor** | read everything in scope, read audit, export evidence | change anything |
 
 ### Rules to quote
@@ -1557,7 +1562,7 @@ The typed text is always treated literally (no injection).
 - The organisation's own volumes are first seen in its environment.
 
 **"How was it tested?"**
-- 878 platform tests (SQLite, with PostgreSQL's rules enforced) and 877 on PostgreSQL; 205 engine tests.
+- 896 platform tests (SQLite, with PostgreSQL's rules enforced) and 895 on PostgreSQL; 205 engine tests.
 - 108 of 108 features verified feature by feature.
 - 24 penetration tests and 11 fuzzing properties.
 - Time-travel tests (0 / 45 / 400 days).
@@ -1572,7 +1577,7 @@ The typed text is always treated literally (no injection).
 **"What do you need from us?"**
 - API access per tool (read scopes first, dedicated service principals)
 - an Entra app registration
-- a CMDB / ownership source
+- a CMDB / ownership source - for cloud resources, the cloud teams' spreadsheet of subscription or resource -> team
 - representative historical data for tuning
 - decisions on hosting and residency
 - the LLM endpoint to use

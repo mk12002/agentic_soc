@@ -15,7 +15,15 @@ from typing import Any
 
 from soc_platform.connectors.base import ConnectorError, LookupResult, Page
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
-from soc_platform.connectors.tools._common import ConnectorAction, need, ok_lookup, parse_ts, targets_of
+from soc_platform.connectors.tools._common import (
+    ConnectorAction,
+    need,
+    odata_str,
+    ok_lookup,
+    parse_ts,
+    path_part,
+    targets_of,
+)
 from soc_platform.connectors.tools._microsoft import APP_FIELDS, ARM, MicrosoftConnector, graph_and_arm_transport
 from soc_platform.core.identity import email_aliases
 from soc_platform.core.schema import EntityRef, NormalizedRecord
@@ -171,16 +179,17 @@ class EntraConnector(MicrosoftConnector):
     # ------------------------------------------------------------------ identity context (PH-F08, IM-F04)
 
     def identity_context(self, upn: str, since_iso: str | None = None) -> dict[str, Any]:
-        flt = f"userPrincipalName eq '{upn}'" + (f" and createdDateTime ge {since_iso}" if since_iso else "")
+        flt = f"userPrincipalName eq {odata_str(upn)}" + (f" and createdDateTime ge {since_iso}" if since_iso else "")
+        u = path_part(upn)
         reads = {   # independent Graph reads: issued together (each still goes through the rate budget)
-            "user": lambda: self.get(f"/v1.0/users/{upn}", params={"$select": "id,userPrincipalName,displayName,"
+            "user": lambda: self.get(f"/v1.0/users/{u}", params={"$select": "id,userPrincipalName,displayName,"
                                                                               "department,jobTitle,accountEnabled,createdDateTime"}),
-            "membership": lambda: self.odata_all(f"/v1.0/users/{upn}/transitiveMemberOf", limit=2000),
-            "methods": lambda: self.get(f"/v1.0/users/{upn}/authentication/methods").get("value", []),
+            "membership": lambda: self.odata_all(f"/v1.0/users/{u}/transitiveMemberOf", limit=2000),
+            "methods": lambda: self.get(f"/v1.0/users/{u}/authentication/methods").get("value", []),
             "signins": lambda: self.get("/v1.0/auditLogs/signIns", params={"$filter": flt, "$top": 50}).get("value", []),
             "risky": lambda: self.get("/v1.0/identityProtection/riskyUsers",
-                                      params={"$filter": f"userPrincipalName eq '{upn}'"}).get("value", []),
-            "rules": lambda: self.get(f"/v1.0/users/{upn}/mailFolders/inbox/messageRules").get("value", []),
+                                      params={"$filter": f"userPrincipalName eq {odata_str(upn)}"}).get("value", []),
+            "rules": lambda: self.get(f"/v1.0/users/{u}/mailFolders/inbox/messageRules").get("value", []),
             "devices": lambda: self._registered_devices(upn, since_iso),
         }
         with ThreadPoolExecutor(max_workers=len(reads)) as pool:
@@ -245,7 +254,7 @@ class EntraConnector(MicrosoftConnector):
             def assignments(sid: str) -> list[dict[str, Any]]:
                 return self.get(f"{ARM}/subscriptions/{sid}/providers/Microsoft.Authorization/roleAssignments",
                                 params={"api-version": ARM_API["authorization"],
-                                        "$filter": f"assignedTo('{object_id}')"}).get("value", [])
+                                        "$filter": f"assignedTo({odata_str(object_id)})"}).get("value", [])
 
             order = sorted(subs)
             with ThreadPoolExecutor(max_workers=max(1, min(8, len(order)))) as pool:   # one call per subscription
@@ -313,7 +322,7 @@ class EntraConnector(MicrosoftConnector):
                                  azure_privileged_roles=ctx["azure_privileged"],
                                  risky_ips=sorted({s.get("ipAddress") for s in risky_signins if s.get("ipAddress")}))
             if entity_type == "ip":
-                s = self.get("/v1.0/auditLogs/signIns", params={"$filter": f"ipAddress eq '{value}'", "$top": 50}).get("value", [])
+                s = self.get("/v1.0/auditLogs/signIns", params={"$filter": f"ipAddress eq {odata_str(value)}", "$top": 50}).get("value", [])
                 users = sorted({x.get("userPrincipalName") for x in s})
                 return ok_lookup(self, [self._signin(x) for x in s], f"{len(s)} sign-in(s) from {value} by {users}",
                                  signins_from_ip=len(s), users=users)
@@ -327,16 +336,16 @@ class EntraConnector(MicrosoftConnector):
         return targets_of(targets, "identity", "upn")
 
     def revoke(self, params: dict, targets: list) -> dict:
-        return {"revoked": [u for u in self._upns(targets) if self.post(f"/v1.0/users/{u}/revokeSignInSessions") is not None]}
+        return {"revoked": [u for u in self._upns(targets) if self.post(f"/v1.0/users/{path_part(u)}/revokeSignInSessions") is not None]}
 
     def disable(self, params: dict, targets: list) -> dict:
         for u in self._upns(targets):
-            self.req("PATCH", f"/v1.0/users/{u}", json={"accountEnabled": False})
+            self.req("PATCH", f"/v1.0/users/{path_part(u)}", json={"accountEnabled": False})
         return {"disabled": self._upns(targets)}
 
     def enable(self, params: dict, targets: list) -> dict:
         for u in self._upns(targets):
-            self.req("PATCH", f"/v1.0/users/{u}", json={"accountEnabled": True})
+            self.req("PATCH", f"/v1.0/users/{path_part(u)}", json={"accountEnabled": True})
         return {"enabled": self._upns(targets)}
 
     def confirm_compromised(self, params: dict, targets: list) -> dict:
@@ -346,7 +355,7 @@ class EntraConnector(MicrosoftConnector):
 
     def force_password_change(self, params: dict, targets: list) -> dict:
         for u in self._upns(targets):
-            self.req("PATCH", f"/v1.0/users/{u}", json={"passwordProfile": {"forceChangePasswordNextSignIn": True}})
+            self.req("PATCH", f"/v1.0/users/{path_part(u)}", json={"passwordProfile": {"forceChangePasswordNextSignIn": True}})
         return {"forced": self._upns(targets)}
 
 

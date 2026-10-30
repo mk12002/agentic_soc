@@ -264,7 +264,7 @@ After `demo`:
 | **Cases** | 10 cases: 7 phishing, 3 incidents. With an LLM configured (and loaded into the shell that runs `demo`), each case's Assessment is the model's written explanation; clear spam / safe reports and runs without a model keep the deterministic, cited summary. Verdicts, severities and actions are the same either way |
 | **Approvals** | 37 actions awaiting a decision (incident 18, phishing 16, vulnerability 3), with or without the ML engine |
 | **Vulnerabilities** | 6 open findings; the CVE-2021-44228 (Log4Shell) campaign |
-| **Cloud posture** | Misconfigurations routed to their owning teams |
+| **Cloud posture** | Misconfigurations routed to their owning teams; the ownership mapping upload (resource / subscription -> team) for what the CMDB does not hold |
 | **Intelligence** | A situation brief, correlated findings, the riskiest users and hosts |
 | **Phishing** | The reported credential-phishing campaign (8 recipients, Jane clicked), supplier fraud, CEO fraud, QR phishing, a genuine invoice (safe, auto-closed), marketing spam. With the ML engine each case's *Analysis* card shows the models' and the rules' verdicts and every model's score |
 | **Suppliers** | Krishna Logistics: account compromise, look-alike domain, payment diversion |

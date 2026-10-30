@@ -61,6 +61,26 @@ def parse_ts(v: Any) -> datetime | None:
         return None
 
 
+def odata_str(v: Any) -> str:
+    """A value as an OData string literal (Graph, Defender for Endpoint): quoted, a quote inside doubled -
+    ``o'brien@x.com`` -> ``'o''brien@x.com'``. Values from investigations (names, hosts, addresses) go through it so a
+    quote neither breaks the query nor changes it."""
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+def fql_str(v: Any) -> str:
+    """A value as a CrowdStrike FQL string literal: quoted, backslashes and quotes escaped."""
+    return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def path_part(v: Any) -> str:
+    """A value as one URL path segment (``/users/{upn}``): reserved characters (``/ ? # %``...) percent-encoded, so a
+    value can only ever name that one resource. Addresses keep their ``@``."""
+    from urllib.parse import quote
+
+    return quote(str(v), safe="@")
+
+
 def need(rec: Any, key: str) -> Any:
     """A record's identifier. Without one a record cannot be stored or de-duplicated, so it is refused with a reason
     (one failed record in the sync report) rather than crashing on a KeyError."""

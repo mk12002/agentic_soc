@@ -112,6 +112,7 @@ orange because they form the only write path.
 | `audit.py` | A hash-chained, append-only audit log. `_lock_chain` serialises appends across replicas. |
 | `audit_export.py` | Audit exports (`GET /api/v1/audit/export?format=jsonl\|json\|csv\|xlsx\|docx`, filtered by time, event type, actor or subject) and the facts the *Audit log* screen states (`GET /api/v1/audit/info`: size, span, last verification, retention from the settings, protections, access). The .xlsx is written without a spreadsheet library (text cells only); CSV cells are guarded against formulas. |
 | `reporting/style.py` | The organisation's report style (`report_styles`, versioned): brand, logo, Word / PowerPoint templates, writing guide; uploads validated (macros, DTDs, sizes, 16:9) and kept in `blobs`; `use_style()` sets `design.STYLE` around every render, so concurrent reports never mix styles; `preview()`; routes under `/api/v1/reports/style`. |
+| `ownership.py` | The uploaded ownership mapping (`ownership_mappings`, one version per upload): parse an Excel / CSV with forgiving headers, `match()` (exact name > pattern > subscription, optionally per cloud / resource type), routes `GET /api/v1/ownership`, `POST /api/v1/ownership/upload` (preview with coverage), `POST /api/v1/ownership/clear`, `GET /api/v1/ownership/export`. Read by both `enrich_ownership()`s after the CMDB connectors. |
 | `watchlists.py` | The block and exception lists (`watchlist_entries`): Excel / CSV upload with preview (`POST /api/v1/watchlists/{name}/upload`), removal, CSV export, and `case_matches()` - the people, hosts and indicators of a case on a list, read whenever the case page, case list or investigation record is built. Context only: nothing decisional reads it. |
 | `crypto.py` | Fernet / MultiFernet encryption (key rotation); atomic writes with 0600 permissions. |
 | `retention.py` + `selfcheck.py` | Retention per data class with legal hold; a proof that every surface shows the same figure. |
@@ -178,6 +179,7 @@ Each tool gets its own least-privilege identity. R means read, W means write. Ev
 | ServiceNow | OAuth2 client credentials or Basic | ticket table, CMDB CI computers | create / update ticket (by correlation id) |
 | Jira | E-mail + API token | search (JQL) | create issue, comment |
 | Ownership CSV | Mounted file | owner, platform team, environment, criticality per host | - |
+| Ownership mapping upload | Console (Excel / CSV), `ownership_mappings` table | team, owner, environment, criticality per resource / host pattern / subscription | - |
 | Microsoft Sentinel | Entra app via ARM (Reader) | SecurityInsights incidents (+ entities) | - |
 | Generic SIEM push | Inbound, platform API key | `POST /api/v1/ingest/alerts` with a field map; one bad item is refused on its own | - |
 | NIST NVD | Optional API key | `/rest/json/cves/2.0` (sends CVE ids only) | - |

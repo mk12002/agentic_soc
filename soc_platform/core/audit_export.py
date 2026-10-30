@@ -46,6 +46,12 @@ COLUMNS = ["seq", "ts_utc", "actor_type", "actor_id", "event_type", "subject_typ
 XLSX_MAX_ROWS = 1_000_000        # Excel's sheet limit is 1,048,576 rows
 XLSX_MAX_CELL = 32_000           # Excel's cell limit is 32,767 characters
 DOCX_MAX_ROWS = 1_000
+# Exactly what audit.compute_hash does, so anyone can re-check an export with any language's SHA-256 and JSON.
+VERIFY_RECIPE = ("hash = lower-case hex SHA-256 of the UTF-8 JSON array [prev_hash, ts, actor_type, actor_id, "
+                 "event_type, subject_type, subject_id, payload], written with sorted object keys, no spaces "
+                 "(separators ',' and ':') and non-ASCII characters as \\u escapes. ts is the record's time in UTC "
+                 "with six microsecond digits and no offset (2026-10-01T09:30:00.000000 - the ts_utc column without "
+                 "its +00:00, and .000000 added when it has no fraction). The first record's prev_hash is 64 zeros; every later one is the hash of the record before.")
 _BAD_XML = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff￾￿]")
 
 
@@ -78,7 +84,8 @@ def records(session: Session, *, since_seq: int = 0, start: datetime | None = No
         q = q.where(AuditRecord.ts < end)
     if event_type:
         et = event_type.strip()
-        q = (q.where(AuditRecord.event_type.like(et[:-1].replace("%", r"\%").replace("_", r"\_") + "%", escape="\\"))
+        prefix = et[:-1].replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+        q = (q.where(AuditRecord.event_type.like(prefix + "%", escape="\\"))
              if et.endswith("*") else q.where(AuditRecord.event_type == et))
     if actor_id:
         q = q.where(AuditRecord.actor_id == actor_id.strip())
@@ -212,8 +219,7 @@ def _about(meta: dict[str, Any]) -> list[list[Any]]:
     rows += [[f"Filter: {k}", str(val)] for k, val in meta["filters"].items()]
     rows += [["Whole chain verified at export", "yes" if v.get("ok") else f"NO - broken at #{v.get('first_bad_seq')}"],
              ["Records in the whole log", v.get("records")], ["Head of the chain", v.get("head") or ""],
-             ["How to verify", ("hash = SHA-256 over [prev_hash, ts, actor_type, actor_id, event_type, subject_type, "
-                               "subject_id, payload] as canonical JSON; each record's prev_hash is the hash before it")]]
+             ["How to verify", VERIFY_RECIPE]]
     return rows
 
 

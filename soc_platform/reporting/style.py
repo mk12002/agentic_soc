@@ -40,6 +40,7 @@ from soc_platform.core.audit import AuditLog
 from soc_platform.core.auth import Perm, Principal
 from soc_platform.core.db import Base, BoundedText, UTCDateTime
 from soc_platform.core.models import utcnow
+from soc_platform.core.text import unsafe_xml
 
 DEFAULT: dict[str, Any] = {"organisation": "", "primary": "1F2A44", "accent": "2563EB", "font": "Calibri",
                            "classification": "Confidential - internal", "footer": "", "guide": "", "files": {}}
@@ -137,8 +138,9 @@ def _office(data: bytes, what: str, template_ct: str, document_ct: str) -> bytes
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as w:
         for info in z.infolist():
             body = z.read(info)
-            if info.filename.endswith((".xml", ".rels")) and (b"<!DOCTYPE" in body or b"<!ENTITY" in body):
-                raise StyleRejected(f"{what}: a part declares a document type - not a normal Office file")
+            if info.filename.endswith((".xml", ".rels")) and unsafe_xml(body):
+                raise StyleRejected(f"{what}: a part declares a document type or uses an unusual encoding - "
+                                    "not a normal Office file")
             if info.filename == "[Content_Types].xml":
                 body = body.replace(template_ct.encode(), document_ct.encode())
             w.writestr(info, body)
@@ -186,6 +188,8 @@ def check_logo(data: bytes) -> tuple[bytes, str]:
             raise StyleRejected("Logo: a PNG or JPEG image, at most 5000 pixels a side")
         out = io.BytesIO()
         img.convert("RGBA").save(out, "PNG")       # re-encoded: no metadata, nothing but the picture
+    except Image.DecompressionBombError as exc:      # a few KB that would unpack to gigapixels
+        raise StyleRejected("Logo: a PNG or JPEG image, at most 5000 pixels a side") from exc
     except (UnidentifiedImageError, OSError, SyntaxError) as exc:
         raise StyleRejected("Logo: not a readable PNG or JPEG image") from exc
     return out.getvalue(), f"{img.width} x {img.height} px"

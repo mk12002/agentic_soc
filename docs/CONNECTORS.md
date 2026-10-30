@@ -111,7 +111,7 @@ Known Exploited Vulnerabilities catalogue; additions trigger exposure assessment
 
 ### Ownership mapping (CSV) (`cmdb_csv`)
 
-Maintained hostname-pattern to owner/platform-team/criticality mapping (fallback for A04/D06).
+Maintained hostname-pattern to owner/platform-team/criticality mapping on a mounted file (fallback for A04/D06). For cloud resources, prefer the ownership mapping uploaded on the Cloud posture screen.
 
 - Vendor: internal · focus areas: vulnerability, incident
 - Read scopes: see vendor docs / to confirm

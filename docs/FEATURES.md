@@ -291,7 +291,7 @@ legitimate vendor, internal and marketing mail).
 | Natural-language query (VM-F15, U12) | "Which internet-facing hosts have KEV vulnerabilities?" → answer + the exact filter used + records |
 | New-CVE / KEV exposure (VM-F16, U02) | Automatic "are we exposed, where, how badly" when a CVE is published or KEV-listed |
 | Coverage (VM-F17) | Assets missing EDR or CMDB records, single-scanner assets, stale scans, match rate |
-| **Cloud posture (U03)** | Wiz misconfigurations consolidated per resource × rule, owner from CMDB or cloud subscription, SLA by severity (toxic combination on an exposed VM → 3 days), routed as tickets, fix claims validated against Wiz |
+| **Cloud posture (U03)** | Wiz misconfigurations consolidated per resource × rule, owner from CMDB or cloud subscription or the uploaded ownership mapping, SLA by severity (toxic combination on an exposed VM → 3 days), routed as tickets, fix claims validated against Wiz |
 
 ![](screenshots/11-cloud-posture.png)
 
@@ -545,3 +545,19 @@ Every API response on a variant is checked to contain no name from the built-in 
 **Scope note.** The sample estate exercises every workflow through the same code as production. What it cannot
 show is behaviour against the client's own tenants and volumes: each vendor connector must be connected and tested in
 the client's environment, and accuracy / latency targets measured on the client's data (see DEMO_GUIDE.md).
+
+### Ownership mapping (Cloud posture screen)
+
+Wiz reports cloud resources - storage accounts, cloud VMs, clusters - that a CMDB rarely holds, so their
+misconfigurations and vulnerabilities had nobody to route to. A lead, administrator or automation administrator
+uploads the mapping on *Cloud posture -> Ownership mapping*: an Excel workbook (.xlsx, every sheet) or a CSV whose
+header names a **Resource** / **Hostname** column (wildcards `*` `?`) and / or a **Subscription** / **Account** /
+**Project** column, the owning **Team** (required), and optionally **Owner**, **Environment**, **Criticality**
+(critical / high / medium / low), **Cloud** and **Resource type** to narrow a row. **Preview** lists every unusable row
+(with its sheet and row) and how many unowned misconfigurations and findings the file would give an owner, changing
+nothing; **Upload and apply** replaces the mapping as a new version and re-applies ownership at once. An exact name
+beats a pattern, a pattern beats a subscription. The mapping fills the gaps the CMDB leaves - ServiceNow and the
+ownership-file connector are asked first - and never overrides them. Criticality feeds the vulnerability priority as
+a CMDB criticality does. *Export CSV* downloads it; *Clear* empties it; every change is audited (`ownership.uploaded`,
+`ownership.cleared`). The page never fixes anything in Wiz or the cloud: it routes the work to the owning team as a
+ticket for approval and checks the fix against Wiz.

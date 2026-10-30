@@ -77,6 +77,39 @@ def test_an_unfiltered_export_can_be_re_verified_outside_the_platform(session):
     assert doc["export"]["selection"].startswith("the whole log")
 
 
+def test_the_written_recipe_alone_re_verifies_an_export_without_the_platforms_code(session):
+    """A reviewer has only the file and the 'How to verify' text: plain SHA-256 and JSON must reproduce every hash."""
+    import hashlib
+
+    from soc_platform.core.audit_export import VERIFY_RECIPE
+
+    _seed(session)
+    AuditLog(session).append(actor_type="human", actor_id="zoë@example.com", event_type="case.note",
+                             subject_type="case", subject_id="c3", payload={"text": "naïve – ✓", "b": 1, "a": [2]})
+    doc = json.loads(export(session, "json", by="aud", filters={})[0])
+    assert "64 zeros" in VERIFY_RECIPE and "sorted object keys" in VERIFY_RECIPE
+    prev = "0" * 64
+    for r in doc["records"]:
+        ts = r["ts_utc"].removesuffix("+00:00")
+        ts = ts if "." in ts else ts + ".000000"
+        body = json.dumps([prev, ts, r["actor_type"], r["actor_id"], r["event_type"], r["subject_type"],
+                           r["subject_id"], r["payload"]], sort_keys=True, separators=(",", ":"))
+        assert r["prev_hash"] == prev and r["hash"] == hashlib.sha256(body.encode("utf-8")).hexdigest()
+        prev = r["hash"]
+
+
+def test_an_event_type_prefix_with_like_wildcards_or_backslashes_matches_literally(session):
+    log = AuditLog(session)
+    for et in ("a_b.one", "axb.two", "a\\b.three"):
+        log.append(actor_type="system", actor_id="t", event_type=et, subject_type="t", subject_id="t", payload={})
+    def pick(pattern):
+        lines = export(session, "jsonl", by="aud", filters={"event_type": pattern})[0].decode().splitlines()
+        return [json.loads(x)["event_type"] for x in lines[:-1]]
+
+    assert pick("a_b.*") == ["a_b.one"]                  # "_" is not "any character"
+    assert pick("a\\b.*") == ["a\\b.three"]              # a backslash is itself, not an escape
+
+
 def test_filters_select_by_event_type_prefix_actor_and_time_window(session):
     _seed(session)
     pick = lambda **f: json.loads(export(session, "json", by="aud", filters=f)[0])

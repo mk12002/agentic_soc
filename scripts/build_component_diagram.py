@@ -134,7 +134,7 @@ zone(X0, y, CW, 330, "core/ - shared services (services take a Session and never
 core = [
     ("context_store.py", ["ingest(), neighbors, timelines,", "keys_of; one SourceRecord each"]),
     ("entity_resolution.py", ["keys -> scored hints (rapidfuzz)", "auto 0.85, review 0.55 -> queue"]),
-    ("identity.py + watchlists.py", ["user_ref(): UPN / SAM / SID keys;", "block / exception list matches"]),
+    ("identity, watchlists, ownership", ["UPN / SAM / SID keys; block /", "exception lists; owner mapping"]),
     ("cases.py (CaseService)", ["cases, evidence, notes, owner,", "recommend(ceiling=), narration"]),
     ("enrichment.py", ["EnrichmentOrchestrator: 16", "threads, 20 s deadline, cache"]),
     ("actions.py (ActionService)", ["the ONLY write path; idempotency", "keys; conditional updates"]),

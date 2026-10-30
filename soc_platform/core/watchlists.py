@@ -40,6 +40,7 @@ from soc_platform.core.auth import Perm, Principal
 from soc_platform.core.db import Base, BoundedText, UTCDateTime
 from soc_platform.core.identity import EMAIL_RE, is_builtin, split_account
 from soc_platform.core.models import CaseEntity, Entity, EntityHint, EntityKey, new_id, utcnow
+from soc_platform.core.text import unsafe_xml
 
 LISTS = {"block": "Block list", "exception": "Exception list"}
 KINDS = {"user": "user", "email": "e-mail address", "host": "host", "ip": "IP address", "domain": "domain",
@@ -47,6 +48,7 @@ KINDS = {"user": "user", "email": "e-mail address", "host": "host", "ip": "IP ad
 MAX_FILE_BYTES = 5_000_000
 MAX_XML_BYTES = 40_000_000           # an .xlsx is compressed: refuse a part that would unpack beyond this
 MAX_ENTRIES = 10_000
+MAX_COLUMNS = 256                    # cells further right are ignored: a cell at XFD would make every row 16,384 wide
 _COLUMNS = {
     "user": ("username", "user_name", "user", "upn", "user_principal_name", "account", "account_name",
              "samaccountname", "login", "identity", "employee"),
@@ -185,9 +187,10 @@ def _xml(z: zipfile.ZipFile, part: str) -> ET.Element | None:
     if info.file_size > MAX_XML_BYTES:
         raise ValueError("the workbook is too large once unpacked - split it")
     raw = z.read(info)
-    if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:          # a workbook never needs one; refusing them closes XXE / expansion
-        raise ValueError("the workbook contains a document type declaration - not a normal Excel file")
-    return ET.fromstring(raw)  # nosec B314 - DTDs and entities refused above
+    if unsafe_xml(raw):                  # a workbook never needs a DTD; refusing them closes XXE / entity expansion
+        raise ValueError("the workbook contains a document type declaration or an unusual encoding - "
+                         "not a normal Excel file")
+    return ET.fromstring(raw)  # nosec B314 - DTDs, entities and multi-byte encodings refused above
 
 
 def _local(tag: str) -> str:
@@ -245,7 +248,9 @@ def _xlsx_rows(data: bytes) -> list[tuple[str, list[str]]]:
                         val = next((_text(x) for x in c if _local(x.tag) == "is"), "")
                     else:
                         val = v[:-2] if t in (None, "n") and v.endswith(".0") else v
-                    cells[_col(c.get("r") or "A") if c.get("r") else len(cells)] = val
+                    col = _col(c.get("r") or "A") if c.get("r") else len(cells)
+                    if col < MAX_COLUMNS:
+                        cells[col] = val
                 if any(x.strip() for x in cells.values()):
                     width = max(cells) + 1
                     out.append((f"{title} row {row.get('r') or len(out) + 1}", [cells.get(i, "") for i in range(width)]))
@@ -471,7 +476,7 @@ def _describe(kind: str, key: str, val: str, own: set[str]) -> list[tuple[str, s
             short = val.split(".")[0]
             return [("host", val, f"host {val}")] + ([("host", short, f"host {val}")] if short != val else [])
         if key == "ip":
-            return [("ip", val, f"IP address {val}")]
+            return [("ip", _ip(val), f"IP address {val}")]
         return [("device", val, f"{key.replace('_', ' ')} {val}")]
     if key != "value" or ":" not in val:                  # indicators: "<type>:<value>"
         return []
@@ -485,7 +490,15 @@ def _describe(kind: str, key: str, val: str, own: set[str]) -> list[tuple[str, s
     if k == "url":
         host = re.sub(r"^[a-z]+://", "", v).split("/")[0].split(":")[0]
         return [("url", v.rstrip("/"), f"link {v}")] + [("domain", d, f"link {v}") for d in _parents(host)]
-    return [(k, v, f"{KINDS.get(k, k)} {v}")]
+    return [(k, _ip(v) if k == "ip" else v, f"{KINDS.get(k, k)} {v}")]
+
+
+def _ip(v: str) -> str:
+    """An address in the one form list entries are stored in (``2001:DB8:0:0::1`` -> ``2001:db8::1``)."""
+    try:
+        return str(ipaddress.ip_address(v))
+    except ValueError:
+        return v
 
 
 def _plain(kind: str, name: str) -> str:

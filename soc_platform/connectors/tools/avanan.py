@@ -66,8 +66,14 @@ class HecAuth(Auth):
                            timeout=30)
             if r.status_code >= 400:
                 raise ConnectorError(f"Avanan auth failed {r.status_code}")
-            self._tok = r.json()["data"]["token"]
-            self._exp = _jwt_exp(self._tok) - 120 if _jwt_exp(self._tok) else time.time() + 25 * 60   # ~30 min tokens
+            try:
+                tok = r.json()["data"]["token"]
+            except (ValueError, KeyError, TypeError) as exc:      # an HTML page or another shape: say so, not KeyError
+                raise ConnectorError("Avanan auth answered without a token (check the base URL and region)") from exc
+            if not isinstance(tok, str) or not tok:
+                raise ConnectorError("Avanan auth answered without a token (check the base URL and region)")
+            exp = _jwt_exp(tok)
+            self._tok, self._exp = tok, exp - 120 if exp else time.time() + 25 * 60   # ~30 min tokens
         headers["Authorization"] = f"Bearer {self._tok}"
         headers["x-av-req-id"] = str(uuid.uuid4())
 

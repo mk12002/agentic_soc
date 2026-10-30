@@ -1111,6 +1111,102 @@ def watchlist_remove(eid: str, reason: str = Query("", max_length=500), p: Princ
         raise _err(exc) from exc
 
 
+# ----------------------------------------------------------------------------- ownership mapping
+
+
+class OwnershipUpload(BaseModel):
+    content_b64: str = Field(min_length=4, max_length=7_000_000)     # the file, base64 (.xlsx or .csv; 5 MB)
+    filename: str = Field(default="", max_length=200)
+    note: str = Field(default="", max_length=500)
+    dry_run: bool = False
+
+
+def _ownership_coverage(s: Session, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """What a mapping would give an owner: open misconfigurations and findings that have no team today."""
+    from soc_platform.core.ownership import match
+    from soc_platform.domains.vulnerability.misconfig import OPEN
+    from soc_platform.domains.vulnerability.models import CloudMisconfiguration, ConsolidatedFinding
+
+    mis = s.execute(select(CloudMisconfiguration).where(CloudMisconfiguration.status.in_(OPEN),
+                                                        CloudMisconfiguration.platform_team.is_(None))).scalars().all()
+    got_mis = [m.resource_name for m in mis if match(rows, {"resource_name": m.resource_name, "subscription": m.subscription,
+                                                            "cloud": m.cloud, "resource_type": m.resource_type})]
+    fins = s.execute(select(ConsolidatedFinding).where(ConsolidatedFinding.platform_team.is_(None),
+                                                       ConsolidatedFinding.status.in_(("open", "reopened")))).scalars().all()
+    got_fin = [f.asset_name for f in fins if match(rows, {"hostname": f.asset_name})]
+    return {"misconfigurations_without_owner": len(mis), "misconfigurations_covered": len(got_mis),
+            "findings_without_owner": len(fins), "findings_covered": len(got_fin),
+            "still_without_owner": sorted({m.resource_name for m in mis} - set(got_mis)
+                                          | ({f.asset_name for f in fins} - set(got_fin)))[:50]}
+
+
+def _apply_ownership(s: Session) -> dict[str, Any]:
+    """Re-run ownership on open misconfigurations and findings, so an upload takes effect at once."""
+    out: dict[str, Any] = {}
+    for name, fn in (("misconfigurations", lambda: _misconfig(s).enrich_ownership()),
+                     ("findings", lambda: _services(s)["vulnerability"].enrich_ownership())):
+        try:
+            out[name] = fn()
+        except Exception as exc:  # noqa: BLE001 - the mapping is saved; the next refresh applies it
+            import logging
+
+            logging.getLogger(__name__).warning("ownership not re-applied to %s: %s", name, type(exc).__name__)
+            out[name] = {"error": "not applied now - the next refresh applies it"}
+    return out
+
+
+@app.get("/api/v1/ownership")
+def ownership(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    """The uploaded ownership mapping in force (resource / host / subscription -> owning team), with its history."""
+    from soc_platform.core.ownership import OwnershipStore
+
+    return OwnershipStore(s).view()
+
+
+@app.post("/api/v1/ownership/upload")
+def ownership_upload(body: OwnershipUpload, p: Principal = Depends(need(Perm.MANAGE_OWNERSHIP)),
+                     s: Session = Depends(db_session, scope="function")):
+    """Replace the ownership mapping with an Excel workbook or CSV. ``dry_run`` shows what it holds, every unusable
+    row and how many unowned misconfigurations and findings it would cover, changing nothing."""
+    import base64
+    import binascii
+
+    from soc_platform.core.ownership import OwnershipStore
+
+    try:
+        data = base64.b64decode(body.content_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(400, "the file content is not valid base64") from exc
+    try:
+        out = OwnershipStore(s).upload(data, p, filename=body.filename, note=body.note, dry_run=body.dry_run,
+                                       coverage=lambda rows: _ownership_coverage(s, rows))
+    except Exception as exc:
+        raise _err(exc) from exc
+    if not body.dry_run:
+        out["applied"] = _apply_ownership(s)
+    return out
+
+
+@app.post("/api/v1/ownership/clear")
+def ownership_clear(body: ReasonBody, p: Principal = Depends(need(Perm.MANAGE_OWNERSHIP)),
+                    s: Session = Depends(db_session, scope="function")):
+    from soc_platform.core.ownership import OwnershipStore
+
+    try:
+        v = OwnershipStore(s).clear(p, body.reason[:500])
+    except Exception as exc:
+        raise _err(exc) from exc
+    return {"version": v.id, "cleared": True}
+
+
+@app.get("/api/v1/ownership/export")
+def ownership_export(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    from soc_platform.core.ownership import OwnershipStore
+
+    return PlainTextResponse("﻿" + OwnershipStore(s).export_csv(), media_type="text/csv",
+                             headers={"Content-Disposition": 'attachment; filename="ownership_mapping.csv"'})
+
+
 @app.get("/api/v1/watchlists/{name}/export")
 def watchlist_export(name: str, _: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     from soc_platform.core.watchlists import WatchlistService

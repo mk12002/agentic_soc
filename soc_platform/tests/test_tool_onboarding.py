@@ -131,6 +131,47 @@ def test_rtr_without_a_session_says_why_instead_of_running_commands_nowhere(reg)
         cs.rtr_collect({}, [{"type": "asset", "crowdstrike_aid": "cs-aid-x"}])
 
 
+def test_rtr_collection_only_ever_runs_read_only_commands_even_if_the_api_client_could_do_more(reg):
+    from soc_platform.connectors.base import ConnectorError
+    from soc_platform.connectors.tools.crowdstrike import _preconditions_collect
+
+    cs = reg.get("crowdstrike")
+    host = [{"type": "asset", "crowdstrike_aid": "cs-aid-jane01"}]
+    for bad in (["runscript -Raw=```x```"], ["put tool.exe"], ["ps", "rm C:\\x"], "ps", [None]):
+        assert any("read-only" in p for p in _preconditions_collect({"commands": bad}, host))   # refused before approval
+        with pytest.raises(ConnectorError, match="read-only commands only"):
+            cs.rtr_collect({"commands": bad}, host)                       # and again at execution
+    assert not [c for c in cs.http.calls if c["method"] == "POST"]          # nothing was even queued
+    assert _preconditions_collect({}, host) == []                            # the default collection is read-only
+    assert cs.rtr_collect({"commands": ["ps", "netstat", "ls C:\\Windows\\Temp"]}, host)["collected"]
+
+
+def test_a_quote_in_a_name_is_escaped_in_every_vendor_query_and_cannot_change_it(reg):
+    """o'brien@ is a real address: unescaped, it broke the Graph filter (and a crafted value could rewrite it)."""
+    from soc_platform.connectors.tools._common import fql_str, odata_str, path_part
+
+    assert odata_str("o'brien@x.com") == "'o''brien@x.com'"
+    assert fql_str("a'b\\c") == "'a\\'b\\\\c'"
+    assert path_part("o'brien@x.com/../me?x#y") == "o%27brien@x.com%2F..%2Fme%3Fx%23y"
+    assert path_part("jane.doe@acme-demo.com") == "jane.doe@acme-demo.com"      # ordinary values are unchanged
+
+    entra = reg.get("entra")
+    entra.http.calls.clear()
+    import contextlib
+
+    with contextlib.suppress(Exception):          # the person is not in the sample data; only the requests sent matter
+        entra.identity_context("o'brien@acme-demo.com")
+    sent = [(c["path"], (c.get("params") or {}).get("$filter", "")) for c in entra.http.calls]
+    assert sent and all("o'brien" not in path for path, _ in sent)
+    assert all("'o''brien@acme-demo.com'" in f for _, f in sent if "userPrincipalName" in f)
+
+    cs = reg.get("crowdstrike")
+    cs.http.calls.clear()
+    cs.lookup("host", "web01' + hostname:'*")
+    filters = [(c.get("params") or {}).get("filter", "") for c in cs.http.calls]
+    assert "hostname:'web01\\' + hostname:\\'*'" in filters
+
+
 # ---------------------------------------------------------------------------------------------- NVD
 
 
@@ -194,3 +235,21 @@ def test_avanan_renews_its_token_before_the_tokens_own_expiry_and_on_a_401(monke
     auth.invalidate()                                                             # what the transport does on a 401
     auth.apply(h, {})
     assert len(issued) == 2 and h["Authorization"] == f"Bearer {issued[-1]}"
+
+
+@pytest.mark.parametrize("answer", ["<html>login</html>", {"data": {}}, {"data": {"token": ""}}, ["x"]])
+def test_an_avanan_sign_in_answer_without_a_token_is_reported_as_such(monkeypatch, answer):
+    from soc_platform.connectors.base import ConnectorError
+    from soc_platform.connectors.tools import avanan
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            if answer == "<html>login</html>":
+                raise json.JSONDecodeError("not JSON", answer, 0)   # an HTML page (wrong region / base URL)
+            return answer
+
+    monkeypatch.setattr(avanan.httpx, "post", lambda *a, **k: R())
+    with pytest.raises(ConnectorError, match="without a token"):
+        avanan.HecAuth("https://gw.example", "id", "key").apply({}, {})

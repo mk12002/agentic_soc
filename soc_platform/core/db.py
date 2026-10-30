@@ -117,6 +117,7 @@ class Database:
         from soc_platform.core import blobstore as _blobs  # noqa: F401
         from soc_platform.core import models  # noqa: F401  (register tables)
         from soc_platform.core import notify as _notify  # noqa: F401
+        from soc_platform.core import ownership as _own  # noqa: F401
         from soc_platform.core import watchlists as _watch  # noqa: F401
         from soc_platform.domains.phishing import models as _ph  # noqa: F401
         from soc_platform.domains.vulnerability import models as _vm  # noqa: F401

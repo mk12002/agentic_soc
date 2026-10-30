@@ -40,6 +40,7 @@ one per tool family (Delinea counts as two products, as in the workbook) and 8 f
 | Threat intelligence fusion | `threat_intel` | 8 sources, each opt-in; internal indicators never sent out |
 | Jira | `jira` | alternative to ServiceNow |
 | Ownership CSV | `cmdb_csv` | fallback ownership source |
+| Ownership mapping upload | console (`core/ownership.py`) | cloud resources and hosts the CMDB does not hold (Wiz above all): resource / subscription -> team |
 | Microsoft Sentinel | `sentinel` | incidents and their entities |
 | Generic SIEM push | `generic_siem` | **inbound**: a SIEM / SOAR pushes alerts to `POST /api/v1/ingest/alerts`. The workbook describes this row as an *outbound* interface; the platform's outbound deliveries are the Teams / Slack / JSON webhook notifications (`SOC_NOTIFY_WEBHOOKS`) and the audit / log export. The row should be corrected in the workbook. |
 

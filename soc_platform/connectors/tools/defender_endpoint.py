@@ -15,8 +15,10 @@ from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import (
     ConnectorAction,
     need,
+    odata_str,
     ok_lookup,
     parse_ts,
+    path_part,
     sev_name,
     source_verdict,
     targets_of,
@@ -127,11 +129,11 @@ class DefenderEndpointConnector(MicrosoftConnector):
                     except ConnectorError:
                         ms = []       # retired or offboarded id: fall back to the name
                 if not ms:
-                    ms = self.get("/api/machines", params={"$filter": f"computerDnsName eq '{value.lower()}'"}).get("value", [])
+                    ms = self.get("/api/machines", params={"$filter": f"computerDnsName eq {odata_str(value.lower())}"}).get("value", [])
                 if not ms:
                     # a short name: only that host or its FQDN - never another machine whose name merely starts so
                     # (web01 must not match web010)
-                    ms = [m for m in self.get("/api/machines", params={"$filter": f"startswith(computerDnsName,'{value.lower()}')"}).get("value", [])
+                    ms = [m for m in self.get("/api/machines", params={"$filter": f"startswith(computerDnsName,{odata_str(value.lower())})"}).get("value", [])
                           if str(m.get("computerDnsName", "")).lower().split(".")[0] == value.lower().split(".")[0]]
                 recs = [self._machine(m) for m in ms]
                 alerts = []
@@ -144,18 +146,18 @@ class DefenderEndpointConnector(MicrosoftConnector):
                                  endpoint_alerts=len(alerts), risk=[m.get("riskScore") for m in ms])
             if entity_type == "ip":
                 # an OData function call, not query parameters; the time must be within the last 30 days
-                ms = self.get(f"/api/machines/findbyip(ip='{value}',timestamp={_ts(context.get('at'))})").get("value", [])
+                ms = self.get(f"/api/machines/findbyip(ip={odata_str(value)},timestamp={_ts(context.get('at'))})").get("value", [])
                 return ok_lookup(self, [self._machine(m) for m in ms], f"{len(ms)} device(s) used IP {value}")
             if entity_type == "hash":
-                f = self.get(f"/api/files/{value}")
+                f = self.get(f"/api/files/{path_part(value)}")
                 return ok_lookup(self, [], f"file prevalence={f.get('globalPrevalence')}, "
                                            f"determination={f.get('determinationType')}, signer={f.get('signer')}",
                                  malicious=str(f.get("determinationType", "")).lower() == "malware")
             if entity_type == "domain":
-                st = self.get(f"/api/domains/{value}/stats")
+                st = self.get(f"/api/domains/{path_part(value)}/stats")
                 return ok_lookup(self, [], f"domain seen on {st.get('orgPrevalence', 0)} device(s) in the org")
             if entity_type == "user":
-                ms = self.get(f"/api/users/{value.split('@')[0]}/machines").get("value", [])
+                ms = self.get(f"/api/users/{path_part(value.split('@')[0])}/machines").get("value", [])
                 return ok_lookup(self, [self._machine(m) for m in ms], f"user logged on to {len(ms)} device(s)")
             raise ValueError(entity_type)
 

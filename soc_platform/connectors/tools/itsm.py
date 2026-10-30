@@ -329,7 +329,7 @@ MANIFESTS = [
         focus_areas=("vulnerability", "incident")),
     ConnectorManifest(
         name="cmdb_csv", tool="Ownership mapping (CSV)", vendor="internal", category="cmdb", dimension="ticketing",
-        description="Maintained hostname-pattern to owner/platform-team/criticality mapping (fallback for A04/D06).",
+        description="Maintained hostname-pattern to owner/platform-team/criticality mapping on a mounted file (fallback for A04/D06). For cloud resources, prefer the ownership mapping uploaded on the Cloud posture screen.",
         factory=lambda s, t: CsvCmdbConnector(s, t, rate_per_sec=100, burst=100),
         live_transport=lambda s: HttpTransport("http://localhost", NoAuth()),
         config=[ConfigField("path", "CSV path: hostname,owner,platform_team,environment,criticality,serial_number",

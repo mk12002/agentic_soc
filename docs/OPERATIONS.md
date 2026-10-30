@@ -388,6 +388,21 @@ events `*.processing_failed` with `final: true` (an item left to an analyst afte
 * Suspected compromise of an operator: `POST /api/v1/admin/revoke-sessions` (all their tokens become invalid);
   a single token: `POST /api/v1/auth/logout`.
 
+## Ownership mapping (cloud resources and hosts the CMDB does not hold)
+
+* *Cloud posture -> Ownership mapping* (`GET /api/v1/ownership`, any reader; `GET /api/v1/ownership/export` as CSV).
+  Changing it needs `manage_ownership` - the **lead**, **admin** and **automation_admin** roles; a person, never an
+  API key.
+* **Upload** (`POST /api/v1/ownership/upload`, body `content_b64`, `filename`, `note`, `dry_run`): .xlsx or CSV, 5 MB,
+  10,000 rows. Columns (header, any case or spacing): `Resource` / `Hostname` / `Name` (wildcards) and / or
+  `Subscription` / `Account` / `Project`, `Team` (required), optional `Owner`, `Environment`, `Criticality`, `Cloud`,
+  `Resource type`, `Note`. `dry_run` returns every unusable row and the coverage (unowned misconfigurations and
+  findings it would give an owner). An upload replaces the mapping as a new version and re-applies ownership to
+  open misconfigurations and findings at once; the `vulnerability` job applies it at every refresh after.
+* **Clear** (`POST /api/v1/ownership/clear`, body `reason`). Versions are kept (`ownership_mappings`).
+* Precedence: ServiceNow and the `cmdb_csv` connector first; the mapping only where they give no team. Within the
+  mapping: exact name > name pattern > subscription; ties go to the earlier row.
+
 ## Report style (templates, logo, brand, writing guide)
 
 * *Reports -> Report style* (`GET /api/v1/reports/style`, any reader). Changing it needs `manage_report_style` - the

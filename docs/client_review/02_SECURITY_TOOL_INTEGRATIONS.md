@@ -203,6 +203,7 @@ when the organisation approves the action type it enables.
 | ServiceNow | Integration user (web-service access only) with `itil` (ticket table) and `cmdb_read`; OAuth client credentials (where enabled on the instance) or Basic |
 | Jira | Integration user with *Browse projects*, *Create issues*, *Add comments*, *Transition issues* on the SOC project; API token |
 | Ownership CSV | A maintained spreadsheet on a mounted volume, used where no CMDB is usable |
+| Ownership mapping (console) | An Excel / CSV uploaded on the Cloud posture screen (resource / host pattern or subscription -> team), stored in the database, versioned and audited; fills the CMDB's gaps - Wiz cloud resources above all - and never overrides it |
 | Egress | `<instance>.service-now.com` / `<site>.atlassian.net` |
 
 ### Microsoft Sentinel (`sentinel`) and SIEM push (`generic_siem`)

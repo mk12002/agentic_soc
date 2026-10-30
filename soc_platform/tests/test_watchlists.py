@@ -115,6 +115,34 @@ def test_unreadable_or_hostile_files_are_refused_with_a_reason():
         read_rows(hostile.getvalue(), "x.xlsx")
     with pytest.raises(ValueError, match="readable"):
         read_rows(b"PK\x03\x04 not really a zip", "x.xlsx")
+    utf16 = io.BytesIO()          # the same declaration in UTF-16 has no plain "<!DOCTYPE" bytes: refused by encoding
+    with zipfile.ZipFile(utf16, "w") as z:
+        z.writestr("xl/workbook.xml", '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x [<!ENTITY e "b">]>'
+                                      '<workbook>&e;</workbook>'.encode("utf-16"))
+    with pytest.raises(ValueError, match="unusual encoding"):
+        read_rows(utf16.getvalue(), "x.xlsx")
+
+
+def test_a_cell_far_to_the_right_is_ignored_instead_of_widening_every_row():
+    data = xlsx({"Hosts": [["Hostname"], ["web01"]]})
+    src, out = zipfile.ZipFile(io.BytesIO(data)), io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        for info in src.infolist():
+            body = src.read(info)
+            if info.filename == "xl/worksheets/sheet1.xml":     # Excel's last column, XFD, on both rows
+                body = body.replace(b"</row>", b'<c r="XFD1"><v>7</v></c></row>')
+            z.writestr(info, body)
+    rows = read_rows(out.getvalue(), "wide.xlsx")
+    assert [len(cells) for _, cells in rows] == [1, 1]
+    assert [e["value"] for e in parse(rows)[0]] == ["web01"]
+
+
+def test_ip_addresses_match_whatever_form_a_tool_wrote_them_in():
+    from soc_platform.core.watchlists import _describe
+
+    assert normalise("2001:0DB8:0000::0001", "ip") == ("2001:db8::1", "ip")
+    assert ("ip", "2001:db8::1") in [(k, v) for k, v, _ in _describe("asset", "ip", "2001:0db8:0000::0001", set())]
+    assert ("ip", "2001:db8::1") in [(k, v) for k, v, _ in _describe("indicator", "value", "ip:2001:0db8::0001", set())]
 
 
 # ---------------------------------------------------------------------------------------------- on cases (API)

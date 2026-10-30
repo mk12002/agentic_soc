@@ -481,7 +481,7 @@ RTR forensic collection.
 
 RTR commands are asynchronous: the connector queues each one, reads its output back until complete (at most a minute
 per command) and closes the session. Verify the RTR scope in the tenant's API client screen: CrowdStrike groups the
-read-only commands under *Real time response*; active-responder commands are not used.
+read-only commands under *Real time response*; active-responder commands are not used - the platform itself refuses any collection command outside ps, netstat, ls, ipconfig, env, filehash, getsid, history, mount and eventlog, so granting a wider RTR scope later does not widen what it runs.
 
 **Settings:** `CROWDSTRIKE_CLIENT_ID`, `CROWDSTRIKE_CLIENT_SECRET`, `CROWDSTRIKE_BASE_URL` = the client's cloud
 (`https://api.crowdstrike.com` US-1, `https://api.us-2.crowdstrike.com`, `https://api.eu-1.crowdstrike.com`,
@@ -674,6 +674,8 @@ Excel as it comes: UTF-8 (with or without the byte-order mark) or Windows-1252, 
 or pipes; headers in any case or spacing, and the usual aliases (`Host Name`, `Server`, `Owner Email`, `Team`, `Env`,
 `Serial`, `Subscription ID`) are recognised. A file with neither a hostname nor a subscription column is reported in
 the log and assigns no owners. The file is re-read when it changes; no restart is needed.
+
+**Prefer the console upload for cloud resources** (*Cloud posture -> Ownership mapping*): the same idea without a file on the host - Excel or CSV, stored in the database (so every replica and the scheduler use it), previewed, versioned and audited, with resource / subscription / cloud / resource-type matching that cloud names need (the file connector cuts names at the first dot). Wiz has no CMDB of its own: ask the cloud teams for a sheet of subscription or resource -> owning team before go-live (`docs/OPERATIONS.md` - Ownership mapping).
 
 ### 4.16 Microsoft Sentinel (`sentinel`) and generic SIEM push (`generic_siem`)
 
@@ -868,6 +870,7 @@ the platform sends in each prompt. Nothing in the platform fine-tunes or trains 
 | The gateway requires an OAuth / Entra ID access token per call instead of a static key | a provider subclass that obtains and caches the token (the connectors' `entra_app_auth` / `OAuth2ClientCredentials` in `soc_platform/connectors/http.py` can be reused) and returns it from `_headers()` | `soc_platform/llm/providers/openai_compatible.py` |
 | The gateway speaks neither the OpenAI nor the Claude protocol (e.g. only Gemini `generateContent`, or a proprietary JSON) | a new `Provider` with one method `complete(system, user, *, tier, max_tokens=None, model=None) -> Completion` (`model`: the model the AI usage policy chose), registered in `build_provider` | `soc_platform/llm/providers/<name>.py`, `soc_platform/llm/gateway.py` |
 | The gateway returns token usage under other field names | adjust the `usage` parsing in the provider | same file |
+| The gateway answers only as a stream (server-sent events) and cannot return one complete response | read the stream to its end inside the provider and return the assembled text and usage as one `Completion` (the platform needs the whole answer before the citation check, so nothing is shown to the analyst token by token) | the provider in use |
 
 Each is a small, isolated change (the existing providers are about 50 lines each); the gateway, guardrails,
 redaction and fallbacks stay as they are. Add a test like `test_openai_compatible_provider` in
@@ -915,7 +918,7 @@ redaction and fallbacks stay as they are. Add a test like `test_openai_compatibl
 |---|---|---|
 | 1 | Entra | users resolve to people; Access screen roles; sign-in risk visible |
 | 2 | Defender for Endpoint and/or CrowdStrike | hosts resolve across both EDRs (one host, two tools); Unresolved queue reviewed |
-| 3 | ServiceNow CMDB (or ownership CSV) | owners and criticality on hosts |
+| 3 | ServiceNow CMDB (or ownership CSV), plus the ownership mapping upload for cloud resources | owners and criticality on hosts; every open Wiz misconfiguration has a team |
 | 4 | Defender for Office 365 (reporting mailbox), Avanan | a test report (an internal simulation mail) becomes a case with verdict and scope |
 | 5 | Rapid7, Wiz, NVD/EPSS/KEV | one finding per host + CVE across scanners; priorities; campaigns |
 | 6 | Umbrella, Canary, Delinea, Sentinel / SIEM push | incident clusters; attack story across tools |
@@ -980,7 +983,7 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 | ITSM system (ServiceNow or Jira), ticket table, CMDB field names | ticketing, ownership |
 | SIEM (Sentinel or another) | incident ingestion |
 | Approved threat-intel sources | enrichment |
-| The in-house LLM gateway: protocol, auth method, the model names to offer per feature (`SOC_LLM_MODELS`), concurrency and token allocation, whether it passes `response_format` | section 5 |
+| The in-house LLM gateway: protocol, auth method, the model names to offer per feature (`SOC_LLM_MODELS`), concurrency and token allocation, whether it passes `response_format`, whether it can answer without streaming (it offers both GPT and Claude models, so the model names for `SOC_LLM_MODELS` come from it) | section 5 |
 | Delinea: the instance's REST API reference (secret-audit and sessions paths, the rotation call) and Privilege Manager's Swagger page (elevation-events and token paths) | 4.12 |
 | Whether approved actions may target admin accounts (needs a privileged Entra role on the connector's service principal) | 4.2 |
 | Rapid7: on-premises console (v3 API, supported) or the cloud Insight platform API (v4, needs a connector change) | 4.7 |

@@ -173,6 +173,21 @@ def test_a_logo_is_re_encoded_and_placed_on_the_cover_header_and_title_slide(ses
         st.upload("logo.png", b"\x89PNG not really", LEAD)
 
 
+def test_a_tiny_png_claiming_gigapixels_is_refused_not_decoded(session):
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    bomb = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 30_000, 30_000, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"")) + chunk(b"IEND", b""))
+    assert len(bomb) < 100
+    with pytest.raises(StyleRejected, match="at most 5000 pixels"):
+        ReportStyleStore(session).upload("logo.png", bomb, LEAD)
+    assert ReportStyleStore(session).active_row() is None
+
+
 @pytest.mark.parametrize("name,data,needle", [
     ("macro.docx", None, "macros"),
     ("macro.docm", b"x", "macro-enabled"),

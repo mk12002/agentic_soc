@@ -70,6 +70,7 @@ tool (writes only after a person approves an action). The one inbound path is an
 | Rapid7 InsightVM | **Usually on premises** (security console) | assets, findings, exceptions | 6 h | **cloud hosting needs private connectivity** (existing VPN / ExpressRoute) to reach it |
 | Delinea Secret Server / Privilege Manager | **On premises or Delinea cloud** | secret audits, elevation events, account owners | on investigation | same as Rapid7 when on premises |
 | Ownership CSV | A file the organisation maintains | owner, team, criticality per host | on change | mounted file |
+| Ownership mapping upload | Uploaded in the console (Excel / CSV) | team, owner, environment, criticality per resource / host pattern / subscription | on upload | the platform's database |
 | NIST NVD, FIRST EPSS, CISA KEV | Public internet | CVE details, exploit probability, known-exploited list | 6 h | public egress (CVE identifiers only are sent) |
 | Threat-intel sources (opt-in) | Vendor SaaS | reputation of **external** indicators only | on investigation | egress per approved source |
 | Generic SIEM push | The organisation's SIEM / SOAR | alerts pushed **into** the platform | as sent | the one inbound path, authenticated with an API key |
