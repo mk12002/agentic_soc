@@ -63,6 +63,7 @@ KNOWN_WORKFLOWS: dict[str, tuple[str, str, str]] = {
     "intelligence.answer": ("large", "person", "Analyst assistant: the answer"),
     "intelligence.deep_analysis": ("large", "person", "Deep analysis of an attack story"),
     "report.plan": ("small", "person", "Plans a report described in words"),
+    "tuning.draft": ("small", "person", "Turns a lead's tuning request in words into a draft rule to check"),
     "report.section.*": ("large", "person", "One section of a generated report"),
     "report.daily_exposure": ("small", "scheduled", "Daily exposure report commentary"),
     "report.weekly_vm": ("small", "scheduled", "Weekly vulnerability report commentary"),

@@ -138,7 +138,7 @@ core = [
     ("cases.py (CaseService)", ["cases, evidence, notes, owner,", "recommend(ceiling=), narration"]),
     ("enrichment.py", ["EnrichmentOrchestrator: 16", "threads, 20 s deadline, cache"]),
     ("actions.py (ActionService)", ["the ONLY write path; idempotency", "keys; conditional updates"]),
-    ("policy.py", ["L0-L4, PolicyEngine.decide(ceiling)", "PolicyStore propose / approve"]),
+    ("policy.py + tuning.py", ["L0-L4 decide(ceiling); PolicyStore;", "tuning rules, two leads approve"]),
     ("auth.py + access.py", ["roles/perms, token checks; grants,", "API keys, revocation, kill switch"]),
     ("audit.py + audit_export.py", ["hash-chained append-only log;", "JSONL/JSON/CSV/XLSX/DOCX export"]),
     ("crypto.py", ["Fernet / MultiFernet; atomic", "0600 writes; key rotation"]),

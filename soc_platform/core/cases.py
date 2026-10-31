@@ -189,8 +189,12 @@ class CaseService:
 
     def recommend(self, case: Case, recs: list[Recommendation], registry: ActionRegistry, policy: PolicyEngine,
                   *, agent: str, ceiling: tuple[int, str] | None = None) -> list[ActionRequest]:
+        from soc_platform.core.tuning import TuningStore, case_facts, demote_rule, describe
+
         svc = ActionService(self.s, registry, policy)
         out = []
+        demotes = TuningStore(self.s).active("action_demote")
+        facts = case_facts(self.s, case) if demotes else None
         for r in sorted(recs, key=lambda x: x.priority):
             try:
                 registry.get(r.action_type)
@@ -200,11 +204,25 @@ class CaseService:
                                   source=agent, dimension="recommendation", is_inference=True,
                                   data={"recommendation": asdict(r), "executable": False})
                 continue
+            # an action analysts keep rejecting here (a lead-approved rule): still recommended and shown, but it
+            # never runs autonomously here - the policy is capped at recommend (L2)
+            demoted = demote_rule(self.s, case, r.action_type, rules=demotes, facts=facts) if demotes else None
+            cap = ceiling
+            if demoted is not None:
+                own = (2, f"usually rejected here (tuning rule #{demoted.id}): recommend only")
+                cap = min((c for c in (ceiling, own) if c is not None), key=lambda c: int(c[0]))
             req = svc.request(r.action_type, params=r.params, targets=r.targets, requested_by=agent_principal(agent),
                               case_id=case.id, domain=case.domain, rationale=r.rationale, evidence_ids=r.evidence_ids,
-                              ceiling=ceiling)
+                              ceiling=cap)
+            fresh = "expected_impact" not in (req.result or {})        # created now, not an action open from before
             req.result = {**(req.result or {}), "expected_impact": r.expected_impact, "blast_radius": r.blast_radius,
                           "reversible": r.reversible, "priority": r.priority}
+            # labelled only when the rule decided it (an action already open from before keeps its own decision)
+            if demoted is not None and fresh:
+                req.result = {**req.result, "tuning_demoted": {"rule": demoted.id,
+                                                               "why": describe(demoted.kind, demoted.params)}}
+                if own[1] not in (req.policy_reasons or []):        # a tool's stage capped it first: still say why
+                    req.policy_reasons = [*(req.policy_reasons or []), own[1]]
             out.append(req)
         if any(a.status in ("recommended", "pending_approval") for a in out):
             case.status = "awaiting_approval"
@@ -261,15 +279,23 @@ class CaseService:
         if not analyst.can(Perm.INVESTIGATE):
             raise PermissionError("investigate permission required")
         case = self._get(case_id)
+        # an exercise's outcome says nothing about whether the detection is noise: it stays out of the statistics
+        source = None if (case.attributes or {}).get("exercise") else (case.attributes or {}).get("detection_source")
         d = Disposition(domain=case.domain, subject_type="case", subject_id=case.id, system_verdict=case.verdict,
                         system_confidence=case.confidence, analyst_verdict=verdict, analyst=analyst.id,
-                        reasoning=reasoning, detection_source=(case.attributes or {}).get("detection_source"))
+                        reasoning=reasoning, detection_source=source)
         self.s.add(d)
         if close:
             case.status, case.closed_at = "closed", utcnow()
         self.audit.append(actor_type="human", actor_id=analyst.id, event_type="case.disposition", subject_type="case",
                           subject_id=case.id, payload={"system_verdict": case.verdict, "analyst_verdict": verdict,
                                                        "agrees": _agrees(case.verdict, verdict), "reasoning": reasoning})
+        rule = (case.attributes or {}).get("tuning_rule")
+        if rule is not None and _bucket(verdict) in ("malicious", "suspicious"):
+            # a threat in what a tuning rule suppressed (or sampled): the rule stops at once
+            from soc_platform.core.tuning import TuningStore
+
+            TuningStore(self.s).pause_for_threat(rule, case, analyst, verdict)
         self.s.flush()
         return d
 
@@ -391,8 +417,10 @@ def agreement_report(session: Session, domain: str, *, since: datetime | None = 
             "confusion": {f"{s}->{a}": v for (s, a), v in sorted(matrix.items())}}
 
 
-def detection_quality(session: Session, domain: str, *, min_count: int = 3, days: int = 30) -> list[dict[str, Any]]:
-    """Detections consistently dispositioned as false positives -> tuning recommendations (IM-F14, U14)."""
+def detection_quality(session: Session, domain: str, *, min_count: int = 3, days: int = 30,
+                      share: float = 0.8) -> list[dict[str, Any]]:
+    """Detections consistently dispositioned as false positives -> tuning recommendations (IM-F14, U14). The
+    thresholds are the defaults or the noise threshold a lead set (``core/tuning.py``)."""
     since = utcnow() - timedelta(days=days)
     rows = session.execute(select(Disposition).where(Disposition.domain == domain,
                                                      Disposition.created_at >= since)).scalars().all()
@@ -403,7 +431,7 @@ def detection_quality(session: Session, domain: str, *, min_count: int = 3, days
     for det, c in per.items():
         total = sum(c.values())
         fp = c["benign"]
-        if total >= min_count and fp / total >= 0.8:
+        if total >= min_count and fp / total >= share:
             out.append({"detection": det, "dispositions": total, "false_positive_share": round(fp / total, 3),
                         "recommendation": f"Tune or suppress '{det}': {fp}/{total} dispositions benign in {days}d"})
     return sorted(out, key=lambda x: -x["false_positive_share"])

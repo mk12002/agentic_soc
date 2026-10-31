@@ -111,7 +111,7 @@ AI gathers and explains, code computes every figure and verdict, and a person ap
 - 56 ATT&CK techniques in the coverage model
 - 11 scheduled jobs
 - 14 self-checks
-- 896 platform tests on SQLite, 895 on PostgreSQL, and 205 phishing-engine tests
+- 935 platform tests on SQLite, 934 on PostgreSQL, and 205 phishing-engine tests
 
 **Say these limits first, before anyone asks.** It buys credibility.
 1. It has not yet run against a real tenant. Every connector is built to the vendor's documented API and is
@@ -141,7 +141,7 @@ Four groups:
 | Operate | Overview, Intelligence, Cases, Approvals |
 | Domains | Phishing, Vulnerabilities, Cloud posture |
 | Insight | ATT&CK coverage, Shadow IT, Supplier risk |
-| Govern | Watch lists, Integrations, Automation policy, AI usage, Reports, Access, Audit log |
+| Govern | Watch lists, Tuning, Integrations, Automation policy, AI usage, Reports, Access, Audit log |
 
 - **The menu depends on your scope.**
   - Intelligence needs all-domain scope.
@@ -857,6 +857,7 @@ a scan proves the fix.
 - **score** = 0.30 × CVSS/10 + 0.25 × EPSS + 0.20 if CISA KEV + 0.10 if internet-exposed + 0.15 × asset criticality.
   - Asset criticality: critical 1.0, high 0.75, medium 0.4, low 0.1.
 - **P1** if score ≥ 0.65 **or** (KEV and internet-exposed); **P2** ≥ 0.45; **P3** ≥ 0.25; else **P4**.
+- The weights and SLA days are the defaults; a vulnerability lead can change them on *Tuning* (a second lead approves). KEV + internet-exposed stays P1 whatever the weights.
 - **SLA from first seen:** P1 7 days, P2 15, P3 30, P4 90. CISA's own KEV due date is a US federal deadline: it is
   shown for reference and never used as the SLA.
 
@@ -1314,14 +1315,14 @@ coverage, shadow IT, control evidence, verdict quality, integration health, valu
 - **Role permissions:** the matrix, including the row *Never granted to service accounts*: approve_action,
   approve_high_impact, approve_policy, manage_access, manage_ownership, manage_report_style, manage_watchlists,
   propose_policy,
-  rollback_action.
+  rollback_action, tune_detections.
 
 ### The five roles
 
 | Role | Can | Cannot |
 |---|---|---|
 | **Analyst** | read, investigate, request and approve routine actions, resolve entities, read audit | approve high-impact, roll back, policy, kill switch |
-| **Lead** | analyst's rights + approve high-impact, roll back, approve policy and configuration, kill switch, export evidence, manage watch lists, manage the report style, manage the ownership mapping | manage access, manage connectors |
+| **Lead** | analyst's rights + approve high-impact, roll back, approve policy and configuration, kill switch, export evidence, manage watch lists, propose and approve tuning (two leads), manage the report style, manage the ownership mapping | manage access, manage connectors |
 | **Automation admin** | propose policy, manage connectors, kill switch, read audit, manage the ownership mapping | approve any action or its own policy (separation of duties) |
 | **Admin** | manage access, manage connectors, kill switch, export evidence, manage the report style, manage the ownership mapping, read audit | approve actions, approve policy |
 | **Auditor** | read everything in scope, read audit, export evidence | change anything |
@@ -1562,7 +1563,7 @@ The typed text is always treated literally (no injection).
 - The organisation's own volumes are first seen in its environment.
 
 **"How was it tested?"**
-- 896 platform tests (SQLite, with PostgreSQL's rules enforced) and 895 on PostgreSQL; 205 engine tests.
+- 935 platform tests (SQLite, with PostgreSQL's rules enforced) and 934 on PostgreSQL; 205 engine tests.
 - 108 of 108 features verified feature by feature.
 - 24 penetration tests and 11 fuzzing properties.
 - Time-travel tests (0 / 45 / 400 days).

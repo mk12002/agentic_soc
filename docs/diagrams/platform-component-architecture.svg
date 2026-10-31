@@ -231,9 +231,9 @@
 <text x="690.0" y="714" class="s">the ONLY write path; idempotency</text>
 <text x="690.0" y="729" class="s">keys; conditional updates</text>
 <rect x="996.0" y="678" width="304.0" height="64" rx="7" class="gov"/>
-<text x="1006.0" y="696" class="t">policy.py</text>
-<text x="1006.0" y="714" class="s">L0-L4, PolicyEngine.decide(ceiling)</text>
-<text x="1006.0" y="729" class="s">PolicyStore propose / approve</text>
+<text x="1006.0" y="696" class="t">policy.py + tuning.py</text>
+<text x="1006.0" y="714" class="s">L0-L4 decide(ceiling); PolicyStore;</text>
+<text x="1006.0" y="729" class="s">tuning rules, two leads approve</text>
 <rect x="1312.0" y="678" width="304.0" height="64" rx="7" class="box"/>
 <text x="1322.0" y="696" class="t">auth.py + access.py</text>
 <text x="1322.0" y="714" class="s">roles/perms, token checks; grants,</text>

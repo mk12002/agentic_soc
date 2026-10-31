@@ -10,6 +10,7 @@ policy-gated recommendations -> analyst decision -> documentation / handover.
 from __future__ import annotations
 
 import itertools
+import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -95,9 +96,47 @@ class IncidentService:
         return [a for a in rows if a.id not in assigned and not _handled_by_phishing(a)
                 and a.first_seen.replace(tzinfo=None) >= cutoff.replace(tzinfo=None)]
 
+    def kev_cves(self) -> set[str]:
+        """KEV-listed CVEs: the catalogue when the feed answers, plus what vulnerability intelligence last stored."""
+        from soc_platform.connectors.base import ConnectorError
+        from soc_platform.domains.vulnerability.models import VulnIntel
+
+        out = {c for (c,) in self.s.execute(select(VulnIntel.cve).where(VulnIntel.kev.is_(True))).all()}
+        if "cisa_kev" in self.registry.enabled_names():
+            try:
+                out |= set(self.registry.get("cisa_kev").catalog())
+            except ConnectorError as exc:     # the stored KEV flags still apply
+                logging.getLogger(__name__).warning("KEV catalogue unavailable for tuning guardrails: %s", exc)
+        return out
+
+    def _tuning_rule(self, members: list[Entity], facts: dict[str, dict[str, Any]], rules: list[Any],
+                     kev: set[str]) -> Any:
+        """The approved tuning rule that covers every alert of a new incident past the guardrails, or None."""
+        from soc_platform.core.tuning import guard, kev_host_ids, matches
+
+        kev_hosts = kev_host_ids(self.store, {h for m in members for h in facts[m.id]["host_ids"]}, kev)
+        chosen = None
+        for m in members:
+            f = facts[m.id]
+            r = next((r for r in rules if matches(r.params, f) and guard(f, r.params["max_severity"], kev_hosts) is None),
+                     None)
+            if r is None:
+                return None
+            chosen = chosen or r
+        return chosen
+
     def cluster(self, *, window_hours: int = 24, since_days: int = 30) -> list[Case]:
+        from soc_platform.core.tuning import TuningStore, alert_facts, describe, matches, qa_sampled
+
         alerts = sorted(self._unassigned_alerts(since_days), key=lambda a: a.first_seen)
-        noisy = {d["detection"] for d in detection_quality(self.s, "incident")}
+        tuning = TuningStore(self.s)
+        thr = tuning.threshold()
+        noisy = {d["detection"] for d in detection_quality(self.s, "incident", min_count=thr["min_decisions"],
+                                                          days=thr["days"], share=thr["benign_percent"] / 100)}
+        rules = tuning.active_suppressions()
+        exercises = tuning.active("exercise")
+        facts = alert_facts(self.s, self.store, alerts) if rules or exercises else {}
+        kev = self.kev_cves() if rules else set()
         parent = {a.id: a.id for a in alerts}
 
         def find(x: str) -> str:
@@ -128,16 +167,31 @@ class IncidentService:
             suppressed = all(t in noisy for t in titles) and severity_rank(sev) <= 2
             tools = sorted({(m.attributes or {}).get("tool") for m in members if (m.attributes or {}).get("tool")})
             is_deception = any(m.kind == "deception" for m in members)
+            # an exercise (red team, penetration test) is investigated as usual and never suppressed: the team is
+            # testing whether it is seen
+            exercise = next((r for r in exercises if any(matches(r.params, facts[m.id]) for m in members)), None)
+            suppressed = suppressed and exercise is None
+            rule = (self._tuning_rule(members, facts, rules, kev)
+                    if rules and not suppressed and not is_deception and exercise is None else None)
+            qa = bool(rule) and qa_sampled([m.id for m in members])
+            tuned = {"tuning_rule": rule.id, "tuning_qa": qa} if rule else {}
+            if exercise is not None:
+                tuned = {"exercise": exercise.id}
+            suppressed = suppressed or (bool(rule) and not qa)
             title = (f"Deception alert: {titles[0]}" if is_deception else
                      titles[0] if len(members) == 1 else f"{titles[0]} (+{len(members) - 1} related alert(s))")
+            title = f"[Exercise] {title}" if exercise is not None else title
             case = self.cases.create("incident", title, severity="critical" if is_deception else sev,
                                      attributes={"alert_count": len(members), "tools": tools, "suppressed": suppressed,
-                                                 "detection_source": titles[0], "deception": is_deception},
+                                                 "alert_severity": "critical" if is_deception else sev,
+                                                 "detection_source": titles[0], "deception": is_deception, **tuned},
                                      actor=f"agent:{AGENT}")
             if suppressed:
                 case.status = "closed"
                 case.verdict = "suppressed_noise"
-                case.summary = "Auto-suppressed: detection consistently dispositioned benign (see detection quality)."
+                case.summary = ("Auto-suppressed: detection consistently dispositioned benign (see detection quality)."
+                                if not rule else f"Suppressed by tuning rule #{rule.id} (approved by {rule.decided_by}): "
+                                                 f"{describe(rule.kind, rule.params)}.")
             for m in members:
                 self.cases.link(case.id, m.id, "alert")
                 for rel, ent in self.store.neighbors(m.id, kinds={"asset", "identity", "indicator"}):
@@ -224,6 +278,9 @@ class IncidentService:
             else deterministic_grounded(ev_llm)
         verdict = "true_positive" if severity_rank(severity) >= 3 and confidence >= 0.6 else \
             "needs_review" if severity_rank(severity) >= 2 else "likely_benign"
+        # a lead's raise-attention rule moves the severity (priority, queue order, notifications) after the verdict
+        # is judged, so a raised incident is looked at sooner without being called a threat because of it
+        severity = self._raised(case, severity, factors)
         self.cases.set_assessment(case, verdict=verdict, severity=severity, confidence=confidence,
                                   summary=grounded["summary"],
                                   assessment={"claims": grounded["claims"], "mitre": mitre, "scoring": factors,
@@ -284,6 +341,28 @@ class IncidentService:
         ids = list(dict.fromkeys((case_ids or []) + self.cases.pending_narration("incident")))
         return self.cases.narrate_pending(ids, self.llm, actor=f"agent:{AGENT}")
 
+    def _raised(self, case: Case, severity: str, factors: dict[str, Any]) -> str:
+        from soc_platform.core.tuning import TuningStore, alert_facts, describe, matches
+
+        rules = TuningStore(self.s).active("raise_severity")
+        attrs = dict(case.attributes or {})
+        rule = None
+        if rules:
+            alerts = [e for e in (self.s.get(Entity, ln.entity_id) for ln in self.s.execute(
+                select(CaseEntity).where(CaseEntity.case_id == case.id, CaseEntity.role == "alert")).scalars())
+                if e is not None]
+            facts = alert_facts(self.s, self.store, alerts)
+            rule = next((r for r in rules if any(matches(r.params, f) for f in facts.values())), None)
+        if attrs.get("tuning_raise") != (rule.id if rule else None):
+            attrs["tuning_raise"] = rule.id if rule else None
+            case.attributes = attrs
+        if rule is None:
+            return severity
+        raised = SEV[min(4, severity_rank(severity) + int(rule.params.get("levels") or 1))]
+        factors["raised_by_tuning_rule"] = {"rule": rule.id, "from": severity, "to": raised,
+                                            "why": describe(rule.kind, rule.params), "approved_by": rule.decided_by}
+        return raised
+
     def _kev_findings_on_case_hosts(self, case_id: str) -> list[dict[str, Any]]:
         kev_conn = self.registry.get("cisa_kev") if "cisa_kev" in self.registry.enabled_names() else None
         catalog = kev_conn.catalog() if kev_conn else {}
@@ -322,7 +401,9 @@ class IncidentService:
 
     def _score(self, case: Case, evidence: list[Evidence], kev: bool) -> tuple[str, float, dict[str, Any]]:
         """Deterministic severity/confidence from structured connector signals (no model-generated figures, R02)."""
-        base = severity_rank(case.severity)
+        # every assessment starts from the alerts' own severity, not the last scored one: a re-assessment must not
+        # stack the KEV boost or a lead's raise on top of itself (older cases fall back to their severity)
+        base = severity_rank((case.attributes or {}).get("alert_severity") or case.severity)
         sig = self._signals(evidence)
         dims: set[str] = set()
         factors: dict[str, Any] = {"base_alert_severity": SEV[base]}

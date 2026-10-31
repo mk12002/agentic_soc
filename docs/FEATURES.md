@@ -117,6 +117,43 @@ to someone else or take it back. The case list shows the owner and filters to *M
 **Analyst notes** keep the team's working notes on the case - kept permanently and never edited (a correction is a
 new note), each with author and time, and every assignment and note is in the audit trail.
 
+**Tuning** (*Govern -> Tuning*). Leads adapt the platform to the situation. A lead describes a change in words, and it becomes a **draft rule from a fixed menu**:
+
+* *Suppress a detection*: new incidents made only of one alert title are closed as noise. It can be narrowed to one tool, a host pattern or a user pattern; low severity by default, medium at most.
+* *Noise threshold*: the benign share, number of analyst decisions and days that make a detection noise (default 80 %, 3, 30 days).
+* *Raise attention*: incidents involving chosen hosts or users ("finance servers fin-* until quarter close", "the CFO's account") count one or two severity levels higher, so they rise in the queue and in notifications. Their verdict is still judged on the unraised severity, and the incident shows which rule raised it.
+* *Exercise*: incidents involving chosen hosts or users are labelled *[Exercise]* for up to 30 days (a red-team or penetration test). They are investigated as usual and never suppressed, and analysts' decisions on them stay out of the noise statistics, so an exercise never teaches the platform that real attack patterns are noise.
+* *Phishing auto-close*: the confidence at which clearly safe or spam reports close automatically (default 70 %) and the share sampled for QA (default 10 %).
+* *Vulnerability priority*: the five priority weights (CVSS, EPSS, KEV, internet exposure, asset criticality; default 30 / 25 / 20 / 10 / 15, adding up to 100) and the SLA days per band (default P1 7, P2 15, P3 30, P4 90). It applies to every open finding as soon as it is approved. A KEV-listed finding on an internet-facing asset stays P1, and every KEV-listed finding keeps the P1 SLA.
+* *Usually rejected action*: an action analysts keep rejecting in one context (an action type in a domain, optionally for one detection or some hosts / users). It is still recommended and shown, labelled *Usually rejected here* on the Approvals screen and the case, and it can never run autonomously there. Critical and deception cases keep their normal handling.
+
+The model only fills in the menu's fields, and the platform checks its draft: a detection must be one it has seen, and a host or user pattern or a number must be written in the request (otherwise it is dropped, with a note saying why). Without the model the platform reads the request itself, and every kind also has a plain form. The lead checks every field, and *Preview* shows the effect on past data:
+
+* a suppression: alerts matched and suppressed, alerts kept by guardrails, and how analysts ruled the incidents those alerts were part of;
+* a raise: the severity changes;
+* an exercise: the alerts and incidents in scope;
+* vulnerability priority: the bands now and after, how many findings change priority, and any that would be past SLA at once;
+* a usually-rejected action: how analysts decided that action in that context (rejected, approved, undecided);
+* auto-close: how many analysed reports would close and how many of those analysts ruled a threat.
+
+A rule that would have hidden a ruled threat is shown in red. *Propose* asks for confirmation, and the rule applies only after a **second lead** approves it. A lead tunes only the domains their role covers: a phishing lead sets auto-close, an incident lead the rest.
+
+The platform also **suggests** changes from analysts' decisions:
+
+* detections they keep ruling benign;
+* the lowest auto-close confidence at which no report they ruled a threat would have closed (offered once at least 10 reports have a ruling);
+* actions they keep rejecting in one context (at least 5 decisions in 30 days, at least 80 % rejected).
+
+Each suggestion is a ready draft that goes through the same approval.
+
+Guardrails no rule can switch off:
+
+* high and critical alerts, deception alerts, exercises and alerts on a host with a KEV-listed vulnerability are never suppressed;
+* 1 in 10 incidents a rule would suppress stays open and is investigated in full;
+* an analyst ruling a suppressed or sampled case malicious or suspicious pauses the rule at once;
+* a report somebody clicked, or one a mail gateway rated worse, is never auto-closed;
+* every rule expires (exercises within 30 days, others within 365), and any lead can revoke it.
+
 **Block and exception lists** (*Govern -> Watch lists*). A lead uploads an Excel workbook (.xlsx, every sheet) or a
 CSV of user names, e-mail addresses, host names, IP addresses, domains, URLs, file hashes or device ids - typed by
 their column (*Username*, *Hostname*, *IP address*...) or by a *Type* column, with an optional *Note* / *Reason*.

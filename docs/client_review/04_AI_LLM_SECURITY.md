@@ -61,7 +61,10 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Analyst assistant (plan + answer) | A person asking a question | Small + large |
 | Deep analysis | A person, per attack story (cached per evidence fingerprint) | Large |
 | Report plan / report sections | A person building a report | Small / large |
+| Tuning draft | A lead describing a tuning change in words: noise, raise attention, an exercise, phishing auto-close, vulnerability priority and SLAs, or an action analysts keep rejecting (the draft is checked against the request and the data, previewed, and approved by a second lead before it applies) | Small |
 | Daily exposure and weekly VM report commentary | Scheduled | Small |
+
+The tuning draft was checked live against the real model with an overreaching request and a prompt-injection attempt. The platform's own checks removed everything the request did not state (no invented host pattern, nothing above medium severity, no expiry past the limit). The endpoint's content filter also refused the injection outright (jailbreak detected), and the platform then drafted from the words alone, telling the lead the model did not answer.
 
 Administrators choose the model for each feature **by name** on the AI usage screen, from the models deployed on the
 organisation's endpoint (by default gpt-4.1-nano, gpt-4.1-mini and gpt-4.1; more are added with `SOC_LLM_MODELS`). The

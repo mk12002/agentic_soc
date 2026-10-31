@@ -426,6 +426,36 @@ events `*.processing_failed` with `final: true` (an item left to an analyst afte
   `blobs reencrypt` re-keys them. A style file that cannot be read is skipped (that part uses the house style) and
   logged as `report_style.file_unreadable`; the report is still produced.
 
+## Tuning (noise, attention, exercises, phishing auto-close)
+
+* *Govern -> Tuning* (`GET /api/v1/tuning`, any reader; it shows the rules of the domains in the reader's scope): rules proposed, in force and past; the noise threshold and auto-close settings in force; suggestions computed from analysts' decisions; the kinds this person may propose; and the detections and tools a rule may name.
+* Changing tuning needs `tune_detections` - the **lead** role, a person, never an API key, with step-up MFA - in the rule's domain. `phishing_autoclose` is a phishing rule, `vuln_priority` a vulnerability rule, and an `action_demote` rule belongs to the domain it names; every other kind is an incident rule. Proposer and approver must be **different leads**.
+* `POST /api/v1/tuning/draft` (`request`: the change in words) returns a draft rule and stores nothing. It uses the model feature `tuning.draft` (small, person-triggered; switch it off or cap it on *AI usage* like any feature) and falls back to the platform's own reading of the request. When the model does not answer (a usage limit, an outage, or the endpoint's content filter refusing a prompt-injection attempt), the draft says so in its notes. A person without incident scope gets no alert titles in the prompt.
+* `POST /api/v1/tuning/preview` (`kind`, `params`) shows the effect on past data and stores nothing. Incident kinds look at the last 90 days of alerts (ending at the newest alert). Phishing auto-close looks at every analysed report.
+* `POST /api/v1/tuning` proposes (with `reason`; the preview is computed again and kept with the rule for the approver).
+* `POST /api/v1/tuning/{id}/approve | reject | revoke` (`note`; a reason is required to reject or revoke). Revoking needs one lead and takes effect at once.
+
+**Rule kinds and settings**
+
+* `suppress_detection`: `detection` (an alert title the platform has seen); optional `tool`, and `host` / `user` patterns with `*` / `?`; `max_severity` informational | low | medium (default low).
+* `noise_threshold`: `benign_percent` 60-100, `min_decisions` 2-50, `days` 7-180.
+* `raise_severity`: `host` and / or `user` (required), optional `detection` and `tool`, `levels` 1 or 2. It applies when an incident is assessed or re-assessed. Severity is raised after the verdict is judged, and the scoring factors record `raised_by_tuning_rule`.
+* `exercise`: `host` and / or `user` (required), optional `detection` and `tool`; `expires_days` 1-30, default 7. It applies when new incidents are clustered: the title gets the prefix `[Exercise]` and the case attribute `exercise` holds the rule id.
+* `phishing_autoclose`: `min_confidence_percent` 50-95, `sample_percent` 5-50. It is read whenever the phishing service starts (each request and job run).
+* `vuln_priority`: `weight_cvss`, `weight_epss`, `weight_kev`, `weight_exposure`, `weight_criticality` (each 0-60, adding up to 100; defaults 30 / 25 / 20 / 10 / 15) and `sla_p1` 1-30, `sla_p2` 1-60, `sla_p3` 1-180, `sla_p4` 1-365 days (never shrinking from P1 to P4; defaults 7 / 15 / 30 / 90). Approving or revoking it re-prioritises every open finding at once; the vulnerability job applies it at every refresh. A finding's factors record the weights when they are not the defaults.
+* `action_demote`: `domain` (incident | phishing | vulnerability), `action_type` (one the platform has recommended), optional `detection` (incident actions), `host`, `user`. It applies to new recommendations: they are capped at recommend (L2), carry `result.tuning_demoted` (rule id and description) and the policy reason "usually rejected here (tuning rule #N)". Critical and deception cases are not covered. Suggestions need at least 5 human decisions on that action in that context in 30 days (ending at the newest decision), at least 80 % rejected.
+* Every kind takes `expires_days` (1-365, default 90; exercises 1-30, default 7). A newer noise threshold or auto-close rule supersedes the one in force.
+
+**Guardrails (in code)**
+
+* high and critical alerts, deception alerts, exercises and alerts on a host with a KEV-listed vulnerability are never suppressed.
+* 1 in 10 incidents a rule would suppress stays open (a stable hash of its alerts) and is investigated in full.
+* An analyst disposition of malicious or suspicious on a case a rule suppressed or sampled pauses the rule (`tuning.paused`). A paused rule is proposed again if it is still wanted.
+* A clicked or gateway-flagged report is never auto-closed.
+* An incident is always scored from its alerts' own severity (`alert_severity`), so re-assessing it never stacks a raise or the KEV boost.
+
+**Audit events:** `tuning.drafted`, `tuning.proposed` (rule, settings, reason, preview), `tuning.activated`, `tuning.rejected`, `tuning.revoked`, `tuning.paused`. Rules live in the `tuning_rules` table (created automatically on start-up).
+
 ## Watch lists (block and exception lists)
 
 * *Govern -> Watch lists* (`GET /api/v1/watchlists`, any signed-in reader). Changing a list needs

@@ -355,7 +355,7 @@ async function Approvals() {
     card(null, `<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="seg">${['all', 'mine', ...doms].map(f =>
       `<button class="${f === APPROVAL_FILTER ? 'on' : ''}" data-fn="approvalFilter" data-args="${arg(f)}"${f === 'mine' ? ' title="Actions on the cases you have taken"' : ''}>${esc(f === 'mine' ? 'My cases' : cap(f))} <span class="muted">${count(f)}</span></button>`).join('')}</div></div>` +
       table(['Action', 'Targets', 'Rationale', 'Policy', ''], xs.map(x => `<tr>
-      <td class="nowrap"><div class="t-title mono">${esc(x.action_type)}</div><div class="t-sub">${esc(cap(x.domain))} · L${esc(x.level)}</div></td>
+      <td class="nowrap"><div class="t-title mono">${esc(x.action_type)}</div><div class="t-sub">${esc(cap(x.domain))} · L${esc(x.level)}</div>${(x.result || {}).tuning_demoted ? `<div class="t-sub" title="${esc(x.result.tuning_demoted.why)}">Usually rejected here (rule #${esc(x.result.tuning_demoted.rule)})</div>` : ''}</td>
       <td class="small wrap">${actTargets(x)}</td><td class="small wrap">${esc(x.rationale)}${actOrigin(x)}</td>
       <td class="small muted">${(x.policy_reasons || []).slice(1).map(esc).join('<br>') || 'recommend (L2)'}${(x.result || {}).awaiting_second_approval && x.status === 'pending_approval' ? `<div class="t-sub" style="color:var(--high)">First approval by ${esc(x.approver)} - a second lead must approve</div>` : ''}</td>
       <td><div class="inline" style="flex-wrap:wrap;gap:6px">${decideButtons(x)}
@@ -1211,6 +1211,235 @@ async function wlRemove(id, value) {
   toast('Removed'); Watchlists();
 }
 
+// ================================================================= Tuning
+let TUNE = null, TUNE_DRAFT = null;   // the screen's data; the draft being edited (kind, params, reason, request)
+const TUNE_STATUS = {active: 'low', proposed: 'medium', paused: 'high'};
+const tuneChip = s => `<span class="chip ${TUNE_STATUS[s] || ''}">${esc(cap(s))}</span>`;
+const TUNE_SCOPED = ['suppress_detection', 'raise_severity', 'exercise'];
+function tunePv(pv) {
+  if (!pv || !pv.kind) return '';
+  if (pv.kind === 'noise_threshold') return `${nf(pv.newly_noise.length)} detection(s) would become noise, ${nf(pv.no_longer_noise.length)} would stop being noise`;
+  if (pv.kind === 'phishing_autoclose') return `${nf(pv.auto_closed_after)} of ${nf(pv.reports)} analysed reports would auto-close (now ${nf(pv.auto_closed_now)}) · ` +
+    (pv.threats_closed_after ? `<b style="color:var(--c-critical)">${nf(pv.threats_closed_after)} of them were ruled a threat</b>` : 'none ruled a threat');
+  if (pv.kind === 'raise_severity') return `${nf(pv.matching_alerts)} alerts, ${nf(pv.incidents)} incident(s) in ${nf(pv.days)} days · ${Object.entries(pv.severity_changes).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ') || 'no severity would change'}`;
+  if (pv.kind === 'exercise') return `${nf(pv.matching_alerts)} alerts, ${nf(pv.incidents)} incident(s) in scope in the last ${nf(pv.days)} days`;
+  if (pv.kind === 'vuln_priority') return `${nf(pv.findings)} open findings: ${Object.entries(pv.moves || {}).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ') || 'no priority would change'}` +
+    (pv.newly_past_sla ? ` · <b style="color:var(--c-critical)">${nf(pv.newly_past_sla)} would be past SLA at once</b>` : '');
+  if (pv.kind === 'action_demote') return Object.entries(pv.outcomes || {}).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ') || `no such action in the last ${nf(pv.days)} days`;
+  const kept = Object.values(pv.kept_by_guardrails || {}).reduce((a, b) => a + b, 0);
+  return `${nf(pv.would_suppress)} of ${nf(pv.matching_alerts)} matching alerts in ${nf(pv.days)} days would be suppressed · ${nf(kept)} kept by guardrails · ` +
+    (pv.threats_hidden ? `<b style="color:var(--c-critical)">${nf(pv.threats_hidden)} incident(s) with these alerts were ruled a threat</b>` : 'none were part of an incident ruled a threat');
+}
+function tuneUse(x) {
+  if (x.kind === 'suppress_detection') return `${nf(x.applied)} suppressed · ${nf(x.qa_samples)} kept open for QA`;
+  if (x.kind === 'raise_severity') return `${nf(x.applied)} incident(s) raised`;
+  if (x.kind === 'exercise') return `${nf(x.applied)} incident(s) labelled`;
+  if (x.kind === 'action_demote') return `${nf(x.applied)} recommendation(s) labelled`;
+  if (x.kind === 'vuln_priority') return 'applies to every open finding';
+  return x.kind === 'phishing_autoclose' ? 'applies to every new report' : 'applies to every new incident';
+}
+async function Tuning() {
+  const __g = GEN;
+  const r = await api('/api/v1/tuning'); TUNE = r;
+  const kinds = r.may_propose, manage = kinds.length > 0, me = String(window.ME.id || '').toLowerCase();
+  const ruleCell = x => `<div class="t-title" style="white-space:normal">${esc(x.summary)}</div><div class="t-sub" style="white-space:normal">${esc(x.kind_label)} · why: ${esc(x.reason)}${x.request_text ? ` · asked as “${esc(x.request_text)}”` : ''}${x.drafted_by === 'llm' ? ' · drafted with the model, checked by the platform' : ''}</div>`;
+  const mine = x => kinds.includes(x.kind);
+  const pending = r.rules.filter(x => x.status === 'proposed'), active = r.rules.filter(x => x.status === 'active'),
+    past = r.rules.filter(x => !['proposed', 'active'].includes(x.status));
+  const pendCard = card(`Waiting for a second lead <span class="muted">(${nf(pending.length)})</span>`, table(['Rule', 'Proposed', 'What it would have done', ''], pending.map(x => `<tr><td>${ruleCell(x)}</td>
+      <td class="small muted">${esc(x.proposed_by)}<br>${day(x.created_at)}</td><td class="small" style="white-space:normal">${tunePv(x.preview)}</td>
+      <td>${!mine(x) ? '' : String(x.proposed_by).toLowerCase() === me ? '<span class="t-sub">A second lead approves</span>' : `<div class="inline" style="gap:6px">${btn('Approve', 'tuneDecide', [x.id, 'approve'], 'sm primary')}${btn('Reject', 'tuneDecide', [x.id, 'reject'], 'sm ghost')}</div>`}</td></tr>`),
+    {empty: 'No rule is waiting for approval.'}), {flush: true});
+  const inForce = [`noise threshold: ${esc(r.threshold.benign_percent)}% benign of at least ${esc(r.threshold.min_decisions)} decisions in ${esc(r.threshold.days)} days`]
+    .concat(r.autoclose ? [`phishing auto-close: ${esc(r.autoclose.min_confidence_percent)}% confidence, ${esc(r.autoclose.sample_percent)}% sampled`] : [])
+    .concat(r.vuln ? [`vulnerability SLA: P1 ${esc(r.vuln.sla_p1)} / P2 ${esc(r.vuln.sla_p2)} / P3 ${esc(r.vuln.sla_p3)} / P4 ${esc(r.vuln.sla_p4)} days`] : []);
+  const actCard = card(`Rules in force <span class="muted">(${nf(active.length)})</span>`, table(['Rule', 'Approved', 'Since approval', 'Expires', ''], active.map(x => `<tr><td>${ruleCell(x)}</td>
+      <td class="small muted">${esc(x.decided_by)}<br>${day(x.decided_at)}</td><td class="small">${tuneUse(x)}</td>
+      <td class="small">${day(x.expires_at)}</td><td>${mine(x) ? btn('Revoke', 'tuneDecide', [x.id, 'revoke'], 'sm ghost') : ''}</td></tr>`),
+    {empty: 'No tuning rule is in force: the platform runs on its defaults.'}), {flush: true, sub: inForce.join(' · ')});
+  const ac = r.autoclose_suggestion;
+  const acRow = ac ? `<tr><td class="t-title" style="white-space:normal">Phishing auto-close at ${esc(ac.min_confidence_percent)}% confidence</td><td class="small" style="white-space:normal">${esc(ac.why)} (${nf(ac.decided)} analyst decisions; ${nf(ac.would_auto_close)} reports would auto-close)</td>
+      <td>${kinds.includes('phishing_autoclose') ? btn('Draft a rule', 'tuneAutoclose', [], 'sm') : ''}</td></tr>` : '';
+  const actRows = (r.action_suggestions || []).map((x, i) => `<tr><td class="t-title" style="white-space:normal">Treat <span class="mono">${esc(x.action_type)}</span> as usually rejected on ${esc(x.domain)} cases${x.detection ? ` for ${esc(x.detection)}` : ''}</td>
+      <td class="small">analysts rejected ${nf(x.rejected)} of ${nf(x.decisions)}</td><td>${(r.action_domains || []).includes(x.domain) ? btn('Draft a rule', 'tuneActSuggest', [i], 'sm') : ''}</td></tr>`);
+  const sugCard = card(`Suggested from analysts' decisions <span class="muted">(${nf(r.suggestions.length + actRows.length + (ac ? 1 : 0))})</span>`, table(['Suggestion', 'Why', ''], r.suggestions.map((x, i) => `<tr>
+      <td class="t-title" style="white-space:normal">Suppress ${esc(x.detection)}</td><td class="small">${nf(x.dispositions)} decisions, ${pct(x.false_positive_share)} benign</td>
+      <td>${kinds.includes('suppress_detection') ? btn('Draft a rule', 'tuneSuggest', [i], 'sm') : ''}</td></tr>`).concat(acRow ? [acRow] : []).concat(actRows),
+    {empty: 'Nothing to suggest: no detection is consistently ruled benign and no action consistently rejected without a rule covering it, and the auto-close confidence matches analysts\' decisions (or there are too few decisions to say).'}), {flush: true});
+  const pastCard = past.length ? card(`History <span class="muted">(${nf(past.length)})</span>`, table(['Rule', 'Status', 'Decided', 'Note'], past.map(x => `<tr><td>${ruleCell(x)}</td><td>${tuneChip(x.status)}</td>
+      <td class="small muted">${esc(x.decided_by || '–')}<br>${day(x.decided_at || x.expires_at)}</td><td class="small" style="white-space:normal">${esc(x.decision_note || '')}</td></tr>`)), {flush: true}) : '';
+  const ask = manage ? card('Ask for a change', `<div class="stack" style="gap:10px">
+      <textarea id="tune-req" rows="2" maxlength="1500" aria-label="The change in words" placeholder="e.g. Red-team exercise on fin-* hosts for the next 5 days · Finance servers fin-* matter more until quarter close, for 30 days · Stop raising incidents for the scanner's port scans on scan-* hosts"></textarea>
+      <div class="inline" style="gap:8px;flex-wrap:wrap">${btn('Draft the rule', 'tuneDraft', [], 'primary')}<span class="t-sub">or start from a form:</span>${kinds.map(k => btn(r.kind_labels[k], 'tuneBlank', [k], 'sm ghost')).join('')}</div>
+      <div id="tune-form"></div></div>`, {sub: 'leads · a second lead approves · every step audited'}) : '';
+  const how = `<div class="callout info"><div><b>How tuning works.</b> A request in words becomes a draft rule from a fixed menu: suppress a noisy detection, change when analysts' decisions make a detection noise, raise attention on chosen hosts or users, label an exercise, set phishing auto-close, set vulnerability priority weights and SLAs, or mark an action analysts keep rejecting. The model only fills in the menu's fields: a detection must be one the platform has seen, and a host, user or number must be written in your request. You check the draft and see what it would have done on past data. A second lead approves it before it applies.
+    <div class="small mt">Guardrails no rule can switch off: high and critical alerts, deception alerts, exercises and alerts on hosts with a KEV-listed vulnerability are never suppressed. ${pct(r.qa_rate)} of what a rule would suppress stays open and is investigated in full, and a threat found there pauses the rule. A raised incident keeps the verdict of its unraised severity. A clicked or gateway-flagged report is never auto-closed. A KEV-listed finding on an internet-facing asset stays P1. A usually-rejected action is still recommended and never runs on its own; critical and deception cases keep their normal handling. Every rule expires (exercises within ${nf(r.exercise_max)} days, others within ${nf(r.expires_max)}) and can be revoked at any time.</div></div></div>`;
+  setMainG(__g, page('Tuning', 'Adapt the platform to the situation: rules a lead proposes in plain words, tested on past data and approved by a second lead. A rule changes which incidents are closed as noise, how urgent incidents and findings are, which incidents are an exercise, which phishing reports close automatically and which recommendations are marked usually rejected - never a verdict, and never an action on its own.', '',
+    `<div class="mb">${how}</div>${ask ? `<div class="mb">${ask}</div>` : ''}<div class="stack">${pendCard}${actCard}${sugCard}${pastCard}</div>`));
+  if (TUNE_DRAFT && manage) tuneForm();
+}
+function tuneForm(notice = '') {
+  const el = $('#tune-form'); if (!el || !TUNE_DRAFT) return;
+  const d = TUNE_DRAFT, p = d.params || {}, r = TUNE;
+  const opt = (v, label, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(label)}</option>`;
+  const field = (label, html) => `<label class="small" style="display:block">${esc(label)}<br>${html}</label>`;
+  const num = (id, v, lo, hi, w = 90) => `<input class="input" id="${id}" type="number" min="${esc(lo)}" max="${esc(hi)}" value="${esc(v)}" style="width:${w}px">`;
+  const ex = d.kind === 'exercise', expMax = ex ? r.exercise_max : r.expires_max;
+  const exp = field('Expires after (days)', num('tf-exp', p.expires_days || (ex ? r.exercise_default : r.expires_default), 1, expMax));
+  const row = xs => `<div class="inline" style="gap:10px;flex-wrap:wrap;align-items:flex-end">${xs.join('')}</div>`;
+  let fields;
+  if (TUNE_SCOPED.includes(d.kind)) {
+    const detLabel = d.kind === 'suppress_detection' ? 'Detection (alert title)' : 'Only this detection (optional)';
+    fields = field(detLabel, `<select id="tf-detection" style="max-width:100%">${opt('', d.kind === 'suppress_detection' ? 'Choose a detection…' : 'any detection', !p.detection)}${r.detections.map(x => opt(x.title, `${x.title} (${x.alerts} alerts)`, x.title === p.detection)).join('')}</select>`) + row([
+      field('Only from tool', `<select id="tf-tool">${opt('', 'any tool', !p.tool)}${r.tools.map(t => opt(t, t, t === p.tool)).join('')}</select>`),
+      field(d.kind === 'suppress_detection' ? 'Only on hosts' : 'Hosts', `<input class="input" id="tf-host" maxlength="200" placeholder="e.g. fin-*" value="${esc(p.host || '')}">`),
+      field(d.kind === 'suppress_detection' ? 'Only for users' : 'Users', `<input class="input" id="tf-user" maxlength="200" placeholder="e.g. cfo@example.com" value="${esc(p.user || '')}">`),
+      d.kind === 'suppress_detection' ? field('Up to severity', `<select id="tf-sev">${r.severities.map(s => opt(s, s, s === (p.max_severity || 'low'))).join('')}</select>`) : '',
+      d.kind === 'raise_severity' ? field('Raise by', `<select id="tf-levels">${opt(1, '1 level', (p.levels || 1) === 1)}${opt(2, '2 levels', p.levels === 2)}</select>`) : '',
+      exp]) + (d.kind === 'suppress_detection' ? '' : '<div class="t-sub">Name hosts or users (or both): a name, or a pattern with * such as fin-*.</div>');
+  } else if (d.kind === 'action_demote') {
+    const doms = r.action_domains || [], dom = p.domain || doms[0] || 'incident';
+    fields = row([field('Domain', `<select id="tf-domain">${doms.map(x => opt(x, x, x === dom)).join('')}</select>`),
+      field('Action', `<select id="tf-action">${opt('', 'Choose an action…', !p.action_type)}${(r.action_types || []).map(x => opt(x, x, x === p.action_type)).join('')}</select>`)]) +
+      field('Only for this detection (incident actions, optional)', `<select id="tf-detection" style="max-width:100%">${opt('', 'any detection', !p.detection)}${r.detections.map(x => opt(x.title, x.title, x.title === p.detection)).join('')}</select>`) +
+      row([field('Only on hosts', `<input class="input" id="tf-host" maxlength="200" placeholder="e.g. srv-*" value="${esc(p.host || '')}">`),
+        field('Only for users', `<input class="input" id="tf-user" maxlength="200" placeholder="e.g. svc-*" value="${esc(p.user || '')}">`), exp]) +
+      '<div class="t-sub">The action is still recommended and shown, labelled \'usually rejected here\', and never runs on its own in this scope. Critical and deception cases are not affected.</div>';
+  } else if (d.kind === 'vuln_priority') {
+    const cur = r.vuln || r.vuln_defaults, b = r.vuln_bounds, W = {cvss: 'CVSS', epss: 'EPSS', kev: 'KEV-listed', exposure: 'Internet exposure', criticality: 'Asset criticality'};
+    fields = '<div class="small strong">Priority weights (%) - they add up to 100</div>' +
+      row(Object.keys(W).map(k => field(W[k], num(`tf-weight_${k}`, p[`weight_${k}`] ?? cur[`weight_${k}`], b[`weight_${k}`][0], b[`weight_${k}`][1])))) +
+      '<div class="small strong">SLA (days to fix, from first seen)</div>' +
+      row([1, 2, 3, 4].map(i => field(`P${i}`, num(`tf-sla_p${i}`, p[`sla_p${i}`] ?? cur[`sla_p${i}`], b[`sla_p${i}`][0], b[`sla_p${i}`][1]))).concat([exp])) +
+      `<div class="t-sub">In force now: CVSS ${esc(cur.weight_cvss)}%, EPSS ${esc(cur.weight_epss)}%, KEV ${esc(cur.weight_kev)}%, exposure ${esc(cur.weight_exposure)}%, criticality ${esc(cur.weight_criticality)}%. A KEV-listed finding on an internet-facing asset stays P1, and every KEV-listed finding keeps the P1 SLA.</div>`;
+  } else if (d.kind === 'noise_threshold') {
+    fields = row(['benign_percent', 'min_decisions', 'days'].map(k => field({benign_percent: 'Benign share (%)', min_decisions: 'At least (decisions)', days: 'Over (days)'}[k],
+      num(`tf-${k}`, p[k] ?? r.defaults[k], r.threshold_bounds[k][0], r.threshold_bounds[k][1], 110))).concat([exp])) +
+      `<div class="t-sub">In force now: ${esc(r.threshold.benign_percent)}% of at least ${esc(r.threshold.min_decisions)} decisions in ${esc(r.threshold.days)} days.</div>`;
+  } else {
+    const b = r.autoclose_bounds, cur = r.autoclose || r.autoclose_defaults;
+    fields = row([field('Auto-close at confidence (%)', num('tf-min_confidence_percent', p.min_confidence_percent ?? cur.min_confidence_percent, b.min_confidence_percent[0], b.min_confidence_percent[1], 110)),
+      field('Sample for QA (%)', num('tf-sample_percent', p.sample_percent ?? cur.sample_percent, b.sample_percent[0], b.sample_percent[1], 110)), exp]) +
+      `<div class="t-sub">In force now: ${esc(cur.min_confidence_percent)}% confidence, ${esc(cur.sample_percent)}% sampled. Only reports judged safe or spam close automatically; a clicked or gateway-flagged report never does.</div>`;
+  }
+  const by = d.drafted_by === 'llm' ? 'drafted with the model and checked by the platform - check every field' : d.drafted_by === 'rules' ? 'drafted by the platform from your words - check every field' : '';
+  el.innerHTML = `<div class="card" style="padding:12px 14px"><div class="stack" style="gap:10px">
+      <div><b>${esc(r.kind_labels[d.kind] || d.kind)}</b> <span class="t-sub">${esc(by)}</span></div>
+      ${(d.notes || []).length ? `<div class="callout"><div class="small">${d.notes.map(esc).join('<br>')}</div></div>` : ''}${notice}
+      ${fields}
+      ${field('Why (kept with the rule and in the audit log)', `<input class="input" id="tf-reason" maxlength="1000" style="width:100%" value="${esc(d.reason || '')}">`)}
+      <div class="inline" style="gap:8px">${btn('Preview on past data', 'tunePreview', [], '')}${btn('Propose', 'tunePropose', [], 'primary')}</div>
+      <div id="tune-pv"></div></div></div>`;
+}
+function tuneRead() {
+  const d = TUNE_DRAFT, v = id => { const e = $('#' + id); return e ? e.value.trim() : ''; };
+  let params;
+  if (TUNE_SCOPED.includes(d.kind)) {
+    params = {detection: v('tf-detection') || null, tool: v('tf-tool') || null, host: v('tf-host') || null, user: v('tf-user') || null, expires_days: Number(v('tf-exp'))};
+    if (d.kind === 'suppress_detection') params.max_severity = v('tf-sev');
+    if (d.kind === 'raise_severity') params.levels = Number(v('tf-levels'));
+  } else if (d.kind === 'action_demote') {
+    params = {domain: v('tf-domain'), action_type: v('tf-action'), detection: v('tf-detection') || null, host: v('tf-host') || null,
+      user: v('tf-user') || null, expires_days: Number(v('tf-exp'))};
+  } else if (d.kind === 'vuln_priority') {
+    params = {expires_days: Number(v('tf-exp'))};
+    for (const k of ['cvss', 'epss', 'kev', 'exposure', 'criticality']) params[`weight_${k}`] = Number(v(`tf-weight_${k}`));
+    for (const i of [1, 2, 3, 4]) params[`sla_p${i}`] = Number(v(`tf-sla_p${i}`));
+  } else if (d.kind === 'noise_threshold') {
+    params = {benign_percent: Number(v('tf-benign_percent')), min_decisions: Number(v('tf-min_decisions')), days: Number(v('tf-days')), expires_days: Number(v('tf-exp'))};
+  } else {
+    params = {min_confidence_percent: Number(v('tf-min_confidence_percent')), sample_percent: Number(v('tf-sample_percent')), expires_days: Number(v('tf-exp'))};
+  }
+  TUNE_DRAFT = {...d, params, reason: v('tf-reason')};
+  return {kind: d.kind, params, reason: TUNE_DRAFT.reason, request_text: d.request || '', drafted_by: d.drafted_by || 'form'};
+}
+async function tuneDraft() {
+  const req = ($('#tune-req').value || '').trim(); if (req.length < 3) { toast('Describe the change first', true); return; }
+  const r = await post('/api/v1/tuning/draft', {request: req});
+  if (!TUNE.may_propose.includes(r.kind)) { toast(`This reads as a ${TUNE.kind_labels[r.kind] || r.kind} rule, which your role cannot propose`, true); return; }
+  TUNE_DRAFT = r; tuneForm(r.llm_notice ? `<div class="t-sub">${esc(r.llm_notice)}</div>` : '');
+}
+function tuneBlank(kind) { TUNE_DRAFT = {kind, params: {}, reason: '', drafted_by: 'form', notes: []}; tuneForm(); }
+function tuneShow() { const f = $('#tune-form'); if (f) f.scrollIntoView({behavior: 'smooth'}); }
+function tuneSuggest(i) { const s = TUNE.suggestions[i]; TUNE_DRAFT = {...s.draft, notes: [], request: ''}; tuneForm(); tuneShow(); }
+function tuneActSuggest(i) { const s = TUNE.action_suggestions[i]; TUNE_DRAFT = {...s.draft, notes: [], request: ''}; tuneForm(); tuneShow(); }
+function tuneAutoclose() {
+  const s = TUNE.autoclose_suggestion, cur = TUNE.autoclose || TUNE.autoclose_defaults;
+  TUNE_DRAFT = {kind: 'phishing_autoclose', drafted_by: 'rules', notes: [], request: '', reason: `Suggested from analysts' decisions: ${s.why}`,
+    params: {min_confidence_percent: s.min_confidence_percent, sample_percent: cur.sample_percent, expires_days: TUNE.expires_default}};
+  tuneForm(); tuneShow();
+}
+function tunePvHtml(pv) {
+  const ul = items => `<ul class="small" style="margin:6px 0;padding-left:18px">${items.filter(Boolean).map(x => `<li>${x}</li>`).join('')}</ul>`;
+  if (pv.kind === 'noise_threshold') {
+    const list = xs => xs.length ? xs.map(x => `<li>${esc(x.detection)} - ${nf(x.dispositions)} decisions, ${pct(x.false_positive_share)} benign</li>`).join('') : '<li>none</li>';
+    return `<div class="callout info"><div><b>${esc(pv.summary)}.</b><div class="small mt">Would become noise:<ul style="margin:4px 0;padding-left:18px">${list(pv.newly_noise)}</ul>Would stop being noise:<ul style="margin:4px 0;padding-left:18px">${list(pv.no_longer_noise)}</ul></div><div class="small">${esc(pv.note)}</div></div></div>`;
+  }
+  if (pv.kind === 'phishing_autoclose') {
+    const s = pv.suggestion;
+    return `<div class="callout ${pv.threats_closed_after ? 'danger' : 'info'}"><div><b>${esc(pv.summary)}.</b> Over the ${nf(pv.reports)} reports analysed so far (${nf(pv.decided)} with an analyst's ruling):${ul([
+      `would auto-close ${nf(pv.auto_closed_after)} (now ${nf(pv.auto_closed_now)}), about ${nf(pv.sampled_after)} of them sampled for QA`,
+      pv.threats_closed_after ? `<b>${nf(pv.threats_closed_after)} of them were ruled a threat by an analyst</b> (now ${nf(pv.threats_closed_now)}) - raise the confidence` : `none of them was ruled a threat (now ${nf(pv.threats_closed_now)})`,
+      s ? `the platform suggests ${esc(s.min_confidence_percent)}%: ${esc(s.why)}` : ''])}<div class="small">${esc(pv.note)}</div></div></div>`;
+  }
+  if (pv.kind === 'vuln_priority') {
+    const bands = o => ['P1', 'P2', 'P3', 'P4'].map(b => `${b} ${nf(o[b] || 0)}`).join(' · ');
+    return `<div class="callout ${pv.newly_past_sla ? 'danger' : 'info'}"><div><b>${esc(pv.summary)}.</b> On the ${nf(pv.findings)} open findings:${ul([
+      `now: ${bands(pv.bands_now || {})}`, `after: ${bands(pv.bands_after || {})}`,
+      `priority changes: ${Object.entries(pv.moves || {}).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ') || 'none'}`,
+      pv.newly_past_sla ? `<b>${nf(pv.newly_past_sla)} finding(s) would be past SLA at once</b> - the owners get no notice` : 'no finding would fall past its SLA at once'])}
+      ${(pv.examples || []).length ? `<details><summary class="small">Examples</summary><div class="small">${pv.examples.map(x => `${esc(x.asset)} · ${esc(x.cve)} · ${esc(x.from)} -> ${esc(x.to)}`).join('<br>')}</div></details>` : ''}
+      <div class="small">${esc(pv.note)}</div></div></div>`;
+  }
+  if (pv.kind === 'action_demote') {
+    return `<div class="callout ${pv.approved_by_analysts ? 'danger' : 'info'}"><div><b>${esc(pv.summary)}.</b> Over the last ${nf(pv.days)} days:${ul([
+      Object.entries(pv.outcomes || {}).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ') || 'no such recommendation yet',
+      pv.approved_by_analysts ? `<b>analysts approved ${nf(pv.approved_by_analysts)} of these</b> - narrow the rule or do not propose it` : ''])}
+      <div class="small">${esc(pv.note)}</div></div></div>`;
+  }
+  const win = `Over the last ${nf(pv.days)} days (${day(pv.window.from)} to ${day(pv.window.to)}):`;
+  if (pv.kind === 'raise_severity' || pv.kind === 'exercise') {
+    return `<div class="callout info"><div><b>${esc(pv.summary)}.</b> ${win}${ul([`${nf(pv.matching_alerts)} alert(s) in scope, on ${nf(pv.hosts)} host(s) and ${nf(pv.users)} user(s), in ${nf(pv.incidents)} incident(s)`,
+      pv.kind === 'raise_severity' ? `severity changes: ${Object.entries(pv.severity_changes).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ') || 'none (already critical, or nothing in scope yet)'}` : `${nf(pv.decisions_kept_out_of_noise_statistics)} analyst decision(s) would stay out of the noise statistics`])}
+      <div class="small">${esc(pv.note)}</div></div></div>`;
+  }
+  const kept = Object.entries(pv.kept_by_guardrails);
+  return `<div class="callout ${pv.threats_hidden ? 'danger' : 'info'}"><div><b>${esc(pv.summary)}.</b> ${win}${ul([
+      `${nf(pv.matching_alerts)} alert(s) match; ${nf(pv.would_suppress)} would be suppressed${Object.keys(pv.by_severity).length ? ` (${Object.entries(pv.by_severity).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ')})` : ''} on ${nf(pv.hosts)} host(s)`,
+      kept.length ? `kept by guardrails: ${kept.map(([k, n]) => `${nf(n)} - ${esc(k)}`).join('; ')}` : '',
+      `incidents these alerts were part of: ${Object.keys(pv.incident_verdicts).length ? Object.entries(pv.incident_verdicts).map(([k, n]) => `${nf(n)} ${esc(k)}`).join(', ') : 'none yet'}`,
+      pv.threats_hidden ? `<b>${nf(pv.threats_hidden)} of them were ruled a threat by an analyst</b> - narrow the rule or do not propose it` : ''])}
+    ${pv.examples.length ? `<details><summary class="small">Examples</summary><div class="small">${pv.examples.map(x => `${dt(x.at)} · ${esc(x.severity)} · ${esc([...x.hosts, ...x.users].slice(0, 3).join(', ') || '–')}`).join('<br>')}</div></details>` : ''}
+    <div class="small">${pct(pv.qa_rate)} of suppressions stay open for QA review.</div></div></div>`;
+}
+async function tunePreview() {
+  const body = tuneRead();
+  const pv = await post('/api/v1/tuning/preview', body);
+  TUNE_DRAFT.preview = pv; $('#tune-pv').innerHTML = tunePvHtml(pv);
+}
+async function tunePropose() {
+  const body = tuneRead();
+  if (!body.reason) { toast('Say why the rule is needed', true); return; }
+  const pv = await post('/api/v1/tuning/preview', body);
+  $('#tune-pv').innerHTML = tunePvHtml(pv);
+  const what = pv.kind === 'vuln_priority' ? `${pv.summary}: ${Object.values(pv.moves || {}).reduce((a, b) => a + b, 0)} of ${pv.findings} open findings change priority${pv.newly_past_sla ? `, ${pv.newly_past_sla} would be past SLA at once` : ''}`
+    : pv.kind === 'suppress_detection' ? `${pv.summary}: ${pv.would_suppress} of ${pv.matching_alerts} matching alerts in the last ${pv.days} days would have been suppressed${pv.threats_hidden ? `, and ${pv.threats_hidden} incident(s) with them were ruled a threat` : ''}`
+    : pv.kind === 'phishing_autoclose' ? `${pv.summary}: ${pv.auto_closed_after} of ${pv.reports} analysed reports would auto-close${pv.threats_closed_after ? `, ${pv.threats_closed_after} of them ruled a threat` : ''}` : pv.summary;
+  if (!confirm(`Propose this rule?\n\n${what}.\n\nIt applies only after a second lead approves it.`)) return;
+  await post('/api/v1/tuning', body);
+  TUNE_DRAFT = null; toast('Rule proposed - a second lead approves it'); Tuning();
+}
+async function tuneDecide(id, verb) {
+  const x = TUNE.rules.find(r => r.id === id);
+  const pv = x.preview && x.preview.kind ? `What it would have done: ${tunePv(x.preview).replace(/<[^<>]*>/g, '')}.\n\n` : '';
+  const ask = {approve: `Approve this rule? It applies at once.\n\n${x.summary}\n\n${pv}Note (optional):`,
+    reject: `Reject this rule? Say why.\n\n${x.summary}`, revoke: `Revoke this rule? It stops at once. Say why.\n\n${x.summary}`}[verb];
+  const note = prompt(ask, ''); if (note === null) return;
+  if (verb !== 'approve' && !note.trim()) { toast('Say why', true); return; }
+  await post(`/api/v1/tuning/${id}/${verb}`, {note});
+  toast({approve: 'Rule approved - it applies at once', reject: 'Rule rejected', revoke: 'Rule revoked'}[verb]); Tuning();
+}
+
 // ================================================================= Trace (diagnostics)
 async function Trace(id) {
   const __g = GEN;
@@ -1350,7 +1579,7 @@ async function approveBundle(id) {
 // ================================================================= registry
 window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
-  policy: Policy, reports: Reports, access: Access, audit: Audit, watchlists: Watchlists};
+  policy: Policy, reports: Reports, access: Access, audit: Audit, watchlists: Watchlists, tuning: Tuning};
 Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, ownUpload, ownClear, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
-  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, styleUpload, styleSave, styleRemove, styleReset});
+  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, tuneDraft, tuneBlank, tuneSuggest, tunePreview, tunePropose, tuneDecide, tuneAutoclose, tuneActSuggest, styleUpload, styleSave, styleRemove, styleReset});

@@ -389,9 +389,20 @@ async function visit(page, hash, name, full = true) {
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
   await page.fill('#si-user', EST.lead); await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
+  // ---------- tuning: a request in words becomes a draft rule and its preview (nothing is stored)
+  await page.goto(`${BASE}/#/tuning`); await settle(page);
+  await page.fill('#tune-req', 'Red-team exercise on lab-* hosts for the next 5 days');
+  await page.click('[data-fn="tuneDraft"]'); await page.waitForSelector('#tf-reason');
+  await page.click('[data-fn="tunePreview"]'); await page.waitForSelector('#tune-pv .callout');
+  await shot(page, '37-tuning-draft'); await axe(page, 'tuning draft + preview');
+  if (!/exercise/i.test(await page.textContent('#tune-pv'))) problems.push('tuning: the preview does not describe the exercise rule');
+  await page.click('[data-fn="tuneBlank"][data-args*="vuln_priority"]'); await page.waitForSelector('#tf-sla_p1');
+  await page.click('[data-fn="tunePreview"]'); await page.waitForSelector('#tune-pv .callout');
+  await page.evaluate(() => window.scrollTo(0, 0)); await shot(page, '38-tuning-vuln-priority'); await axe(page, 'tuning vulnerability priority preview');
+  if (!/open findings/i.test(await page.textContent('#tune-pv'))) problems.push('tuning: the vulnerability preview does not count the open findings');
   const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'ai-usage', 'reports', 'access', 'audit',
-    'watchlists', `search/${encodeURIComponent(term)}`];
+    'watchlists', 'tuning', `search/${encodeURIComponent(term)}`];
   for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light']]) {
     await page.setViewportSize({width: w, height: 900});
     await page.evaluate(t => { document.documentElement.setAttribute('data-theme', t); }, theme);

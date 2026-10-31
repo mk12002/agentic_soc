@@ -84,6 +84,14 @@ class AutoClosePolicy:
         return int(hashlib.sha256(key.encode()).hexdigest(), 16) % 1000 < int(self.sample_rate * 1000)
 
 
+def tuned_auto_close(session: Session) -> AutoClosePolicy:
+    """The auto-close policy in force: the defaults, or the phishing auto-close rule two leads approved."""
+    from soc_platform.core.tuning import TuningStore
+
+    t = TuningStore(session).autoclose()
+    return AutoClosePolicy(min_confidence=t["min_confidence_percent"] / 100, sample_rate=t["sample_percent"] / 100)
+
+
 class PhishingService:
     def __init__(self, session: Session, registry: ConnectorRegistry, *, policy: PolicyEngine | None = None,
                  llm: LLMGateway | None = None, actions: ActionRegistry | None = None, use_engine: bool = False,
@@ -105,7 +113,7 @@ class PhishingService:
                     for d in sup.domains]
         heuristic = HeuristicAnalyzer(org_domains=self.org_domains, threat_intel=ti, partner_domains=partners)
         self.analyzer = CompositeAnalyzer(heuristic, EngineAnalyzer() if use_engine else None)
-        self.auto_close = auto_close or AutoClosePolicy()
+        self.auto_close = auto_close or tuned_auto_close(session)
         if raw_dir is None:                                  # the configured store (SOC_RAW_PAYLOAD_DIR), like the API
             from soc_platform.config import get_settings
 
@@ -506,6 +514,29 @@ class PhishingService:
                 for e in rows if (e.attributes or {}).get("confirmed_malicious")]
 
     # ------------------------------------------------------------------ PH-F14 reporting
+
+    def autoclose_history(self) -> list[dict[str, Any]]:
+        """Every analysed report as the auto-close rule sees it (verdict, confidence, clicked, a gateway rating it
+        worse) with the analyst's ruling when there is one: what a tuning preview counts."""
+        from soc_platform.core.cases import _bucket
+        from soc_platform.core.models import Disposition
+
+        latest: dict[str, str] = {}
+        for d in self.s.execute(select(Disposition).where(Disposition.domain == "phishing")
+                                .order_by(Disposition.created_at)).scalars():
+            latest[d.subject_id] = _bucket(d.analyst_verdict)
+        out = []
+        for sub, case in self.s.execute(select(Submission, Case).join(Case, Case.id == Submission.case_id)
+                                        .order_by(Submission.received_at, Submission.id)).all():
+            if not sub.verdict:
+                continue
+            rec = (case.assessment or {}).get("reconciliation") or {}
+            out.append({"verdict": sub.verdict, "confidence": case.confidence,
+                        "clicked": bool((sub.analysis or {}).get("clicked")),
+                        "gateway_flagged": any(isinstance(x, dict) and x.get("type") == "platform_less_severe"
+                                               for x in rec.get("disagreements") or []),
+                        "analyst": latest.get(case.id, "undecided")})
+        return out
 
     def metrics(self) -> dict[str, Any]:
         subs = self.s.execute(select(Submission)).scalars().all()

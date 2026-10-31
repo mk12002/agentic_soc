@@ -58,6 +58,10 @@ An **agentic SOC platform**: one investigation and automation layer over an orga
   tool identifier, findings and CVEs, Teams / Slack / webhook notifications for findings above a threshold, and
   block / exception watch lists (uploaded as Excel or CSV by a lead) flagged on every case that involves a listed item,
   and an uploaded ownership mapping (resource / host / subscription -> owning team) for what the CMDB does not hold.
+- **Tuning**: a lead asks in words to cut noise, raise attention on hosts / users, label an exercise, set phishing
+  auto-close, adjust vulnerability priority weights / SLA days or mark an action analysts keep rejecting; the request becomes a checked draft rule, previewed on past data and approved by a second lead; the
+  platform suggests changes from analysts' decisions. High / critical, deception, exercise and KEV-host alerts are never
+  suppressed; 1 in 10 suppressions stays open; a threat found pauses the rule; a raise never changes a verdict.
 - Every connector has **fake mode** (vendor-shaped fixtures through the same parsing code) so the whole platform runs
   and demos with no tenant access.
 - **Phishing ML engine** (`soc_platform/domains/phishing/engine/`, ~24k lines, earlier code base): 7-agent ML swarm
@@ -204,6 +208,12 @@ soc_platform/
   core/ownership.py      the uploaded ownership mapping (`ownership_mappings`, versioned): .xlsx / CSV rows of resource
                          or host name (wildcards) and / or subscription -> team, owner, environment, criticality;
                          match() exact > pattern > subscription; fills the CMDB's gaps in both enrich_ownership()s
+  core/tuning.py         tuning (`tuning_rules`): a lead's request -> draft from a fixed menu (suppress, noise threshold,
+                         raise attention, exercise, phishing auto-close, vuln priority / SLAs, usually-rejected
+                         action), checked against the request and the data;
+                         preview on past data; second-lead approval in the rule's domain; revoke / expiry / pause on a
+                         threat; applied in IncidentService.cluster / investigate, CaseService.decide / recommend,
+                         VulnerabilityService (weights, SLA days), phishing.tuned_auto_close
   core/audit_export.py   audit exports (jsonl / json / csv / xlsx / docx, filtered) + info() for the Audit screen;
                          .xlsx written without a library (text cells only), CSV cells formula-guarded
   domains/phishing/      service.py (pipeline), models.py, supplier.py, agents/{decompose,analyzer,investigation}.py, engine/
@@ -404,6 +414,10 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `test_value_scorecard.py` (benefit KPIs, baselines, capacity, permissions),
   `test_watchlists.py` (Excel / CSV parsing incl. an openpyxl-written workbook in `tests/data/`, hostile files,
   matching on every case kind, no outside-address match, lead-only + audited changes, nothing decisional moves),
+  `test_tuning.py` (draft keeps only what the request says and the data holds, preview, two leads, per-domain
+  rights, guardrails, QA sample, pause on a threat, revoke / expiry, noise threshold, raise without a verdict change,
+  exercises out of the noise statistics, auto-close effect and suggestion, no stacked boosts, vulnerability weights /
+  SLAs as previewed with KEV + exposed kept P1, usually-rejected actions suggested / capped / labelled, the API),
   `test_ownership.py` (forgiving headers, unusable rows named, exact > pattern > subscription, cloud / type narrowing,
   versions and audit, permissions, fills the CMDB's gaps without overriding it, the console API),
   `test_audit_export.py` (every format, re-verifying an export outside the platform, filters, formula guard, scope),
@@ -418,7 +432,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 896 platform tests passing on SQLite and 895 on PostgreSQL (912 collected; skips: 12 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 2 on PostgreSQL), 205
+- Current counts (keep docs in sync when they change): 935 platform tests passing on SQLite and 934 on PostgreSQL (953 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 2 on PostgreSQL), 205
   engine tests, 108/108 features verified with `--browser --engine --live --llm` (round 25); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 

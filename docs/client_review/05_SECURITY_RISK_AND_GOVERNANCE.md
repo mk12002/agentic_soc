@@ -82,6 +82,7 @@ review with the organisation (H = high, M = medium, L = low). References R01-R16
 | Manage access (grants, API keys, session revocation, AI usage policy) | | | | ✓ | |
 | Export compliance evidence and the audit trail | | ✓ | | ✓ | ✓ |
 | Change the block / exception watch lists (upload, remove) | | ✓ | | | |
+| Propose, approve (a second lead) or revoke tuning rules (noise, raise attention, exercises, phishing auto-close, vulnerability priority and SLAs, usually-rejected actions; in the role's own domains) | | ✓ | | | |
 | Change the report style (templates, logo, brand, writing guide) | | ✓ | | ✓ | |
 
 | Control | Behaviour | Status |
@@ -89,7 +90,7 @@ review with the organisation (H = high, M = medium, L = low). References R01-R16
 | Source of roles | Entra ID app roles `SOC.<Role>` or `SOC.<Role>.<Domain>` assigned to groups; platform grants (time-bound, justified, audited) on top. Unknown role claims grant nothing | Implemented; configured at deployment |
 | Domain scope | Any role can be limited to phishing, incident and / or vulnerability. Every list is filtered; every record route checks the record's domain and answers "not found" out of scope - including reports, the audit log and the access log. Cross-domain views (intelligence, brief, metrics) need all-domain scope | Implemented |
 | Per-role scope | A user sees the union of their roles' domains, but each permission counts only where the role granting it applies (a phishing lead who is also an all-domain auditor approves phishing actions only) | Implemented |
-| Step-up MFA | Approvals, rollback, policy approval, kill switch, access management and watch-list changes need a token showing MFA (`amr`) or the configured Conditional Access authentication context; on by default in production | Implemented |
+| Step-up MFA | Approvals, rollback, policy approval, kill switch, access management, watch-list changes and tuning need a token showing MFA (`amr`) or the configured Conditional Access authentication context; on by default in production | Implemented |
 | Human-only permissions | Approvals, policy, access management and rollback are never granted to API-key principals, whatever roles a key holds | Implemented |
 | Separation of duties | No one approves their own action, policy, exception, connector change or access grant; automation admins configure but cannot approve; a scoped administrator grants only their own domains; a lead, admin or automation-admin grant takes effect only when a second administrator approves it and ends within 90 days; a rollback is an action under the policy; switching the kill switch off needs a lead | Implemented |
 | Service accounts | API keys: only the SHA-256 is stored; expiry at most 365 days; roles limited to analyst, auditor or automation admin; shown once | Implemented |

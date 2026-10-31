@@ -1111,6 +1111,135 @@ def watchlist_remove(eid: str, reason: str = Query("", max_length=500), p: Princ
         raise _err(exc) from exc
 
 
+# ----------------------------------------------------------------------------- detection tuning
+
+
+class TuneDraftBody(BaseModel):
+    request: str = Field(min_length=3, max_length=1500)
+
+
+class TuneRuleBody(BaseModel):
+    kind: str = Field(max_length=32)
+    params: dict[str, Any] = Field(default_factory=dict)
+    reason: str = Field(default="", max_length=1000)
+    request_text: str = Field(default="", max_length=2000)
+    drafted_by: str = Field(default="form", max_length=16)
+
+
+class TuneDecisionBody(BaseModel):
+    note: str = Field(default="", max_length=1000)
+
+
+def _tuning_preview(s: Session, p: Principal, kind: str, params: dict[str, Any]) -> dict[str, Any]:
+    from soc_platform.core.tuning import KINDS, may_tune, preview
+
+    if kind not in KINDS:
+        raise HTTPException(422, f"unknown rule kind '{kind}' ({', '.join(KINDS)})")
+    if not may_tune(p, kind, params):
+        raise HTTPException(403, "tune_detections is not granted for this rule's domain")
+    sv = _services(s)
+    try:
+        return preview(s, sv["incident"].store, kind, params,
+                       kev_cves=sv["incident"].kev_cves() if kind == "suppress_detection" else set(),
+                       phishing_history=sv["phishing"].autoclose_history() if kind == "phishing_autoclose" else None,
+                       vuln_preview=sv["vulnerability"].priority_preview if kind == "vuln_priority" else None)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/v1/tuning")
+def tuning(p: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    """Tuning: the rules of the domains in the reader's scope (proposed, in force, past), the settings in force,
+    suggestions computed from analysts' decisions, the kinds this person may propose, and what a rule may name."""
+    from soc_platform.core import tuning as T
+
+    st = T.TuningStore(s)
+    inc, ph, vm = p.in_domain("incident"), p.in_domain("phishing"), p.in_domain("vulnerability")
+    autoclose_suggestion = None
+    if ph:
+        autoclose_suggestion = T.autoclose_suggestion(_services(s)["phishing"].autoclose_history(),
+                                                      st.autoclose()["min_confidence_percent"])
+    return {"rules": [st.as_dict(r) for r in st.rules() if p.in_domain(T.rule_domain(r.kind, r.params))],
+            "may_propose": [k for k in T.KINDS if T.may_tune(p, k)], "kind_labels": T.KIND_LABELS,
+            "threshold": st.threshold(), "defaults": T.DEFAULT_THRESHOLD, "threshold_bounds": T.THRESHOLD_BOUNDS,
+            "autoclose": st.autoclose() if ph else None, "autoclose_defaults": T.DEFAULT_AUTOCLOSE,
+            "autoclose_bounds": T.AUTOCLOSE_BOUNDS, "autoclose_suggestion": autoclose_suggestion,
+            "suggestions": T.suggestions(s) if inc else [],
+            "action_suggestions": [x for x in T.action_suggestions(s) if p.in_domain(x["domain"])],
+            "action_types": T.known_action_types(s),
+            "action_domains": [d for d in T.DOMAINS if T.may_tune(p, "action_demote", {"domain": d})],
+            "vuln": st.vuln_priority() if vm else None, "vuln_defaults": T.DEFAULT_VULN, "vuln_bounds": T.VULN_BOUNDS,
+            "detections": [{"title": k, "alerts": v} for k, v in list(T.known_detections(s).items())[:500]] if inc else [],
+            "tools": T.known_tools(s) if inc else [], "severities": list(T.SUPPRESSIBLE),
+            "expires_max": T.EXPIRES_MAX, "expires_default": T.EXPIRES_DEFAULT,
+            "exercise_max": T.EXERCISE_MAX, "exercise_default": T.EXERCISE_DEFAULT,
+            "preview_days": T.PREVIEW_DAYS, "qa_rate": T.QA_RATE}
+
+
+@app.post("/api/v1/tuning/draft")
+def tuning_draft(body: TuneDraftBody, p: Principal = Depends(need(Perm.TUNE_DETECTIONS)),
+                 s: Session = Depends(db_session, scope="function")):
+    """A request in words -> a draft rule to check. Nothing is stored or changed."""
+    from soc_platform.core.tuning import draft
+
+    gw = llm(s, p)
+    out = draft(s, body.request, gw, incident=p.in_domain("incident"))
+    AuditLog(s).append(actor_type=p.actor_type, actor_id=p.id, event_type="tuning.drafted", subject_type="tuning_rule",
+                       subject_id="draft", payload={"kind": out["kind"], "drafted_by": out["drafted_by"]})
+    return _with_notice(out, gw)
+
+
+@app.post("/api/v1/tuning/preview")
+def tuning_preview(body: TuneRuleBody, p: Principal = Depends(need(Perm.TUNE_DETECTIONS)),
+                   s: Session = Depends(db_session, scope="function")):
+    """What the rule would have done over the last 90 days. Nothing is stored or changed."""
+    return _tuning_preview(s, p, body.kind, body.params)
+
+
+@app.post("/api/v1/tuning")
+def tuning_propose(body: TuneRuleBody, p: Principal = Depends(need(Perm.TUNE_DETECTIONS)),
+                   s: Session = Depends(db_session, scope="function")):
+    """Propose a rule: its preview is computed now and kept with it for the approving lead."""
+    from soc_platform.core.tuning import TuningStore
+
+    pv = _tuning_preview(s, p, body.kind, body.params)
+    st = TuningStore(s)
+    try:
+        row = st.propose(body.kind, body.params, p, reason=body.reason, request_text=body.request_text,
+                         drafted_by=body.drafted_by, preview=pv)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return st.as_dict(row)
+
+
+@app.post("/api/v1/tuning/{rid}/{verb}")
+def tuning_decide(rid: int, verb: str, body: TuneDecisionBody, p: Principal = Depends(need(Perm.TUNE_DETECTIONS)),
+                  s: Session = Depends(db_session, scope="function")):
+    """approve (a second lead), reject, or revoke (roll an active rule back at once)."""
+    from soc_platform.core.tuning import TuningStore
+
+    st = TuningStore(s)
+    fn = {"approve": st.approve, "reject": st.reject, "revoke": st.revoke}.get(verb)
+    if not 1 <= rid <= 2_147_483_647:             # an id the 32-bit column cannot hold names no rule
+        raise HTTPException(404, "unknown tuning rule")
+    if fn is None:
+        raise HTTPException(404, "unknown tuning decision (approve, reject, revoke)")
+    try:
+        row = fn(rid, p, body.note)
+    except KeyError as exc:
+        raise HTTPException(404, "unknown tuning rule") from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if row.kind == "vuln_priority" and verb in ("approve", "revoke"):
+        s.flush()
+        _services(s)["vulnerability"].prioritise()           # the new weights and SLA days apply at once
+    return st.as_dict(row)
+
+
 # ----------------------------------------------------------------------------- ownership mapping
 
 

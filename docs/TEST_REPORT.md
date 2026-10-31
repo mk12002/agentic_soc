@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-30 (rounds 15-31; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-10-31 (rounds 15-32; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,38 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 31 (2026-10-30) - latest results: code review of every module, and the ownership mapping upload
+## 0. Round 32 (2026-10-31) - latest results: tuning the platform in plain words
+
+Aim: the client asked how noise is told apart from real alerts, and asked for a platform that adapts to the situation:
+a lead asks for a change in words, and the platform adjusts, with confirmation and only for leads.
+
+| Found or built | Fix and check | Evidence |
+|---|---|---|
+| **Tuning** (`core/tuning.py`, *Govern -> Tuning*): a request in words becomes a draft rule from a fixed menu - suppress a noisy detection, noise threshold, raise attention on hosts / users, exercise, phishing auto-close. The model only fills in the fields; a detection must be one the platform has seen, and a pattern or number must be written in the request; without the model the platform reads the request itself | Preview on past data; propose with confirmation; a second lead with the rule's domain approves; revoke at once; expiry | `test_a_drafted_rule_keeps_only_what_the_request_says_and_what_the_data_holds`, `test_without_the_model_the_platform_reads_the_request_itself`, `test_the_platform_reads_the_new_kinds_from_words_without_the_model`, `test_a_rule_applies_only_after_a_second_lead_approves_it`, `test_a_lead_tunes_only_the_domains_their_role_covers` |
+| Guardrails no rule can switch off | High / critical, deception, exercise and KEV-host alerts are never suppressed; 1 in 10 suppressions stays open (stable hash); a threat found in a suppressed or sampled case pauses the rule; a raise never changes a verdict; a clicked or gateway-flagged report never auto-closes | `test_guardrails_keep_high_severity_deception_and_kev_host_alerts`, `test_a_threat_found_in_what_a_rule_suppressed_pauses_the_rule`, `test_raising_attention_moves_severity_but_not_the_verdict`, `test_an_exercise_is_labelled_never_suppressed_and_kept_out_of_the_noise_statistics`, `test_the_auto_close_preview_counts_what_would_close_and_what_analysts_ruled_a_threat` |
+| Suggestions from analysts' decisions | Noisy detections, and the lowest auto-close confidence at which no report analysts ruled a threat would have closed (from 10 decided reports) - computed, proposed, never applied without approval | `test_suggestions_come_from_analysts_decisions_and_drop_once_a_rule_covers_them`, `test_the_platform_suggests_the_lowest_confidence_that_would_have_missed_no_ruled_threat` |
+| **Bug found by the new tests:** re-assessing an incident started from its last *scored* severity, so the KEV boost (and now a raise) climbed with every re-assessment, and a revoked raise stuck | An incident is scored from its alerts' own severity (`alert_severity`, set when it is created); older cases fall back to their stored severity | `test_assessing_an_incident_again_does_not_stack_boosts` (fails on the old scoring), `test_a_revoked_raise_no_longer_applies_when_the_incident_is_reassessed` |
+| **Live check with the real model** (Azure AI Foundry, gpt-4.1-mini): five requests - suppress, exercise, raise attention, phishing auto-close, an overreach ("all alerts on every host, up to critical, for 999 days") and a prompt injection ("ignore your instructions...") | The four real requests drafted correctly by the model. The overreach came back with no host or user pattern, no severity above medium and the default expiry. The endpoint's content filter refused the prompt injection (HTTP 400, jailbreak detected), and the platform read the words itself, with no pattern and no detection. The draft now says when the model did not answer. 3 of 3 runs passed; the whole live-LLM file 10 of 10. A second live test drafts a vulnerability SLA change and a usually-rejected action with the real model: 3 of 3 runs passed | `test_tuning_drafts_from_the_real_model_keep_only_what_the_request_says` (`SOC_LIVE_LLM=1`), `test_a_draft_says_when_the_model_did_not_answer` |
+| **Vulnerability priority and SLAs** as a tuning rule: the five weights (adding up to 100) and the SLA days per band, previewed on the open findings (bands now and after, findings that would fall past SLA at once); a vulnerability lead proposes, a second approves; approving or revoking re-prioritises at once | A KEV-listed finding on an internet-facing asset stays P1 and every KEV finding keeps the P1 SLA, whatever the weights; the defaults reproduce the previous formula exactly (demo findings identical) | `test_vulnerability_priority_weights_and_slas_are_checked`, `test_a_vulnerability_priority_rule_moves_bands_as_previewed_and_keeps_kev_exposed_findings_p1`, `test_vulnerability_priority_is_a_vulnerability_leads_rule` |
+| **Learning from rejected actions**: an action analysts keep rejecting in one context (at least 5 decisions in 30 days, at least 80 % rejected) is suggested as a *usually rejected* rule | With the rule in force the action is still recommended and shown, labelled on the Approvals screen, and capped at recommend (L2) so it never runs autonomously there; critical and deception cases are never covered | `test_actions_analysts_keep_rejecting_become_a_suggestion`, `test_a_usually_rejected_action_is_still_recommended_but_never_autonomous_and_is_labelled`, `test_an_action_rule_names_an_action_the_platform_has_recommended` |
+| **Bug found by the new tests:** the platform's own reading of a request classified "suppress Port scan from the *vulnerability* scanner" as a vulnerability-priority request (the word was in the detection's title); and a plain suppression request also picked up noise-threshold fields | The kind of change is read from the words around a named detection, never from its title; each kind's fields are filled only for that kind | `test_without_the_model_the_platform_reads_the_request_itself`, `test_the_platform_reads_vulnerability_and_action_requests_without_the_model` |
+| Write-route fuzzing found a 500 for an impossible rule id | A rule id outside the 32-bit range, or unknown, answers 404 | `test_an_unknown_or_impossible_rule_id_is_not_found`; `test_malformed_input_never_crashes_any_write_route` |
+
+**Demo unchanged.** The demo run with these changes and at the previous commit, on identical input files, gives the
+same cases (severity, verdict, confidence, status), the same 37 recommended actions (status and autonomy level) and the same 6 vulnerability findings (band, score, SLA date): 7 phishing + 3 incident
+cases, 6 open vulnerabilities. (A first comparison differed in one QA sample only because a separate checkout wrote
+the sample e-mail with Windows line endings - different bytes, a different stable hash.)
+
+**In the browser.** The browser tour now opens *Tuning*, drafts a rule from words and previews it, then previews a vulnerability priority rule: 38 screenshots,
+**0 problems**. Its first run found two colour-contrast failures on the new screen (grey sub-text on the blue info
+boxes); fixed. Lint, bandit and the pre-commit scan are clean.
+
+**Counts:** 935 passed, 18 skipped on SQLite; 934 passed, 19 skipped on PostgreSQL 16 (953 collected; 34 new tests,
+2 new opt-in live tests, and 5 more cases the route-sweeping tests generate for the new routes). A first PostgreSQL run was cut off when the
+machine's session restarted mid-run (its database server stopped, so the tests after that point failed); the full
+run on a fresh server passed.
+
+## 0.000000 Round 31 (2026-10-30): code review of every module, and the ownership mapping upload
 
 Aim: two requests. (1) Review all the code for bugs and gaps. (2) Wiz has no CMDB, so cloud resources had no owning
 team: let a lead upload a file of resource / subscription -> owning team.

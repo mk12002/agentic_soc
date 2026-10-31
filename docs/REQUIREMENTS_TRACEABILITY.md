@@ -14,7 +14,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | VM-F01 | Multi-source exposure ingestion | ✅ | Rapid7, CrowdStrike, Wiz, Defender connectors; `VulnerabilityService.ingest` (scheduled + on demand) | test_vulnerability, test_connectors |
 | VM-F02 | Asset identity resolution | ✅ | `core/entity_resolution.py` deterministic keys → scored fuzzy → queue → override; conflict keys, provisional absorption | test_resolution_scale (400-host messy estate: 0 false merges), test_core_context |
 | VM-F03 | Finding normalisation and deduplication | ✅ | `VulnerabilityService.consolidate` one record per asset×CVE, every source kept with status/link | test_vulnerability::test_four_scanners_consolidate... |
-| VM-F04 | Exposure enrichment and prioritisation | ✅ | `prioritise`: CVSS + EPSS + KEV + exploit + internet exposure + criticality, explainable factors | test_vulnerability |
+| VM-F04 | Exposure enrichment and prioritisation | ✅ | `prioritise`: CVSS + EPSS + KEV + exploit + internet exposure + criticality, explainable factors; weights and SLA days adjustable by a vulnerability-priority tuning rule (previewed, two leads) | test_vulnerability, test_tuning |
 | VM-F05 | Affected-device consolidation | ✅ | `affected_devices(cve)` with owner/team/env/location/priority/status | test_vulnerability, test_api |
 | VM-F06 | Remediation notification drafting | ✅ | `create_campaign` drafts per-team notifications (assets, rationale, fix, target date) | test_vulnerability |
 | VM-F07 | Ownership routing | ✅ | `enrich_ownership` from ServiceNow CMDB / CSV mapping; unknown owner → blocked plan (exception raised) | test_vulnerability |
@@ -139,7 +139,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | NFR-12 | Change management | ✅ | Versioned policy and versioned connector configuration / organisation lists: propose ≠ approve, re-checked at approval (stale proposals refused, preflight must still match), audited, restorable, exportable; pause is the only immediate change | test_core_governance, test_connector_admin |
 | NFR-13 | Observability | ✅ | Connector freshness, job health, reconciliation, drift monitor, Prometheus metrics with alert rules (scheduler heartbeat, audit chain, failing jobs, unverified actions, break-glass); structured trace-stamped logs (requests, audit, model calls, outbound tool calls, jobs, CLI) with secrets masked; trace view and model-call diagnostics | test_demo_walkthrough, test_jobs, test_intelligence, test_observability |
 | NFR-14 | Portability and vendor neutrality | ✅ | Uniform connector SDK + manifest registry; swapping a tool is a connector change; tools configured and staged from the console (Fixtures → Recording → Read-only → Recommend → Automate) after a preflight; `connector new` / `connector check` for a tool without a connector; one misconfigured tool is isolated | test_connectors, test_connector_conformance, test_connector_admin |
-| NFR-15 | Testability and validation | 🟡 | Golden corpora, regression suites (896 platform tests, 205 engine tests), connector conformance for every stream, record-and-sanitise mode turning live responses into fixtures, shadow agreement; accuracy in the client's environment needs A07 data | all |
+| NFR-15 | Testability and validation | 🟡 | Golden corpora, regression suites (935 platform tests, 205 engine tests), connector conformance for every stream, record-and-sanitise mode turning live responses into fixtures, shadow agreement; accuracy in the client's environment needs A07 data | all |
 | NFR-16 | Documentation and handover | ✅ | README, ARCHITECTURE, CONNECTORS, OPERATIONS, SECURITY, DEMO_GUIDE, TEST_REPORT, this matrix | - |
 
 ## Use cases
@@ -159,7 +159,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | U11 | Shadow IT and risky destination analytics | ✅ | `intelligence/shadow_it.py`: unsanctioned services, risky destinations, per-user usage (Umbrella) | test_demo_walkthrough |
 | U12 | Natural-language querying of security data | ✅ | Intelligence analyst Q&A with shown tool calls + VM NL query with shown filter | test_intelligence |
 | U13 | Similar-incident retrieval | ✅ | Similar-incident retrieval | test_incident |
-| U14 | Detection tuning recommendations | ✅ | Detection tuning recommendations | test_core_governance |
+| U14 | Detection tuning recommendations | ✅ | Detection tuning recommendations; suggestions become draft rules on *Tuning* (`core/tuning.py`), with raise attention, exercises and phishing auto-close (a computed suggested confidence): previewed on past data, approved by a second lead, guardrails in code | test_core_governance, test_tuning |
 | U15 | Automated post-incident reporting and evidence packs | ✅ | Investigation report + evidence pack from the audit trail | test_demo_walkthrough |
 | U16 | User security-risk scoring and targeted awareness | ✅ | Repeat-clicker cohorts + `repeat_clicker` insight | test_intelligence |
 | U17 | Compliance and audit evidence automation | ✅ | `reporting/compliance.py`: control tests + evidence.json + chained audit export + summary.docx | test_demo_walkthrough, test_access_security |

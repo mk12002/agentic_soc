@@ -410,6 +410,7 @@ Use these when someone asks "how do you get that number?". Every one is determin
 - **SLA:** P1 7 days, P2 15, P3 30, P4 90, counted from first seen. KEV always gets the P1 SLA.
 - **CISA KEV due date:** CISA's "due date" is a US federal deadline, so it's shown for reference and never used as
   our SLA.
+- **Adjustable:** These are the defaults: a vulnerability lead can change the five weights (they add up to 100) and the SLA days on *Tuning*, previewed on the open findings and approved by a second lead. A KEV-listed finding on an internet-facing asset stays P1, and every KEV-listed finding keeps the P1 SLA, whatever the weights.
 - **Consolidation:** one finding per host and CVE across Rapid7, CrowdStrike, Wiz and Defender, after entity
   resolution.
 - **Justify:** "CVSS says how bad a bug could be; EPSS and KEV say whether it's being exploited; exposure and
@@ -631,7 +632,7 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 896 passed on SQLite (with PostgreSQL's rules enforced) and 895 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
+| Platform test suite | 935 passed on SQLite (with PostgreSQL's rules enforced) and 934 on PostgreSQL 16 (one test runs only on PostgreSQL, one real-server check only on SQLite), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
@@ -729,6 +730,8 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 
 | Question | Answer |
 |---|---|
+| Can we tune the platform by telling it what we want? | Yes, on *Tuning*. A lead writes the change in words, and it becomes a draft rule from a fixed menu: suppress a noisy detection, change the noise threshold, raise attention on chosen hosts or users, label an exercise, set phishing auto-close, adjust vulnerability priority weights and SLA days, or mark an action analysts keep rejecting. The model only fills in the form, and the platform checks it. The lead sees what the rule would have done on past data, and a second lead approves it. Whatever the rule says, high and critical alerts, deception alerts, exercises and alerts on a host with a KEV-listed vulnerability are never suppressed. 1 in 10 suppressions is still investigated, and a threat found there pauses the rule. Every rule expires. |
+| Does the platform learn and adapt? | In bounded, visible ways. It learns from analysts' decisions: a detection they keep ruling benign becomes noise (low and medium incidents only), their identity-match decisions are remembered, and the drift monitor watches its agreement with them. From those decisions it also suggests changes, such as a noisy detection to suppress, a safer phishing auto-close confidence or an action analysts keep rejecting, which a second lead approves. It does not retrain its models or change its scoring on its own. That is deliberate: self-tuning nobody can see or stop is what a security review rejects. |
 | What if the AI is wrong? | It doesn't decide anything. Verdicts, scores and priorities are deterministic; the model explains them and must cite evidence. Uncited statements and unsupported figures are removed, and the removal count is shown. Drift monitoring compares verdicts with analyst decisions. |
 | Can it hallucinate a number into a board report? | No. Figures are computed in code and shown next to the narrative. A narrative sentence stating a figure that isn't in its cited figures is dropped. |
 | Can a prompt injection in an email make it do something? | The model's output can never trigger an action; the analyst assistant can only call read-only tools. The worst case is a bad narrative, and that narrative must still cite evidence. |
@@ -782,7 +785,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
-| How was it tested? | See §16. In short: 896 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 935 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -865,7 +868,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 17 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 896 SQLite, 895 PostgreSQL / 205 |
+| Platform tests / engine tests | 935 SQLite, 934 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
 | Features verified | 108 of 108 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
@@ -1087,6 +1090,7 @@ and every model call writes an **LLM call** row (with its duration). Every notif
 | **Cloud posture** | Open, past SLA, false closures, teams involved; misconfigurations with route / mark fixed / validate; the ownership mapping (upload an Excel / CSV of resource or subscription -> team, preview, export, clear) | Wiz issues through the same lifecycle as findings; owners from the CMDB, gaps filled by the mapping; nothing is changed in Wiz or the cloud | Vulnerability scope; changing the mapping needs `manage_ownership` |
 | **ATT&CK coverage** | Weighted coverage, priority blind spots, single-source techniques, firing; the matrix; blind spots to close | The enabled tools' detection capabilities (56 techniques) and what has fired | All |
 | **Shadow IT** | Unsanctioned services, high-risk services, users involved, risky sites; by category; risky destinations | Umbrella DNS against `config/sanctioned_services.yaml`; aggregated, never stored | Incident scope |
+| **Tuning** | Ask for a change in words -> a checked draft rule (suppress noise, noise threshold, raise attention, exercise, phishing auto-close, vulnerability priority and SLAs, usually-rejected actions); preview on past data; rules waiting for a second lead; rules in force (what each did, expiry, revoke); suggestions from analysts' decisions; history | `tuning_rules`; applied when incidents are clustered and assessed and when phishing reports are analysed | Each lead in their own domains |
 | **Watch lists** | Block list and exception list: every entry (value, type, note, file, who added it, when); upload an Excel workbook or CSV with a preview; remove; export | `watchlist_entries`; matched against each case's people, hosts and indicators when a case is shown - a banner on the case, a badge in the case list, a section in the investigation record; never changes a severity, verdict or action | All can view; changes need `manage_watchlists` (lead, MFA) |
 | **Integrations** | Each connector's stage, freshness and last preflight; *Preflight*, *Configure* (propose a change; approve another person's) and *Pause*; configuration history, restore, export / import; key suppliers and sanctioned services; platform self-check; notification channels and recent deliveries; scheduled jobs with history and replay | Connector checkpoints; job runs; the self-check; the notification log | All can view (self-check and notifications: all-domain scope); Test, Sync and job replay need `manage_connectors` |
 | **Automation policy** | Every action type with level, limits, four-eyes, reversible; kill switch; pending policy changes | The active policy version | All; changes by role |
@@ -1224,7 +1228,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 896 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 935 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |

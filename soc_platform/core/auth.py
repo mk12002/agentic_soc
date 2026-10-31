@@ -57,16 +57,17 @@ class Perm(str, Enum):
     MANAGE_WATCHLISTS = "manage_watchlists"  # upload / remove block-list and exception-list entries
     MANAGE_REPORT_STYLE = "manage_report_style"  # the organisation's report templates, logo, brand and writing guide
     MANAGE_OWNERSHIP = "manage_ownership"  # the uploaded asset / cloud resource -> owning team mapping
+    TUNE_DETECTIONS = "tune_detections"  # propose / approve / revoke detection tuning rules (two leads)
 
 
 DOMAINS = ("phishing", "incident", "vulnerability")
 # Need a fresh strong authentication (MFA) - decisions with blast radius.
 STEP_UP_PERMS = {Perm.APPROVE_ACTION, Perm.APPROVE_HIGH_IMPACT, Perm.APPROVE_POLICY, Perm.KILL_SWITCH,
-                 Perm.MANAGE_ACCESS, Perm.ROLLBACK_ACTION, Perm.MANAGE_WATCHLISTS}
+                 Perm.MANAGE_ACCESS, Perm.ROLLBACK_ACTION, Perm.MANAGE_WATCHLISTS, Perm.TUNE_DETECTIONS}
 # Never granted to non-human (API-key) principals, whatever roles they hold: humans decide.
 HUMAN_ONLY_PERMS = {Perm.APPROVE_ACTION, Perm.APPROVE_HIGH_IMPACT, Perm.APPROVE_POLICY, Perm.MANAGE_ACCESS,
                     Perm.PROPOSE_POLICY, Perm.ROLLBACK_ACTION, Perm.MANAGE_WATCHLISTS, Perm.MANAGE_REPORT_STYLE,
-                    Perm.MANAGE_OWNERSHIP}
+                    Perm.MANAGE_OWNERSHIP, Perm.TUNE_DETECTIONS}
 
 
 ROLE_PERMS: dict[Role, set[Perm]] = {
@@ -75,7 +76,7 @@ ROLE_PERMS: dict[Role, set[Perm]] = {
     Role.LEAD: {Perm.READ, Perm.INVESTIGATE, Perm.REQUEST_ACTION, Perm.APPROVE_ACTION,
                 Perm.APPROVE_HIGH_IMPACT, Perm.ROLLBACK_ACTION, Perm.RESOLVE_ENTITIES,
                 Perm.APPROVE_POLICY, Perm.KILL_SWITCH, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE,
-                Perm.MANAGE_WATCHLISTS, Perm.MANAGE_REPORT_STYLE, Perm.MANAGE_OWNERSHIP},
+                Perm.MANAGE_WATCHLISTS, Perm.MANAGE_REPORT_STYLE, Perm.MANAGE_OWNERSHIP, Perm.TUNE_DETECTIONS},
     # Configures automation but cannot approve actions or its own policy (separation of duties).
     Role.AUTOMATION_ADMIN: {Perm.READ, Perm.PROPOSE_POLICY, Perm.MANAGE_CONNECTORS, Perm.READ_AUDIT,
                             Perm.KILL_SWITCH, Perm.MANAGE_OWNERSHIP},

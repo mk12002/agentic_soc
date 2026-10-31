@@ -146,7 +146,7 @@ immediately (section 6).
 
 | Activity | Result at the time of writing |
 |---|---|
-| Platform test suite on SQLite and PostgreSQL 16 | 896 on SQLite, 895 on PostgreSQL (one SQLite-file check skips there) |
+| Platform test suite on SQLite and PostgreSQL 16 | 935 on SQLite, 934 on PostgreSQL (one SQLite-file check skips there) |
 | Phishing ML engine tests | 205 passing |
 | Feature verification (including a real-browser tour, live public feeds and a live LLM) | 108 of 108 features verified |
 | Penetration suite, input fuzzing, static analysis, dependency audit | No open findings |
