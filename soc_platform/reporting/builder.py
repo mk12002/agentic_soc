@@ -271,7 +271,18 @@ def src_drift(c: Ctx) -> dict:
     from soc_platform.intelligence.drift import drift_report
 
     d = drift_report(c.s)
-    facts: Facts = [(f"{k.title()} verdict quality", f"{v['status']}; agreement {v['agreement']['recent']}; PSI {v['psi_verdicts']}") for k, v in d["domains"].items()]
+
+    def quality(v: dict[str, Any]) -> str:
+        if v["status"] == "insufficient_data":       # no measure yet: say so, a figure here would be an empty one
+            return "not enough analyst decisions yet"
+        parts = [str(v["status"]).replace("_", " ")]
+        if v["agreement"]["recent"] is not None:
+            parts.append(f"agreement {v['agreement']['recent']}")
+        if v["psi_verdicts"] is not None:
+            parts.append(f"PSI {v['psi_verdicts']}")
+        return "; ".join(parts)
+
+    facts: Facts = [(f"{k.title()} verdict quality", quality(v)) for k, v in d["domains"].items()]
     return {"facts": facts, "domain": "*", "table": {"header": [], "rows": []},
             "det": lambda f: "Verdict quality against analyst decisions: " + "; ".join(f"{k}: {v.split(';')[0]}" for k, v in f.items()) + "."}
 

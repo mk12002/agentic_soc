@@ -522,7 +522,7 @@ python -m soc_platform serve
 ```
 
 It empties the database in `SOC_DATABASE_URL`, deletes the raw payloads and generated reports, and reloads the
-sample organisation (`init-db` + `demo`): about 15 seconds without the LLM (measured 14 s), longer with it because the model writes the explanations. It protects you from mistakes:
+sample organisation (`init-db` + `demo`): about 15 seconds without the LLM (measured 14 s), about 2 minutes with it (measured 1 min 54 s), because the model writes every case explanation and finding narrative up front - so nothing is left for the first scheduler pass. It protects you from mistakes:
 - it refuses to run while the server is running on `SOC_PORT` (on Windows the database file would be in use)
 - it refuses with `SOC_ENVIRONMENT=prod`
 - it deletes the raw-payload and report folders only when they are inside the current folder or the project

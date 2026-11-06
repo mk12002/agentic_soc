@@ -72,7 +72,7 @@ const VALUE_STATUS = {met: ['ok', 'On target'], improving: ['info', 'Improving']
   no_baseline: ['info', 'Awaiting baseline'], no_data: ['info', 'No data yet']};
 const VALUE_SOURCE = {platform: 'measured by the platform', time_study: 'time study', derived: 'derived'};
 function valueCard(v) {
-  const fmt = (x, u) => x == null ? '–' : `${nf(x)}${u === '%' ? ' %' : ' ' + esc(u)}`;
+  const fmt = (x, u) => x == null ? '–' : u === 'minutes' && x < 1 ? 'under 1 minute' : `${nf(x)}${u === '%' ? ' %' : ' ' + esc(u)}`;
   const rows = v.kpis.map(k => `<tr><td><div class="t-title">${esc(k.label)}</div><div class="t-sub">${esc(VALUE_SOURCE[k.source] || k.source)} · ${esc(k.measured_from)}</div></td>
     <td class="num">${fmt(k.baseline, k.unit)}</td><td class="num strong">${fmt(k.current, k.unit)}</td><td class="num">${fmt(k.target, k.unit)}</td>
     <td>${status(...(VALUE_STATUS[k.status] || ['info', k.status]))}</td></tr>`);
@@ -99,14 +99,15 @@ async function saveValueInput() {
 let INTEL_FILTER = 'all', INTEL_ALL = false;
 async function Intelligence() {
   const __g = GEN;
-  const [b, ins, top] = await Promise.all([api('/api/v1/intelligence/brief'), api('/api/v1/intelligence/insights'), api('/api/v1/intelligence/risk/top?limit=10')]);
+  const briefing = api('/api/v1/intelligence/brief').catch(() => null);    // may wait for the model: never holds up the screen
+  const [ins, top] = await Promise.all([api('/api/v1/intelligence/insights'), api('/api/v1/intelligence/risk/top?limit=10')]);
   const filtered = INTEL_FILTER === 'all' ? ins : ins.filter(i => i.severity === INTEL_FILTER);
   const shown = INTEL_ALL ? filtered : filtered.slice(0, 8);
   const actions = can('investigate') ? btn('Re-correlate', 'refreshIntel', [], '', 'refresh') : '';
   setMainG(__g, page('Intelligence', 'Cross-domain correlation over every data source. Findings are raised by deterministic rules; the analyst assistant only explains, citing evidence.', actions,
     `<div class="grid g-2">
       <div class="stack">
-        ${card('Situation brief', `<div class="prose">${esc(b.summary)}</div>`, {right: chip(b.source === 'llm' ? 'AI narrative' : 'Platform summary', 'plain')})}
+        ${card('Situation brief', `<div id="ibrief"><div class="skeleton"></div><div class="skeleton"></div></div>`, {right: '<span id="ibrief-src"></span>'})}
         ${card('Ask the analyst', `<div class="inline"><input class="input" style="flex:1;min-width:260px" id="iq" data-enter="askIntel" placeholder="e.g. Is jane.doe@acme-demo.com compromised and what should we do first?">
           ${btn('Ask', 'askIntel', [], 'primary')}</div><div id="ia"></div>`)}
         ${card(`Correlated findings <span class="muted">(${ins.length})</span>`, shown.map(i => `
@@ -125,6 +126,10 @@ async function Intelligence() {
       ${card('Risk by user and host', top.map(p => `<div class="list-row"><div class="grow"><div class="t-title">${entLink(p.entity_id, p.name)}</div><div class="t-sub">${esc(p.kind)} · ${esc(p.dimensions.map(dimLabel).join(', '))}</div>
         <div style="margin-top:6px">${meter(p.score)}</div></div><span class="score">${Math.round(p.score)}</span></div>`).join('') || empty('No risk signals yet'), {sub: 'time-decayed, explainable'})}
     </div>`));
+  const b = await briefing;
+  if (__g !== GEN || !$('#ibrief')) return;           // the person has moved on
+  $('#ibrief').innerHTML = b ? `<div class="prose">${esc(b.summary)}</div>` : empty('The brief could not be prepared - the findings below are complete');
+  if (b) $('#ibrief-src').innerHTML = chip(b.source === 'llm' ? 'AI narrative' : 'Platform summary', 'plain');
 }
 async function askIntel() {
   const q = $('#iq').value.trim(); if (!q) return;
@@ -244,7 +249,7 @@ async function CaseDetail(id) {
   };
   setMainG(__g, `<div class="page-head"><div>
       <div class="inline" style="margin-bottom:8px"><a href="#/cases" class="small" aria-label="Back to cases" title="Back to cases">${icon('back', '')}</a>${chip(c.severity)}${chip(c.verdict || 'pending', 'plain')}<span class="muted small">${esc(cap(c.domain))} · ${esc(cap(c.status))} · opened ${dt(c.created_at)}</span></div>
-      <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} · automation mode ${esc(cap(c.autonomy_mode || 'recommend'))} ·
+      <h1>${esc(c.title)}</h1><p>Confidence ${pct(c.confidence)} ·
         owner <b>${c.assignee ? esc(c.assignee) : 'unassigned'}</b>
         ${can('investigate') && c.assignee !== ME.id.toLowerCase() ? btn('Take case', 'assignCase', [id, 'me'], 'sm') : ''}
         ${can('investigate') && c.assignee && (c.assignee === ME.id.toLowerCase() || can('approve_high_impact')) ? btn('Unassign', 'assignCase', [id, ''], 'sm ghost') : ''}</p></div>
@@ -681,7 +686,7 @@ async function Integrations() {
       ${cfg.file_problems.map(p => `<div class="small">${esc(p.where)}: ${esc(p.message)}${p.fix ? ' - ' + esc(p.fix) : ''}</div>`).join('')}</div></div>` : '';
   const pending = cfg && cfg.pending.length ? `<div class="mb">${card('Configuration changes awaiting approval', cfg.pending.map(v => pendingRow(v)).join(''), {sub: 'proposed by one person, approved by another; a newer approved change makes older proposals stale'})}</div>` : '';
   setMainG(__g, page('Integrations', 'Connect, roll out and monitor every security tool: stage, preflight checks, data freshness and scheduled jobs.',
-    cfg ? `<span class="status-pill"><span class="dot"></span>Configuration version ${esc(cfg.active_version || 'file only')}</span>` : '',
+    cfg ? `<span class="status-pill"><span class="dot"></span>${cfg.active_version ? `Configuration version ${esc(cfg.active_version)}` : 'Configuration from file'}</span>` : '',
     `${fileProblems}${pending}<div id="cfgpanel"></div>
     ${sc ? `<div class="mb">${card('Platform self-check', `<div class="inline" style="margin-bottom:${sc.ok ? 0 : 10}px">${status(sc.ok ? 'ok' : 'high', sc.ok ? 'Consistent' : 'Attention')}<span class="small">${sc.passed} of ${sc.total} checks pass - the same figures agree on every screen, report and answer; every stored reference resolves; nothing is duplicated; the audit chain verifies.</span></div>` +
       sc.checks.filter(c => !c.ok).map(c => `<div class="list-row small"><span class="grow"><b>${esc(c.check)}</b></span><span class="mono muted">${esc(JSON.stringify(c.detail)).slice(0, 160)}</span></div>`).join(''), {sub: 'runs hourly; a failure raises a finding'})}</div>` : ''}
@@ -702,8 +707,21 @@ async function Integrations() {
     <div class="mt">${card('Scheduled jobs', table(['Job', 'Last run', 'Outcome', {h: 'Duration', num: 1}, 'Detail', ''], Object.keys(jr.jobs).map(j => { const r = last[j]; return `<tr>
       <td class="t-title">${esc(cap(j))}</td><td class="mono small muted">${r ? dt(r.started_at) : 'never'}</td>
       <td>${r ? status(jst[r.status], cap(r.status)) + `${r.attempts > 1 ? `<div class="t-sub">${r.attempts} attempts</div>` : ''}` : ''}</td>
-      <td class="num small">${r && r.duration_s != null ? r.duration_s + ' s' : ''}</td><td class="small muted wrap">${r ? esc((r.error || JSON.stringify(r.summary)).slice(0, 140)) : ''}</td>
+      <td class="num small">${r && r.duration_s != null ? r.duration_s + ' s' : ''}</td><td class="small muted wrap"${r && !r.error ? ` title="${esc(JSON.stringify(r.summary))}"` : ''}>${r ? esc(r.error ? r.error.slice(0, 140) : jobDetail(r.summary)) : ''}</td>
       <td>${manage ? btn('Run now', 'runJob', [j], 'sm') : ''}</td></tr>`; })), {flush: true, sub: 'retried with backoff; dead-lettered after 3 failed runs'})}</div>`));
+}
+// a job's summary in words (the raw figures stay in the tooltip)
+function jobDetail(sum) {
+  const SKIP = new Set(['cutoffs', 'llm_budget', 'dry_run', 'errors', 'failing']);
+  const say = (k, v) => `${cap(k)} ${v}`;
+  return Object.entries(sum || {}).filter(([k]) => !SKIP.has(k)).map(([k, v]) => {
+    if (typeof v === 'boolean') return v ? cap(k) : '';
+    if (typeof v === 'string') return /^[0-9a-f]{32}$/.test(v) ? `${cap(k)} written` : say(k, v);
+    if (Array.isArray(v)) return say(k, v.length);
+    if (v && typeof v === 'object') { const nums = Object.entries(v).filter(([, n]) => typeof n === 'number' && n);
+      return nums.length ? `${cap(k)}: ${nums.slice(0, 3).map(([a, n]) => `${a.replace(/_/g, ' ')} ${n}`).join(', ')}${nums.length > 3 ? ` +${nums.length - 3} more` : ''}` : `${cap(k)}: none`; }
+    return say(k, v);
+  }).filter(Boolean).join(' · ') || 'Nothing to do';
 }
 function changeList(chs) {
   return chs.length ? table(['Tool', 'Setting', 'From', 'To'], chs.map(c => `<tr><td class="small">${esc(c.connector)}</td><td class="mono small">${esc(c.field)}</td>
@@ -1474,7 +1492,7 @@ function blastGraph(b) {
   const people = principals.map(n => `<div class="brow">${dot(n.kind)}<span class="strong">${['asset', 'identity'].includes(n.kind) ? entLink(n.id, n.label) : esc(n.label)}</span><span class="tag">${n.kind === 'asset' ? 'host' : 'user'}</span></div>`).join('');
   const secrets = by('secret').map(n => `<div class="brow">${dot('secret')}<span>${esc(n.label)}</span><span class="t-sub">accessed after compromise</span></div>`).join('');
   const rec = by('recipient');
-  const recips = `<div class="bchips">${rec.map(n => `<span class="chip plain${n.interacted ? ' high' : ''}" title="${esc(n.label)}${n.interacted ? ' - interacted' : ''}">${esc(short(n.label, 28))}</span>`).join('')}</div>
+  const recips = `<div class="bchips">${rec.map(n => `<span class="chip plain raw${n.interacted ? ' high' : ''}" title="${esc(n.label)}${n.interacted ? ' - interacted' : ''}">${esc(short(n.label, 28))}</span>`).join('')}</div>
     <div class="t-sub">${nf(rec.filter(n => n.interacted).length)} of ${nf(rec.length)} other recipients interacted (highlighted)</div>`;
   const cases = by('case').map(n => `<div class="brow">${chip(n.severity || 'info')}<span title="${esc(n.label)}">${caseLink(n.id.replace(/^case:/, ''), short(n.label, 60))}</span><span class="t-sub">${esc(cap(n.domain || ''))}</span></div>`).join('');
   const groups = {};

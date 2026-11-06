@@ -381,7 +381,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **PostgreSQL parity**: `SOC_TEST_POSTGRES` maps every SQLite URL to a fresh PG database. Plain SQLite runs enforce
   PG rules via listeners (over-long strings except `BoundedText`, 32-bit Integer overflow, NUL in query params) -
   a `PostgresRuleViolation` in a test means production would fail.
-- **Test files by concern**: `test_consistency.py` (same figure on every surface; re-runs change nothing; LLM on/off
+- **Test files by concern**: `test_demo_rehearsal.py` (defects found by rehearsing the demo as written: no write lock across model calls, a failing model reads like no model, plain words on screen), `test_consistency.py` (same figure on every surface; re-runs change nothing; LLM on/off
   identical; every GET route × 7 roles; write-route fuzzing; references resolve), `test_time.py` (clock travel),
   `test_pentest.py` (24 attack tests incl. round 2: per-role scope, ReDoS), `test_properties.py` (Hypothesis), `test_scheduler.py`,
   `test_audit_concurrency.py`, `test_generalisation.py`/`test_variants.py` (no demo names leak on other orgs),
@@ -432,7 +432,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 935 platform tests passing on SQLite and 934 on PostgreSQL (953 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 2 on PostgreSQL), 205
+- Current counts (keep docs in sync when they change): 945 platform tests passing on SQLite and 942 on PostgreSQL (963 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
   engine tests, 108/108 features verified with `--browser --engine --live --llm` (round 25); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
@@ -578,6 +578,11 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **SQLite blocks all writers during a long transaction** (an LLM call inside a request): background writes such as the
   heartbeat wait or fail. Commit before slow model calls (jobs and bulk endpoints do), and never infer "dead" from
   one missed write - `/health` asks the in-process scheduler (`Scheduler.alive_here`).
+- **Rehearse the demo as written, with the model on and the scheduler running** (`test_demo_rehearsal.py`). The tour holds the
+  jobs back and has no model, so it could not see the intelligence job holding SQLite's write lock across 64 s of model calls: the
+  Intelligence screen answered 503 and the job lost its own lease. Narrate through `IntelligenceService.narrate_committing` after
+  committing the findings. A model *failure* must read like no model at all: `deterministic_grounded`'s "N evidence item(s)" text is
+  a fallback for claims, not something to show as a summary.
 - **Thread exceptions only warn in pytest** (`PytestUnhandledThreadExceptionWarning`) - a crashed background thread
   can hide behind a green test. `test_scheduler.py` turns them into errors; do the same in new concurrency tests.
 - **No randomness or speed in tests.** Generated data must be byte-identical for the same seed (never `make_msgid()`,

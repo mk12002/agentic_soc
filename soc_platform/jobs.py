@@ -117,7 +117,10 @@ def _body(name: str, s: Session) -> dict[str, Any]:
                 "expired_exceptions": len(exp)}
     if name == "intelligence":
         svc = _intel(s)
-        n = len(svc.refresh())
+        insights = svc.refresh(narrate=False)
+        s.commit()          # the findings are visible now; their narratives follow, with no write lock held meanwhile
+        svc.narrate_committing(insights)
+        n = len(insights)
         try:   # prepare the situation brief now, so the first person to open Intelligence does not wait for it
             svc.analyst.brief()
             warmed = True

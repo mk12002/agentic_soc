@@ -363,13 +363,13 @@ class IntelligenceAnalyst:
             # the question named someone or something the platform could not find: say exactly that. "Not found" is
             # not "no evidence of compromise", and a model given only empty look-ups once drew that conclusion
             answer = missing
-        elif self.llm is not None:
-            answer = self.llm.grounded("intelligence.answer", question, evidence)
         else:
-            answer = {"summary": _facts_summary(results), "claims": _readable_claims(results),
-                      "source": "deterministic", "insufficient_evidence": not any(
-                          r["result"] and not (isinstance(r["result"], dict) and r["result"].get("not_found"))
-                          for r in results)}
+            answer = self.llm.grounded("intelligence.answer", question, evidence) if self.llm is not None else None
+            if answer is None or answer.get("source") != "llm":     # no model, or it failed: the same words either way
+                answer = {"summary": _facts_summary(results), "claims": _readable_claims(results),
+                          "source": "deterministic", "insufficient_evidence": not any(
+                              r["result"] and not (isinstance(r["result"], dict) and r["result"].get("not_found"))
+                              for r in results)}
         return {"question": question, "planner": planner, "tool_calls": [{"tool": r["tool"], "args": r["args"]}
                                                                         for r in results],
                 "answer": answer["summary"], "claims": answer.get("claims", []),
@@ -474,13 +474,16 @@ class IntelligenceAnalyst:
         key = hashlib.sha256((("llm" if self.llm else "det") + json.dumps(facts, sort_keys=True, default=str)).encode()).hexdigest()
         ttl = float(os.environ.get("SOC_BRIEF_CACHE_SECONDS", "900"))
         hit = _BRIEF_CACHE.get(key)
-        if hit and time.monotonic() - hit[0] < ttl:
+        # the platform's own text after a model failure is kept only briefly: the next visit tries the model again
+        if hit and time.monotonic() - hit[0] < (ttl if self.llm is None or hit[1].get("source") == "llm" else min(ttl, 60)):
             return {**hit[1], "cached": True}
         if self.llm is not None:
             g = self.llm.grounded("intelligence.brief", "Write the SOC situation brief: top threats and why, "
                                   "which users/hosts need attention first, what is waiting on analysts, and "
                                   "exposure posture. Lead with what matters most.", evidence)
         else:
+            g = {}
+        if g.get("source") != "llm":                                # no model, or it failed: the same words either way
             g = {"summary": _brief_text(facts), "claims": [], "source": "deterministic"}
         out = {"summary": g["summary"], "claims": g.get("claims", []), "source": g.get("source"), "facts": facts}
         if len(_BRIEF_CACHE) > 64:
@@ -665,9 +668,23 @@ class IntelligenceService:
     def refresh(self, entity_ids: list[str] | None = None, *, narrate: bool = True) -> list[Insight]:
         insights = self.correlation.run(entity_ids)
         if narrate:
-            self.analyst.narrate_many([i for i in insights
-                                       if not i.narrative or i.narrative_source in {"deterministic", "stale"}])
+            self.analyst.narrate_many(self.needing_narrative(insights))
         return insights
+
+    @staticmethod
+    def needing_narrative(insights: list[Insight]) -> list[Insight]:
+        return [i for i in insights if not i.narrative or i.narrative_source in {"deterministic", "stale"}]
+
+    def narrate_committing(self, insights: list[Insight]) -> None:
+        """Narrate in small batches, committing after each: the caller owns the transaction and has committed the
+        findings first, and a write transaction open across model calls blocks every other writer on SQLite (requests
+        answered 503, the scheduler's heartbeat and leases lost). A batch holds it only until its calls return."""
+        from soc_platform.llm.gateway import llm_concurrency
+
+        todo, step = self.needing_narrative(insights), max(1, llm_concurrency())
+        for at in range(0, len(todo), step):
+            self.analyst.narrate_many(todo[at:at + step])
+            self.s.commit()
 
 
 def _target_names(target: dict[str, Any]) -> set[str]:

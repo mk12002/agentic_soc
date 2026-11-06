@@ -1933,6 +1933,15 @@ def get_case(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Dep
     return view
 
 
+def _refresh_intel(s: Session) -> list[Any]:
+    """Correlate, commit, then write the narratives: no write lock is held while the model writes."""
+    svc = _intel(s)
+    insights = svc.refresh(narrate=False)
+    s.commit()
+    svc.narrate_committing(insights)
+    return insights
+
+
 def _case_intelligence(s: Session, view: dict[str, Any]) -> dict[str, Any]:
     from soc_platform.intelligence.models import Insight
     from soc_platform.intelligence.risk import RiskEngine
@@ -1941,7 +1950,8 @@ def _case_intelligence(s: Session, view: dict[str, Any]) -> dict[str, Any]:
     insights = [i for i in s.execute(select(Insight).where(Insight.status != "dismissed")).scalars()
                 if ids & set(i.entity_ids)]
     risk = RiskEngine(s)
-    profiles = [p for e in view["entities"] if e["kind"] in {"asset", "identity"} and (p := risk.profile(e["id"]))]
+    people = {e["id"] for e in view["entities"] if e["kind"] in {"asset", "identity"}}      # one row each, whatever their roles
+    profiles = [p for eid in sorted(people) if (p := risk.profile(eid))]
     return {"insights": [{"id": i.id, "rule": i.rule, "title": i.title, "severity": i.severity,
                           "narrative": i.narrative, "next_steps": i.next_steps} for i in
                          sorted(insights, key=lambda x: -x.score)],
@@ -2152,7 +2162,7 @@ def phishing_ingest(process: bool = True, p: Principal = Depends(need(Perm.INVES
     svc.narrate_pending(ids)                     # the model explanations for the whole batch, in parallel
     out = [svc.cases.view(cid)["case"] for cid in ids]
     if out:
-        _intel(s).refresh()
+        _refresh_intel(s)
     return {"submissions": [x.id for x in subs], "processed": out}
 
 
@@ -2203,7 +2213,7 @@ def incidents_run(investigate: bool = True, p: Principal = Depends(need(Perm.INV
     s.commit()                                   # cases saved first: no write lock is held while the model writes
     svc.narrate_pending(ids)                     # the model explanations for the whole batch, in parallel
     done = [svc.cases.view(cid)["case"] for cid in ids]
-    _intel(s).refresh()
+    _refresh_intel(s)
     return {"ingested": ing.synced, "errors": ing.errors, "new_incidents": len(cases), "investigated": done}
 
 
@@ -2227,7 +2237,7 @@ def incident_handover(hours: int = Query(12, ge=1, le=24 * 90), _: Principal = D
 def vm_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "vulnerability")), s: Session = Depends(db_session, scope="function")):
     out = _services(s)["vulnerability"].refresh()
     out["misconfigurations"] = _misconfig(s).refresh()
-    _intel(s).refresh()
+    _refresh_intel(s)
     return out
 
 
@@ -2844,7 +2854,7 @@ def intel_insights(severity: str | None = None, status: str = "new,acknowledged"
 
 @app.post("/api/v1/intelligence/refresh")
 def intel_refresh(p: Principal = Depends(need(Perm.INVESTIGATE, "*")), s: Session = Depends(db_session, scope="function")):
-    return {"insights": len(_intel(s).refresh())}
+    return {"insights": len(_refresh_intel(s))}
 
 
 @app.post("/api/v1/intelligence/insights/{iid}/{verb}")

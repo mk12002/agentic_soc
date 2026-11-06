@@ -810,7 +810,13 @@ It is rebuilt on demand and never stored. An event not in the store cannot appea
   - Without an LLM, a deterministic planner and a fact-list writer give the same interface.
 - **The situation brief** is computed facts plus a cited narrative. It is cached for up to 15 minutes by a
   fingerprint of its facts, so opening the screen repeatedly costs one call per change. The intelligence job prepares
-  it after every re-correlation, so with the built-in scheduler the first viewer does not wait either.
+  it after every re-correlation, so with the built-in scheduler the first viewer does not wait either. The screen never
+  waits for it: the findings and risk list render first and the brief fills in. A model failure gives the same
+  platform text as no model, and that text is kept for at most 60 s, so the model is tried again soon.
+- **No write lock across model calls.** The intelligence job and the bulk routes correlate, commit, then narrate in
+  batches of `SOC_LLM_CONCURRENCY`, committing after each (`IntelligenceService.narrate_committing`). Holding one transaction
+  across the batch kept SQLite's only write lock for 64 s on a demo's first run: requests answered 503 and the job lost its
+  lease. `reset-demo` narrates up front, so the first scheduler pass after `serve` has no model work.
 - **Counts are true totals** (`Page` totals), never the length of a capped list; a real bug once said "30" where
   there were 34.
 

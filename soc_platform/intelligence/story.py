@@ -99,6 +99,24 @@ def _known(technique: str) -> str | None:
     return technique if technique in TECHNIQUES else technique.split(".")[0] if technique.split(".")[0] in TECHNIQUES else None
 
 
+def _clip(text: str, limit: int) -> str:
+    """Shorten at a word, never inside one."""
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
+
+
+def _exposure_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per entity and CVE (each scanner names the host its own way); the tools that report it stay listed."""
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for x in rows:
+        key = (str(x.get("entity")), str(x.get("cve") or x.get("title")))
+        cur = merged.get(key)
+        if cur is None:
+            merged[key] = {**x, "title": f"{x['cve']} on {x['entity']}" if x.get("cve") else x["title"]}
+        elif x.get("tool") and x["tool"] not in cur["tool"].split(", "):
+            cur["tool"] = ", ".join(sorted({*cur["tool"].split(", "), x["tool"]}))
+    return sorted(merged.values(), key=lambda x: x["title"])
+
+
 def _tactic_of(techniques: list[str], vendor_tactics: list[str] | None = None) -> str | None:
     tacs = [TECHNIQUES[k][1] for k in (_known(t) for t in techniques) if k]
     # the vendor's own tactic ("Discovery", "credentialAccess") when no technique is known to the catalogue
@@ -297,7 +315,7 @@ class AttackStory:
         ordered = timed + untimed
         for i, e in enumerate(ordered, 1):
             e.ref = f"S{i}"
-        return ordered, baseline, exposure
+        return ordered, baseline, _exposure_rows(exposure)
 
     # ------------------------------------------------------------------ steps
     @staticmethod
@@ -574,7 +592,7 @@ class AttackStory:
         first = steps[0]
         last = next((s for s in reversed(steps) if s["start"]), steps[-1])
         parts = [f"{a['label']} of {who} ({a['confidence']} confidence)."]
-        parts.append(f"It began with {first['stage_name'].lower()} ({first['title'][:90]})"
+        parts.append(f"It began with {first['stage_name'].lower()} ({_clip(first['title'], 160)})"
                      + (f" and reached {last['stage_name'].lower()} within {span} minutes" if span and len(steps) > 1 else "") + ".")
         parts.append(f"{len(steps)} step(s) across {len({t for s in steps for t in s['tools']})} tools.")
         st = blast["stats"]

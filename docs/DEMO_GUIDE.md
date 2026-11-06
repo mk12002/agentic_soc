@@ -1,5 +1,8 @@
 # Client demo guide
 
+The word-for-word script is [LIVE_DEMO_20MIN.md](LIVE_DEMO_20MIN.md), and the detail behind every screen is
+[LIVE_DEMO_NOTES.md](LIVE_DEMO_NOTES.md). This page is the short version.
+
 A 25-minute walkthrough of the platform on the built-in scenario (fixture mode: realistic, vendor-shaped data from
 21 tools about one fictional organisation, `acme-demo.com`). Everything shown is computed live by the platform.
 
@@ -17,15 +20,14 @@ endpoint it adds narrative - claims are still restricted to cited evidence.
 
 ## Setup (5 minutes, before the meeting)
 
-```bash
-python -m soc_platform init-db
-python -m soc_platform serve        # http://127.0.0.1:8080
+```bat
+scripts\serve_with_env.cmd reset     :: .env loaded, demo data rebuilt (about 2 minutes with the AI on), then http://127.0.0.1:8080
 ```
 
-Sign in with role **Lead** and *Continue*. Then, in order:
-Cases → *Run incident pipeline*, *Pull reported emails*; Vulnerabilities → *Refresh*; Intelligence → *Re-correlate*.
-(Or run `python -m soc_platform demo` once beforehand.) Rehearse once - the first run takes ~10 s in total.
-Between audiences: stop the server and run `python -m soc_platform reset-demo --yes`.
+Sign in as **Lena** (Lead) in one browser profile, **Alice** (Lead) in a second and **Ada** (Admin) in a third. Check: Cases
+*All 10 · Phishing 7 · Incident 3*; Approvals 37; Vulnerabilities 6. Rehearse once.
+Between audiences: stop the server (Ctrl+C) and run the same command again. Without the AI, `.env` needs no `SOC_LLM_*`
+settings and everything except the written narrative is identical.
 
 ## Script
 
@@ -43,10 +45,11 @@ Between audiences: stop the server and run `python -m soc_platform reset-demo --
    lead; approve it in a second lead window and it runs); show that an analyst cannot approve a four-eyes action
    and that nothing ran without approval. Policy screen: autonomy levels, kill switch.
 5. **Vulnerabilities** (4 min) - four scanners → one record per host×CVE, KEV/EPSS/exposure prioritisation, owner
-   routing, campaign; *Cloud misconfigurations*: route to owners, mark fixed, **Validate** → false closure caught.
+   routing, campaign; *Cloud posture*: mark fixed, **Validate** → false closure caught.
 6. **Coverage / Shadow IT / Supplier risk** (3 min) - ATT&CK blind spots per enabled tool; unsanctioned services
    (WeTransfer, DeepSeek, AnyDesk); Krishna Logistics look-alike and bank-detail-change mail.
-7. **Governance** (2 min) - Watch lists (upload a block list, the case badge appears), Audit (chain verified, what it
+7. **Governance** (2 min) - Watch lists (upload `artifacts/demo/watchlist_demo.xlsx`, the case badges appear), Tuning (a
+   request in words becomes a checked rule a second lead approves), Audit (chain verified, what it
    keeps and for how long, export to Excel), Access (roles, service accounts, MFA), Reports → report style preview and
    compliance pack (sign in as auditor).
 

@@ -30,8 +30,9 @@ timings, audit counts, the AI's wording - read off the screen rather than from t
 
 ## Before the audience arrives (10 minutes earlier)
 
-- [ ] Start clean with `.env` loaded: `scripts\serve_with_env.cmd reset`. The first log lines must say
-  `sign-in: development sign-in on`.
+- [ ] Start clean with `.env` loaded: `scripts\serve_with_env.cmd reset`. The reset takes about 2 minutes with the AI on
+  (it writes every explanation up front). The first log lines of the server must say
+  `sign-in: development sign-in on`. Give the server half a minute for its first pass of scheduled jobs.
 - [ ] Three browser profiles signed in: **Lena** (Lead, all domains - your main window), **Alice** (Lead, all domains -
   the second approver), **Ada** (Admin, all domains).
 - [ ] Check: **Cases** shows *All 10 · Phishing 7 · Incident 3*; **Approvals** 37; **Vulnerabilities** 6.
@@ -39,9 +40,9 @@ timings, audit counts, the AI's wording - read off the screen rather than from t
   it. With the AI on, run **Deep analysis** once so it is cached.
 - [ ] Tabs in Lena's window, in this order: Overview · the phishing case · Cases · Approvals · Intelligence ·
   Vulnerabilities · Cloud posture · ATT&CK coverage · Shadow IT · Supplier risk · Watch lists · Integrations ·
-  Automation policy · Reports · Audit log. Ada's window: AI usage.
-- [ ] A small watch-list workbook on the desktop: sheet *Users* with a *Username* header and `ACME\jane.doe`; sheet
-  *Hosts* with a *Hostname* header and `web01`.
+  Automation policy · Reports · Audit log. Ada's window: Integrations · AI usage. (Only Ada has the Preflight button.)
+- [ ] The watch-list workbook is ready to upload: `artifacts\demo\watchlist_demo.xlsx` (sheet *Users* with
+  `ACME\jane.doe`; sheet *Hosts* with `web01`).
 - [ ] Approve nothing beforehand - every approval moves counts on several pages.
 - [ ] 1920 × 1080, about 90 % zoom, light theme.
 
@@ -106,6 +107,11 @@ that a supplier's mailbox has been taken over.
 **Watch lists** (section 12).
 Your SOC's own block and exception lists - users, machines, IP addresses, domains, links and file hashes. Every case is
 checked against them, and a match is shown as context only.
+
+**Tuning** *(on request; "ahead of time" item 4)*.
+A lead asks in plain words to cut noise, raise attention on a host or person, label an exercise, or change an auto-close
+level or a vulnerability deadline. That becomes a checked draft rule, previewed on past data, and a second lead has to
+approve it. High and critical alerts, decoy alerts and known-exploited hosts can never be suppressed.
 
 **Integrations** (section 13).
 Where each tool is connected and rolled out stage by stage, with preflight checks, data freshness and the scheduled
@@ -368,6 +374,9 @@ The intelligence layer looks across all three workflows.
 This brief is labelled - read the chip: *AI narrative* or *Platform summary*. Either way, the figures in it are the
 same.
 
+*(You approved actions a moment ago, so the facts changed and the brief is being rewritten: the page is already usable
+and the brief fills in within about ten seconds. Keep talking.)*
+
 **▶ Expand the top correlated finding - the phishing compromise chain.**
 
 These are correlated findings - twenty of them right now. Each comes from one of thirteen fixed rules: a compromise
@@ -540,7 +549,8 @@ be read, that it's fresh, and that the clocks agree - and if something's wrong, 
 your vault; this screen only ever says *set* or *not set*. A change is proposed by one person and approved by
 another, with no restart. And any tool can be paused instantly.
 
-**▶ If time: click Preflight on CrowdStrike.**
+**▶ If time: in Ada's window, Integrations → click Preflight on CrowdStrike.** (Lena has no Preflight button: connectors
+are an administrator's job, and that separation is worth saying.)
 
 **▶ Automation policy tab. Point at the action types, all at L2.** (§18.)
 
@@ -553,8 +563,13 @@ stops every change to that tool.
 
 And you stay in control of the AI. You pick the model for each feature, by name, and you can add more. There are
 monthly and daily budgets, and limits per person. If someone goes over a limit, or the model is down, they get the
-platform's own cited text instead - nothing that matters changes. Our recommendation is GPT-4.1 mini for routine text
-and GPT-4.1 for reports and deep analysis. At your volume, that's about twenty-one dollars a month.
+platform's own cited text instead - nothing that matters changes. As shipped, everything runs on GPT-4.1 mini. Measured
+on our sample workload, that's about five dollars a month for a small SOC and about twenty-six for a mid-size one. Your
+own figure shows on this screen once real volumes run.
+
+*(Only gpt-4.1-mini is deployed on the demo endpoint. **Check which models answer** will say **No** for the other two -
+"not deployed on the endpoint" - which is what the check is for. Don't choose them in a dropdown during the demo: that
+feature would fall back to the platform's own text.)*
 
 ---
 
@@ -573,7 +588,8 @@ different people. This log can only be added to. Every record is chained to the 
 breaks the chain - and the database itself refuses edits. You can export it to JSON, CSV, Excel or a Word report, and a
 full export can be checked again outside the platform.
 
-**▶ If time: click Trace on a model-call row.**
+**▶ If time: scroll to the `intelligence.ask` record from your question to the analyst and click its Trace, then open
+*Prompt as sent*.**
 
 And this shows exactly what the AI was sent, with identities pseudonymised, what it answered, and every sentence the
 evidence check removed.
@@ -615,6 +631,15 @@ does - and cover AI usage (section 13) in one sentence.
    closed on their own, the campaigns, and who clicked more than once."*
 3. **Access, in Ada's window.** Say: *"Roles are granted with a reason and an end date, and an administrator can't
    approve actions - that's a different job."*
+4. **Tuning.** ▶ Type `Raise attention on web01 for two weeks because of a known threat`, click **Draft the rule** (about
+   ten seconds with the AI), fill in why, click **Preview**, then **Propose**. ▶ Alice's window, Tuning → **Approve**.
+   Say: *"A lead asks in words; the platform only fills in a fixed menu, shows what it would have done on past data,
+   and a second lead approves. A raise never changes a verdict."* ▶ Revoke it afterwards.
+
+---
+
+**If the network drops:** carry on. Say: *"The model is unreachable right now, so you're seeing rule two live: every figure,
+verdict and action is exactly the same, and the platform writes its own text."* Skip Deep analysis. (LIVE_DEMO_NOTES §27.)
 
 ---
 
@@ -653,6 +678,11 @@ out to your tools, your LLM endpoint, and the notification channels you configur
 **"What do you need from us?"**
 It's on the last slide: an environment, an Entra app registration, one read-only service account per tool and the
 reporting mailbox, access to your LLM gateway, licence confirmations, the tool owners, and two SOC leads.
+
+**"The AI's paragraph says 'likely a true positive' but the verdict says needs review. Which is it?"**
+The verdict. It comes from the fixed rules shown under *Why high*. The paragraph is the model's wording, kept only
+because it cites evidence, and it never moves the verdict. That's the point of keeping facts, inferences and the computed
+result apart.
 
 **"Is it hard-coded to this demo?"**
 No. Our test suite renames the whole organisation into other generated companies and requires the same results, with

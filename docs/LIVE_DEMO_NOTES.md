@@ -10,7 +10,7 @@ Personal notes for whoever runs the platform live in front of an audience. For e
 Use them next to the recorded [Demo_Video_Script.md](client_review/Demo_Video_Script.md) (what to say, in order) and
 [PRESENTER_GUIDE.md](PRESENTER_GUIDE.md) (formulas and the long Q&A).
 
-Every value marked **demo** was read from a freshly reset demo with the current code on 2026-10-27. Every rule and
+Every value marked **demo** was read from a freshly reset demo with the current code on 2026-11-05. Every rule and
 formula was read from the code. Values that change with the day (risk decay, SLA ages, enrichment timings, the
 audit-record count) or with the AI's wording are marked *read it off the screen*.
 
@@ -41,6 +41,7 @@ audit-record count) or with the AI's wording are marked *read it off the screen*
 20. [Reports](#20-reports)
 21. [Access](#21-access)
 22. [Watch lists (block and exception lists)](#22-watch-lists-block-and-exception-lists)
+22a. [Tuning](#22a-tuning)
 23. [Audit log and Trace](#23-audit-log-and-trace)
 24. [Search](#24-search)
 25. [Questions that cut across every page](#25-questions-that-cut-across-every-page)
@@ -58,6 +59,8 @@ audit-record count) or with the AI's wording are marked *read it off the screen*
   `python -m soc_platform serve`.
 - The first log lines must say `sign-in: development sign-in on`. If they say *OFF*, `.env` was not loaded and the
   sign-in page will fail.
+- With the AI on, the reset takes about 2 minutes: it writes the 8 case explanations and the 20 findings' narratives up
+  front. After `serve`, the first pass of scheduled jobs then takes about half a minute; nothing waits on it.
 
 **Check these before the audience arrives.**
 - [ ] **Cases** shows *All 10 · Phishing 7 · Incident 3*; **Approvals** shows 37 waiting; **Vulnerabilities** shows
@@ -71,7 +74,8 @@ audit-record count) or with the AI's wording are marked *read it off the screen*
   - **Alice**: Lead, all domains. The second approval for four-eyes.
   - **Ada**: Admin, all domains. Integrations, AI usage and Access.
 - [ ] Approve nothing before the demo. Every approval changes the counts on several pages.
-- [ ] Have `artifacts/phishing/corpus/html_attachment_phish.eml` ready to upload.
+- [ ] Have `artifacts/phishing/corpus/html_attachment_phish.eml` ready to upload, and
+  `artifacts/demo/watchlist_demo.xlsx` for the watch list.
 - [ ] Use a 1920 × 1080 window at about 90 % zoom, in the light theme for projectors.
 
 **What the demo set-up staged.** Be ready to say this if asked:
@@ -111,7 +115,7 @@ AI gathers and explains, code computes every figure and verdict, and a person ap
 - 56 ATT&CK techniques in the coverage model
 - 11 scheduled jobs
 - 14 self-checks
-- 935 platform tests on SQLite, 934 on PostgreSQL, and 205 phishing-engine tests
+- 945 platform tests on SQLite, 942 on PostgreSQL, and 205 phishing-engine tests
 
 **Say these limits first, before anyone asks.** It buys credibility.
 1. It has not yet run against a real tenant. Every connector is built to the vendor's documented API and is
@@ -149,7 +153,7 @@ Four groups:
   - Vulnerabilities and Cloud posture need the vulnerability domain.
   - Shadow IT needs the incident domain (DNS is incident telemetry).
   - A phishing-only analyst simply doesn't see the other pages, and the API answers *404 not found* for their data.
-- **The badge on Approvals** is the live count of actions waiting for a decision (37 in the demo).
+- **The badge on Approvals** is the count of actions waiting for a decision (37 in the demo), refreshed on every screen change.
 - **The footer** shows your roles, your data scope and *All times UTC*. Every timestamp on every page is UTC.
 
 ### Top bar
@@ -247,7 +251,9 @@ third. This page looks across every tool and every domain at once.
 exposure.
 - The chip says **AI narrative** (the model wrote the prose from the platform's figures) or **Platform summary** (the
   AI is off or over budget, so the platform's own template is used).
-- It is prepared in the background and cached, so the page can take a few seconds the first time.
+- It is prepared in the background and cached. The page opens at once and the brief fills in when it is ready: about ten
+  seconds with the AI after anything that changes its facts (an approval, say), immediately otherwise. After a model
+  failure the chip says *Platform summary* and the model is tried again a minute later.
 
 **Ask the analyst.** A free-text question, for example
 `Is jane.doe@acme-demo.com compromised and what should we do first?`. How it works - tell it in this order:
@@ -375,7 +381,7 @@ Open **Reported: Action required: your password expires today**.
 
 ### Header
 - Severity chip, verdict chip, domain · status · opened.
-- **Confidence · automation mode** (*Recommend*) **· owner**.
+- **Confidence · owner**.
 - **Take case** assigns it to you, audited. **Unassign** is offered to the owner, or to a lead for anyone's case.
   Only a lead can take a case off someone else.
 - **Attack story** opens [§8](#8-attack-story).
@@ -596,7 +602,8 @@ In the demo:
 umbrella"*. "Not found" is always stated with which tools looked; it is never assumed. A stage no tool can see would
 say *Blind spot*.
 
-**Exposure on affected assets.** Vulnerabilities and posture issues on the hosts involved.
+**Exposure on affected assets.** Vulnerabilities and posture issues on the hosts involved: one row per host and CVE, with
+every scanner that reports it.
 
 **Deep analysis** (optional; needs the AI). A second opinion on exactly this evidence, with identities pseudonymised.
 - **Sections:** assessment, likely objective, key findings (fact / inference), alternative explanations, priorities
@@ -614,6 +621,9 @@ say *Blind spot*.
   same attack gives the same story from any related case.
 - **"What if we don't have tool X?"** Stages that no enabled tool can see appear as **blind spots**, never as "clean".
 - **"Why 'confirmed' and not 'likely'?"** Because the computed rule above was met. Read the reason line aloud.
+- **"Steps 13 and 14 say 'time not reported by the tool' - why?"** Microsoft Graph lists a mailbox's rules with no creation
+  time, and the analysis records the count of new devices. So they are placed after the timed steps, and the screen says so
+  rather than inventing a time. The audit event for the rule (`Set-InboxRule`) is timed, on Jane's timeline.
 
 ---
 
@@ -970,7 +980,7 @@ That's also raised as a 'control gap' finding on Intelligence."*
 stage, with checks and two-person changes.
 
 ### Section by section
-- **Pill:** *Configuration version N* (or "file only"). The configuration in force is `config/connectors.yaml` plus
+- **Pill:** *Configuration version N* (or *Configuration from file*). The configuration in force is `config/connectors.yaml` plus
   the latest approved console change.
 - **Configuration changes awaiting approval:** proposals with their changes (from → to), their preflight results and
   the note. *Approve / Reject* for someone else; *Withdraw* for the proposer. A newer approved change makes older
@@ -1007,7 +1017,8 @@ stage, with checks and two-person changes.
 - **Notifications:** *"Findings rated high or higher are sent to ... - once per channel, again if a finding
   escalates"*. In the demo there are no channels: *"Set SOC_NOTIFY_WEBHOOKS (Teams, Slack or JSON webhooks)"*. With
   channels, there is a delivery log and *Send test message*. Up to 5 attempts.
-- **Scheduled jobs:** last run, outcome, attempts, duration, detail, and **Run now**. Retried with backoff;
+- **Scheduled jobs:** last run, outcome, attempts, duration, what it did in words (the raw figures are in the tooltip), and
+  **Run now**. Retried with backoff;
   dead-lettered after 3 failed runs (which raises an operational alert).
 
 ### The five stages (the rollout story - tell it)
@@ -1173,7 +1184,8 @@ changes.
 - **Models:** the models a feature can use - **gpt-4.1-nano, gpt-4.1-mini, gpt-4.1** by default - with their size,
   their price per million tokens in and out (list prices: $0.10 / $0.40, $0.40 / $1.60, $2.00 / $8.00, editable) and
   which work each is the default for. **Check which models answer** (admins) sends each a tiny request and shows
-  *Yes* with its latency, or *No* with the error. Run it before choosing: a feature set to a model your endpoint does
+  *Yes* with its latency, or *No* with the reason (*HTTP 404: this model is not deployed on the endpoint*). On the demo endpoint
+    only gpt-4.1-mini answers, so the other two say *No*. Run it before choosing: a feature set to a model your endpoint does
   not serve falls back to the platform's own text on every call. More models are added with `SOC_LLM_MODELS` as
   they are deployed.
 - **Limits per person:** everyone 100,000 tokens / hour and 400,000 / day by default. Overrides per role and per
@@ -1401,7 +1413,7 @@ When a case involves something on a list, the case says so.
   at once.
 
 **Demo it (3 minutes):**
-1. As Lena, upload a small workbook: *Users* sheet with `ACME\jane.doe`, *Hosts* sheet with `web01`.
+1. As Lena, upload `artifacts/demo/watchlist_demo.xlsx`: *Users* sheet with `ACME\jane.doe`, *Hosts* sheet with `web01`.
 2. Preview it, then upload.
 3. Open *Cases*: the badges appear on every case involving Jane or web01.
 4. Open the phishing case: the red banner names Jane, as compromised, and the entry.
@@ -1426,13 +1438,62 @@ When a case involves something on a list, the case says so.
 
 ---
 
+## 22a. Tuning
+
+**Who sees it:** everyone who can read. A **lead** proposes and approves, within their domain's rule kinds. An analyst sees the
+rules and proposes nothing. Use Lena to propose and Alice to approve.
+
+**What it is for (say this):** every SOC needs to adapt the platform to the week it's having - a noisy detection, a server
+that matters more until quarter end, a red-team exercise. Here a lead asks in words, and the change stays bounded, tested
+and approved by someone else.
+
+### Section by section
+- **How tuning works** (the callout) states the fixed menu and the guardrails. Read the guardrails if asked.
+- **Ask for a change:** type the request and click **Draft the rule**, or start from a form: *Suppress a detection, Noise
+  threshold, Raise attention, Exercise, Phishing auto-close, Vulnerability priority, Usually rejected action*.
+- **The draft:** the model only fills in the menu's fields. A detection must be one the platform has seen; a host, user or number
+  must be written in the request. The label says *drafted with the model and checked by the platform*. With the AI off, keyword
+  rules draft it. Check every field and say why.
+- **Preview** shows what it would have done on past data, for example *1 alert(s) in scope, on 1 host(s), in 1 incident(s);
+  severity changes: 1 high -> critical*. **Propose** asks you to confirm that figure.
+- **Waiting for a second lead:** the proposer sees *A second lead approves*; another lead sees **Approve / Reject**.
+- **Rules in force:** with what each has done since approval, its expiry and **Revoke**. The subtitle gives the defaults in force
+  (noise threshold, auto-close, vulnerability SLAs).
+- **Suggested from analysts' decisions:** detections consistently ruled benign, actions consistently rejected and auto-close
+  levels the decisions don't support. Empty in a fresh demo, because no analyst has decided anything.
+
+### Guardrails no rule can switch off
+- High and critical alerts, deception alerts, exercises and alerts on hosts with a KEV-listed vulnerability are never suppressed.
+- 10 % of what a rule would suppress stays open and is investigated in full; a threat found there pauses the rule.
+- A raised incident keeps the verdict of its unraised severity.
+- A clicked or gateway-flagged report is never auto-closed.
+- A KEV-listed finding on an internet-facing asset stays P1, whatever the weights.
+- A usually-rejected action is still recommended and never runs on its own.
+- Every rule expires (exercises within 30 days, others within 365) and can be revoked at any time.
+
+### Demo it (2 minutes)
+1. As Lena: `Raise attention on web01 for two weeks because of a known threat` → **Draft the rule** (about 10 s with the AI).
+2. Fill in why → **Preview** → **Propose**.
+3. In Alice's window, open **Tuning** → **Approve**.
+4. Revoke it afterwards, so the case figures stay as in these notes.
+
+### Likely questions
+- **"Can the AI change a rule by itself?"** No. It only proposes values for a fixed form. A person checks them, the platform
+  validates them against the request and the data, and a second lead approves.
+- **"Can someone quietly switch off detections?"** Not the important ones (see the guardrails), not alone, and not silently:
+  every step is audited and every rule expires.
+- **"Does it learn?"** In bounded, visible ways: it suggests rules from analysts' decisions, and a person accepts them.
+
+---
+
 ## 23. Audit log and Trace
 
 ### Audit log
 **Who sees it:** *read_audit*. Domain-scoped users see only the records about their domains. The **Export** card
 needs *export_evidence* with all-domain scope (Lead, Admin, Auditor). Use Audrey (auditor) or Lena.
 
-- **Pill:** *Chain verified · N records in the full log* (81 right after a reset; it grows with every action). If
+- **Pill:** *Chain verified · N records in the full log* (right after a reset 89 with the AI on, 81 without; a few more once the
+  scheduler has run, and it grows with every action). If
   anything were altered: *Chain broken at #N*.
 - **About this audit log** (every line is read from the log and the settings in force):
   - **Records:** how many, and the first and last time (UTC).
@@ -1563,7 +1624,7 @@ The typed text is always treated literally (no injection).
 - The organisation's own volumes are first seen in its environment.
 
 **"How was it tested?"**
-- 935 platform tests (SQLite, with PostgreSQL's rules enforced) and 934 on PostgreSQL; 205 engine tests.
+- 945 platform tests (SQLite, with PostgreSQL's rules enforced) and 942 on PostgreSQL; 205 engine tests.
 - 108 of 108 features verified feature by feature.
 - 24 penetration tests and 11 fuzzing properties.
 - Time-travel tests (0 / 45 / 400 days).
@@ -1623,12 +1684,15 @@ The typed text is always treated literally (no injection).
 |---|---|
 | The sign-in page fails or says dev sign-in is off | `.env` wasn't loaded in the shell that started the server. Restart with `scripts\serve_with_env.cmd` |
 | A page spins for 10-20 s | The model is writing (brief, deep analysis, report). *"This is the optional narrative - the computed view is already complete."* |
+| *Check which models answer* says **No** for gpt-4.1 and gpt-4.1-nano | Correct on the demo endpoint: only gpt-4.1-mini is deployed. *"That's the check doing its job."* |
+| A figure on the page didn't update after someone else acted | The page shows what it loaded. Click another tab and back, or *Refresh* |
 | *Deep analysis unavailable* | No AI configured, or the budget is exhausted: *"the platform falls back automatically; the story is complete without it."* |
 | An approval is refused | Four-eyes, self-approval or a missing role: *"that's the control working."* Approve from Alice's window |
 | A four-eyes action didn't run after your approval | Correct: it needs a second, different lead |
 | Numbers differ from these notes | Time has passed (risk decay, SLA ages) or you approved something. Stop the server, `python -m soc_platform reset-demo --yes`, start again |
 | A connector shows *stale* | The sample data is dated, or the scheduler hasn't run yet. *"Freshness is checked against each stream's cadence - that's the monitoring working."* Run the job from Integrations |
 | *Scheduler stopped* banner | The background job runner isn't running in this process. Restart the server; the banner exists so this can't go unnoticed |
+| The network drops (the model can't be reached) | **Carry on; nothing that matters changes.** Every count, verdict, score, story and action stays the same, since they never came from the model. The first model call waits for its connection timeout (about 10 s); after 3 failures the platform stops trying for 60 s, so screens answer at once. The brief's chip says *Platform summary*, the analyst answers from its own look-ups, reports say *deterministic templates*, tuning drafts say *drafted by the platform*, and Deep analysis shows a message instead of a result (the story is complete without it). *"That's rule two, live: the AI only explains."* Measured with the endpoint unreachable, on a full reset and every model-backed click |
 | A question you can't answer | *"I'll confirm that from the code and come back to you."* Never guess a number |
 
 ---

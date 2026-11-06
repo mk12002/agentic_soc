@@ -259,6 +259,7 @@ async function refreshStatus() {
 async function render() {
   if (!window.ME) return;
   const {name, params} = route();
+  refreshStatus();                 // badge, kill switch and scheduler state: another person or a job may have moved them
   document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === name));
   const q = $('#global-q'); if (q && name !== 'search') q.value = '';        // the box shows a query only on its results
   const title = TITLES[name] || cap(name);

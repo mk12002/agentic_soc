@@ -81,6 +81,11 @@ def _owns(domain: str, s: Supplier) -> bool:
     return any(domain == d or domain.endswith("." + d) for d in s.domains)
 
 
+def _auth_words(auth: dict[str, Any] | None) -> str:
+    """SPF pass, DKIM pass, DMARC pass - how a person reads it."""
+    return ", ".join(f"{str(k).upper()} {v}" for k, v in (auth or {}).items()) or "no authentication results"
+
+
 def _authenticated(auth: dict[str, str]) -> bool:
     a = {k: str(v).lower() for k, v in (auth or {}).items()}
     return a.get("dmarc") == "pass" or (a.get("dkim") == "pass" and a.get("spf") in {"pass", None})
@@ -131,10 +136,10 @@ class SupplierMonitor:
 
                 if own and verdict in BAD and _authenticated(auth):
                     add("supplier_account_compromise", "high",
-                        f"{verdict} message authenticated as {dom} (auth {auth}); the supplier's mailbox or tenant is "
+                        f"{verdict} message authenticated as {dom} ({_auth_words(auth)}); the supplier's mailbox or tenant is "
                         "likely compromised")
                 if own and _auth_failed(auth):
-                    add("supplier_spoofing", "medium", f"message claims {dom} but fails authentication ({auth})")
+                    add("supplier_spoofing", "medium", f"message claims {dom} but fails authentication ({_auth_words(auth)})")
                 if look and verdict in BAD | {"spam"}:
                     add("supplier_impersonation", "high", f"{dom} imitates supplier domain {look[0]} ({look[1]})")
                 if sigs & PAYMENT_SIGNALS:  # even when the message itself looks clean: verify out of band

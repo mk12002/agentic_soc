@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-10-31 (rounds 15-32; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-11-05 (rounds 15-33; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,53 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 32 (2026-10-31) - latest results: tuning the platform in plain words
+## 0. Round 33 (2026-11-05) - latest results: rehearsing the live demo as written
+
+Aim: run the demo exactly as `LIVE_DEMO_20MIN.md` says - reset, then serve, with the model on and the real scheduler running, on
+the calendar day (46 days past the sample data) - read every tab, make every click, and compare every figure with the scripts. The
+browser tour could not have found the main defect: it holds the jobs back and has no model.
+
+**Method.** Real browser with the Content-Security-Policy on, at 1920 x 1080, signed in through the sign-in page as lead, second
+lead, admin, auditor and analyst. Every tab and case page (read as text and on screen); 85 scripted clicks in script order; every
+function off the timed path (tuning from words to revoke, ownership upload, connector propose / approve / pause, rollback, policy
+proposal, value inputs, report style); every report and export read back; every tab compared before and after two idle job cycles;
+then all of it again with the model endpoint unreachable.
+
+**Found and fixed:**
+
+| Defect | Seen as | Fix |
+|---|---|---|
+| The intelligence job held SQLite's write lock across every model call (64 s) | Intelligence answered 503 after 43 s, heartbeat lost, `job.lease_lost` | Findings commit first; narratives in committed batches; `reset-demo` writes them up front (first job 9.8 s, later ones 0.4 s) |
+| The Intelligence screen waited for the brief | 10 s blank after any approval | Screen renders at once; the brief fills in |
+| A failing model gave the gateway's generic text | Brief and answer read "7 evidence item(s) from 7 source(s)" | Same words as with no model; retried after 60 s, not 15 minutes |
+| Incidents had no written summary without the model | "55 evidence item(s) from 15 source(s)" | The computed result in words |
+| Approvals badge, kill switch and scheduler banner refreshed only at sign-in | Badge 36 beside a tile saying 39 | Refreshed on every screen change |
+| Story summary cut mid-word | `your password expire)` | Cut at a word, longer limit |
+| One CVE listed once per scanner in the story | Three rows, one host named three ways | One row per host and CVE, tools listed |
+| A person listed twice under Cross-domain context | `bob.lee` twice (recipient and reporter) | One row per person |
+| Recipient addresses capitalised by the chip style | `Arun.K@Acme-Demo.Com` | Shown as written |
+| Case header showed a field nothing uses | "automation mode Shadow" | Removed |
+| Model check printed the endpoint's address | Azure URL on screen | "HTTP 404: this model is not deployed on the endpoint" |
+| Raw values on screen and in reports | `auth {'spf': 'pass'...}`, job JSON, `agreement None; PSI None`, "0 minutes" | Plain words |
+
+**Script errors corrected:** Preflight was scripted in a window with no Preflight button; "about twenty-one dollars at your volume"
+was a different model mix for a small SOC, and no one has measured the client's volume (now the measured $5 / $26); the Trace step
+named a row that the Audit log does not have; Tuning was missing from the script and the notes. Every other figure quoted matched the
+screen: 10 cases, 37 approvals by domain and type, 20 findings by severity and rule, 6 vulnerabilities, ATT&CK, Shadow IT, suppliers,
+risk scores, story.
+
+**Checked and deliberately left:** "time not reported by the tool" on two story steps is accurate (Graph's message rules carry no
+time).
+
+**Not covered:** the Azure and on-premises deployments; a real tenant; `scripts/serve_with_env.cmd` itself was not run, to leave the
+working demo database alone (the rehearsal ran the same reset and serve on a scratch database and port). `verify_features.py` was
+not re-run, and `docs/screenshots` was not refreshed, so older images still show the removed header field.
+
+**Counts:** SQLite: 944 passed, 18 skipped, 0 failed. PostgreSQL 16: 941 passed, 21 skipped, 0 failed. One more test, for the last
+one-line console change, was added afterwards and passes on both, with the browser tour run again: 945 and 942 of 963 collected. Browser tour: 38
+screenshots, 4 widths, light and dark, 0 problems.
+
+## 0.0a Round 32 (2026-10-31): tuning the platform in plain words
 
 Aim: the client asked how noise is told apart from real alerts, and asked for a platform that adapts to the situation:
 a lead asks for a change in words, and the platform adjusts, with confirmation and only for leads.
@@ -170,7 +216,7 @@ test container did not have); ML engine 203 passed, 0 failed; the ML engine insi
 After the fixes, the affected files on 3.13: 112 passed, 0 failed. Linux 3.11 behaved the same (803 passed, the same
 two explained failures; engine 203 passed). **Nothing failed on 3.13 alone** except the SQLite start-up race, fixed.
 
-**Counts:** COUNTS_PLACEHOLDER
+**Counts:** Windows, Python 3.11: 807 passed, 16 skipped. ML engine: 203 passed on 3.11 and on 3.13. The PostgreSQL run of this round did not finish, so no PostgreSQL count is claimed for it (later rounds report one).
 
 ## 0.0 Round 27 (2026-10-18): functional review (does every output mean what it says)
 

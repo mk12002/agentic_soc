@@ -281,8 +281,13 @@ class IncidentService:
         # a lead's raise-attention rule moves the severity (priority, queue order, notifications) after the verdict
         # is judged, so a raised incident is looked at sooner without being called a threat because of it
         severity = self._raised(case, severity, factors)
+        tools = sorted({str(e.get("source")) for e in ev_llm if e.get("source")})
+        # without the model's text (none configured, it failed, or it is still to come): the computed result, in words
+        computed = (f"{case.title}: rated {severity} with {round(confidence * 100)} % confidence "
+                    f"({verdict.replace('_', ' ')}), from {len(ev_llm)} pieces of evidence across {len(tools)} tools. "
+                    "The rules behind the rating are listed below.")
         self.cases.set_assessment(case, verdict=verdict, severity=severity, confidence=confidence,
-                                  summary=grounded["summary"],
+                                  summary=grounded["summary"] if grounded.get("source") == "llm" else computed,
                                   assessment={"claims": grounded["claims"], "mitre": mitre, "scoring": factors,
                                               "insufficient_evidence": grounded.get("insufficient_evidence", False),
                                               "evidence_index": {e["id"]: e["evidence_row"] for e in ev_llm},

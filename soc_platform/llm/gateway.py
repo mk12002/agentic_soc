@@ -251,6 +251,18 @@ def pinned_ok(pins: str | None, chosen: str | None, answered: str) -> bool:
     return not entries or any(p in answered for p in entries)
 
 
+def _probe_error(exc: Exception) -> str:
+    """What an administrator needs from a failed model check - without the endpoint's address."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 404:
+        return "HTTP 404: this model is not deployed on the endpoint"
+    if status in (401, 403):
+        return f"HTTP {status}: the endpoint refused the credentials for this model"
+    if status:
+        return f"HTTP {status} from the endpoint"
+    return f"{type(exc).__name__}: {re.sub(r'https?://[^ ]+', '(endpoint)', str(exc))[:200]}"
+
+
 class LLMGateway:
     def __init__(self, session: Session, settings: Settings, provider: Provider | None = None,
                  redactor: Redactor | None = None, *, actor: Any = None) -> None:
@@ -483,8 +495,7 @@ class LLMGateway:
                 ms = round((time.perf_counter() - started) * 1000)
                 self._log("llm.model_check", prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error",
                           latency_ms=ms, tier=m["size"], requested_model=m["name"])
-                out.append({"model": m["name"], "ok": False, "latency_ms": ms,
-                            "detail": f"{type(exc).__name__}: {str(exc)[:200]}"})
+                out.append({"model": m["name"], "ok": False, "latency_ms": ms, "detail": _probe_error(exc)})
                 continue
             ms = round((time.perf_counter() - started) * 1000)
             if c is None:

@@ -137,8 +137,13 @@ def cmd_demo() -> None:
         from soc_platform.intelligence.analyst import IntelligenceService
 
         intel = IntelligenceService(s, vm=vm)
-        for ins in sorted(intel.refresh(), key=lambda i: -i.score)[:6]:
+        insights = intel.refresh()
+        for ins in sorted(insights, key=lambda i: -i.score)[:6]:
             print(f"[INTEL] {ins.severity:>8} {ins.title}")
+        if gw is not None:          # written now, so the first scheduler pass after `serve` has no model work to do
+            s.commit()
+            IntelligenceService(s, gw, vm=vm).narrate_committing(insights)
+            print(f"[LLM] written narratives: {sum(i.narrative_source == 'llm' for i in insights)} correlated finding(s)")
         ans = intel.analyst.ask("Is jane.doe@acme-demo.com compromised?")
         print(f"[ASK] {ans['answer']}  (tools: {', '.join(c['tool'] for c in ans['tool_calls'])})")
         rs = ReportService(s, out)
