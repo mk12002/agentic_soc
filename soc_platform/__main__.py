@@ -251,6 +251,7 @@ def cmd_serve() -> None:
     uvicorn.run("soc_platform.api.app:app", host=os.environ.get("SOC_HOST", "127.0.0.1"),
                 port=int(os.environ.get("SOC_PORT", "8080")), workers=workers,
                 proxy_headers=False,   # X-Forwarded-For is handled by the app (SOC_TRUSTED_PROXIES, right-most hop)
+                server_header=False,   # no "server: uvicorn" on every answer: the stack is not the caller's business
                 # on SIGTERM (a deploy, `docker stop`) requests in flight get this long to finish, then the server stops
                 # - inside the orchestrator's own grace period, so the scheduler and access log shut down cleanly
                 timeout_graceful_shutdown=max(1, int(os.environ.get("SOC_SHUTDOWN_GRACE_SECONDS", "20") or 20)))

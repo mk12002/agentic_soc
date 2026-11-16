@@ -278,6 +278,11 @@ class CaseService:
                close: bool = True) -> Disposition:
         if not analyst.can(Perm.INVESTIGATE):
             raise PermissionError("investigate permission required")
+        # a ruling is one of the known words: an unknown one was stored as written and counted as "suspicious" in the
+        # agreement and noise statistics - enough to pause a tuning rule or shift a suggestion on a typing error
+        verdict = (verdict or "").strip().lower()
+        if verdict not in ANALYST_VERDICTS:
+            raise ValueError(f"unknown verdict; use one of: {', '.join(sorted(ANALYST_VERDICTS))}")
         case = self._get(case_id)
         # an exercise's outcome says nothing about whether the detection is noise: it stays out of the statistics
         source = None if (case.attributes or {}).get("exercise") else (case.attributes or {}).get("detection_source")
@@ -386,6 +391,7 @@ class CaseService:
 
 MALICIOUS = {"malicious", "phishing", "true_positive", "confirmed", "compromised", "high_risk"}
 BENIGN = {"safe", "benign", "clean", "false_positive", "spam", "likely_safe", "no_action"}
+ANALYST_VERDICTS = MALICIOUS | BENIGN | {"suspicious"}       # what an analyst's ruling may say (CaseService.decide)
 
 
 def _bucket(v: str | None) -> str:

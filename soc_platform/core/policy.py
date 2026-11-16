@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.auth import Perm, Principal
+from soc_platform.core.auth import Perm, Principal, same_person
 from soc_platform.core.models import PolicyVersion, utcnow
 
 
@@ -248,7 +248,7 @@ class PolicyStore:
         row = self.s.get(PolicyVersion, version_id)
         if row is None or row.status != "proposed":
             raise ValueError("policy version is not awaiting approval")
-        if row.proposed_by == by.id:
+        if same_person(row.proposed_by, by.id):
             raise PermissionError("separation of duties: proposer cannot approve their own policy change")
         for old in self.s.execute(select(PolicyVersion).where(PolicyVersion.status == "active")).scalars():
             old.status = "superseded"

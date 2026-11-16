@@ -292,6 +292,20 @@ def test_policy_change_needs_different_approver(session, automation_admin, lead,
     assert store.active()["actions"]["canary.escalate"]["level"] == 4
 
 
+def test_separation_of_duties_is_not_fooled_by_the_case_of_a_name(session):
+    """The proposer and the approver were compared as exact text, so one person signed in as ``Lena@...`` could
+    approve what they proposed as ``lena@...`` (where the sign-in's subject is an address)."""
+    proposer = person("lena@acme-demo.com", Role.AUTOMATION_ADMIN, Role.LEAD)
+    same_other_case = person("Lena@Acme-Demo.com", Role.LEAD)
+    store = PolicyStore(session)
+    doc = store.active()
+    doc["actions"]["canary.escalate"] = {"level": 4}
+    v = store.propose(doc, proposer, note="promote canary")
+    with pytest.raises(PermissionError, match="separation of duties"):
+        store.approve(v.id, same_other_case)
+    store.approve(v.id, person("omar@acme-demo.com", Role.LEAD))
+
+
 def test_same_containment_from_two_cases_is_one_approval(session, registry):
     """The phishing case and the incident case both recommend blocking the same host: the analyst decides once."""
     from soc_platform.core.cases import CaseService

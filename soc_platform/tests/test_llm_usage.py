@@ -250,7 +250,9 @@ def test_the_monthly_cap_is_the_one_the_administrator_set(session):
     assert session.query(LLMCall).filter_by(status="budget_exceeded").count() == 1
 
 
-def test_a_person_over_their_limit_gets_an_answer_without_the_model_and_is_told_why(session):
+def test_a_person_over_their_limit_gets_an_answer_without_the_model_and_is_told_why(session, monkeypatch):
+    # midday: the daily limit counts from midnight UTC, so "3 hours ago" must be today whenever the suite runs
+    monkeypatch.setenv("SOC_CLOCK_FREEZE", utcnow().replace(hour=12, minute=0, second=0, microsecond=0).isoformat())
     save(session, {"user_default": {"hourly_tokens": 1_000, "daily_tokens": 5_000}})
     spend(session, 1_000, actor=ANALYST.id, ago=timedelta(minutes=10))
     m = Model()

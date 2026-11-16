@@ -572,7 +572,25 @@ def _err(exc: Exception) -> HTTPException:
     if isinstance(exc, PermissionError):
         return HTTPException(403, str(exc))
     if isinstance(exc, KeyError):
-        return HTTPException(404, str(exc))
+        # the message itself: str() of a KeyError is its repr, quotes included
+        return HTTPException(404, str(exc.args[0]) if exc.args else "not found")
+    if isinstance(exc, SQLAlchemyError):
+        # a database error's text is the statement and its parameters: answered as the global handlers answer it
+        # (busy -> 503, a value the database cannot store -> 400), logged with the trace id, never echoed
+        import logging
+
+        if isinstance(exc, (OperationalError, SQLATimeoutError)):
+            logging.getLogger(__name__).warning("database unavailable: %s", str(exc).splitlines()[0][:200])
+            return HTTPException(503, "the database is busy or unreachable - retry in a moment",
+                                 headers={"Retry-After": "5"})
+        if isinstance(exc, DataError):
+            return HTTPException(400, "a value in the request is invalid or too long")
+        from sqlalchemy.exc import IntegrityError
+
+        logging.getLogger(__name__).warning("request refused by the database: %s", str(exc).splitlines()[0][:200])
+        if isinstance(exc, IntegrityError):
+            return HTTPException(409, f"the request conflicts with stored data; trace {TRACE.get() or '-'}")
+        return HTTPException(500, f"the request could not be completed; trace {TRACE.get() or '-'}")
     from soc_platform.connectors.base import ConnectorError
 
     if isinstance(exc, ConnectorError):
@@ -909,8 +927,8 @@ class ApiKeyBody(BaseModel):
 
 
 class RevokeBody(BaseModel):
-    principal_id: str
-    reason: str = ""
+    principal_id: str = Field(min_length=1, max_length=256)
+    reason: str = Field(default="", max_length=2000)
 
 
 def _access(s: Session) -> AccessService:
@@ -1385,7 +1403,7 @@ def get_policy(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_
 
 class PolicyProposal(BaseModel):
     document: dict[str, Any]
-    note: str = ""
+    note: str = Field(default="", max_length=2000)
 
 
 @app.post("/api/v1/policy/proposals")
@@ -1550,15 +1568,17 @@ def _action(a: ActionRequest) -> dict[str, Any]:
 
 
 class ActionBody(BaseModel):
-    action_type: str
-    targets: list[dict[str, Any]] = Field(default_factory=list)
+    # free text is bounded everywhere: it is stored on the record and in the audit log, and the only other limit
+    # is the 30 MB request body
+    action_type: str = Field(min_length=1, max_length=128)
+    targets: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
     params: dict[str, Any] = Field(default_factory=dict)
-    case_id: str | None = None
-    rationale: str = ""
+    case_id: str | None = Field(default=None, max_length=64)
+    rationale: str = Field(default="", max_length=4000)
 
 
 class Decision(BaseModel):
-    note: str = ""
+    note: str = Field(default="", max_length=2000)
 
 
 def _action_service(s: Session) -> ActionService:
@@ -1592,7 +1612,7 @@ def decide_action(aid: str, verb: str, body: Decision, p: Principal = Depends(cu
         fn = {"approve": svc.approve, "reject": svc.reject, "rollback": svc.rollback}[verb]
         return _action(fn(aid, p, note=body.note))
     except KeyError as exc:
-        raise HTTPException(404, str(exc)) from exc
+        raise _err(exc) from exc
     except Exception as exc:
         raise _err(exc) from exc
 
@@ -1768,8 +1788,8 @@ def unresolved(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depend
 
 
 class Override(BaseModel):
-    entity_id: str | None = None
-    reason: str = ""
+    entity_id: str | None = Field(default=None, max_length=64)
+    reason: str = Field(default="", max_length=2000)
 
 
 @app.post("/api/v1/resolution/{uid}/override")
@@ -1928,7 +1948,7 @@ def get_case(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = Dep
     try:
         view = CaseService(s).view(cid)
     except KeyError as exc:
-        raise HTTPException(404, str(exc)) from exc
+        raise _err(exc) from exc
     view["intelligence"] = _case_intelligence(s, view) if "*" in p.domains else {}
     return view
 
@@ -1960,8 +1980,8 @@ def _case_intelligence(s: Session, view: dict[str, Any]) -> dict[str, Any]:
 
 
 class DispositionBody(BaseModel):
-    verdict: str
-    reasoning: str = ""
+    verdict: str = Field(min_length=1, max_length=64)        # one of cases.ANALYST_VERDICTS (the service checks)
+    reasoning: str = Field(default="", max_length=10_000)
     close: bool = True
 
 
@@ -1989,7 +2009,7 @@ def case_report(cid: str, p: Principal = Depends(need(Perm.READ)), s: Session = 
 
 class BundleBody(BaseModel):
     action_ids: list[str] = Field(min_length=1, max_length=50)
-    note: str = ""
+    note: str = Field(default="", max_length=2000)
 
 
 @app.get("/api/v1/cases/{cid}/story")
@@ -2321,8 +2341,8 @@ def vm_affected(cve: str, _: Principal = Depends(need(Perm.READ, "vulnerability"
 
 
 class CampaignBody(BaseModel):
-    cve: str
-    notify_via: str = "email"
+    cve: str = Field(min_length=1, max_length=32)
+    notify_via: str = Field(default="email", max_length=32)
     team_contacts: dict[str, str] = Field(default_factory=dict)
 
 
@@ -2338,9 +2358,9 @@ def vm_campaign(body: CampaignBody, p: Principal = Depends(need(Perm.READ, "vuln
 
 class AckBody(BaseModel):
     committed_date: datetime
-    owner: str | None = None
-    dependencies: str = ""
-    response: str = ""
+    owner: str | None = Field(default=None, max_length=256)
+    dependencies: str = Field(default="", max_length=4000)
+    response: str = Field(default="", max_length=4000)
 
 
 @app.post("/api/v1/vm/plans/{pid}/acknowledge")
@@ -2413,7 +2433,7 @@ def vm_rr_decide(eid: str, approve: bool, p: Principal = Depends(need(Perm.READ,
 
 
 class QueryBody(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=2000)
 
 
 @app.post("/api/v1/vm/query")

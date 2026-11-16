@@ -38,6 +38,7 @@ KEY_PREFIX = "sk_soc_"
 MAX_KEY_DAYS = 365
 BREAK_GLASS_PREFIX = "bg."
 BREAK_GLASS_TTL = 900                 # seconds a break-glass session lasts; exchange the sealed secret again after
+BG_SESSION_PREFIX = "bg_session:"     # system_flags rows: one per issued break-glass session, removed once expired
 BREAK_GLASS_ATTEMPTS = 5              # failed attempts per client per 15 minutes (per process) before refusing unseen
 
 
@@ -333,14 +334,24 @@ class AccessService:
                         hashlib.sha256).digest()
 
     def issue_break_glass_session(self) -> tuple[str, datetime]:
-        """A 15-minute session token for a verified break-glass use."""
+        """A 15-minute session token for a verified break-glass use.
+
+        The session is recorded (``bg_session:<jti>`` in ``system_flags``) and only a recorded one is honoured. The
+        signing key is derived from the configured *hash* of the sealed secret, which the platform's configuration
+        holds: without the record, anyone able to read that setting could sign a lead + admin session of their own -
+        never knowing the secret, and never passing the audited exchange that raises the alert."""
         import jwt
 
         now = utcnow()
         exp = now + timedelta(seconds=BREAK_GLASS_TTL)
+        jti = secrets.token_hex(16)
+        for old in self.s.execute(select(SystemFlag).where(SystemFlag.name.like(BG_SESSION_PREFIX + "%"))).scalars():
+            if float((old.value or {}).get("exp") or 0) < now.timestamp():
+                self.s.delete(old)                       # expired sessions are not kept
+        self.s.add(SystemFlag(name=BG_SESSION_PREFIX + jti, value={"exp": exp.timestamp()}, updated_by="break-glass"))
+        self.s.flush()
         token = jwt.encode({"sub": "break-glass", "typ": "break_glass", "iat": int(now.timestamp()),
-                            "exp": int(exp.timestamp()), "jti": secrets.token_hex(16)}, self._session_key(),
-                           algorithm="HS256")
+                            "exp": int(exp.timestamp()), "jti": jti}, self._session_key(), algorithm="HS256")
         return BREAK_GLASS_PREFIX + token, exp
 
     def break_glass_session(self, token: str) -> Principal:
@@ -354,6 +365,9 @@ class AccessService:
         except jwt.PyJWTError as exc:
             raise PermissionError(f"invalid break-glass session: {exc}") from exc
         if claims.get("typ") != "break_glass":
+            raise PermissionError("invalid break-glass session")
+        # issued by this platform at the audited exchange - a well-signed token nobody issued is refused
+        if self.s.get(SystemFlag, BG_SESSION_PREFIX + str(claims["jti"])[:40]) is None:
             raise PermissionError("invalid break-glass session")
         p = Principal(id="break-glass", name="Break-glass administrator", roles=frozenset({Role.LEAD, Role.ADMIN}),
                       mfa=True, break_glass=True, auth_method="break_glass", token_id=str(claims["jti"]),

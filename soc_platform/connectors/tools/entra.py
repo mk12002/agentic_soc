@@ -24,7 +24,7 @@ from soc_platform.connectors.tools._common import (
     path_part,
     targets_of,
 )
-from soc_platform.connectors.tools._microsoft import APP_FIELDS, ARM, MicrosoftConnector, graph_and_arm_transport
+from soc_platform.connectors.tools._microsoft import APP_FIELDS, MicrosoftConnector, arm_base, graph_and_arm_transport
 from soc_platform.core.identity import email_aliases
 from soc_platform.core.schema import EntityRef, NormalizedRecord
 
@@ -252,7 +252,7 @@ class EntraConnector(MicrosoftConnector):
             subs = self._azure_subscriptions()
 
             def assignments(sid: str) -> list[dict[str, Any]]:
-                return self.get(f"{ARM}/subscriptions/{sid}/providers/Microsoft.Authorization/roleAssignments",
+                return self.get(f"{arm_base(self.settings)}/subscriptions/{sid}/providers/Microsoft.Authorization/roleAssignments",
                                 params={"api-version": ARM_API["authorization"],
                                         "$filter": f"assignedTo({odata_str(object_id)})"}).get("value", [])
 
@@ -285,7 +285,7 @@ class EntraConnector(MicrosoftConnector):
         cached = getattr(self, "_subs_cache", None)
         if cached and time.monotonic() - cached[0] < 3600:
             return cached[1]
-        listed = self.get(f"{ARM}/subscriptions", params={"api-version": ARM_API["subscriptions"]}).get("value", [])
+        listed = self.get(f"{arm_base(self.settings)}/subscriptions", params={"api-version": ARM_API["subscriptions"]}).get("value", [])
         subs = {s["subscriptionId"]: s.get("displayName") or s["subscriptionId"] for s in listed}
         self._subs_cache = (time.monotonic(), subs)
         return subs
@@ -296,7 +296,7 @@ class EntraConnector(MicrosoftConnector):
             return AZURE_BUILTIN_ROLES[guid]
         names = self.__dict__.setdefault("_role_names", {})          # custom roles: looked up once
         if guid not in names:
-            body = self.get(f"{ARM}{definition_id}", params={"api-version": ARM_API["authorization"]})
+            body = self.get(f"{arm_base(self.settings)}{definition_id}", params={"api-version": ARM_API["authorization"]})
             names[guid] = (body.get("properties") or {}).get("roleName") or guid
         return names[guid]
 

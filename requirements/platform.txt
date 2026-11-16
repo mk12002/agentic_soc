@@ -14,8 +14,8 @@ jinja2>=3.1
 python-docx>=1.1
 python-pptx>=0.6.23
 python-multipart>=0.0.6
-setuptools>=83            # CVE fixes (PYSEC-2025-49, PYSEC-2026-3447)
+setuptools>=84.1          # CVE fixes (PYSEC-2025-49, PYSEC-2026-3447, and the 84.1 advisory)
 pyzbar>=0.1.9             # QR-code decoding in reported mail
-Pillow>=10.2
+Pillow>=13.0              # 12.x carries known advisories (pip-audit, 2026-11)
 ppdeep>=20200505          # fuzzy hashing (PH-T03)
 anthropic>=1.8          # optional LLM provider (SOC_LLM_PROVIDER=anthropic)

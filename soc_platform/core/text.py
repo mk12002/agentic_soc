@@ -9,8 +9,9 @@ _LIST = re.compile(r"\[((?:'[^'\[\]]{0,200}'|\"[^\"\[\]]{0,200}\"|None|-?\d+(?:\
 
 def readable(text: str) -> str:
     """Evidence is read by analysts (and given to the model): a connector's Python rendering of a list or a missing
-    value - ``['Low', 'High']``, ``[]``, ``signer=None`` - becomes plain words. Bounded patterns (linear on any input)."""
-    if not text or ("[" not in text and "None" not in text):
+    value - ``['Low', 'High']``, ``[]``, ``signer=None``, ``exposed=True`` - becomes plain words. Bounded patterns
+    (linear on any input)."""
+    if not text or not any(x in text for x in ("[", "None", "True", "False")):
         return text
 
     def items(m: re.Match) -> str:
@@ -20,7 +21,10 @@ def readable(text: str) -> str:
 
     out = _LIST.sub(items, text)
     out = re.sub(r"\[\]", "none", out)
-    return re.sub(r"(?<=[=:(] )None\b|(?<=[=:(])None\b", "unknown", out)
+    out = re.sub(r"(?<=[=:(] )None\b|(?<=[=:(])None\b", "unknown", out)
+    # a flag printed as Python prints it ("standing admin role: False", "internet-exposed=True")
+    return re.sub(r"(?<=[=:] )(?:True|False)\b|(?<=[=:])(?:True|False)\b",
+                  lambda m: "yes" if m.group(0) == "True" else "no", out)
 
 
 def unsafe_xml(raw: bytes) -> bool:

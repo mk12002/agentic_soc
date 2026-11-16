@@ -490,7 +490,7 @@ class PhishingService:
     def confirm(self, case_id: str, analyst: Principal, *, verdict: str, reasoning: str = "") -> dict[str, Any]:
         d = self.cases.decide(case_id, analyst, verdict=verdict, reasoning=reasoning)
         propagated = []
-        if verdict in {"malicious", "phishing", "true_positive"}:
+        if d.analyst_verdict in {"malicious", "phishing", "true_positive"}:      # as recorded (normalised), not as typed
             from soc_platform.core.models import CaseEntity
 
             for ln in self.s.execute(select(CaseEntity).where(CaseEntity.case_id == case_id)).scalars():

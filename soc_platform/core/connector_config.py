@@ -46,7 +46,7 @@ from soc_platform.connectors.config_schema import (
 )
 from soc_platform.connectors.registry import COMMON_FIELDS, ConnectorRegistry, discover
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.auth import Perm, Principal
+from soc_platform.core.auth import Perm, Principal, same_person
 from soc_platform.core.models import ConnectorConfigVersion, ConnectorPreflight, utcnow
 
 PREFLIGHT_MAX_AGE = timedelta(days=7)
@@ -399,7 +399,7 @@ class ConfigStore:
         row = self.s.get(ConnectorConfigVersion, version_id)
         if row is None or row.status != "proposed":
             raise ValueError("this configuration change is not awaiting approval")
-        if row.proposed_by == by.id:
+        if same_person(row.proposed_by, by.id):
             raise PermissionError("separation of duties: the proposer cannot approve their own change")
         active = self.active_row()
         if (active.id if active else None) != row.base_version:
@@ -436,7 +436,7 @@ class ConfigStore:
         row = self.s.get(ConnectorConfigVersion, version_id)
         if row is None or row.status != "proposed":
             raise ValueError("this configuration change is not awaiting a decision")
-        own = row.proposed_by == by.id
+        own = same_person(row.proposed_by, by.id)
         if not own and not by.can(Perm.APPROVE_POLICY):
             raise PermissionError("approve_policy permission required (or withdraw your own proposal)")
         row.status, row.decided_at = ("withdrawn" if own else "rejected"), utcnow()

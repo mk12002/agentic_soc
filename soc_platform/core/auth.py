@@ -150,6 +150,13 @@ class Principal:
         return {k: (["*"] if "*" in v else sorted(v)) for k, v in sorted(out.items())}
 
 
+def same_person(a: str | None, b: str | None) -> bool:
+    """Whether two recorded identifiers name one principal. Separation of duties compares who proposed with who
+    approves: by exact text, ``Lena@...`` could approve what ``lena@...`` proposed wherever the sign-in's subject is
+    an address (dev sign-in, or an identity provider configured to send one)."""
+    return bool(a) and bool(b) and str(a).strip().lower() == str(b).strip().lower()
+
+
 def agent_principal(name: str) -> Principal:
     """Principal used when an agent (not a human) acts. Agents can only request/recommend."""
     return Principal(id=f"agent:{name}", name=name, roles=frozenset(), is_agent=True)

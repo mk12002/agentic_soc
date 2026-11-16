@@ -95,7 +95,7 @@ review with the organisation (H = high, M = medium, L = low). References R01-R16
 | Separation of duties | No one approves their own action, policy, exception, connector change or access grant; automation admins configure but cannot approve; a scoped administrator grants only their own domains; a lead, admin or automation-admin grant takes effect only when a second administrator approves it and ends within 90 days; a rollback is an action under the policy; switching the kill switch off needs a lead | Implemented |
 | Service accounts | API keys: only the SHA-256 is stored; expiry at most 365 days; roles limited to analyst, auditor or automation admin; shown once | Implemented |
 | Revocation | Per token (logout) and per user (revoke all sessions) | Implemented |
-| Break-glass | For identity-provider outages: a sealed secret of which only the hash is configured, exchanged once for a 15-minute session; every use and failed attempt is audited and raises a critical finding; repeated failures from one address are refused | Implemented; configured at deployment |
+| Break-glass | For identity-provider outages: a sealed secret of which only the hash is configured, exchanged once for a 15-minute session that is honoured only if the platform issued it (the configured hash alone gives no access); every use and failed attempt is audited and raises a critical finding; repeated failures from one address are refused | Implemented; configured at deployment |
 
 ## 4 Audit logging
 

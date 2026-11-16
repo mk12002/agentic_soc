@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.auth import Perm, Principal
+from soc_platform.core.auth import Perm, Principal, same_person
 from soc_platform.core.models import ActionRequest, utcnow
 from soc_platform.core.policy import PolicyDecision, PolicyEngine
 
@@ -197,7 +197,7 @@ class ActionService:
         if not self._may_approve(approver, high_impact):
             raise PermissionError("approve_high_impact permission required" if high_impact
                                   else "approve_action permission required")
-        if req.requested_by == approver.id and not _self_ok:
+        if same_person(req.requested_by, approver.id) and not _self_ok:
             raise PermissionError("separation of duties: requester cannot approve their own action")
         # Four-eyes means two people. A person who requests the action is the first; when an agent recommended it,
         # two different people must approve it - the first approval is recorded and the action keeps waiting.

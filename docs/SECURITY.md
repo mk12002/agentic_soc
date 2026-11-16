@@ -254,6 +254,23 @@ Bicep template in the client's subscription; the CloudNativePG pooler's certific
 cluster (the failover drill); Kyverno or Azure Policy enforcing signatures; etcd encryption for any Kubernetes
 Secret; the independent penetration test below.
 
+### Security audit (2026-11-15): code review, live probing, dependencies
+
+Method: every route of a running server called without credentials and as each role (five roles, three
+domain-scoped sign-ins), forged and unsigned tokens, hostile query and body values, out-of-scope reads and decisions;
+the authentication, access, upload, storage and outbound-call code read line by line; the dependency locks audited
+as CI audits them. No route answered without credentials, no 5xx, no out-of-scope read; the console escapes every
+interpolated value and the Content-Security-Policy allows no inline script. Found and fixed, each with a test:
+
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 1 | **A break-glass session could be forged from the configured hash.** The 15-minute session token was signed with a key derived only from `SOC_BREAKGLASS_SHA256` - the value operators are told to give the platform *instead of* the secret. Anyone able to read that setting could sign a lead + admin session without the sealed secret and without the audited exchange (no audit event, no alert). | High | A session is recorded when the exchange issues it (`bg_session:<id>` in `system_flags`, removed once expired) and only a recorded session is honoured (`test_a_break_glass_session_nobody_issued_is_refused_even_when_well_signed`) |
+| 2 | **An analyst's ruling was free text.** `POST /cases/{id}/disposition` stored any word (or 9,000 characters) and closed the case; an unknown word counted as "suspicious" in the agreement and noise statistics, which can pause a tuning rule or shift a suggestion. | Medium | The ruling is one of the known words, normalised; bounded at the API (`test_an_analysts_ruling_is_one_of_the_known_words`) |
+| 3 | **Database error text could reach the caller.** Routes that answer a service's exception with its text did the same for a database error, whose text is the SQL statement and its parameters (on PostgreSQL an over-long value produced one), and answered a busy database as 400. | Medium | Database errors are logged with the trace id and answered generically: 400 invalid value, 503 busy, 409 conflict (`test_a_database_error_is_never_echoed_to_the_caller`) |
+| 4 | **Separation of duties compared names as exact text.** Where the sign-in's subject is an address, `Lena@...` could approve what `lena@...` proposed (policy, connector configuration, tuning rule, action, risk exception). Entra object ids are not affected. | Low | One case-insensitive comparison everywhere (`auth.same_person`; `test_separation_of_duties_is_not_fooled_by_the_case_of_a_name`) |
+| 5 | **Small disclosures and unbounded inputs.** Every answer carried `server: uvicorn`; the vulnerability question and eight request bodies had free text with no length limit; evidence text showed Python values (`standing admin role: False`). | Low | Server header off; every free-text field bounded; flags read "yes" / "no" (`test_evidence_text_never_shows_a_python_value`) |
+| 6 | **Dependencies with published advisories.** `pip-audit` on the locks (the CI gate) reported Pillow 12.3.0, certifi and setuptools in the platform lock, and pyasn1, opentelemetry-api and soupsieve in the engine image lock; the development environment a further six packages. | Medium | Upgraded (Pillow 13.0.0, certifi 2026.10.23, setuptools 84.2.1 and the rest), floors raised in `requirements/`, `platform.lock` and both hashed image locks regenerated; `pip-audit` reports no known vulnerability on the environment or any lock |
+
 ## Supply chain and build pipeline
 
 | Control | How |

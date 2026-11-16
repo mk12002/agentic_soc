@@ -360,6 +360,10 @@ fingerprints hash the evidence.
   case/action of a domain not fixed by its route must pass `p.acting_in(case.domain)` to the service. Actions requested
   on a case carry the case's domain; `ActionService` re-judges every decision in the action's domain.
 - Human-only permissions (approvals, policy, access management, rollback) never go to API-key principals.
+- Separation of duties compares identities with `auth.same_person` (case-insensitive), never `==`.
+- Routes answer a service's exception through `_err`: it never returns a database error's text (SQL and parameters)
+  and maps busy / invalid / conflict to 503 / 400 / 409. Don't write `HTTPException(400, str(exc))` for a bare
+  `Exception`. Every free-text field of a request body has a `max_length` (it is stored and audited).
 - UI: interpolate with `esc()`; clicks go through `data-fn` + the `ALLOWED` map (no inline handlers, strict CSP).
 - Nothing fetches URLs taken from e-mail content (no SSRF surface) - keep it that way. The only configurable
   outbound destinations are connector endpoints and `SOC_NOTIFY_WEBHOOKS` (HTTPS only, from settings); never store,
@@ -427,12 +431,15 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   async output and read-only commands only, NVD date windows, Avanan token expiry and token-less answers, quotes in
   names escaped in every OData / FQL query and URL path), `test_report_design.py` (house style:
   header / footer / page fields, charts, no 'None' / 'n/a', 16:9 decks),
+  `test_live_wire.py` (every connector built as a live tool - `manifest.live_transport`, real `HttpTransport`, real
+  sign-in code - answered over HTTP from the fixtures: same records as fake mode, credentials on every request; a
+  sign-in that cannot complete is a connector error; next links only to the tool's own hosts),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 945 platform tests passing on SQLite and 942 on PostgreSQL (963 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
+- Current counts (keep docs in sync when they change): 971 platform tests passing on SQLite and 968 on PostgreSQL (989 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
   engine tests, 108/108 features verified with `--browser --engine --live --llm` (round 25); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
@@ -700,6 +707,17 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   narrations could give two people the same token and restore the wrong name into a case.
 - **Dev sign-in mints any role** (`/api/v1/dev/token`): the registry isolates every live tool while it is on
   (outside `SOC_ENVIRONMENT=test`, which the suite's conftest sets). Don't add a way around it.
+- **Fake mode never runs the live transport.** The sign-in, URL joining, query encoding and the origin check exist
+  only in `HttpTransport` / the auth classes: a token endpoint blocked by the firewall raised httpx's own error
+  (the preflight called it a connector defect), and `arm_base` sent Entra's Azure calls to a host its own transport
+  refused. A new connector or auth class must pass `test_live_wire.py`; a sign-in goes through `http.token_request`
+  / `token_from`, never a bare `httpx.post`.
+- **A verifier is not a signing secret.** Break-glass sessions were signed with a key derived from the configured
+  *hash* of the sealed secret, so the setting operators are told is safe to hand over could mint an admin session.
+  A session now counts only if its id was recorded at the audited exchange (`bg_session:<jti>` in `system_flags`).
+  Anything derived only from configuration proves nothing about who holds the secret.
+- **A word an analyst sends is checked against the vocabulary** (`cases.ANALYST_VERDICTS`): free text was stored as
+  the ruling and counted as "suspicious" by `_bucket`, which feeds agreement, noise and tuning-pause logic.
 - **Default-deny applies to the database pods too** (on-prem CloudNativePG in the same namespace): their own network
   policy lets replication, the operator, DNS and backups through. AGIC (Azure) sends from the gateway's subnet, not
   from a namespace: the ingress policy uses an `ipBlock`.

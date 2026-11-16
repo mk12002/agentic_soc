@@ -489,7 +489,8 @@ print(secrets.token_urlsafe(32))"`), store it sealed (two custodians), and confi
 that token, and exchange again after it expires. The secret itself is accepted nowhere else, so it is not repeated in
 every request or proxy log. Every use and every failed attempt is audited and raises a critical insight (and the
 `SocBreakGlassUsed` alert); five failures from one address in 15 minutes and that address is refused unseen for the
-rest of the window. Rotating the secret ends every break-glass session. After use: review the access log, rotate the
+rest of the window. Rotating the secret ends every break-glass session. A session is valid only if the platform
+recorded it at the exchange, so the configured hash by itself gives no access. After use: review the access log, rotate the
 secret, record the incident.
 
 ## Kill switch

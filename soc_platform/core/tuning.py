@@ -55,7 +55,7 @@ from sqlalchemy import JSON, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from soc_platform.core.audit import AuditLog
-from soc_platform.core.auth import Perm, Principal
+from soc_platform.core.auth import Perm, Principal, same_person
 from soc_platform.core.db import Base, BoundedText, UTCDateTime
 from soc_platform.core.models import Case, CaseEntity, Disposition, Entity, utcnow
 from soc_platform.core.schema import severity_rank
@@ -445,7 +445,7 @@ class TuningStore:
     def approve(self, rule_id: int, by: Principal, note: str = "") -> TuningRule:
         row = self._pending(rule_id, ("proposed",), "approved")
         _may_tune(by, row.kind, row.params)
-        if row.proposed_by == by.id:
+        if same_person(row.proposed_by, by.id):
             raise PermissionError("separation of duties: a second lead approves - not the one who proposed it")
         clean_params(self.s, row.kind, row.params)          # the data may have changed since it was proposed
         now = utcnow()

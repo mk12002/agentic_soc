@@ -83,6 +83,70 @@ class BasicAuth(Auth):
         headers["Authorization"] = f"Basic {token}"
 
 
+def token_request(url: str, **kw: Any) -> httpx.Response:
+    """POST to a tool's token endpoint, with every failure as a connector error.
+
+    The sign-in is the first call a live tool ever makes, and the one most likely to meet an incomplete egress
+    allow-list, an inspecting proxy or a throttled identity provider. It used to raise httpx's own exception (so a
+    blocked ``login.microsoftonline.com`` read as "a defect in the connector" in the preflight, and crashed code that
+    degrades on ``ConnectorError``), and a 429 / 5xx from the identity provider was not retried. Now: unreachable and
+    5xx -> ``TransientError`` (retried with backoff), 429 -> ``RateLimited`` (Retry-After honoured), credentials
+    refused -> ``AuthExpired``, anything else -> ``ConnectorError``. Logged like every outbound call."""
+    host = urlsplit(url).hostname or "the token endpoint"
+    started = time.perf_counter()
+    try:
+        resp = httpx.post(url, timeout=30, **kw)
+    except httpx.TransportError as exc:
+        _log_call("POST", url, None, started, type(exc).__name__)
+        raise TransientError(f"sign-in: {host} could not be reached ({type(exc).__name__}: {exc})") from exc
+    _log_call("POST", url, resp.status_code, started)
+    status = resp.status_code
+    if status == 429:
+        raise RateLimited(retry_after_seconds(resp.headers.get("retry-after")))
+    if status >= 500:
+        raise TransientError(f"sign-in at {host} -> {status}")
+    if status in (400, 401, 403):
+        # the identity provider's own reason (invalid_client, an AADSTS code): what the operator needs to fix it
+        raise AuthExpired(f"sign-in at {host} refused the credentials ({status}): {_oauth_reason(resp)}")
+    if status >= 400:
+        raise ConnectorError(f"sign-in at {host} failed ({status}): check the token URL / base URL")
+    return resp
+
+
+def _oauth_reason(resp: httpx.Response) -> str:
+    """The error code and first line of its description from a token endpoint's answer (never the whole body)."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return "no reason given"
+    if not isinstance(body, dict):
+        return "no reason given"
+    code = str(body.get("error") or body.get("error_code") or "")[:60]
+    desc = str(body.get("error_description") or body.get("message") or "").splitlines()[0:1]
+    return (f"{code}: {desc[0][:160]}" if code and desc else code or (desc[0][:160] if desc else "no reason given"))
+
+
+def token_from(resp: httpx.Response, url: str, *, field: str = "access_token") -> tuple[str, float]:
+    """(token, seconds it lives) from a token endpoint's answer. A page from a proxy, another shape or an empty
+    token is a ``ConnectorError`` that says so - not a KeyError or a JSON error from inside the sign-in."""
+    host = urlsplit(url).hostname or "the token endpoint"
+    try:
+        body = resp.json()
+    except ValueError as exc:
+        if resp.text.lstrip()[:1] == "<":
+            raise html_page_error("POST", urlsplit(url).path or "/", resp.status_code,
+                                  resp.headers.get("content-type", "")) from exc
+        raise ConnectorError(f"sign-in at {host} answered without a token (not JSON): check the token URL") from exc
+    token = body.get(field) if isinstance(body, dict) else None
+    if not isinstance(token, str) or not token:
+        raise ConnectorError(f"sign-in at {host} answered without a token: check the token URL and the grant type")
+    try:
+        ttl = float(body.get("expires_in") or 1800)
+    except (TypeError, ValueError):
+        ttl = 1800.0                                   # a lifetime that cannot be read: assume the usual half hour
+    return token, max(60.0, ttl)
+
+
 class OAuth2ClientCredentials(Auth):
     """Client-credentials (and password-grant) token with caching and early refresh."""
 
@@ -118,13 +182,9 @@ class OAuth2ClientCredentials(Auth):
                 form.update({"client_id": self.client_id, "client_secret": self.client_secret})
             if self.scope:
                 form["scope"] = self.scope
-            resp = (httpx.post(self.token_url, json=form, headers=headers, timeout=30) if self.json_body
-                    else httpx.post(self.token_url, data=form, headers=headers, timeout=30))
-            if resp.status_code >= 400:
-                raise ConnectorError(f"token request failed {resp.status_code}: {resp.text[:200]}")
-            body = resp.json()
-            self._token = body["access_token"]
-            self._expires = time.time() + float(body.get("expires_in", 1800))
+            resp = token_request(self.token_url, headers=headers, **({"json": form} if self.json_body else {"data": form}))
+            token, ttl = token_from(resp, self.token_url)
+            self._token, self._expires = token, time.time() + ttl
             return self._token
 
     def apply(self, headers, params):
@@ -163,10 +223,11 @@ def certificate_assertion(pem: str, client_id: str, audience: str) -> Any:
 
 
 def entra_app_auth(tenant_id: str, client_id: str, client_secret: str | None, scope: str, *,
-                   certificate: str | None = None) -> OAuth2ClientCredentials:
+                   certificate: str | None = None, authority: str | None = None) -> OAuth2ClientCredentials:
     """Entra ID client-credentials token for an app registration: with its certificate when one is configured
-    (recommended), else with its client secret."""
-    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    (recommended), else with its client secret. ``authority``: the sign-in host of a national cloud (default the
+    worldwide one)."""
+    url = f"{(authority or 'https://login.microsoftonline.com').rstrip('/')}/{tenant_id}/oauth2/v2.0/token"
     if certificate:
         return OAuth2ClientCredentials(url, client_id, "", scope=scope,
                                        assertion=certificate_assertion(certificate, client_id, url))
@@ -178,7 +239,7 @@ def entra_app_auth(tenant_id: str, client_id: str, client_secret: str | None, sc
 def entra_app_auth_from(settings: dict[str, Any], scope: str) -> OAuth2ClientCredentials:
     """``entra_app_auth`` from a Microsoft connector's settings (tenant_id, client_id, client_secret / certificate)."""
     return entra_app_auth(settings["tenant_id"], settings["client_id"], settings.get("client_secret"), scope,
-                          certificate=settings.get("client_certificate"))
+                          certificate=settings.get("client_certificate"), authority=settings.get("login_base"))
 
 
 # ----------------------------------------------------------------------------- transports
@@ -205,8 +266,10 @@ def _origin(url: str) -> tuple[str, str, int | None]:
 
 class HttpTransport:
     def __init__(self, base_url: str, auth: Auth | None = None, *, timeout: float = 30.0, verify: bool = True,
-                 default_headers: dict[str, str] | None = None) -> None:
+                 default_headers: dict[str, str] | None = None, sibling_hosts: tuple[str, ...] = ()) -> None:
         self.base_url = base_url.rstrip("/")
+        # other hosts of the same vendor API that a next link may name (a regional host): exact names or ".suffix"
+        self.sibling_hosts = tuple(h.lower() for h in sibling_hosts)
         self.auth = auth or NoAuth()
         self.client = httpx.Client(timeout=timeout, verify=verify)
         self.default_headers = {"Accept": "application/json", **(default_headers or {})}
@@ -215,7 +278,7 @@ class HttpTransport:
         if path.lower().startswith(("http://", "https://")):
             # an absolute URL comes from a vendor's response (a next link): the credentials go only to the tool's
             # own origin, never to whatever host a tampered or proxied response names
-            if _origin(path) != _origin(self.base_url):
+            if _origin(path) != _origin(self.base_url) and not self._sibling(path):
                 raise ConnectorError(f"refused to follow {method} to {urlsplit(path).hostname or '?'}: not the "
                                      f"connector's own host ({urlsplit(self.base_url).hostname})")
             url = path
@@ -243,6 +306,12 @@ class HttpTransport:
             if body.lstrip()[:1] == "<":         # a proxy, captive portal or SSO login page answering instead of the API
                 raise html_page_error(method, path, r.status_code, ctype)
         return Response(r.status_code, body, dict(r.headers))
+
+    def _sibling(self, url: str) -> bool:
+        """An https URL on one of the vendor's own hosts for this API (declared by the connector, never by data)."""
+        scheme, host, port = _origin(url)
+        return scheme == "https" and port == 443 and any(
+            host == h or (h.startswith(".") and host.endswith(h)) for h in self.sibling_hosts)
 
     def reauthenticate(self) -> None:
         self.auth.invalidate()

@@ -16,10 +16,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any
 
-import httpx
+import httpx  # noqa: F401 - kept importable here: tests patch httpx.post through this module
 
 from soc_platform.connectors.base import ConnectorError, LookupResult, Page
-from soc_platform.connectors.http import Auth, HttpTransport
+from soc_platform.connectors.http import Auth, HttpTransport, token_request
 from soc_platform.connectors.registry import ConfigField, ConnectorManifest
 from soc_platform.connectors.tools._common import ConnectorAction, ToolConnector, need, ok_lookup, parse_ts, sev_name
 from soc_platform.core.models import utcnow
@@ -62,10 +62,8 @@ class HecAuth(Auth):
 
     def apply(self, headers, params):
         if not self._tok or time.time() > self._exp:
-            r = httpx.post(f"{self.base}/auth/external", json={"clientId": self.client_id, "accessKey": self.access_key},
-                           timeout=30)
-            if r.status_code >= 400:
-                raise ConnectorError(f"Avanan auth failed {r.status_code}")
+            # unreachable / throttled / refused are connector errors (retried or explained), as for every sign-in
+            r = token_request(f"{self.base}/auth/external", json={"clientId": self.client_id, "accessKey": self.access_key})
             try:
                 tok = r.json()["data"]["token"]
             except (ValueError, KeyError, TypeError) as exc:      # an HTML page or another shape: say so, not KeyError

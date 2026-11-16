@@ -1,6 +1,6 @@
 # Test report - Agentic SOC platform
 
-Date: 2026-11-05 (rounds 15-33; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-11-16 (rounds 15-34; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,66 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 33 (2026-11-05) - latest results: rehearsing the live demo as written
+## 0. Round 34 (2026-11-15) - latest results: whole-system check and security audit
+
+Aim: confirm that everything works as intended, and audit the platform's security: gates, both test suites, the demo
+run on a scratch database and read, a running server probed, the security-relevant code read, the dependencies
+audited.
+
+**Method.** All quality gates; the full suite; `demo` on a fresh database and a real server on it (scheduler held
+back, no model): all 143 documented routes called without credentials, every GET as five roles and three
+domain-scoped sign-ins, unsigned / wrongly signed / revoked tokens, a no-MFA approval, out-of-scope reads and
+decisions, 35 hostile query and body values; every case, story, finding, the brief, the overview and the
+self-check read for sense; stored evidence, rationales and findings scanned for programming artefacts; the
+authentication, access, crypto, storage, upload, notification and API code read; `pip-audit` on the locks as CI
+runs it.
+
+**Held:** no route answered without credentials (the three public ones aside), no 5xx, no out-of-scope case, action,
+story, report or search result, forged and revoked tokens refused, approval without MFA refused, rate limit and
+body limit enforced, no path traversal on static files, no cross-origin access. Demo figures as documented (7 + 3
+cases, 37 approvals, 6 open vulnerabilities, 20 findings); self-check 14 of 14; audit chain intact.
+
+**Found and fixed:**
+
+| Defect | Seen as | Fix |
+|---|---|---|
+| A break-glass session could be signed with the configured hash alone | Code review: the session key was derived only from `SOC_BREAKGLASS_SHA256` | A session is recorded at the audited exchange and only a recorded one is honoured |
+| An analyst's ruling was free text | `"nonsense"` and 9,000 characters answered 200, closed the case and counted as "suspicious" in the statistics | One of the known words, normalised; bounded |
+| Database error text could be returned to the caller | Code review of `_err`: SQL and parameters in a 400 on PostgreSQL; a busy database answered 400 | Logged with the trace id; answered 400 / 503 / 409 without the text |
+| Separation of duties compared names as exact text | Code review: `Lena@` could approve what `lena@` proposed where the subject is an address | One case-insensitive comparison in all five places |
+| Free text without a length limit on eight request bodies | A 200,000-character question accepted; notes and rationales bounded only by the 30 MB body | Limits on every field |
+| Python values in evidence text | `standing admin role: False`, `internet-exposed=True` | "yes" / "no" on both evidence paths |
+| `server: uvicorn` on every answer | Response headers | Server header off |
+| A not-found message in quotes | `"\"unknown action type 'x'..."` | The message itself |
+| Dependencies with published advisories | `pip-audit` on the locks: Pillow, certifi, setuptools (platform); pyasn1, opentelemetry-api, soupsieve (engine image) | Upgraded; all three locks regenerated; `pip-audit` clean on the environment and every lock |
+
+**Production integration of the tools (same round).** No tenant was available, so the live code path was put on the
+wire instead: `test_live_wire.py` builds each connector exactly as the registry builds a live tool
+(`manifest.live_transport`), points its HTTP client at a local responder that answers from the fixtures, and requires
+every stream to read the same records as fake mode with credentials on every request (16 connectors that pull over
+the network; 38 look-ups of 16 tools were compared the same way by hand - the threat-intelligence sources could not be, their fixtures are addressed differently). Preflight: 21 of 21 ready on fixtures.
+
+| Defect (live path only - invisible in fake mode) | Fix |
+|---|---|
+| A sign-in that could not complete raised httpx's own error: a blocked `login.microsoftonline.com` read as "a defect in the connector" in the preflight and crashed code that degrades on `ConnectorError`; a throttled or failing identity provider was not retried; a proxy's page was a JSON error; the identity provider's reason was not shown | `token_request` / `token_from` (every OAuth tool and Avanan): unreachable and 5xx retried, 429 honours Retry-After, refused credentials say why (`invalid_client`, the AADSTS code), a page or an answer without a token says so |
+| With `arm_base` set (national clouds), Entra's Azure role look-ups were still addressed to the worldwide host and refused as another origin; Graph and ARM tokens were always requested for the worldwide audience and from the worldwide sign-in host | Calls, token audience and routing follow the configured base; `login_base` setting for the sign-in authority |
+| A Defender next link naming another Microsoft Defender host (regional or the older name) than the one called would be refused, stopping the sync at the first page boundary. Not confirmed against a tenant; Microsoft documents several hosts for one API | Next links are followed to Microsoft's Defender API hosts only (https, declared in code); any other host is still refused |
+
+**Not provable here:** a sign-in to the client's tenants, the permissions actually granted, real volumes and
+throttling. The preflight (`python -m soc_platform preflight --all`, or Integrations in the console) is what proves
+those on the day, per tool, before it leaves the Fixtures stage.
+
+**Counts (full re-run, 2026-11-16):** 26 tests were added (5 security, 21 in `test_live_wire.py`); 989 collected.
+SQLite: 970 passed, 18 skipped, 1 failed (42 min 1 s). PostgreSQL 16: 967 passed, 21 skipped, 1 failed (both suites
+at once). Engine suite: 205 passed, 2 skipped, on Pillow 13. The one failure was the same test on both and not a
+platform defect: `test_a_person_over_their_limit_gets_an_answer_without_the_model_and_is_told_why` recorded usage
+"3 hours ago" and expected it to count against today's limit, which counts from midnight UTC - so it failed whenever
+the suite ran between 00:00 and 03:00 UTC, as this run did. The test now freezes the clock at midday; its file was
+re-run in that same window on both databases (27 passed each). With it: 971 passing on SQLite, 968 on PostgreSQL.
+Before the round's changes, SQLite: 945 passed, 18 skipped, 0 failed. The browser tour and `verify_features.py` were
+not run in this round.
+
+## 0.0b Round 33 (2026-11-05): rehearsing the live demo as written
 
 Aim: run the demo exactly as `LIVE_DEMO_20MIN.md` says - reset, then serve, with the model on and the real scheduler running, on
 the calendar day (46 days past the sample data) - read every tab, make every click, and compare every figure with the scripts. The

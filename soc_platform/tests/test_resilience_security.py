@@ -194,3 +194,54 @@ def test_a_huge_retry_after_never_stalls_a_job():
 
     assert with_backoff(throttled, sleep=waits.append) == "ok"
     assert waits == [MAX_RETRY_AFTER, MAX_RETRY_AFTER]
+
+
+def test_an_analysts_ruling_is_one_of_the_known_words(session, analyst):
+    """The API stored whatever word it was sent as the ruling and closed the case: "nonsense" (or a typing error)
+    counted as "suspicious" in the agreement and noise statistics, which is enough to pause a tuning rule."""
+    from soc_platform.core.cases import ANALYST_VERDICTS, CaseService
+    from soc_platform.core.models import Disposition
+
+    cases = CaseService(session)
+    case = cases.create("incident", "Suspicious sign-in")
+    for bad in ("nonsense", "", "x" * 9000, "true positive"):
+        with pytest.raises(ValueError, match="unknown verdict"):
+            cases.decide(case.id, analyst, verdict=bad)
+    assert session.query(Disposition).count() == 0 and case.status != "closed"
+    d = cases.decide(case.id, analyst, verdict="  False_Positive ")          # as a person might type it
+    assert d.analyst_verdict == "false_positive" and case.status == "closed"
+    assert {"true_positive", "malicious", "suspicious", "false_positive", "benign"} <= ANALYST_VERDICTS   # the console's
+
+
+def test_a_database_error_is_never_echoed_to_the_caller():
+    """Routes turn a service's exception into an answer with its text. A database error's text is the SQL statement
+    and its parameters - on PostgreSQL an over-long value reached the caller that way, as a 400 that also hid a busy
+    database behind "bad request"."""
+    from sqlalchemy.exc import DataError, IntegrityError, OperationalError
+
+    from soc_platform.api.app import _err
+
+    sql, params = "INSERT INTO dispositions (id, analyst_verdict) VALUES (?, ?)", ("abc", "secret-looking-value")
+    for exc, status in ((DataError(sql, params, Exception("value too long")), 400),
+                        (OperationalError(sql, params, Exception("database is locked")), 503),
+                        (IntegrityError(sql, params, Exception("UNIQUE constraint failed")), 409)):
+        out = _err(exc)
+        assert out.status_code == status
+        assert "INSERT" not in str(out.detail) and "secret-looking-value" not in str(out.detail)
+    assert _err(KeyError("unknown case abc")).detail == "unknown case abc"   # the message, not its quoted repr
+
+
+def test_evidence_text_never_shows_a_python_value(session):
+    """Evidence is read by analysts and handed to the model: 'standing admin role: False' and 'internet-exposed=True'
+    reached the case screen as a connector's Python printed them."""
+    from soc_platform.core.cases import CaseService
+    from soc_platform.core.text import readable
+
+    assert readable("0 privileged session(s); standing admin role: False") == "0 privileged session(s); standing admin role: no"
+    assert readable("Wiz: 3 open finding(s); internet-exposed=True") == "Wiz: 3 open finding(s); internet-exposed=yes"
+    assert readable("signer=None; tags: ['a', 'b']; hits: []") == "signer=unknown; tags: a, b; hits: none"
+    assert readable("A True story about Mr False") == "A True story about Mr False"      # words, not flags
+    cases = CaseService(session)
+    case = cases.create("incident", "Suspicious sign-in")
+    ev = cases.add_evidence(case.id, source="wiz", dimension="cloud", summary="internet-exposed=True; owner=None")
+    assert ev.summary == "internet-exposed=yes; owner=unknown"

@@ -206,6 +206,39 @@ def test_break_glass_is_exchanged_for_a_short_session_and_guessing_is_throttled(
             acc.break_glass("sealed-envelope-secret", client="10.7.7.7", path="/x")
 
 
+def test_a_break_glass_session_nobody_issued_is_refused_even_when_well_signed():
+    """The session key is derived from the configured hash of the sealed secret - a value the platform's settings
+    hold. Whoever could read that setting could sign a lead + admin session without knowing the secret and without
+    the audited exchange. Only a session the platform recorded when it issued it is honoured."""
+    import time
+
+    import jwt as pyjwt
+
+    from soc_platform.core import access as accmod
+    from soc_platform.core.models import SystemFlag
+
+    db = _db()
+    st = _st(break_glass_sha256=hashlib.sha256(b"sealed-envelope-secret").hexdigest())
+    with db.session() as s:
+        acc = AccessService(s, st)
+        now = int(time.time())
+        key = accmod.hmac.new(st.break_glass_sha256.encode(), b"soc-break-glass-session", hashlib.sha256).digest()
+        forged = accmod.BREAK_GLASS_PREFIX + pyjwt.encode(
+            {"sub": "break-glass", "typ": "break_glass", "iat": now, "exp": now + 600, "jti": "a" * 32}, key,
+            algorithm="HS256")
+        with pytest.raises(PermissionError):
+            acc.break_glass_session(forged)
+        token, _ = acc.issue_break_glass_session()                 # the real exchange records its session
+        assert acc.break_glass_session(token).break_glass
+        issued = [f for f in s.query(SystemFlag).all() if f.name.startswith(accmod.BG_SESSION_PREFIX)]
+        assert len(issued) == 1
+        issued[0].value = {"exp": 1.0}                             # long expired: removed at the next exchange
+        s.flush()
+        acc.issue_break_glass_session()
+        names = [f.name for f in s.query(SystemFlag).all() if f.name.startswith(accmod.BG_SESSION_PREFIX)]
+        assert len(names) == 1 and names[0] != issued[0].name
+
+
 def test_kill_switch_is_durable_and_permissioned():
     db = _db()
     with db.session() as s:

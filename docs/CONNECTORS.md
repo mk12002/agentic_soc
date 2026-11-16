@@ -147,6 +147,7 @@ Alerts, device inventory, TVM vulnerabilities, advanced hunting, isolation, scan
   - `client_id` (secret): App registration (client) id
   - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
   - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
+  - `login_base` (optional): Sign-in authority (national clouds only; default https://login.microsoftonline.com)
   - `user_domain` (optional): UPN suffix for alert users
   - `mde_base` (optional): API base: https://api.security.microsoft.com (default) or a regional host such as https://eu.api.security.microsoft.com
 
@@ -163,6 +164,7 @@ On-premises Active Directory identity alerts and domain logon events (Defender X
   - `client_id` (secret): App registration (client) id
   - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
   - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
+  - `login_base` (optional): Sign-in authority (national clouds only; default https://login.microsoftonline.com)
   - `user_domain` (optional): UPN suffix for bare account names
   - `lookback_days` (optional): Days of logon events read on the first sync (default 7)
   - `hunting_page_size` (optional): Rows per advanced-hunting call (default 1000)
@@ -181,6 +183,7 @@ User-reported mail, email alerts, message trace & campaign hunting, click teleme
   - `client_id` (secret): App registration (client) id
   - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
   - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
+  - `login_base` (optional): Sign-in authority (national clouds only; default https://login.microsoftonline.com)
   - `reporting_mailbox`: Mailbox receiving user-reported messages / SOC mailbox
   - `graph_base` (optional): Microsoft Graph base (national clouds only)
 
@@ -230,6 +233,7 @@ Users, sign-ins, risky users and detections, directory and Azure roles, MFA, inb
   - `client_id` (secret): App registration (client) id
   - `client_secret` (secret) (optional): App registration secret (or use client_certificate)
   - `client_certificate` (secret) (optional): App registration certificate: one PEM with the private key and the certificate (recommended over a secret; mount it with <CONNECTOR>_CLIENT_CERTIFICATE_FILE)
+  - `login_base` (optional): Sign-in authority (national clouds only; default https://login.microsoftonline.com)
   - `azure_subscriptions` (optional): Azure subscription ids to read role assignments from (comma-separated; empty = every subscription the app can read)
   - `graph_base` (optional): Microsoft Graph base (national clouds only)
   - `arm_base` (optional): Azure Resource Manager base (national clouds only)

@@ -24,6 +24,6 @@ loguru>=0.7.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.1.1
 pyzbar>=0.1.9
-Pillow>=10.2.0
+Pillow>=13.0
 azure-ai-vision-imageanalysis>=1.0.0
 ppdeep>=20200505          # fuzzy hashing for campaign clustering (PH-T03)

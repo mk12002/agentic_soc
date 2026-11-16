@@ -985,7 +985,9 @@ changes no number, verdict or action; the test suite proves it on three estates.
   - They may hold only analyst, auditor or automation-admin roles.
 - **Break-glass:** `POST /api/v1/auth/break-glass` with the `X-Break-Glass` header exchanges the sealed secret for a
   15-minute HS256 session token (`bg.` prefix; key derived from the configured hash, so rotating the secret ends every
-  session; revocable by `jti`). The header is refused on every other route. Only the credential's SHA-256 is
+  session; revocable by `jti`). The session is recorded when it is issued (`bg_session:<jti>` in `system_flags`,
+  removed once expired) and only a recorded session is honoured: the configured hash alone cannot sign one. The
+  header is refused on every other route. Only the credential's SHA-256 is
   configured (`SOC_BREAKGLASS_SHA256`), compared in constant time. Every use and every failed attempt is audited, a
   use raises a critical insight, and five failures per address in 15 minutes (per process) are then refused unseen.
 - **Revocation:** per token (`jti`, used by logout) and per principal (`not_before`, "revoke all sessions").
