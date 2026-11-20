@@ -111,7 +111,7 @@ AI gathers and explains, code computes every figure and verdict, and a person ap
 - 13 correlation rules plus 4 operational alerts
 - 26 action types in the catalogue
 - 5 roles
-- 17 report data sources and 7 standard reports
+- 18 report data sources and 7 standard reports
 - 56 ATT&CK techniques in the coverage model
 - 11 scheduled jobs
 - 14 self-checks
@@ -1281,8 +1281,8 @@ changes.
   - It applies to **every** Word report and deck - standard, described in words, scheduled - and the audit trail
     report.
 
-### The 17 data sources
-SOC overview, vulnerability posture, top vulnerabilities, cloud misconfigurations, reported phishing, supplier e-mail
+### The 18 data sources
+SOC overview, Dome Score, vulnerability posture, top vulnerabilities, cloud misconfigurations, reported phishing, supplier e-mail
 risk, incidents, attack stories, incident narrative, correlated findings, highest-risk users and hosts, detection
 coverage, shadow IT, control evidence, verdict quality, integration health, value scorecard.
 

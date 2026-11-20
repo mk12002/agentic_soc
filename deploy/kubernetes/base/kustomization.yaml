@@ -1,4 +1,4 @@
-# Agentic SOC platform - Kubernetes base (no single point of failure in the application tier).
+# CyberDome - Kubernetes base (no single point of failure in the application tier).
 # Render:  kubectl kustomize deploy/kubernetes/overlays/azure   (or overlays/onprem)
 # Apply:   kubectl apply -k deploy/kubernetes/overlays/<azure|onprem>
 # Before applying: create the secrets (docs/HIGH_AVAILABILITY.md section 4) and set the image in the overlay.

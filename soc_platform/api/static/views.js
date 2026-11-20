@@ -1,4 +1,4 @@
-// Agentic SOC console - pages. Each view renders into #main; every figure comes from the API.
+// CyberDome console - pages. Each view renders into #main; every figure comes from the API.
 'use strict';
 
 const dot = k => `<span class="dot-i ${esc(k)}"></span>`;
@@ -27,15 +27,16 @@ function showMore(id) {
 // ================================================================= Overview
 async function Overview() {
   const __g = GEN;
-  const [o, conns, dr, top, val] = await Promise.all([api('/api/v1/dashboard/overview?days=14'), api('/api/v1/dashboard/connectors'),
+  const [o, conns, dr, top, val, dome] = await Promise.all([api('/api/v1/dashboard/overview?days=14'), api('/api/v1/dashboard/connectors'),
     api('/api/v1/metrics/drift'), inDomain('*') ? api('/api/v1/intelligence/risk/top?limit=6') : Promise.resolve([]),
-    api('/api/v1/value/scorecard?days=30')]);
+    api('/api/v1/value/scorecard?days=30'), inDomain('*') ? api('/api/v1/dome-score') : Promise.resolve(null)]);
   const c = o.cases, a = o.actions, vm = o.vulnerability || {}, ctx = o.context;
   const bad = conns.filter(x => x.enabled && ['error', 'stale', 'misconfigured'].includes(x.state));
   const perf = o.performance.investigation_enrichment_ms;
   setMainG(__g, page('Overview', `Last ${o.window_days} days across phishing, incidents and vulnerabilities. Every figure is computed from stored records.`,
     btn('Refresh', 'refreshPage', [], 'ghost', 'refresh'),
     `<div class="grid g-kpi">
+      ${dome ? kpi('Dome Score', dome.score == null ? '–' : dome.score, `${esc(DOME_BAND[dome.band] || dome.band)} · <a href="#/dome-score">Pillars and weights</a>`, dome.band === 'weak') : ''}
       ${kpi('Open cases', nf(c.open), Object.entries(c.open_by_domain).map(([k, v]) => `${esc(cap(k))} ${v}`).join(' · ') || 'none')}
       ${kpi('Awaiting approval', nf(a.pending_approval), `<a href="#/approvals">Review queue</a>`, a.pending_approval > 0)}
       ${kpi('Automation rate', pct(a.automation_rate_pct / 100, 1), `${nf(a.autonomous)} of ${nf(a.in_window)} actions ran under policy`)}
@@ -1007,7 +1008,7 @@ function styleCard(rs) {
     ${card('What every report looks like', `<p class="small muted" style="margin-top:0">Applied to every Word report and PowerPoint deck - standard, described and scheduled - and the audit trail report. Figures and citations never change; only the look and, for model-written text, the wording.</p>
       ${part('word', 'Word template')}${part('deck', 'PowerPoint template (16:9)')}${part('logo', 'Logo')}
       <div class="list-row"><div class="grow"><div class="t-title">Writing guide</div><div class="t-sub">${S.guide ? `${nf(S.guide.length)} characters - used when the model writes report narrative` : 'none - the model writes in plain report English'}</div></div>${manage && S.guide ? btn('Remove', 'styleRemove', ['guide'], 'sm ghost') : ''}</div>
-      <div class="list-row"><div class="grow"><div class="t-title">Brand</div><div class="t-sub">${esc(S.organisation || 'Agentic SOC')} · ${sw(S.primary)} ${sw(S.accent)} · ${esc(S.font)} · ${esc(S.classification)}</div></div></div>
+      <div class="list-row"><div class="grow"><div class="t-title">Brand</div><div class="t-sub">${esc(S.organisation || 'CyberDome')} · ${sw(S.primary)} ${sw(S.accent)} · ${esc(S.font)} · ${esc(S.classification)}</div></div></div>
       <div class="inline mt" style="gap:8px;flex-wrap:wrap">${btn('Preview in Word', 'dl', ['/api/v1/reports/style/preview?format=docx'], '', 'download')}${btn('Preview as slides', 'dl', ['/api/v1/reports/style/preview?format=pptx'], '', 'download')}${manage && rs.custom ? btn('Back to the house style', 'styleReset', [], 'ghost') : ''}</div>`,
       {sub: rs.version ? `version ${esc(rs.version)}` : 'house style'})}
     ${manage ? card('Customise', `<div class="stack" style="gap:10px">
@@ -1016,7 +1017,7 @@ function styleCard(rs) {
       <div class="inline" style="gap:8px">${btn('Upload', 'styleUpload', [], 'primary')}<span class="small muted">Checked before use: macros, document-type declarations and oversized files are refused; a deck template must be 16:9.</span></div>
       <div id="st-out"></div>
       <div class="grid g-2" style="gap:10px">
-        <div class="stack" style="gap:4px">${field('st-org', 'Organisation name (header and footer)', S.organisation, 'Agentic SOC', ' maxlength="80"')}</div>
+        <div class="stack" style="gap:4px">${field('st-org', 'Organisation name (header and footer)', S.organisation, 'CyberDome', ' maxlength="80"')}</div>
         <div class="stack" style="gap:4px">${field('st-cls', 'Classification line', S.classification, '', ' maxlength="80"')}</div>
         <div class="stack" style="gap:4px">${field('st-pri', 'Primary colour (hex)', S.primary, '1F2A44', ' maxlength="7"')}</div>
         <div class="stack" style="gap:4px">${field('st-acc', 'Accent colour (hex)', S.accent, '2563EB', ' maxlength="7"')}</div>
@@ -1594,10 +1595,105 @@ async function approveBundle(id) {
   refreshStatus(); Story(id);
 }
 
+// ================================================================= Dome Score
+// CyberDome's posture figure (intelligence/dome_score.py). The server computes every pillar and the weighted score;
+// moving a weight asks the server for a preview, and nothing changes for anyone until a lead saves the weights.
+const DOME_BAND = {strong: 'Strong', fair: 'Fair', weak: 'Weak', 'no data': 'No data yet'};
+const postureColor = v => v == null ? 'var(--c-other)' : v >= 80 ? 'var(--c-low)' : v >= 60 ? 'var(--c-high)' : 'var(--c-critical)';
+const pbar = v => `<div class="pbar" aria-hidden="true"><span style="width:${v == null ? 0 : Math.max(2, v)}%;background:${postureColor(v)}"></span></div>`;
+function domeRing(score) {
+  const r = 52, c = 66, C = 2 * Math.PI * r, v = score == null ? 0 : score;
+  return `<svg class="dome-ring" width="132" height="132" viewBox="0 0 132 132" role="img" aria-label="Dome Score ${score == null ? 'not available' : score + ' of 100'}">
+    <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke-width="12" style="stroke:var(--surface-3)"/>
+    <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke-width="12" stroke-linecap="round" stroke-dasharray="${v / 100 * C} ${C}" transform="rotate(-90 ${c} ${c})" style="stroke:${postureColor(score)}"/>
+    <text x="${c}" y="${c + 8}" text-anchor="middle" class="num">${score == null ? '–' : score}</text><text x="${c}" y="${c + 26}" text-anchor="middle" class="of">of 100</text></svg>`;
+}
+let DOME = null, DOME_SEQ = 0, DOME_T = null;
+async function DomeScore() {
+  const __g = GEN;
+  const [d, h] = await Promise.all([api('/api/v1/dome-score'), api('/api/v1/dome-score/history')]);
+  DOME = d;
+  const names = Object.fromEntries(d.pillars.map(p => [p.key, p.name]));
+  const v = d.weights_version;
+  const counted = d.pillars.filter(p => p.counted).length;
+  const hero = `<div class="dome-hero">${domeRing(d.score)}<div class="stack" style="gap:6px">
+      <div class="dome-band ${esc(d.band.replace(' ', '-'))}">${esc(DOME_BAND[d.band] || d.band)}</div>
+      <div class="small muted">${counted} of ${d.pillars.length} pillars counted · strong from ${d.bands.strong}, fair from ${d.bands.fair}</div>
+      <div class="small muted">${v ? `Weights set by ${esc(v.set_by)} on ${esc(dt(v.created_at))} UTC${v.note ? ` - ${esc(v.note)}` : ''}` : 'Default weights (no lead has changed them)'}</div>
+      <div class="small muted">Computed ${esc(dt(d.generated_at))} UTC. No figure on this page is written by AI.</div></div></div>`;
+  const rows = d.pillars.map(p => `<tr><td><div class="t-title"><a href="${esc(p.link)}">${esc(p.name)}</a></div><div class="t-sub">${esc(p.module)}</div></td>
+    <td><div class="inline" style="gap:10px">${pbar(p.score)}<span class="score">${p.score == null ? '–' : p.score}</span></div></td>
+    <td><div>${esc(p.detail)}</div><div class="t-sub">${esc(p.formula)}</div></td>
+    <td class="num">${nf(p.weight)}</td><td class="num">${p.counted ? nf(p.share_pct) + ' %' : '<span class="muted">not counted</span>'}</td>
+    <td class="num strong">${p.counted ? p.contribution.toFixed(1) : '–'}</td></tr>`);
+  const pillars = table(['Pillar', 'Score', 'What it counts', {h: 'Weight', num: true}, {h: 'Counts for', num: true}, {h: 'Points', num: true}], rows)
+    + `<div class="small muted" style="padding:10px 16px">Points are each pillar's share of the score (shown to one decimal); they add up to ${d.score == null ? 'the score' : d.score}. A pillar with no data is left out and the others share its weight.</div>`;
+  const lead = can('approve_policy');
+  const wrows = d.pillars.map(p => `<div><div class="t-title">${esc(p.name)}</div><div class="t-sub">${esc(p.module)}</div></div>
+    <div class="slider"><input type="range" min="0" max="100" step="1" value="${p.weight}" id="dw-${esc(p.key)}" data-input="domeWeight" data-key="${esc(p.key)}" aria-label="${esc(p.name)} weight"></div>
+    <input class="input" type="number" min="0" max="100" step="1" value="${p.weight}" id="dn-${esc(p.key)}" data-input="domeWeight" data-key="${esc(p.key)}" aria-label="${esc(p.name)} weight value">
+    <div class="share small muted num" id="ds-${esc(p.key)}">${p.counted ? nf(p.share_pct) + ' %' : '–'}</div>`).join('');
+  const weights = `<div class="wgrid"><div class="hd">Pillar</div><div class="hd slider">Weight</div><div class="hd">0-100</div><div class="hd share">Share</div>${wrows}</div>
+    <div class="dome-preview mt" id="dome-preview" aria-live="polite">Score with these weights: <b>${d.score == null ? '–' : d.score}</b> <span class="muted">(the weights in force)</span></div>
+    ${lead ? `<div class="inline mt" style="gap:8px;flex-wrap:wrap"><input class="input" id="dome-note" maxlength="2000" style="flex:1;min-width:220px" placeholder="Why the weights change (kept in the audit log)" aria-label="Reason for the change">
+      ${btn('Save weights', 'saveDomeWeights', [], 'primary')}</div>` : ''}
+    <div class="inline mt" style="gap:8px;flex-wrap:wrap">${btn('Undo changes', 'resetDomeWeights', ['current'], 'ghost sm')}${btn('Default weights', 'resetDomeWeights', ['default'], 'ghost sm')}</div>
+    ${lead ? '' : '<div class="small muted mt">Only a lead can save weights for everyone; you can try weights here and nothing is saved.</div>'}`;
+  const how = `<p style="margin-top:0">${esc(d.formula)}</p>
+    <dl class="kv"><dt>Strong</dt><dd>${d.bands.strong} and above</dd><dt>Fair</dt><dd>${d.bands.fair} to ${d.bands.strong - 1}</dd><dt>Weak</dt><dd>below ${d.bands.fair}</dd></dl>
+    <p class="small muted">Weights decide how much each pillar counts; they never change a pillar's own figure. Each pillar is computed by the platform from the records behind its link, so anyone can recompute the score from this page. Every change of weights is versioned and written to the audit log.</p>`;
+  const wsum = w => Object.entries(w).filter(([, x]) => x > 0).map(([k, x]) => `${esc(names[k] || k)} ${x}`).join(' · ');
+  const hist = h.versions.length ? h.versions.map(x => `<div class="list-row"><div class="grow"><div class="t-title">${esc(dt(x.created_at))} UTC · ${esc(x.set_by)}</div>
+      <div class="t-sub">${wsum(x.weights)}${x.note ? ` - ${esc(x.note)}` : ''}</div></div></div>`).join('')
+    : empty(`No changes yet. Default weights: ${Object.entries(h.default_weights).map(([k, x]) => `${names[k] || k} ${x}`).join(' · ')}.`);
+  setMainG(__g, page('Dome Score', "One posture figure for the whole estate: eight pillars, each computed from your tools' records, combined by weights your security leads choose. Every pillar links to its records.",
+    btn('Refresh', 'refreshPage', [], 'ghost', 'refresh'),
+    `${card('', hero)}
+    <div class="mt">${card('Pillars', pillars, {sub: 'each from 0 to 100, computed by the platform', flush: true})}</div>
+    <div class="grid g-2 mt">${card('Weights', weights, {sub: lead ? 'try weights, then save them for everyone' : 'try other weights'})}${card('How the score is made', how)}</div>
+    <div class="mt">${card('Weight history', hist, {sub: 'newest first'})}</div>`));
+}
+function domeInputs() {
+  return Object.fromEntries((DOME ? DOME.pillars : []).map(p => {
+    const el = document.getElementById('dn-' + p.key);
+    return [p.key, Math.max(0, Math.min(100, Math.round(Number(el && el.value) || 0)))];
+  }));
+}
+function domeWeight(el) {
+  const k = el.dataset.key;
+  const v = Math.max(0, Math.min(100, Math.round(Number(el.value) || 0)));
+  ['dw-', 'dn-'].forEach(pre => { const x = document.getElementById(pre + k); if (x && x !== el) x.value = v; });
+  clearTimeout(DOME_T);
+  DOME_T = setTimeout(domePreview, 250);
+}
+async function domePreview() {
+  const box = document.getElementById('dome-preview'); if (!box || !DOME) return;
+  const w = domeInputs();
+  if (!Object.values(w).some(x => x > 0)) { box.innerHTML = 'At least one pillar needs a weight above 0.'; return; }
+  const seq = ++DOME_SEQ;
+  const r = await post('/api/v1/dome-score/preview', {weights: w});
+  if (seq !== DOME_SEQ || !document.getElementById('dome-preview')) return;     // a newer preview is on its way
+  const diff = r.score == null || DOME.score == null ? '' : r.score - DOME.score;
+  box.innerHTML = `Score with these weights: <b>${r.score == null ? '–' : r.score}</b> <span class="muted">(${diff === '' ? 'no data' : diff === 0 ? 'same as now' : (diff > 0 ? '+' : '') + diff + ' against ' + DOME.score + ' now'}; not saved)</span>`;
+  r.pillars.forEach(p => { const s = document.getElementById('ds-' + p.key); if (s) s.textContent = p.counted ? nf(p.share_pct) + ' %' : '–'; });
+}
+function resetDomeWeights(which) {
+  if (!DOME) return;
+  const src = which === 'default' ? DOME.default_weights : DOME.weights;
+  Object.entries(src).forEach(([k, v]) => ['dw-', 'dn-'].forEach(pre => { const x = document.getElementById(pre + k); if (x) x.value = v; }));
+  domePreview();
+}
+async function saveDomeWeights() {
+  const note = (($('#dome-note') || {}).value || '').trim();
+  const r = await api('/api/v1/dome-score/weights', {method: 'PUT', body: JSON.stringify({weights: domeInputs(), note})});
+  toast(`Weights saved. Dome Score ${r.score == null ? 'has no data yet' : 'is now ' + r.score}.`);
+  DomeScore();
+}
+
 // ================================================================= registry
-window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
+window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, 'dome-score': DomeScore, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit, watchlists: Watchlists, tuning: Tuning};
-Object.assign(ALLOWED, {saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {domeWeight, resetDomeWeights, saveDomeWeights, saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, ownUpload, ownClear, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
   rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, tuneDraft, tuneBlank, tuneSuggest, tunePreview, tunePropose, tuneDecide, tuneAutoclose, tuneActSuggest, styleUpload, styleSave, styleRemove, styleReset});

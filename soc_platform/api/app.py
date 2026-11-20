@@ -84,7 +84,7 @@ async def _lifespan(_app: FastAPI):
         event("server.stop", pid=__import__("os").getpid(), access_log_dropped=ACCESS_LOG.dropped)
 
 
-app = FastAPI(title="Agentic SOC Platform", version=__version__, lifespan=_lifespan,
+app = FastAPI(title="CyberDome", version=__version__, lifespan=_lifespan,
               docs_url=None if _PROD else "/docs", redoc_url=None, openapi_url=None if _PROD else "/openapi.json")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -2808,6 +2808,57 @@ def dash_attack(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db
     from soc_platform.intelligence.attack_coverage import coverage
 
     return coverage(s, registry().enabled_names())
+
+
+# ----------------------------------------------------------------------------- Dome Score (posture)
+class DomeWeightsBody(BaseModel):
+    weights: dict[str, int] = Field(max_length=32)
+    note: str = Field(default="", max_length=2000)
+
+
+class DomePreviewBody(BaseModel):
+    weights: dict[str, int] = Field(max_length=32)
+
+
+@app.get("/api/v1/dome-score")
+def dome_score_get(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
+    """The organisation's posture (0-100): eight pillars computed from the records, combined by the weights in force.
+    Spans every domain, so it needs all-domain access."""
+    from soc_platform.intelligence.dome_score import dome_score
+
+    return dome_score(s, registry())
+
+
+@app.post("/api/v1/dome-score/preview")
+def dome_score_preview(body: DomePreviewBody, _: Principal = Depends(need(Perm.READ, "*")),
+                       s: Session = Depends(db_session, scope="function")):
+    """What the score would be with other weights. Nothing is saved."""
+    from soc_platform.intelligence.dome_score import dome_score
+
+    try:
+        return dome_score(s, registry(), body.weights)
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+@app.put("/api/v1/dome-score/weights")
+def dome_score_set(body: DomeWeightsBody, p: Principal = Depends(need(Perm.APPROVE_POLICY, "*")),
+                   s: Session = Depends(db_session, scope="function")):
+    """Set how much each pillar counts (a lead; versioned and audited; in force at once)."""
+    from soc_platform.intelligence.dome_score import WeightStore, dome_score
+
+    try:
+        WeightStore(s).save(body.weights, p, body.note)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return dome_score(s, registry())
+
+
+@app.get("/api/v1/dome-score/history")
+def dome_score_history(_: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
+    from soc_platform.intelligence.dome_score import DEFAULT_WEIGHTS, WeightStore
+
+    return {"versions": WeightStore(s).history(), "default_weights": dict(DEFAULT_WEIGHTS)}
 
 
 @app.get("/api/v1/dashboard/shadow-it")

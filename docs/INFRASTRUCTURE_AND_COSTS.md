@@ -211,8 +211,8 @@ A daily retention job applies these in batches; its report and audit entry say h
 | Value scorecard | 8 benefit KPIs against the organisation's baseline | computed from case, action and finding timestamps | live |
 | Daily exposure report (Word) | what needs action today, changes in 24 h, team standing, ageing, coverage | the same queries as the screens | daily at the configured time |
 | Weekly VM report (Word), weekly management deck (PowerPoint) | team SLA compliance, campaigns, exceptions; the week in numbers to the decisions needed | same | weekly |
-| Board monthly (PowerPoint), CISO weekly, phishing monthly, compliance quarterly, post-incident | standard leadership reports, each with charts and the value scorecard | 17 data sources computed in code | scheduled or on demand |
-| Reports described in words | any combination of the 17 sources, planned by the LLM from a request ("a slide pack for the CISO on phishing and supplier risk this month") | the LLM chooses sections and writes narrative; **every figure from code**, each sentence cites it | on demand |
+| Board monthly (PowerPoint), CISO weekly, phishing monthly, compliance quarterly, post-incident | standard leadership reports, each with charts and the value scorecard | 18 data sources computed in code | scheduled or on demand |
+| Reports described in words | any combination of the 18 sources, planned by the LLM from a request ("a slide pack for the CISO on phishing and supplier risk this month") | the LLM chooses sections and writes narrative; **every figure from code**, each sentence cites it | on demand |
 
 Live-data behaviour is tested, not assumed: every screen and report is checked against the API figure-for-figure,
 on four different organisations including a messy one 20 times the demo; a browser tour audits every screen at four

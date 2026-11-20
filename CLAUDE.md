@@ -1,4 +1,4 @@
-# CLAUDE.md - working on the Agentic SOC platform
+# CLAUDE.md - working on the CyberDome platform
 
 Context for anyone (human or AI) changing this repository. Read the **Hard rules** first: they are not negotiable.
 Deep detail lives in `docs/`; this file tells you what the project is, how it is put together, how to run and test
@@ -37,7 +37,7 @@ it, the conventions the code relies on, and the traps that have already cost tim
 
 ## 2. What this project is
 
-An **agentic SOC platform**: one investigation and automation layer over an organisation's existing security tools.
+**CyberDome**, an **agentic SOC platform**: one investigation and automation layer over an organisation's existing security tools.
 
 - **21 connectors** pull from EDR (CrowdStrike, Defender for Endpoint), e-mail security (Defender for Office 365,
   Avanan), identity (Entra ID, Defender for Identity), DNS (Umbrella), deception (Canary), PAM (Delinea Secret Server / Privilege Manager),
@@ -49,6 +49,9 @@ An **agentic SOC platform**: one investigation and automation layer over an orga
   - **Incident** - alerts → clusters → parallel enrichment → deterministic severity → MITRE → recommended actions.
   - **Vulnerability** - 4 scanners → one finding per host+CVE → priority (CVSS/EPSS/KEV/exposure/criticality) →
     owner → campaign → validated fix; cloud misconfigurations share the lifecycle.
+- **Dome Score**: one posture figure (0-100) from eight pillars computed in code (identity, endpoint, vulnerability
+  exposure, cloud posture, email, response, detection coverage, tool health), combined by weights a lead sets
+  (previewed, versioned, audited). Menu groups follow the CyberDome modules (Dome Agents / Graph / Connect / Comply).
 - An **intelligence layer** correlates across domains: explainable risk per user/host, 13 correlation rules, the
   **attack story** (cross-tool kill-chain reconstruction), optional LLM deep analysis, analyst Q&A, situation brief,
   ATT&CK coverage, shadow IT, drift monitoring, and a report builder (Word/PowerPoint).
@@ -169,6 +172,8 @@ soc_platform/
   connectors/registry.py discovery (tools/*.py MANIFEST or entry points), ConnectorRegistry (isolation of unusable
                          connectors, stages, StagedAction cap), ConfigField (secret, required, kind)
   connectors/config_schema.py  strict config checking (Problem with fix, "did you mean"), stages, YAML line errors
+  connectors/health.py   connector_freshness / HEALTHY_STATES: tool health, one definition (Integrations, Dome Score,
+                         connector report); api/dashboards re-exports it
   connectors/preflight.py      run_preflight: config, start-up, sign-in, every stream (permission, parsing,
                          freshness, clock, volume), write scopes - each failure with its fix
   connectors/devkit.py   `connector new` scaffold + `connector check`
@@ -219,14 +224,15 @@ soc_platform/
   domains/phishing/      service.py (pipeline), models.py, supplier.py, agents/{decompose,analyzer,investigation}.py, engine/
   domains/incident/service.py
   domains/vulnerability/ service.py, misconfig.py, models.py
-  intelligence/          risk.py, correlation.py, story.py, deep_analysis.py, analyst.py, attack_coverage.py, shadow_it.py, drift.py
+  intelligence/          dome_score.py (Dome Score: PILLARS, DEFAULT_WEIGHTS, WeightStore - lead only, audited;
+                         combine() is pure arithmetic over the pillar scores shown), risk.py, correlation.py, story.py, deep_analysis.py, analyst.py, attack_coverage.py, shadow_it.py, drift.py
   llm/gateway.py         LLMGateway, providers, grounding, numeric guardrail, breaker, timeouts, llm_concurrency();
                          enforces the usage policy (refusal -> BudgetExceeded / UserLimitExceeded, gateway.notice)
   llm/usage_policy.py    AI usage policy (budgets, per-person limits, per-feature tier / answer cap / on-off), its
                          store (admin-only, versioned, audited) and usage_report (cost, quality, tier advice)
   llm/redaction.py       pseudonymisation before any prompt leaves; restore after
   llm/providers/         openai_compatible (also azure_foundry), anthropic_provider
-  reporting/             builder.py (17 sources, 7 standard reports, planner), reports.py, compliance.py,
+  reporting/             builder.py (18 sources, 7 standard reports, planner), reports.py, compliance.py,
                          style.py (the organisation's report style: templates, logo, brand, writing guide; uploads
                          validated; use_style() sets design.STYLE around every render - render inside it),
                          value.py (value scorecard: benefit KPIs vs baseline / target; ValueInput in models.py),
@@ -434,6 +440,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `test_live_wire.py` (every connector built as a live tool - `manifest.live_transport`, real `HttpTransport`, real
   sign-in code - answered over HTTP from the fixtures: same records as fake mode, credentials on every request; a
   sign-in that cannot complete is a connector error; next links only to the tool's own hosts),
+  `test_dome_score.py` (each pillar is the published count, weighted average of the scores shown, weights never
+  change a pillar, validation, lead-only + audited + versioned, a broken pillar left out, preview saves nothing, API),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
 - **Comparing two runs figure-for-figure**: freeze the clock (`frozen_clock` fixture sets `SOC_CLOCK_FREEZE`) - risk
   decays with time, so a slower run otherwise rounds differently.
@@ -726,6 +734,12 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   inspect`, never by guessing.
 - **The scheduler container has no HTTP server**: it needs the liveness-file health check, not the image's HTTP one
   (Compose had it unhealthy for ever).
+- **The product is CyberDome; identifiers keep their names.** The package (`soc_platform`), the `SOC_*` settings, the
+  Kubernetes namespace (`agentic-soc`) and the database tables were not renamed: renaming them breaks deployments and
+  stored data. User-visible text says CyberDome.
+- **The Dome Score's weights only combine pillars.** A pillar's own figure must never depend on a weight, and a new
+  pillar needs a published formula, a link to its records and a default weight (`DEFAULT_WEIGHTS`); old weight rows
+  get the default for it (`_full`).
 - **Patch files, not heredocs, for multi-line edits** - the Bash tool also mangled quotes in long Python heredocs
   (`unexpected EOF`); the Write tool + a `.py` patch is reliable. The Write tool drops trailing spaces, so a patch
   whose search text ends in a space will not match.

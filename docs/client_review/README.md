@@ -1,11 +1,11 @@
-# Agentic SOC platform - security and architecture review pack
+# CyberDome platform - security and architecture review pack
 
 | | |
 |---|---|
 | **Version** | 1.0 - 2026-10-10 |
 | **Status** | For review by the organisation's security, architecture and risk teams |
 | **Classification** | Confidential - prepared for the organisation's review |
-| **Scope** | The Agentic SOC platform as it would run in the organisation's environment: architecture, integrations, data, AI, governance, deployment and validation |
+| **Scope** | The CyberDome platform as it would run in the organisation's environment: architecture, integrations, data, AI, governance, deployment and validation |
 
 ## What the platform is, in one paragraph
 

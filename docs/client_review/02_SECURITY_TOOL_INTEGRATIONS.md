@@ -2,13 +2,13 @@
 
 | | |
 |---|---|
-| **Document** | Security tool integrations - Agentic SOC platform |
+| **Document** | Security tool integrations - CyberDome platform |
 | **Version** | 1.0 - 2026-10-10 |
 | **Audience** | Security engineering, identity and access management, tool owners |
 
 ## About the platform
 
-The Agentic SOC platform is an investigation and automation layer that runs inside the organisation's own environment,
+The CyberDome platform is an investigation and automation layer that runs inside the organisation's own environment,
 on top of the security tools it already owns (EDR, e-mail security, identity, DNS, deception, privileged access,
 vulnerability scanners, cloud posture, ITSM / CMDB, SIEM). It reads from those tools through their APIs, resolves every
 record to one host or one person, and runs three workflows - reported phishing, incident management and

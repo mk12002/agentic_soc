@@ -122,6 +122,7 @@ class Database:
         from soc_platform.core import watchlists as _watch  # noqa: F401
         from soc_platform.domains.phishing import models as _ph  # noqa: F401
         from soc_platform.domains.vulnerability import models as _vm  # noqa: F401
+        from soc_platform.intelligence import dome_score as _dome  # noqa: F401
         from soc_platform.intelligence import models as _intel  # noqa: F401
         from soc_platform.llm import usage_policy as _llm_policy  # noqa: F401
         from soc_platform.reporting import models as _rep  # noqa: F401

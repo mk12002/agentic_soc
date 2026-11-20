@@ -62,7 +62,7 @@ def classification() -> str:
 
 def brand() -> str:
     """The name in every running header and slide footer: the organisation's, else the platform's."""
-    return _style().get("organisation") or "Agentic SOC"
+    return _style().get("organisation") or "CyberDome"
 
 
 def footer_text() -> str:

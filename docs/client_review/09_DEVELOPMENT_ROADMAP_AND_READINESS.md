@@ -2,13 +2,13 @@
 
 | | |
 |---|---|
-| **Document** | Development roadmap and readiness - Agentic SOC platform |
+| **Document** | Development roadmap and readiness - CyberDome platform |
 | **Version** | 1.0 - 2026-10-13 |
 | **Audience** | Customer presentation: security leadership, SOC, project sponsors |
 
 ## About the platform
 
-The Agentic SOC platform is a planned investigation and automation layer that runs inside the organisation's own
+The CyberDome platform is a planned investigation and automation layer that runs inside the organisation's own
 environment, on top of the security tools it already owns, covering phishing investigation, incident management and
 vulnerability management. It recommends actions; **a person approves them**.
 

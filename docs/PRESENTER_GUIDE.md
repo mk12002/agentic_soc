@@ -1,6 +1,6 @@
 # Presenter guide - explaining, demonstrating and defending the platform
 
-This is the briefing to read before presenting the Agentic SOC platform. It covers what to say, what to click,
+This is the briefing to read before presenting the CyberDome platform. It covers what to say, what to click,
 what to point at, how each result is produced, how to justify every design decision, the hard questions you will
 get (with answers), and the limits you should state before anyone else does.
 
@@ -305,7 +305,7 @@ look-alike of your own domain."
 **Click:** Reports. Show the gallery of seven standard reports. Type *"A one-page board brief on phishing and
 supplier risk this quarter, as slides"* → **Plan report** → review → **Generate** → download the PowerPoint.
 **Say:** "Standard reports are preconfigured. Anything else can be asked for in words. The system plans sections
-only from a catalogue of 17 data sources, shows you the plan first, computes every figure in code, and has the
+only from a catalogue of 18 data sources, shows you the plan first, computes every figure in code, and has the
 model write the narrative from those figures. A sentence that doesn't cite a figure - or states a number that
 isn't in its figures - is removed."
 **Point at:**
@@ -518,7 +518,7 @@ Operational alerts:
 
 ### 6.8 Reports
 
-- **Catalogue:** 17 data sources computed in code: overview, vulnerability posture, top vulnerabilities, cloud
+- **Catalogue:** 18 data sources computed in code: overview, Dome Score, vulnerability posture, top vulnerabilities, cloud
   misconfigurations, phishing, supplier risk, incidents, attack stories, incident narrative, correlated findings,
   risk, detection coverage, shadow IT, compliance, verdict quality, integration health, value scorecard.
 - **Standard reports (7):** board monthly (PowerPoint), CISO weekly, VM weekly, phishing monthly, post-incident
@@ -785,6 +785,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Question | Answer |
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
+| How is the Dome Score worked out, and can we change it? | Eight pillars, each computed from the records and shown with its count (identity, endpoint, vulnerability exposure, cloud posture, email, response, detection coverage, tool health). The score is the weighted average of the pillar scores shown, so anyone can recompute it from the screen. The weights are yours: move a slider to preview the result (nothing is saved), and a lead saves them with a reason; every version is kept and audited. A weight changes how much a pillar counts, never the pillar's own figure, and no figure on that screen comes from AI. |
 | How was it tested? | See §16. In short: 971 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |

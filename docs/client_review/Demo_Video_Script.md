@@ -1,4 +1,4 @@
-# Demo video script - Agentic SOC platform
+# Demo video script - CyberDome platform
 
 A screen recording with voice-over for a client audience: security leadership, SOC leads and analysts, and the
 architects who will review it. It shows **every screen**, and for each one explains **what the feature does, how it
@@ -72,7 +72,7 @@ correlation, score, severity and recommendation was computed by the platform fro
 > then identity, then DNS, then a ticket - the same person, host and address looked up five times under five names,
 > and the conclusion written by hand at the end.
 >
-> The Agentic SOC platform is one investigation and automation layer over the tools you already own. It does not
+> The CyberDome platform is one investigation and automation layer over the tools you already own. It does not
 > replace them. It connects to twenty-one of them - email security, EDR, identity, DNS, deception, privileged access,
 > vulnerability scanners, threat intelligence, ITSM and SIEM - and does the gathering for the analyst.
 >

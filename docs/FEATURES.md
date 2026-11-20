@@ -1,4 +1,4 @@
-# Agentic SOC - features
+# CyberDome - features
 
 An AI-assisted investigation and automation layer for a Security Operations Centre. One platform serves three
 workflows - **phishing / reported email**, **incident management** and **vulnerability management** - over a shared,
@@ -33,9 +33,12 @@ Headline features: **[Attack story](#51-attack-story)** (the whole attack across
 
 A single web console for the whole SOC. It opens in a light theme by default, and a one-click toggle switches to
 dark mode (the choice is remembered per browser).
-Navigation is grouped by job - *Operate* (overview, intelligence, cases, approvals), *Domains* (phishing,
-vulnerabilities, cloud posture), *Insight* (ATT&CK coverage, shadow IT, supplier risk) and *Govern* (integrations,
-automation policy, reports, access, audit). The top bar always shows whether automation is active or halted
+Navigation is grouped by CyberDome module - *Command* (overview, Dome Score), *Dome Agents* (intelligence, cases,
+approvals, tuning, automation policy, AI usage), *Domains* (phishing, vulnerabilities, cloud posture), *Dome Graph*
+(ATT&CK coverage, shadow IT, supplier risk, watch lists), *Dome Connect* (integrations) and *Dome Comply* (reports,
+audit log, access). The menu retracts to a rail of icons - each keeps its name as a tooltip - from the button at its
+top right, and expands again from the same button; the choice is remembered per browser. On a narrow screen the
+collapsed menu folds away completely. The top bar always shows whether automation is active or halted
 (kill switch), the signed-in user, their role and MFA status, and a **search box**: type any name, e-mail, hostname,
 serial, MAC, cloud id, CVE or case title and get matching cases, people, hosts, indicators, correlated findings and
 vulnerabilities in one place - only what your role and data scope allow. Every page has a stable URL (`#/cases/<id>`,
@@ -53,7 +56,7 @@ the platform's app roles ([CLIENT_DEPLOYMENT_GUIDE.md](CLIENT_DEPLOYMENT_GUIDE.m
 |---|
 | ![](screenshots/29-search.png) |
 
-**Overview dashboard** - open cases by domain and severity, approvals waiting, automation rate, median time to
+**Overview dashboard** - the Dome Score (for all-domain users), open cases by domain and severity, approvals waiting, automation rate, median time to
 close, open insights, open vulnerabilities and SLA breaches, a 14-day trend by domain, the highest-priority
 correlated findings, the riskiest users and hosts, data quality (asset / identity match rates, resolution queue),
 integration health, **measured enrichment latency** (median and p95 per investigation) and **verdict-quality
@@ -343,6 +346,41 @@ legitimate vendor, internal and marketing mail).
 
 ## 5. Intelligence layer
 
+### 5.0 Dome Score (posture)
+
+One figure from 0 to 100 for the whole estate, on the **Dome Score** screen and at the head of the Overview. It is
+built from eight pillars; each is computed by the platform from its records, shows the count behind it ("3 of 4
+hosts") and links to the screen that lists those records. No figure on the screen is written by the model.
+
+| Pillar | CyberDome module | Score (0-100) | Default weight |
+|---|---|---|---|
+| Identity | Dome Graph | people whose risk is below high / people known | 20 |
+| Endpoint | Dome Graph | hosts whose risk is below high / hosts known | 15 |
+| Vulnerability exposure | Dome Graph | hosts without an open P1 / P2 finding / hosts known | 20 |
+| Cloud posture | Dome Graph | resources without an open high / critical misconfiguration / resources with any misconfiguration on record | 10 |
+| Email | Dome Agents | malicious or suspicious reports nobody clicked / such reports, 90 days up to the newest report | 10 |
+| Response | Dome Agents | 100 minus 15 per open critical case and 8 per open high case (not below 0) | 10 |
+| Detection coverage | Dome Connect | weighted ATT&CK coverage of the enabled tools (full 1, partial 0.5) | 10 |
+| Tool health | Dome Connect | healthy enabled tools / enabled tools | 5 |
+
+Dome Score = round( sum(weight x pillar score) / sum(weight) ), over the pillars that have data and a
+weight above 0. Strong is 80 and above, fair 60 to 79, weak below 60.
+
+A pillar with no data (no cloud resources on record, say) is left out and the others share its weight. A pillar
+whose data cannot be read is shown as unavailable and left out, never failing the score.
+
+**Weights are the organisation's choice.** Anyone who sees every domain can move the sliders and see the score the
+server computes with those weights (`POST /api/v1/dome-score/preview`; nothing is saved). A lead
+(`approve_policy`, step-up MFA) saves them for everyone with a reason (`PUT /api/v1/dome-score/weights`): each
+version is kept (`GET /api/v1/dome-score/history`) and the change - pillar by pillar, from and to - is written to the
+audit log. Weights change how much each pillar counts, never a pillar's own figure. The screen shows each pillar's
+weight, its share of the score and the points it contributes, so the headline can be recomputed by hand. The board
+report carries the score and its pillars (report source `dome_score`).
+
+| Dome Score (weights previewed) | Menu collapsed to icons |
+|---|---|
+| ![](screenshots/41-dome-score-preview.png) | ![](screenshots/42-menu-collapsed.png) |
+
 ![](screenshots/02-intelligence.png)
 
 * **Explainable risk engine** - per user and host across all domains, time-decayed, every factor shown.
@@ -540,7 +578,7 @@ Every generated report shares one house style (`reporting/design.py`), so it can
   never sees or shapes chart data.
 * **Any other report, described in words** - e.g. *"a one-page board brief on phishing and supplier risk this
   quarter, as slides"*. A planner (the LLM when configured, keyword rules otherwise) turns the request into sections,
-  audience, format and period, using **only** the 17 sources in the data catalogue. You review the plan, then
+  audience, format and period, using **only** the 18 sources in the data catalogue. You review the plan, then
   generate it, and can save it as a reusable template.
 * **Figures are always computed in code** from the platform's records. The LLM writes each section's narrative
   from that section's figures (F#); a sentence that does not cite a figure, or cites one that does not exist, is

@@ -1,4 +1,4 @@
-// Agentic SOC console - core: auth, API client, router, shell, shared components.
+// CyberDome console - core: auth, API client, router, shell, shared components.
 // No inline handlers anywhere: clicks are delegated through data-fn / data-go so the page runs under a strict CSP.
 'use strict';
 
@@ -86,7 +86,13 @@ const I = {
   back: '<path d="M15 6l-6 6 6 6"/>',
   filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+  dome: '<path d="M3 19h18M5 19v-3a7 7 0 0 1 14 0v3M12 9V5M9 19v-3a3 3 0 0 1 6 0v3"/>',
+  collapse: '<path d="M4 4h16v16H4zM9 4v16M16 9l-3 3 3 3"/>',
+  expand: '<path d="M4 4h16v16H4zM9 4v16M13 9l3 3-3 3"/>',
 };
+// the CyberDome mark: a dome over a horizon, drawn in the page's own colours
+const brandMark = () => `<div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 17h16M6 17v-2a6 6 0 0 1 12 0v2M12 6.5V4M9.5 17v-1.5a2.5 2.5 0 0 1 5 0V17"/></svg></div>`;
+const brand = sub => `${brandMark()}<div class="brand-text"><div class="brand-name">CyberDome</div><div class="brand-sub">${esc(sub)}</div></div>`;
 const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${I[n] || ''}</svg>`;
 
 // ---------------------------------------------------------------- shared components
@@ -193,15 +199,18 @@ function columns(items, o = {}) {
 const meter = (v, max = 100) => `<div class="bar"><span style="width:${Math.max(2, Math.min(100, v / max * 100))}%;background:${v >= 75 ? 'var(--c-critical)' : v >= 50 ? 'var(--c-high)' : v >= 25 ? 'var(--c-medium)' : 'var(--c-low)'}"></span></div>`;
 
 // ---------------------------------------------------------------- navigation model
+// Groups follow CyberDome's modules: Dome Score (posture), Dome Agents (AI investigation and response), the domain
+// workflows, Dome Graph (assets, identities, coverage), Dome Connect (the tools) and Dome Comply (evidence, audit).
 const NAV = [
-  ['Operate', [['overview', 'Overview', 'overview'], ['intelligence', 'Intelligence', 'intel', '*'], ['cases', 'Cases', 'cases'],
-    ['approvals', 'Approvals', 'approvals']]],
+  ['Command', [['overview', 'Overview', 'overview'], ['dome-score', 'Dome Score', 'dome', '*']]],
+  ['Dome Agents', [['intelligence', 'Intelligence', 'intel', '*'], ['cases', 'Cases', 'cases'],
+    ['approvals', 'Approvals', 'approvals'], ['tuning', 'Tuning', 'filter'], ['policy', 'Automation policy', 'policy'], ['ai-usage', 'AI usage', 'ai']]],
   ['Domains', [['phishing', 'Phishing', 'phishing', 'phishing'], ['vulnerabilities', 'Vulnerabilities', 'vuln', 'vulnerability'],
     ['cloud', 'Cloud posture', 'cloud', 'vulnerability']]],
-  ['Insight', [['coverage', 'ATT&CK coverage', 'coverage'], ['shadow-it', 'Shadow IT', 'shadow', 'incident'],
-    ['suppliers', 'Supplier risk', 'supplier', 'phishing']]],
-  ['Govern', [['watchlists', 'Watch lists', 'list'], ['tuning', 'Tuning', 'filter'], ['integrations', 'Integrations', 'plug'], ['policy', 'Automation policy', 'policy'], ['ai-usage', 'AI usage', 'ai'], ['reports', 'Reports', 'reports'],
-    ['access', 'Access', 'access'], ['audit', 'Audit log', 'audit']]],
+  ['Dome Graph', [['coverage', 'ATT&CK coverage', 'coverage'], ['shadow-it', 'Shadow IT', 'shadow', 'incident'],
+    ['suppliers', 'Supplier risk', 'supplier', 'phishing'], ['watchlists', 'Watch lists', 'list']]],
+  ['Dome Connect', [['integrations', 'Integrations', 'plug']]],
+  ['Dome Comply', [['reports', 'Reports', 'reports'], ['audit', 'Audit log', 'audit'], ['access', 'Access', 'access']]],
 ];
 const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity', search: 'Search'};
 
@@ -213,11 +222,14 @@ function route() {
 function shell() {
   const me = window.ME;
   const initials = (me.name || '?').split(/[@.\s]/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join('');
-  $('#app').innerHTML = `<div class="shell">
-    <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations</div></div></div>
-      ${NAV.map(([g, items]) => `<div class="nav-group">${g}</div>` + items.filter(([, , , d]) => !d || inDomain(d)).map(([id, label, ic]) =>
-        `<a class="nav-item" href="#/${id}" data-nav="${id}">${icon(ic)}<span>${esc(label)}</span>${id === 'approvals' ? '<span class="count" id="nav-approvals" hidden></span>' : ''}</a>`).join('')).join('')}
+  $('#app').innerHTML = `<div class="shell${navCollapsed() ? ' nav-collapsed' : ''}">
+    <aside class="sidebar" aria-label="Main menu">
+      <div class="brand">${brand('Security operations')}
+        <button class="icon-btn nav-toggle" id="nav-toggle" data-fn="toggleNav" data-args="[]" aria-controls="side-nav"></button></div>
+      <nav class="side-nav" id="side-nav">
+      ${NAV.map(([g, items]) => { const shown = items.filter(([, , , d]) => !d || inDomain(d)); return shown.length ? `<div class="nav-group">${esc(g)}</div>` + shown.map(([id, label, ic]) =>
+        `<a class="nav-item" href="#/${id}" data-nav="${id}" title="${esc(label)}">${icon(ic)}<span class="nav-label">${esc(label)}</span>${id === 'approvals' ? '<span class="count" id="nav-approvals" hidden></span>' : ''}</a>`).join('') : ''; }).join('')}
+      </nav>
       <div class="sidebar-foot">Signed in as ${esc(me.auth_method === 'api_key' ? 'service account' : me.roles.join(', ') || 'no role')}<br>${esc(me.domains.includes('*') ? 'All domains' : me.domains.join(', '))}<br>All times UTC</div>
     </aside>
     <div class="main">
@@ -238,7 +250,28 @@ function shell() {
       <main class="content" id="main"></main>
     </div></div>`;
   paintThemeButton();
+  paintNavToggle();
   refreshStatus();
+}
+
+// ---------------------------------------------------------------- collapsible menu
+// The menu retracts to a rail of icons (each keeps its name as a tooltip) and expands again from the button at the
+// top right of the menu. The choice is remembered on this browser only.
+function navCollapsed() { try { return localStorage.getItem('soc_nav') === 'collapsed'; } catch (e) { return false; } }
+function toggleNav() {
+  const sh = document.querySelector('.shell'); if (!sh) return;
+  const collapsed = !sh.classList.contains('nav-collapsed');
+  sh.classList.toggle('nav-collapsed', collapsed);
+  try { localStorage.setItem('soc_nav', collapsed ? 'collapsed' : 'expanded'); } catch (e) { /* storage blocked */ }
+  paintNavToggle();
+}
+function paintNavToggle() {
+  const b = $('#nav-toggle'), sh = document.querySelector('.shell'); if (!b || !sh) return;
+  const collapsed = sh.classList.contains('nav-collapsed');
+  b.innerHTML = icon(collapsed ? 'expand' : 'collapse');
+  b.title = collapsed ? 'Expand the menu' : 'Collapse the menu';
+  b.setAttribute('aria-label', b.title);
+  b.setAttribute('aria-expanded', String(!collapsed));
 }
 
 async function refreshStatus() {
@@ -265,7 +298,7 @@ async function render() {
   const title = TITLES[name] || cap(name);
   const parent = {story: 'cases', entity: 'cases', trace: 'audit'}[name] || name;
   $('#crumbs').innerHTML = name === 'search' ? '<b>Search</b>' : params.length ? `<a href="#/${esc(parent)}">${esc(TITLES[parent] || title)}</a> <span class="muted">/</span> <b>${esc(name === 'story' ? 'Attack story' : name === 'entity' ? 'Entity 360' : name === 'trace' ? 'Trace' : 'Detail')}</b>` : `<b>${esc(title)}</b>`;
-  document.title = title + ' · Agentic SOC';
+  document.title = title + ' · CyberDome';
   const view = (window.VIEWS || {})[name];
   const main = $('#main');
   GEN += 1;
@@ -338,7 +371,7 @@ function signInScreen() {
   window.ME = null;
   if (AUTH && AUTH.mode === 'entra') {
     $('#app').innerHTML = `<div class="auth"><section class="card auth-card"><div class="card-b">
-      <div class="brand" style="padding:0"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations platform</div></div></div>
+      <div class="brand" style="padding:0">${brand('Security operations platform')}</div>
       <h1>Sign in</h1>
       <button class="btn primary" data-fn="signInEntra" data-args="[]" style="justify-content:center;height:36px">Sign in with Microsoft</button>
       <div class="foot">Single sign-on with your organisation account (Microsoft Entra ID). Your roles come from the platform's app roles.</div>
@@ -348,7 +381,7 @@ function signInScreen() {
     return;
   }
   $('#app').innerHTML = `<div class="auth"><section class="card auth-card"><div class="card-b">
-    <div class="brand" style="padding:0"><div class="brand-mark">AS</div><div><div class="brand-name">Agentic SOC</div><div class="brand-sub">Security operations platform</div></div></div>
+    <div class="brand" style="padding:0">${brand('Security operations platform')}</div>
     <h1>Sign in</h1>
     <div class="field"><label for="si-user">Work email</label><input class="input" id="si-user" value="lena@acme-demo.com" autocomplete="username"></div>
     <div class="field"><label for="si-role">Role</label><select id="si-role">${['lead', 'analyst', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${cap(r)}</option>`).join('')}</select></div>
@@ -397,7 +430,7 @@ function goTo(h) { location.hash = h; }
 
 // ---------------------------------------------------------------- delegation
 function runSearch() { const q = ($('#global-q').value || '').trim(); if (q.length >= 2) location.hash = '#/search/' + encodeURIComponent(q); }
-const ALLOWED = {toggleTheme, toggleMenu, goTo, signIn, signInEntra, signOut, dl, runSearch, jumpEv, refreshPage: () => render()};
+const ALLOWED = {toggleTheme, toggleNav, toggleMenu, goTo, signIn, signInEntra, signOut, dl, runSearch, jumpEv, refreshPage: () => render()};
 document.addEventListener('click', ev => {
   const menu = $('#user-menu');
   if (menu && !menu.hidden && !ev.target.closest('.user')) menu.hidden = true;
@@ -410,6 +443,12 @@ document.addEventListener('click', ev => {
   try { args = JSON.parse(el.dataset.args || '[]'); } catch (e) { return; }
   if (el.tagName === 'BUTTON') { el.disabled = true; setTimeout(() => { el.disabled = false; }, 400); }
   Promise.resolve().then(() => fn(...args)).catch(() => { /* reported via toast */ });
+});
+// live controls (a slider, a number box): data-input names the handler, which receives the element
+document.addEventListener('input', ev => {
+  const el = ev.target.closest('[data-input]');
+  const fn = el && ALLOWED[el.dataset.input];
+  if (fn) Promise.resolve().then(() => fn(el)).catch(() => { /* reported via toast */ });
 });
 document.addEventListener('keydown', ev => {
   if (ev.key === 'Enter' && ev.target.matches('input[data-enter]')) {

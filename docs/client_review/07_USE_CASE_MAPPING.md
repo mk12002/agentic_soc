@@ -2,13 +2,13 @@
 
 | | |
 |---|---|
-| **Document** | Use-case mapping - Agentic SOC platform |
+| **Document** | Use-case mapping - CyberDome platform |
 | **Version** | 1.2 - 2026-10-17 |
 | **Audience** | SOC leadership, SOC analysts, security management |
 
 ## About the platform
 
-The Agentic SOC platform is a planned AI-assisted investigation and operations layer across the security tools the
+The CyberDome platform is a planned AI-assisted investigation and operations layer across the security tools the
 organisation already owns (CrowdStrike Falcon, Microsoft Defender for Endpoint, Rapid7 InsightVM / Nexpose, Wiz,
 Avanan, Defender for Office 365, Microsoft Entra, Cisco Umbrella, Thinkst Canary, Delinea Secret Server and Privilege
 Manager). It gathers, correlates, summarises, enriches, drafts and reports; **the SOC analyst validates the evidence,

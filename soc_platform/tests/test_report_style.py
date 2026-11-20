@@ -84,7 +84,7 @@ def docx_text(data: bytes) -> str:
 def test_the_house_style_applies_until_someone_sets_another(session):
     assert ReportStyleStore(session).view()["custom"] is False
     text = docx_text(preview(session, "docx"))
-    assert "Agentic SOC" in text and D.CLASSIFICATION in text
+    assert "CyberDome" in text and D.CLASSIFICATION in text
     assert D.primary() == D.NAVY and D.STYLE.get() is None          # nothing leaks out of a rendering
 
 

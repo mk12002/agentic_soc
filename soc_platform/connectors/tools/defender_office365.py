@@ -228,7 +228,7 @@ class DefenderOffice365Connector(MicrosoftConnector):
         if not emails:
             raise ValueError("no (network_message_id, recipient) targets")
         body = self.post("/beta/security/collaboration/analyzedEmails/remediate", json={
-            "displayName": params.get("name", f"SOC platform {action}"), "description": params.get("reason", ""),
+            "displayName": params.get("name", f"CyberDome {action}"), "description": params.get("reason", ""),
             "severity": params.get("severity", "high"), "action": action, "remediateSendersCopy": False,
             "analyzedEmails": emails})
         return {"action": action, "messages": len(emails), "response": body}
@@ -278,7 +278,7 @@ class DefenderOffice365Connector(MicrosoftConnector):
         body = self.post(f"{EXO}/adminapi/beta/{tenant}/InvokeCommand", json={
             "CmdletInput": {"CmdletName": "New-TenantAllowBlockListItems", "Parameters": {
                 "ListType": "Sender", "Block": True, "Entries": senders,
-                "ExpirationDate": params.get("expires"), "Notes": params.get("reason", "SOC platform")}}})
+                "ExpirationDate": params.get("expires"), "Notes": params.get("reason", "CyberDome")}}})
         return {"blocked": senders, "response": body}
 
     def unblock_sender(self, params: dict, targets: list) -> dict:

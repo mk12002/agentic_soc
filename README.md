@@ -1,6 +1,6 @@
-# Agentic SOC Platform
+# CyberDome
 
-AI-assisted investigation and automation layer for a Security Operations Centre, built against the
+**CyberDome** is an AI-assisted investigation and automation layer for a Security Operations Centre, built against the
 *SOC – AI & Automation Consolidated Requirements*. One platform serves three workflows over a shared,
 governed context store, with a cross-domain intelligence layer on top.
 
@@ -11,6 +11,7 @@ governed context store, with a cross-domain intelligence layer on top.
 | **Phishing / reported email** | Ingests user-reported mail, decomposes it (incl. QR codes), analyses it with the 7-agent ML swarm and a deterministic analyser, reconciles with Defender/Avanan, scopes the campaign tenant-wide, finds who clicked and whether any endpoint or identity was compromised, monitors supplier email risk, recommends gated remediation, answers the reporter, auto-closes clear benign reports with QA sampling | PH-F01…F16, PH-T01…T09, U16, U18 |
 | **Incident management** | Ingests alerts from every tool, clusters them into incidents, enriches every entity in parallel across 8 dimensions, scores severity deterministically (exposure-informed), maps MITRE ATT&CK with evidence, recommends ranked guarded actions, recalls similar incidents, writes the shift handover | IM-F01…F16, IM-T01…T11, U04–U06, U13–U15 |
 | **Vulnerability management** | Pulls findings from Rapid7, CrowdStrike, Wiz and Defender, resolves the same host across tools, deduplicates, prioritises (CVSS + EPSS + KEV + exposure + criticality), routes to owners, tracks plans, syncs ITSM tickets both ways, validates remediation (catches false closures), manages exceptions, runs Wiz misconfigurations through the same lifecycle, generates reports | VM-F01…F18, VM-T01…T13, U01–U03, U12 |
+| **Dome Score** | One posture figure (0-100) from eight pillars - identity, endpoint, vulnerability exposure, cloud posture, email, response, detection coverage, tool health - each computed from the records and linked to them, combined by weights a lead sets (previewed before saving, versioned, audited) | U01, U09, U17 |
 | **Intelligence layer** | Explainable per-user/host risk across all streams, 13 correlation rules, analyst assistant with cited answers, situation brief, ATT&CK coverage, shadow IT, drift monitoring | U02, U04, U06–U12, U16, U18, R14 |
 | **Attack story** | The whole attack across every tool on one page: ATT&CK kill chain (observed / blocked / checked / blind), cited timeline, benign explanations tested, gaps, blast radius, phased response plan with one-step governed approval; optional evidence-bound LLM deep analysis | U08, U13, U14 |
 | **Report builder** | Seven preconfigured standard reports (board deck, CISO brief, VM, phishing, post-incident, control assurance, SOC daily) and any other report described in words; figures computed in code, LLM narrative must cite them; scoped, audited, encrypted at rest | U01, U15, VM-F13 |
@@ -84,12 +85,17 @@ API - no Node build step, no external CDNs - and works in current Chrome, Edge, 
 
 ## Console
 
-| Area | Screens |
+The menu is grouped by CyberDome module and retracts to a rail of icons from the button at its top right (the
+choice is remembered per browser; on a narrow screen it folds away completely).
+
+| Menu group | Screens |
 |---|---|
-| Operate | Overview · Intelligence (brief, cited Q&A, correlated findings, risk) · Cases (owner, Mine / Unassigned, notes, attack story, entity 360) · Approvals · global search in the top bar |
+| Command | Overview · Dome Score (posture by pillar, weights a lead sets) · global search in the top bar |
+| Dome Agents | Intelligence (brief, cited Q&A, correlated findings, risk) · Cases (owner, Mine / Unassigned, notes, attack story, entity 360) · Approvals · Tuning (a lead asks in words to cut noise, raise attention, label an exercise, set phishing auto-close, adjust vulnerability priority weights and SLAs, or mark an action analysts keep rejecting; a checked draft rule, previewed on past data, approved by a second lead; suggestions from analysts' decisions) · Automation policy (levels, kill switch, proposals) · AI usage (budgets, per-person limits, model choice per feature by name, model check, recent model calls) |
 | Domains | Phishing (+ supplier risk) · Vulnerabilities · Cloud posture |
-| Insight | ATT&CK coverage · Shadow IT · Supplier risk |
-| Govern | Integrations (connector health, stages, preflight, configuration with approval, freshness, notifications, jobs) · Automation policy (levels, kill switch, proposals) · Watch lists (block / exception lists uploaded as Excel or CSV, flagged on every case that involves a listed item) · Tuning (a lead asks in words to cut noise, raise attention, label an exercise, set phishing auto-close, adjust vulnerability priority weights and SLAs, or mark an action analysts keep rejecting; a checked draft rule, previewed on past data, approved by a second lead; suggestions from analysts' decisions) · AI usage (budgets, per-person limits, model choice per feature by name, model check, recent model calls) · Reports (standard reports, "describe a report", exports, compliance pack, the organisation's report style: templates, logo, brand, writing guide) · Access · Audit log (retention and protection stated, exports in JSON Lines / JSON / CSV / Excel / Word, with a trace of everything each request or job did) |
+| Dome Graph | ATT&CK coverage · Shadow IT · Supplier risk · Watch lists (block / exception lists uploaded as Excel or CSV, flagged on every case that involves a listed item) |
+| Dome Connect | Integrations (connector health, stages, preflight, configuration with approval, freshness, notifications, jobs) |
+| Dome Comply | Reports (standard reports, "describe a report", exports, compliance pack, the organisation's report style: templates, logo, brand, writing guide) · Audit log (retention and protection stated, exports in JSON Lines / JSON / CSV / Excel / Word, with a trace of everything each request or job did) · Access |
 
 ## Connecting real tools (plug and play)
 

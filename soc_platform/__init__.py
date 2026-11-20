@@ -1,4 +1,4 @@
-"""Agentic SOC platform: AI-assisted investigation and automation.
+"""CyberDome (agentic SOC platform): AI-assisted investigation and automation.
 
 One platform serving three domains (phishing, incident, vulnerability) over a
 shared context store, policy engine, action layer and audit trail. See

@@ -181,22 +181,22 @@ class DefenderEndpointConnector(MicrosoftConnector):
 
     def isolate(self, params: dict, targets: list) -> dict:
         out = {mid: self.post(f"/api/machines/{mid}/isolate", json={
-            "Comment": params.get("comment", "SOC platform isolation"),
+            "Comment": params.get("comment", "CyberDome isolation"),
             "IsolationType": params.get("isolation_type", "Selective")}) for mid in self._machines(targets)}
         return {"isolated": list(out), "responses": out}
 
     def release(self, params: dict, targets: list) -> dict:
-        out = {mid: self.post(f"/api/machines/{mid}/unisolate", json={"Comment": "SOC platform release"})
+        out = {mid: self.post(f"/api/machines/{mid}/unisolate", json={"Comment": "CyberDome release"})
                for mid in self._machines(targets)}
         return {"released": list(out), "responses": out}
 
     def scan(self, params: dict, targets: list) -> dict:
         return {mid: self.post(f"/api/machines/{mid}/runAntiVirusScan",
-                               json={"Comment": "SOC platform scan", "ScanType": params.get("scan_type", "Quick")})
+                               json={"Comment": "CyberDome scan", "ScanType": params.get("scan_type", "Quick")})
                 for mid in self._machines(targets)}
 
     def collect(self, params: dict, targets: list) -> dict:
-        return {mid: self.post(f"/api/machines/{mid}/collectInvestigationPackage", json={"Comment": "SOC platform"})
+        return {mid: self.post(f"/api/machines/{mid}/collectInvestigationPackage", json={"Comment": "CyberDome"})
                 for mid in self._machines(targets)}
 
     def block_indicator(self, params: dict, targets: list) -> dict:
@@ -207,7 +207,7 @@ class DefenderEndpointConnector(MicrosoftConnector):
                 continue
             body = self.post("/api/indicators", json={
                 "indicatorValue": t["value"], "indicatorType": itype, "action": params.get("action", "Block"),
-                "title": params.get("title", "SOC platform block"), "severity": params.get("severity", "High"),
+                "title": params.get("title", "CyberDome block"), "severity": params.get("severity", "High"),
                 "description": params.get("reason", "Confirmed malicious by SOC analyst"),
                 "generateAlert": True})
             created.append({"value": t["value"], "indicator_id": body.get("id"), "response": body})

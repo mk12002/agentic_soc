@@ -147,7 +147,7 @@ class UmbrellaConnector(ToolConnector):
         dl = self.settings.get("block_list_id")
         domains = [t["value"] for t in targets if t.get("type") == "indicator" and t.get("indicator_type") in {"domain", "url"}]
         body = self.post(f"/policies/v2/destinationlists/{dl}/destinations",
-                         json=[{"destination": d, "comment": params.get("reason", "SOC platform")} for d in domains])
+                         json=[{"destination": d, "comment": params.get("reason", "CyberDome")} for d in domains])
         return {"blocked": domains, "destination_list": dl, "response": body}
 
     def unblock(self, params: dict, targets: list) -> dict:

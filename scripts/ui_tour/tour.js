@@ -259,6 +259,32 @@ async function visit(page, hash, name, full = true) {
   same('overview', 'Awaiting approval', k['Awaiting approval'], ov.actions.pending_approval);
   same('overview', 'Open insights', k['Open insights'], ov.insights.open);
   same('overview', 'Open vulnerabilities', k['Open vulnerabilities'], ov.vulnerability.open_findings);
+  const dome = await call(lead, 'GET', '/api/v1/dome-score');
+  same('overview', 'Dome Score', k['Dome Score'], dome.score == null ? '–' : dome.score);
+  await page.goto(`${BASE}/#/dome-score`); await settle(page);
+  same('dome score', 'ring', (await page.textContent('.dome-ring .num')).trim(), dome.score == null ? '–' : dome.score);
+  const shown = await page.$$eval('#main table tbody tr', rs => rs.map(r => r.querySelector('.score').textContent.trim()));
+  same('dome score', 'pillar scores', shown.join(','), dome.pillars.map(p => p.score == null ? '–' : p.score).join(','));
+  // a weight moved on screen is previewed by the server, and nothing is saved
+  const only = Object.fromEntries(dome.pillars.map(p => [p.key, p.key === 'vulnerability' ? 100 : 0]));
+  for (const [key, v] of Object.entries(only)) await page.fill(`#dn-${key}`, String(v));
+  await page.waitForFunction(() => /not saved/.test(document.getElementById('dome-preview').textContent), null, {timeout: 15000}).catch(() => {});
+  const pv = await call(lead, 'POST', '/api/v1/dome-score/preview', {weights: only});
+  same('dome score', 'preview', (await page.textContent('#dome-preview b')).trim(), pv.score == null ? '–' : pv.score);
+  await shot(page, '41-dome-score-preview');
+  same('dome score', 'weights after a preview', JSON.stringify((await call(lead, 'GET', '/api/v1/dome-score')).weights), JSON.stringify(dome.weights));
+  // the menu retracts to a rail of icons from its own button, stays so after a reload, and expands again
+  await page.click('#nav-toggle'); await page.waitForTimeout(400);
+  const rail = await page.evaluate(() => ({w: document.querySelector('.sidebar').getBoundingClientRect().width,
+    labels: [...document.querySelectorAll('.nav-label')].some(l => l.getBoundingClientRect().width > 0),
+    expanded: document.getElementById('nav-toggle').getAttribute('aria-expanded')}));
+  if (rail.w > 72 || rail.labels || rail.expanded !== 'false') problems.push(`menu did not collapse: ${JSON.stringify(rail)}`);
+  await page.reload(); await settle(page);
+  if (!(await page.$('.shell.nav-collapsed'))) problems.push('the collapsed menu was not remembered after a reload');
+  await shot(page, '42-menu-collapsed', false); await axe(page, 'collapsed menu');
+  await page.click('#nav-toggle'); await page.waitForTimeout(400);
+  if (await page.$('.shell.nav-collapsed') || (await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width)) < 200)
+    problems.push('menu did not expand again');
   const asum = await call(lead, 'GET', '/api/v1/actions/summary?status=recommended,pending_approval');
   same('sidebar', 'Approvals badge', (await page.textContent('#nav-approvals')).trim(), asum.total);
   await page.goto(`${BASE}/#/approvals`); await settle(page);
@@ -400,7 +426,7 @@ async function visit(page, hash, name, full = true) {
   await page.click('[data-fn="tunePreview"]'); await page.waitForSelector('#tune-pv .callout');
   await page.evaluate(() => window.scrollTo(0, 0)); await shot(page, '38-tuning-vuln-priority'); await axe(page, 'tuning vulnerability priority preview');
   if (!/open findings/i.test(await page.textContent('#tune-pv'))) problems.push('tuning: the vulnerability preview does not count the open findings');
-  const routes = ['overview', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
+  const routes = ['overview', 'dome-score', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'ai-usage', 'reports', 'access', 'audit',
     'watchlists', 'tuning', `search/${encodeURIComponent(term)}`];
   for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light']]) {

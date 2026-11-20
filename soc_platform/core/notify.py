@@ -102,7 +102,7 @@ def payload(kind: str, insight: Any) -> dict[str, Any]:
     link = _link()
     head = f"[{insight.severity.upper()}] {insight.title}"
     if kind == "json":
-        return {"source": "agentic-soc", "id": insight.id, "rule": insight.rule, "severity": insight.severity,
+        return {"source": "cyberdome", "id": insight.id, "rule": insight.rule, "severity": insight.severity,
                 "title": insight.title, "status": insight.status, "domains": insight.domains,
                 "next_steps": steps, "first_seen": insight.first_seen.isoformat() if insight.first_seen else None,
                 "link": link}
@@ -159,10 +159,10 @@ def send_test(*, by: str, post: Any = None) -> list[dict[str, Any]]:
     delivery (it is not a finding); the caller audits it."""
     post = post or _post
     link = _link()
-    text = f"Agentic SOC test message, sent by {by}. If you can read this, notifications reach this channel."
+    text = f"CyberDome test message, sent by {by}. If you can read this, notifications reach this channel."
     out = []
     for ch in channels():
-        body = ({"source": "agentic-soc", "test": True, "text": text, "link": link} if ch.kind == "json"
+        body = ({"source": "cyberdome", "test": True, "text": text, "link": link} if ch.kind == "json"
                 else {"text": text + (f"\nOpen: {link}" if link else "")})
         try:
             post(ch.url, body)

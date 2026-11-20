@@ -78,7 +78,7 @@ badge(298, 104, 1)
 badge(298, 212, 1)
 
 # ----------------------------------------------------------------------------------------------- centre: platform
-zone(340, 70, 1300, 1610, "Agentic SOC platform (Python 3.11) - Docker images, non-root uid 1001", "zoneb")
+zone(340, 70, 1300, 1610, "CyberDome platform (Python 3.11) - Docker images, non-root uid 1001", "zoneb")
 X0, CW = 352, 1276
 # R1 runtime
 y = 100
@@ -288,7 +288,7 @@ svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" font-fam
     </style>
   </defs>
   <rect width="{W}" height="{H}" fill="#ffffff"/>
-  <text x="30" y="34" class="h" font-size="22">Agentic SOC platform - component architecture (tools, modules, technologies, endpoints)</text>
+  <text x="30" y="34" class="h" font-size="22">CyberDome - component architecture (tools, modules, technologies, endpoints)</text>
   <text x="30" y="56" class="s">Production shape in the client's environment. Boxes are real components (file / module / technology / table / vendor endpoint). R = read, W = write (policy-gated). Orange = the only path that can change a security tool.</text>
   {chr(10).join(parts)}
 </svg>

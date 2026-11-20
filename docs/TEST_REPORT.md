@@ -1,4 +1,4 @@
-# Test report - Agentic SOC platform
+# Test report - CyberDome platform
 
 Date: 2026-11-16 (rounds 15-34; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Document** | Solution architecture - Agentic SOC platform |
+| **Document** | Solution architecture - CyberDome platform |
 | **Version** | 1.0 - 2026-10-10 |
 | **Audience** | Enterprise / security architecture, infrastructure and network teams |
 
@@ -32,7 +32,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Element | Role |
 |---|---|
 | SOC users | Analysts, leads, administrators and auditors use a browser; sign-in is Microsoft Entra ID single sign-on with MFA; roles come from Entra app roles |
-| Agentic SOC platform | Ingests from the tools, resolves entities, runs the three workflows and the intelligence layer, presents cases and recommendations, executes approved actions, records everything in a tamper-evident audit chain |
+| CyberDome platform | Ingests from the tools, resolves entities, runs the three workflows and the intelligence layer, presents cases and recommendations, executes approved actions, records everything in a tamper-evident audit chain |
 | Security tools | Read through their documented APIs with a dedicated, least-privilege service identity per tool; written to only for action types the organisation approves |
 | Organisation services | Entra ID (sign-in, app roles), the vault holding secrets, the SIEM / log platform receiving logs and audit exports, monitoring, optional Teams / Slack notifications, the LLM gateway |
 | Public intelligence | NIST NVD, FIRST EPSS and CISA KEV for vulnerability context (only CVE identifiers are sent); optional threat-intelligence sources, each enabled only with the organisation's approval |

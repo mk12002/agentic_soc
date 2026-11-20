@@ -2,13 +2,13 @@
 
 | | |
 |---|---|
-| **Document** | Architecture and data flow overview - Agentic SOC platform |
+| **Document** | Architecture and data flow overview - CyberDome platform |
 | **Version** | 1.0 - 2026-10-13 |
 | **Audience** | Customer presentation: security leadership, architecture, SOC |
 
 ## About the platform
 
-The Agentic SOC platform is a planned investigation and automation layer that runs inside the organisation's own
+The CyberDome platform is a planned investigation and automation layer that runs inside the organisation's own
 environment, on top of the security tools it already owns. It recommends actions; **a person approves them**. An
 optional AI model, reached only through the organisation's own LLM gateway, writes explanations from evidence but
 never makes a decision.

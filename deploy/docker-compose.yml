@@ -1,4 +1,4 @@
-# SOC platform on one host (Kubernetes is the highly available deployment: deploy/kubernetes, HIGH_AVAILABILITY.md).
+# CyberDome on one host (Kubernetes is the highly available deployment: deploy/kubernetes, HIGH_AVAILABILITY.md).
 #   docker compose -f deploy/docker-compose.yml --env-file .env up -d                     # production, platform only
 #   ... --profile engine up -d                                                             # + phishing ML microservices
 #   ... --profile tls up -d                                                                # + TLS reverse proxy (Caddy)

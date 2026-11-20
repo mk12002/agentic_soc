@@ -7,7 +7,7 @@ vendor API endpoint. The numbered badges (1-8, A) are the flows, walked through 
 Other views of the same system: `ARCHITECTURE.md` (overview), `ARCHITECTURE_WALKTHROUGH.md` (what to say for the
 platform and dev-VM technical diagrams), `ENGINEERING.md` (every design decision and its reason).
 
-![Agentic SOC platform - component architecture](diagrams/platform-component-architecture.svg)
+![CyberDome platform - component architecture](diagrams/platform-component-architecture.svg)
 
 ---
 
@@ -91,8 +91,8 @@ Every request passes through these stages in this order. Badge 3 walks through i
 | `domains/phishing/` | `service.py` (the pipeline), `models.py`, `agents/decompose.py` (MIME parsing, QR codes via pyzbar + Pillow, ppdeep fuzzy hashes), `agents/analyzer.py` (heuristic rules, look-alike domains, `CompositeAnalyzer.fuse`), `engine/` (LangGraph swarm of 7 ML agents, scikit-learn 1.8, TF-IDF content model, offline only), `agents/investigation.py` (who clicked, endpoint and identity impact), `supplier.py` (risk of a supplier's own e-mail). | One case per reported message. Each case has a verdict, campaign scope, who clicked, impact and recommended remediation. |
 | `domains/incident/` | `service.py`: ingest of `ALERT_STREAMS` + `AUDIT_STREAMS` (Entra audits), clustering by host or person, `investigate` (parallel enrichment), `_score` (deterministic severity), `_verdict_conflict` (two tools disagree), `_mitre`, `_recommendations`, `reassess_open`, deferred narration through `narrate_pending`. | Incident cases with severity, ATT&CK techniques, evidence and recommended actions. |
 | `domains/vulnerability/` | `service.py`: ingest from 4 scanners, `consolidate` (one finding per asset + CVE), `refresh_intel` (NVD, EPSS, KEV), priority P1-P4 with an SLA, owners, campaigns, `follow_up`, validation (`verify_finding`), exceptions (four-eyes, expiry, tool exceptions), risk register; `misconfig.py` (Wiz cloud issues). | Ranked findings, each with an owner, a campaign and a validated fix. |
-| `intelligence/` | `risk.py` (`RiskEngine`, cached, decay anchored to the data), `correlation.py` (13 rules), `story.py` (attack story), `deep_analysis.py`, `analyst.py` (Q&A and brief), `attack_coverage.py` (ATT&CK), `shadow_it.py`, `drift.py` (PSI). | Risk per user and host, cross-domain insights, kill-chain stories, coverage and blind spots. |
-| `reporting/` | `builder.py` (17 data sources, 7 standard reports, planner), `value.py` (value scorecard: benefit KPIs against baseline and target), `reports.py` (python-docx, python-pptx, charts), `compliance.py` (evidence pack), Jinja2 templates. | Word and PowerPoint reports. Every figure comes from code. |
+| `intelligence/` | `risk.py` (`RiskEngine`, cached, decay anchored to the data), `correlation.py` (13 rules), `story.py` (attack story), `deep_analysis.py`, `analyst.py` (Q&A and brief), `attack_coverage.py` (ATT&CK), `dome_score.py` (Dome Score: eight pillars, weights versioned in `dome_score_weights`, routes `/api/v1/dome-score`, `/preview`, `/weights`, `/history`), `shadow_it.py`, `drift.py` (PSI). | Risk per user and host, cross-domain insights, kill-chain stories, coverage and blind spots. |
+| `reporting/` | `builder.py` (18 data sources, 7 standard reports, planner), `value.py` (value scorecard: benefit KPIs against baseline and target), `reports.py` (python-docx, python-pptx, charts), `compliance.py` (evidence pack), Jinja2 templates. | Word and PowerPoint reports. Every figure comes from code. |
 
 ### 2.5 Core services (core/)
 
@@ -332,7 +332,7 @@ The access-log row and audit event carry the request's trace id (flow A).
    an approved story be recognised again.
 4. The notify job sends findings above the threshold to Teams, Slack or a webhook, once per (finding, severity,
    channel).
-5. Reports: `reporting/builder.py` takes figures from its 17 data sources. `reports.py` writes Word or PowerPoint
+5. Reports: `reporting/builder.py` takes figures from its 18 data sources. `reports.py` writes Word or PowerPoint
    (7 standard reports, daily and weekly jobs, or built on demand with `POST /api/v1/reports/build`). Generated files
    are encrypted and downloaded through `/api/v1/reports/{rid}/download`.
 

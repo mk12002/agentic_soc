@@ -236,7 +236,7 @@ class ReportService:
                                          ["Asset match rate", D.fmt((m["asset_match_rate"] or 0) * 100, "%")],
                                          ["People awaiting identity resolution", cov["unresolved_queue"]]],
                 widths_cm=[6.0, 11.0])
-        D.note(d, f"Generated {utcnow():%Y-%m-%d %H:%M} UTC by the SOC platform. Every figure is computed from the "
+        D.note(d, f"Generated {utcnow():%Y-%m-%d %H:%M} UTC by CyberDome. Every figure is computed from the "
                   f"connected tools; the commentary ({src}) only describes them.")
         path = self.out / f"daily_exposure_{utcnow():%Y%m%d_%H%M%S}.docx"
         d.save(path)
@@ -291,7 +291,7 @@ class ReportService:
                                           ["Recurrence rate", D.fmt(round(100 * (m["recurrence_rate"] or 0), 1), "%")],
                                           ["Asset match rate", D.fmt((m["asset_match_rate"] or 0) * 100, "%")]],
                 widths_cm=[8.0, 9.0])
-        D.note(d, f"Generated {utcnow():%Y-%m-%d %H:%M} UTC by the SOC platform. Every figure is computed from the "
+        D.note(d, f"Generated {utcnow():%Y-%m-%d %H:%M} UTC by CyberDome. Every figure is computed from the "
                   f"connected tools; the commentary ({src}) only describes them.")
         path = self.out / f"weekly_vm_{utcnow():%Y%m%d_%H%M%S}.docx"
         d.save(path)

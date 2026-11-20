@@ -136,7 +136,7 @@ def test_siem_push_and_ui(client):
         {"id": "siem-1", "title": "Impossible travel", "severity": "high", "timestamp": "2026-09-20T10:00:00Z",
          "user": "jane.doe@acme-demo.com", "src_ip": "185.220.101.4", "source": "sentinel"}]}).json()
     assert r["ingested"] == 1
-    assert "<title>Agentic SOC</title>" in client.get("/").text
+    assert "<title>CyberDome</title>" in client.get("/").text
 
 
 def test_one_malformed_pushed_alert_is_refused_and_the_rest_of_the_batch_lands(client):

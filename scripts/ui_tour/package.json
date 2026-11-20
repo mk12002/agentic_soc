@@ -1,7 +1,7 @@
 {
   "name": "soc-ui-tour",
   "private": true,
-  "description": "Browser tour and layout audit for the Agentic SOC console",
+  "description": "Browser tour and layout audit for the CyberDome console",
   "scripts": {
     "tour": "node tour.js"
   },
