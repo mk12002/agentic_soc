@@ -115,7 +115,7 @@ AI gathers and explains, code computes every figure and verdict, and a person ap
 - 56 ATT&CK techniques in the coverage model
 - 11 scheduled jobs
 - 14 self-checks
-- 971 platform tests on SQLite, 968 on PostgreSQL, and 205 phishing-engine tests
+- 985 platform tests on SQLite, 982 on PostgreSQL, and 205 phishing-engine tests
 
 **Say these limits first, before anyone asks.** It buys credibility.
 1. It has not yet run against a real tenant. Every connector is built to the vendor's documented API and is
@@ -1624,8 +1624,8 @@ The typed text is always treated literally (no injection).
 - The organisation's own volumes are first seen in its environment.
 
 **"How was it tested?"**
-- 971 platform tests (SQLite, with PostgreSQL's rules enforced) and 968 on PostgreSQL; 205 engine tests.
-- 108 of 108 features verified feature by feature.
+- 985 platform tests (SQLite, with PostgreSQL's rules enforced) and 982 on PostgreSQL; 205 engine tests.
+- 109 of 109 features verified feature by feature.
 - 24 penetration tests and 11 fuzzing properties.
 - Time-travel tests (0 / 45 / 400 days).
 - A consistency suite: the same figure on every surface, every pipeline run twice, AI on vs off identical.

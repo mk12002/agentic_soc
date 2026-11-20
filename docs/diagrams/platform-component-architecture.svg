@@ -25,7 +25,7 @@
     </style>
   </defs>
   <rect width="2400" height="1700" fill="#ffffff"/>
-  <text x="30" y="34" class="h" font-size="22">Agentic SOC platform - component architecture (tools, modules, technologies, endpoints)</text>
+  <text x="30" y="34" class="h" font-size="22">CyberDome - component architecture (tools, modules, technologies, endpoints)</text>
   <text x="30" y="56" class="s">Production shape in the client's environment. Boxes are real components (file / module / technology / table / vendor endpoint). R = read, W = write (policy-gated). Orange = the only path that can change a security tool.</text>
   <rect x="20" y="70" width="300" height="1610" rx="12" class="zone"/>
 <text x="34" y="90" class="z">Client environment services</text>
@@ -85,7 +85,7 @@
 <circle cx="298" cy="212" r="11" fill="#2563eb"/>
 <text x="298" y="216" class="n" text-anchor="middle">1</text>
 <rect x="340" y="70" width="1300" height="1610" rx="12" class="zoneb"/>
-<text x="354" y="90" class="z">Agentic SOC platform (Python 3.11) - Docker images, non-root uid 1001</text>
+<text x="354" y="90" class="z">CyberDome platform (Python 3.11) - Docker images, non-root uid 1001</text>
 <rect x="352.0" y="100" width="310.0" height="94" rx="7" class="ctr"/>
 <text x="362.0" y="118" class="t">soc-api (2+ replicas)</text>
 <text x="362.0" y="136" class="s">python -m soc_platform serve</text>

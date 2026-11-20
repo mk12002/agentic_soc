@@ -113,7 +113,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 108 features
+python scripts/verify_features.py                                 # tests mapped to 109 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -447,8 +447,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 971 platform tests passing on SQLite and 968 on PostgreSQL (989 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
-  engine tests, 108/108 features verified with `--browser --engine --live --llm` (round 25); the go-live round's
+- Current counts (keep docs in sync when they change): 985 platform tests passing on SQLite and 982 on PostgreSQL (1003 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
+  engine tests, 109/109 features verified with `--browser --engine --live --llm` (round 35); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
 ---

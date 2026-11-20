@@ -21,7 +21,7 @@
     </style>
   </defs>
   <rect width="1400" height="900" fill="#ffffff"/>
-  <text x="30" y="36" class="h" font-size="20">Agentic SOC - development VM technical architecture</text>
+  <text x="30" y="36" class="h" font-size="20">CyberDome - development VM technical architecture</text>
   <text x="30" y="58" class="s">Internal build-and-demo environment: 1 engineer, 1 month, synthetic data only. Arrows start at the side that opens the connection; labels give protocol and port.</text>
 
   <!-- ============ corporate network -->

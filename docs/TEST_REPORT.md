@@ -1,6 +1,6 @@
 # Test report - CyberDome platform
 
-Date: 2026-11-16 (rounds 15-34; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-11-20 (rounds 15-35; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,48 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 34 (2026-11-15) - latest results: whole-system check and security audit
+## 0. Round 35 (2026-11-20) - latest results: CyberDome rebrand, Dome Score, collapsible menu
+
+Aim: rebrand the platform as CyberDome with the deck's module names, retract and expand the menu from a button,
+and add a Dome Score whose weights the organisation sets - then prove all of it on both databases, in a real
+browser with the model on, and feature by feature.
+
+**What changed.** The product name in the console, sign-in, page titles, API title, reports, notifications, the
+comments the platform writes into tools, diagrams and docs (identifiers - the `soc_platform` package, `SOC_*`
+settings, the `agentic-soc` namespace, database tables - keep their names). Menu groups follow the modules: Command,
+Dome Agents, Domains, Dome Graph, Dome Connect, Dome Comply. The menu retracts to a rail of icons from the button at
+its top right and expands again; the choice is remembered per browser; on a narrow screen it folds away. The Dome
+Score (`intelligence/dome_score.py`): eight pillars, each a published count computed from the records, combined by
+a weighted average; anyone with all-domain access previews other weights (nothing saved); a lead saves them
+(versioned in `dome_score_weights`, audited pillar by pillar); it heads the Overview and is a report source in the
+board report. Tool health moved to `connectors/health.py` so the score and the report builder no longer import from
+the API layer.
+
+**Tests added (14, `test_dome_score.py`):** each pillar equals the published count of seeded records; the score is
+the weighted average of the pillar scores shown; a weight never changes a pillar's own figure; a pillar without
+data is left out and the others share its weight; weights are whole numbers 0-100 for known pillars and not all
+zero (7 cases); only a human lead saves weights, each change versioned and audited with from / to per pillar; a
+pillar whose data cannot be read is shown unavailable and the score still computes; the API shows the score only
+with all-domain access, previews without saving, refuses an analyst's save and an invalid one, and keeps the lead's.
+The browser tour now also checks the Dome Score on the Overview and its own screen against the API (ring, every
+pillar, a slider preview against `/preview`, weights unchanged after a preview) and that the menu collapses to a rail
+under 72 px, is remembered after a reload and expands again; `dome-score` joined the screens audited at every
+width and theme.
+
+**Found and fixed during the round:** the detection pillar first said "by two or more tools" for what the coverage
+module calls full coverage (worded "fully" now); with six menu groups the expanded menu was taller than a 900 px
+window and the collapsed rail showed a full-width scrollbar (spacing tightened, thin scrollbar); the product name
+was on the confidential-name list, so every changed file was blocked by the pre-commit scan (the owner removed it
+locally; the CI secret is updated separately).
+
+**Counts:** 1003 collected. SQLite: 985 passed, 18 skipped, 0 failed (42 min 0 s). PostgreSQL 16: 982 passed, 21
+skipped, 0 failed (1 h 34 min, both suites at once). Engine suite not re-run (no engine change; 205 on 2026-11-16).
+`verify_features.py --browser --engine --live --llm`: **109 of 109** features (the Dome Score is the new one), 347
+mapped tests passed, evaluations and browser tour ok. Browser tour with the model on: 41 screenshots, layout audited
+at 1440 / 1280 / 1024 / 768 px in light and dark, every KPI cross-checked against the API, 0 problems; the
+documentation screenshots were refreshed from it. ruff, bandit and the secret / confidential-name scan clean.
+
+## 0.0 Round 34 (2026-11-15): whole-system check and security audit
 
 Aim: confirm that everything works as intended, and audit the platform's security: gates, both test suites, the demo
 run on a scratch database and read, a running server probed, the security-relevant code read, the dependencies

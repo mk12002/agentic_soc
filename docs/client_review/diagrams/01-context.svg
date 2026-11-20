@@ -29,7 +29,7 @@
 
   <!-- platform -->
   <rect x="300" y="125" width="450" height="300" rx="12" class="core"/>
-  <text x="318" y="152" class="h" font-size="16">Agentic SOC platform</text>
+  <text x="318" y="152" class="h" font-size="16">CyberDome platform</text>
   <text x="318" y="174" class="s">API + web console · scheduler · workflows - 2+ replicas each, stateless</text>
   <rect x="318" y="190" width="200" height="54" rx="8" class="box"/><text x="330" y="212" class="h">Workflows</text><text x="330" y="231" class="s">phishing · incident · vulnerability</text>
   <rect x="532" y="190" width="200" height="54" rx="8" class="box"/><text x="544" y="212" class="h">Intelligence</text><text x="544" y="231" class="s">risk · correlation · attack story</text>

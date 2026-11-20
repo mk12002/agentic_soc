@@ -26,7 +26,7 @@
     </style>
   </defs>
   <rect width="1600" height="1090" fill="#ffffff"/>
-  <text x="30" y="34" class="h" font-size="20">Agentic SOC platform - technical architecture (production, in the client's environment)</text>
+  <text x="30" y="34" class="h" font-size="20">CyberDome platform - technical architecture (production, in the client's environment)</text>
   <text x="30" y="56" class="s">Layers depend downwards only (API → intelligence → workflows → core → connectors). Arrows start at the side that opens the connection. Orange = the only path that can change a security tool.</text>
 
   <!-- ===================== client services (left) -->
@@ -75,7 +75,7 @@
 
   <!-- ===================== platform (centre) -->
   <rect x="290" y="70" width="940" height="790" rx="12" class="zoneb"/>
-  <text x="306" y="92" class="z">Agentic SOC platform - containers on a VM or Kubernetes; non-root images; API stateless, scheduler leases</text>
+  <text x="306" y="92" class="z">CyberDome platform - containers on a VM or Kubernetes; non-root images; API stateless, scheduler leases</text>
   <rect x="306" y="104" width="908" height="42" rx="8" class="bar"/>
   <text x="320" y="130" class="w">TLS reverse proxy + WAF (client's: App Gateway / Front Door / on-premises) → API :8080 · X-Forwarded-For trusted from the proxy only</text>
 
