@@ -177,6 +177,7 @@ Results: [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 | [docs/LIVE_DEMO_20MIN.md](docs/LIVE_DEMO_20MIN.md) | A timed 20-23 minute live demo: the order, what to click and say per segment, what to cut when running long, the ten likely questions |
 | [docs/LIVE_DEMO_NOTES.md](docs/LIVE_DEMO_NOTES.md) | Presenter's notes for a live demo: every page and section, what it computes, the demo's values, likely questions |
 | [docs/FEATURES.md](docs/FEATURES.md) | Complete feature list with screenshots |
+| [docs/TUNING_USER_GUIDE.md](docs/TUNING_USER_GUIDE.md) | Tuning for leads and analysts: the screen, creating a rule step by step, reading the preview, approving and revoking, the seven rule types, guardrails, suggestions, troubleshooting, API |
 | [docs/LLM_TOKENS_AND_COST.md](docs/LLM_TOKENS_AND_COST.md) | Measured tokens per component, unit costs, monthly cost by SOC size, budget sizing |
 | [docs/FAILURE_MODES.md](docs/FAILURE_MODES.md) | What can fail in production, how it is detected, how the platform behaves |
 | [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | 25-minute client walkthrough, what a demo proves |

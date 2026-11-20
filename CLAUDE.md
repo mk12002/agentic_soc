@@ -488,6 +488,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 | `docs/PRESENTER_GUIDE.md` | what to say/click in a demo, formulas, hard Q&A, numbers to remember, §15 component reference, §16 testing |
 | `docs/DEMO_GUIDE.md` | short demo script |
 | `docs/FEATURES.md` | screens and features |
+| `docs/TUNING_USER_GUIDE.md` | the tuning user guide (screen, steps, rule types with defaults and bounds, guardrails, messages, API) - update when `core/tuning.py`, its routes or the Tuning screen change |
 | `docs/SECURITY.md` | threat model, hardening, pentest results |
 | `docs/FAILURE_MODES.md` | failure → detection → behaviour → status |
 | `docs/OPERATIONS.md` | settings, jobs, monitoring, access, backups, key rotation |
