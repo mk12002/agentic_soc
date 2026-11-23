@@ -194,6 +194,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 
 /* ---------------------------------------------------------------- tables */
 .table-wrap { overflow-x: auto; }
+.table-wrap:focus-visible, .adpre:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
 /* visible, theme-aware scrollbars wherever content scrolls sideways */
 .table-wrap, .scroll-x { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .table-wrap::-webkit-scrollbar, .scroll-x::-webkit-scrollbar { height: 10px; }
@@ -402,6 +403,18 @@ svg.graph line { stroke: var(--border-strong); stroke-width: 1; }
 /* global search in the top bar */
 .search-box { width: 260px; max-width: 32vw; height: 32px; margin-right: 8px; }
 @media (max-width: 900px) { .search-box { width: 150px; } }
+/* phones: the top bar wraps (search on its own row, the account chip shows only its avatar, the automation pill only
+   its dot while all is well) and no control is wider than its container - otherwise every screen scrolled sideways by 100-160 px */
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; height: auto; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
+  .topbar .search-box { order: 10; flex: 1 1 100%; width: auto; max-width: none; margin-right: 0; }
+  .user .who { display: none; }
+  .user { padding: 3px; }
+  .menu { right: -4px; max-width: calc(100vw - 32px); }
+  #kill-status:not(.halt) { font-size: 0; gap: 0; padding: 7px; }   /* "halted" is an alarm: it keeps its words */
+  .seg { flex-wrap: wrap; max-width: 100%; }
+  .input, select, textarea { max-width: 100%; }
+}
 
 /* stacked horizontal bars (hbars in app.js) */
 .hbars { display: flex; flex-direction: column; gap: 9px; }

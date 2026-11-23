@@ -418,7 +418,7 @@ function actContext(c) {
     <div><div class="small strong">What happens if approved</div>
       <div class="small" style="margin:4px 0">${esc(c.description || a.action_type)}${c.tool ? ` - via <b>${esc(c.tool)}</b>` : ''}</div>
       ${targets}${p.group ? `<div class="small">Sent to team <b>${esc(p.group)}</b>${p.priority ? ` · priority ${esc(p.priority)}` : ''}</div>` : ''}
-      ${p.title || p.description ? `<div class="adpre"><div class="strong">${esc(p.title || '')}</div>${esc(p.description || '')}</div>` : ''}
+      ${p.title || p.description ? `<div class="adpre" tabindex="0" role="region" aria-label="${esc(p.title || 'Description')}"><div class="strong">${esc(p.title || '')}</div>${esc(p.description || '')}</div>` : ''}
       ${extra.length ? `<dl class="kv small">${extra.map(([k, v]) => `<dt>${esc(cap(k))}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
       <div class="inline mt-s" style="flex-wrap:wrap;gap:6px">${impact}</div>
       ${(a.policy_reasons || []).map(r => `<div class="t-sub">${esc(r)}</div>`).join('')}
@@ -886,7 +886,7 @@ async function AiUsage() {
         <input class="input" style="width:90px;margin-top:4px" id="wm-${esc(f.workflow)}" aria-label="Output cap for ${esc(f.workflow)}" placeholder="cap ${esc(P.max_output_tokens[f.tier] || '')}" value="${esc(r.max_output_tokens || '')}">
         <label class="inline small" style="margin-top:4px"><input type="checkbox" id="we-${esc(f.workflow)}"${r.enabled === false ? '' : ' checked'}> on</label>`
         : `<span class="tag" style="white-space:nowrap">${esc(f.model)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}`}</td></tr>`; };
-  const lim = (id, v, ph, label) => `<input class="input" style="width:100%;max-width:130px" id="${id}" aria-label="${esc(label || id)}" value="${v == null ? '' : esc(v)}" placeholder="${esc(ph || '')}"${edit ? '' : ' readonly'}>`;
+  const lim = (id, v, ph, label) => `<input class="input" style="width:100%;min-width:11ch;max-width:130px" id="${id}" aria-label="${esc(label || id)}" value="${v == null ? '' : esc(v)}" placeholder="${esc(ph || '')}"${edit ? '' : ' readonly'}>`;
   const roleRows = pol.roles.map(r => { const v = (P.roles || {})[r] || {}; return `<tr><td class="small">${esc(cap(r))}</td><td>${lim('rh-' + r, v.hourly_tokens, 'everyone', cap(r) + ' per hour')}</td><td>${lim('rd-' + r, v.daily_tokens, 'everyone', cap(r) + ' per day')}</td></tr>`; });
   const row2 = (label, a, b) => `<tr><td class="small">${label}</td><td>${a}</td><td>${b || ''}</td></tr>`;
   const userOver = Object.entries(P.users || {}).map(([k, v]) => `${k} | ${v.hourly_tokens ?? ''} | ${v.daily_tokens ?? ''}`).join('\n');

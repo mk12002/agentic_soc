@@ -154,6 +154,9 @@ def test_a_quote_in_a_name_is_escaped_in_every_vendor_query_and_cannot_change_it
     assert fql_str("a'b\\c") == "'a\\'b\\\\c'"
     assert path_part("o'brien@x.com/../me?x#y") == "o%27brien@x.com%2F..%2Fme%3Fx%23y"
     assert path_part("jane.doe@acme-demo.com") == "jane.doe@acme-demo.com"      # ordinary values are unchanged
+    for other_resource in ("", " ", ".", "..", "..."):                            # the collection, or a parent path
+        with pytest.raises(ValueError, match="single resource"):
+            path_part(other_resource)
 
     entra = reg.get("entra")
     entra.http.calls.clear()

@@ -149,7 +149,7 @@ event volume; `--handoff` builds the data handoff workbook's estate), `estate_pr
 share and replays through the connectors' own parsers), `measure_scale.py --scales 1,20,40 [--db URL]` (time and SQL per stage on growing messy estates),
 `load_test.py --users N --seconds S --workers W [--db URL]` (a real multi-process server under concurrent analysts), `rename_estate.py`, `eval_phishing.py`,
 `eval_identity_resolution.py`, `eval_resolution_at_scale.py`, `measure_llm_usage.py` (token/cost measurement),
-`build_connector_docs.py`, `ui_tour/tour.js` (Playwright browser tour: layout at 4 widths, axe-core accessibility,
+`build_connector_docs.py`, `ui_tour/tour.js` (Playwright browser tour: layout at 5 widths incl. a 390 px phone, axe-core accessibility,
 stored-XSS probe, screen-vs-API cross-check; needs Node + installed Chrome/Edge), `load_env.ps1`.
 
 ---
@@ -447,7 +447,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 985 platform tests passing on SQLite and 982 on PostgreSQL (1003 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
+- Current counts (keep docs in sync when they change): 986 platform tests passing on SQLite and 983 on PostgreSQL (1004 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
   engine tests, 109/109 features verified with `--browser --engine --live --llm` (round 35); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
@@ -738,6 +738,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **The product is CyberDome; identifiers keep their names.** The package (`soc_platform`), the `SOC_*` settings, the
   Kubernetes namespace (`agentic-soc`) and the database tables were not renamed: renaming them breaks deployments and
   stored data. User-visible text says CyberDome.
+- **Never list products where a category exists.** Coverage and risk knew EDR as `{crowdstrike, defender_endpoint}`,
+  so a host seen only by any other EDR was an "EDR gap". Ask the manifests (`registry.tools_in_category("edr")`).
 - **The Dome Score's weights only combine pillars.** A pillar's own figure must never depend on a weight, and a new
   pillar needs a published formula, a link to its records and a default weight (`DEFAULT_WEIGHTS`); old weight rows
   get the default for it (`_full`).

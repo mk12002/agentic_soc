@@ -141,6 +141,20 @@ def discover() -> dict[str, ConnectorManifest]:
     return found
 
 
+_CATEGORY_TOOLS: dict[str, frozenset[str]] = {}
+
+
+def tools_in_category(category: str) -> frozenset[str]:
+    """Names of every discovered connector of one category (``edr``, ``vuln``...), as records carry them in ``tool``.
+
+    Coverage questions ("does any EDR see this host?") must ask the manifests, never a list of product names: a list
+    misses every EDR added later (a third-party package or a scaffolded connector) and reports its hosts as gaps.
+    """
+    if category not in _CATEGORY_TOOLS:
+        _CATEGORY_TOOLS[category] = frozenset(n for n, m in discover().items() if m.category == category)
+    return _CATEGORY_TOOLS[category]
+
+
 def _manifests_of(module: Any) -> list[ConnectorManifest]:
     if hasattr(module, "MANIFESTS"):
         return list(module.MANIFESTS)

@@ -1,5 +1,5 @@
 // Browser tour: drives the real console in Chrome/Edge against a running server, loads the sample estate through
-// the API, visits every screen (3 roles, light + dark), audits layout at 1440/1280/1024/768 px, runs an axe-core
+// the API, visits every screen (3 roles, light + dark), audits layout at 1440/1280/1024/768/390 px, runs an axe-core
 // accessibility scan (WCAG 2.1 A/AA) on every screen in both themes, saves screenshots.
 //   npm install            (once, in this folder; uses the installed Chrome/Edge - no browser download)
 //   SOC_BASE=http://127.0.0.1:8765 node tour.js
@@ -46,7 +46,7 @@ async function settle(page) {
 }
 const AUDIT = () => {
   const out = [], vw = document.documentElement.clientWidth;
-  const desc = el => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : ''} "${(el.textContent || '').trim().slice(0, 40)}"`;
+  const desc = el => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : ''} "${(el.textContent || '').trim().slice(0, 40)}"`;
   const inScroller = el => { for (let p = el.parentElement; p; p = p.parentElement) { const o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll') return true; } return false; };
   for (const el of document.querySelectorAll('body *')) {
     if (el.closest('svg') || el.closest('#toast')) continue;
@@ -429,19 +429,25 @@ async function visit(page, hash, name, full = true) {
   const routes = ['overview', 'dome-score', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'ai-usage', 'reports', 'access', 'audit',
     'watchlists', 'tuning', `search/${encodeURIComponent(term)}`];
-  for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light']]) {
+  // 390 px is a phone: tables scroll sideways there, so axe also runs at that width (a scroll region must be focusable)
+  for (const [w, theme] of [[1280, 'light'], [1280, 'dark'], [1024, 'light'], [1024, 'dark'], [768, 'light'], [390, 'light']]) {
     await page.setViewportSize({width: w, height: 900});
     await page.evaluate(t => { document.documentElement.setAttribute('data-theme', t); }, theme);
     for (const r of routes) { await page.goto(`${BASE}/#/${r}`); await settle(page); await audit(page, `${w}px ${theme} ${r}`);
-      if (w === 1280) await axe(page, `${theme} ${r}`);
-      const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-      if (ov > 2) problems.push(`${w}px ${r}: page overflow ${ov}px`); }
+      if (w === 1280 || w === 390) await axe(page, `${w}px ${theme} ${r}`);
+      const ov = await page.evaluate(() => {   // how far the page scrolls sideways, and the element reaching furthest
+        let worst = null, right = window.innerWidth;
+        for (const el of document.querySelectorAll('body *')) { const x = el.getBoundingClientRect().right; if (x > right + 1) { right = x; worst = el; } }
+        const name = worst ? `${worst.tagName.toLowerCase()}${worst.id ? '#' + worst.id : ''}.${String(worst.className || '').trim().split(/\s+/).join('.')}` : '';
+        return [document.documentElement.scrollWidth - window.innerWidth, name];
+      });
+      if (ov[0] > 2) problems.push(`${w}px ${r}: page overflow ${ov[0]}px (${ov[1]})`); }
     console.log('audited', w, theme, routes.length, 'screens');
   }
   await browser.close();
   if (a11yNotes.length) console.log('\nACCESSIBILITY NOTES (moderate/minor):\n - ' + [...new Set(a11yNotes)].join('\n - '));
   console.log('\nPROBLEMS:', problems.length ? '\n - ' + problems.join('\n - ') : 'none');
   fs.writeFileSync(path.join(OUT, 'tour-result.json'), JSON.stringify({problems,
-    screenshots: fs.readdirSync(OUT).filter(f => f.endsWith('.png')).length, audited_widths: [1440, 1280, 1024, 768], a11y_notes: [...new Set(a11yNotes)], llm: llmOn}, null, 1));
+    screenshots: fs.readdirSync(OUT).filter(f => f.endsWith('.png')).length, audited_widths: [1440, 1280, 1024, 768, 390], a11y_notes: [...new Set(a11yNotes)], llm: llmOn}, null, 1));
   process.exit(problems.length ? 1 : 0);
 })().catch(e => { console.error('CRASH', e); console.log('PROBLEMS so far:', problems); process.exit(2); });

@@ -211,9 +211,10 @@ class RiskEngine:
                 if f.internet_exposed:
                     add("internet_exposed_vulnerable", "exposure", 5, "wiz", f.id, f.first_seen,
                         f"{f.cve} on internet-exposed asset")
+            from soc_platform.connectors.registry import tools_in_category
             from soc_platform.core.asset_types import needs_endpoint_agent
 
-            has_edr = {"crowdstrike", "defender_endpoint"} & set((ent.attributes or {}).get("by_tool", {}))
+            has_edr = tools_in_category("edr") & set((ent.attributes or {}).get("by_tool", {}))
             if not has_edr and factors and needs_endpoint_agent(self.s, ent):
                 add("no_edr_coverage", "coverage", 5, "platform", entity_id, None, "no EDR telemetry for this host",
                     factor=strongest(AMPLIFIER_TRIGGERS["no_edr_coverage"]))

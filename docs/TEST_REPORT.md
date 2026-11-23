@@ -1,6 +1,6 @@
 # Test report - CyberDome platform
 
-Date: 2026-11-20 (rounds 15-35; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-11-21 (rounds 15-36; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,26 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 35 (2026-11-20) - latest results: CyberDome rebrand, Dome Score, collapsible menu
+## 0. Round 36 (2026-11-21) - latest results: EDR coverage by category, URL path values, phones
+
+Aim: find defects the existing tests could not see.
+
+**Found and fixed:**
+
+| Defect | Fix | Regression test |
+|---|---|---|
+| Coverage and risk knew EDR as two product names, so a host listed only by any other EDR connector was reported "missing EDR", risk-scored for it and could raise the attacked-host-without-EDR insight | Both ask the connector manifests (`registry.tools_in_category("edr")`) | `test_a_host_seen_by_any_edr_is_never_reported_as_missing_edr` (failed before the fix: `lt-0001` listed as missing) |
+| `path_part` left an empty, `.` or `..` value unencoded: `/users/` names the collection and `/users/..` a parent path - including for the Entra disable / revoke / password-reset writes | Such values are refused (a look-up reports the tool unavailable, an action fails) | `test_a_quote_in_a_name_is_escaped_in_every_vendor_query_and_cannot_change_it` (5 new cases) |
+| Phones: the top bar was wider than a 390 px screen, so every screen scrolled sideways by 104-159 px (132 layout findings); sideways-scrolling tables and the scrolling description block could not be reached by keyboard; a token budget box was cut off | The top bar wraps on phones (search on its own row, avatar only, the automation pill as a dot unless halted); every table's scroll region and the description block are focusable and named, with a focus outline; number boxes keep a minimum width | The browser tour now audits a 390 px width with axe-core there too, and names the element behind any page overflow |
+
+**Counts:** 1004 collected. SQLite: 986 passed, 18 skipped, 0 failed (41 min 57 s). PostgreSQL 16: 983 passed, 21
+skipped, 0 failed (1 h 35 min 51 s, both suites at once). The `path_part` and console changes were made while those
+runs were under way; the affected files were re-run afterwards on both databases. Browser tour: 40 screenshots, layout
+audited at 1440 / 1280 / 1024 / 768 / 390 px, axe-core at 1280 and 390, 0 problems on two consecutive runs (one
+earlier run showed a 56 px overflow on a case page that did not recur; the tour now names the overflowing element).
+Engine suite not re-run (no engine change). ruff, bandit and the secret / confidential-name scan clean.
+
+## 0.0a Round 35 (2026-11-20): CyberDome rebrand, Dome Score, collapsible menu
 
 Aim: rebrand the platform as CyberDome with the deck's module names, retract and expand the menu from a button,
 and add a Dome Score whose weights the organisation sets - then prove all of it on both databases, in a real

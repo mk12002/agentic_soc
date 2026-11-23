@@ -186,7 +186,7 @@ All action types also have a hard limit of 5,000 targets per request, above whic
 | Input fuzzing | Every request field and query parameter of every API route; every field of every connector stream with wrong types; every node of the autonomy policy, AI usage policy and connector configuration; corrupted e-mails; model answers of every shape | All handled without a server error; malformed items refused with a reason |
 | Static analysis | bandit over the platform and scripts | No medium or high findings |
 | Dependency audit | pip-audit (Python), npm audit (test tooling) | No known vulnerabilities |
-| Browser tour | Real browser over every screen at 4 widths, accessibility scan, stored-XSS probe, screen-versus-API figure cross-check | No problems |
+| Browser tour | Real browser over every screen at 5 widths (down to a phone), accessibility scan, stored-XSS probe, screen-versus-API figure cross-check | No problems |
 | Database parity | The full suite on SQLite and PostgreSQL 16, with PostgreSQL's constraints enforced in SQLite runs | Identical results |
 
 

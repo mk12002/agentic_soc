@@ -75,10 +75,17 @@ def fql_str(v: Any) -> str:
 
 def path_part(v: Any) -> str:
     """A value as one URL path segment (``/users/{upn}``): reserved characters (``/ ? # %``...) percent-encoded, so a
-    value can only ever name that one resource. Addresses keep their ``@``."""
+    value can only ever name that one resource. Addresses keep their ``@``.
+
+    An empty value would name the collection (``/users/``) and ``.`` / ``..`` stay unencoded and are resolved as
+    dot-segments (``/users/..``): either would point a lookup - or a write such as disabling an account - at another
+    resource, so they are refused."""
     from urllib.parse import quote
 
-    return quote(str(v), safe="@")
+    s = str(v)
+    if s.strip(" .") == "":
+        raise ValueError(f"{s!r} cannot name a single resource in a URL path")
+    return quote(s, safe="@")
 
 
 def need(rec: Any, key: str) -> Any:

@@ -105,7 +105,9 @@ function card(title, body, o = {}) {
 }
 function table(cols, rows, o = {}) {
   if (!rows.length) return `<div class="empty">${esc(o.empty || 'Nothing to show yet.')}</div>`;
-  return `<div class="table-wrap"><table><thead><tr>${cols.map(c => `<th class="${c.num ? 'num' : ''}">${esc(c.h || c)}</th>`).join('')}</tr></thead>
+  // focusable + named: on a phone the table scrolls sideways, and a keyboard user must be able to reach it (WCAG 2.1.1)
+  const name = o.label || `Table: ${cols.map(c => c.h || c).filter(Boolean).slice(0, 3).join(', ')}`;
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="${esc(name)}"><table><thead><tr>${cols.map(c => `<th class="${c.num ? 'num' : ''}">${esc(c.h || c)}</th>`).join('')}</tr></thead>
     <tbody>${rows.join('')}</tbody></table></div>`;
 }
 const btn = (label, fn, args = [], cls = '', ic = '') =>

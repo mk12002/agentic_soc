@@ -1543,7 +1543,7 @@ documented in `pyproject.toml`; silent `pass` handlers replaced with logging). R
 | Concurrency | `test_scheduler.py`, `test_audit_concurrency.py`, pentest races | No double runs, no forked chain, exactly-once approvals, one case per e-mail |
 | Live (opt-in) | `test_live_llm.py`, live feed tests | The real LLM and public feeds |
 | Engine | `domains/phishing/tests/` | The ML engine |
-| Browser | `scripts/ui_tour/tour.js` | Every screen in a real browser, 4 roles, 2 themes, 4 widths; screen values = API; accessibility; stored XSS |
+| Browser | `scripts/ui_tour/tour.js` | Every screen in a real browser, 4 roles, 2 themes, 5 widths (1440 to a 390 px phone); screen values = API; accessibility; stored XSS |
 | Feature map | `scripts/verify_features.py` | 89 features, each mapped to the tests that prove it → FEATURE_VERIFICATION.md |
 
 ### 22.2 PostgreSQL parity
@@ -1757,6 +1757,7 @@ Operations detail: [OPERATIONS.md](OPERATIONS.md).
 | 108 | An incident is scored from its alerts' own severity (`alert_severity`, set when it is created), not from its last scored severity | Score from `case.severity` | Re-assessment (new KEV exposure, a reassessed incident, a raise) started from the already boosted figure and climbed each time; found by the tuning tests | Cases created before this fall back to their stored severity |
 | 104 | Each connector was checked against the vendor's current documentation before onboarding, and a fixture answers only the request the vendor accepts | Trust fixtures that answered whatever the code sent | Fixtures had accepted calls a tenant refuses (Graph's per-user device lists with app permissions, MDE `findbyip` as query parameters, NVD with one date, RTR output read synchronously) - green tests, broken onboarding | Paths a vendor documents only inside the tenant (Delinea Privilege Manager, Secret Server's audit list) stay settings and are flagged to confirm |
 | 109 | One posture figure, the Dome Score: eight pillars each computed in code as a published count ("3 of 4 hosts") or stated penalty, combined by a weighted average whose weights a lead sets (`approve_policy`, versioned in `dome_score_weights`, audited pillar by pillar); preview without saving | A model-written posture grade; fixed weights; a score per tool | The deck's CISO view needs one number, and an auditor must be able to recompute it from the screen; what matters most differs per organisation, so the weights are theirs - but a weight may only change how pillars combine, never a pillar's own figure | Pillars with no data are left out and the rest share their weight, so a new estate's score rests on fewer pillars until its tools report; a pillar whose data cannot be read is shown unavailable rather than failing the score |
+| 110 | "Does an EDR see this host?" is answered from the connectors' manifests (`tools_in_category("edr")`), in coverage and in risk | A list of EDR product names | The list knew two products, so a laptop listed only by any other EDR (a third-party connector package, a scaffolded one) was reported as an EDR gap, risk-scored for it and could raise the attacked-host-without-EDR insight | The category is read once per process; a connector installed while the platform runs counts after a restart, like every other discovered connector |
 ---
 
 ## 26. Known limitations and trade-offs
