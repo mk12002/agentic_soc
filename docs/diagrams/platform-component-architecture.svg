@@ -55,10 +55,10 @@
 <text x="42" y="505" class="s">SOC_LLM_API_KEY, webhooks)</text>
 <rect x="32" y="532" width="276" height="94" rx="7" class="box"/>
 <text x="42" y="550" class="t">Client LLM gateway</text>
-<text x="42" y="568" class="s">Azure OpenAI / AI Foundry, or</text>
-<text x="42" y="583" class="s">Anthropic / OpenAI-compatible</text>
-<text x="42" y="598" class="s">endpoint approved by the client</text>
-<text x="42" y="613" class="s">(SOC_LLM_PROVIDER, _ENDPOINT)</text>
+<text x="42" y="568" class="s">In-house platform (its SDK,</text>
+<text x="42" y="583" class="s">service account) or an API</text>
+<text x="42" y="598" class="s">key: OpenRouter, OpenAI-</text>
+<text x="42" y="613" class="s">compatible, Anthropic, Azure</text>
 <rect x="32" y="640" width="276" height="94" rx="7" class="box"/>
 <text x="42" y="658" class="t">SIEM (Microsoft Sentinel)</text>
 <text x="42" y="676" class="s">Log agent reads container stdout</text>
@@ -274,16 +274,16 @@
 <text x="978.0" y="686" class="n" text-anchor="middle">7</text>
 <rect x="352" y="916" width="400" height="184" rx="7" class="key"/>
 <text x="362" y="934" class="t">llm/ - model access (optional)</text>
-<text x="362" y="952" class="s">gateway.py: LLMGateway grounded() /</text>
-<text x="362" y="967" class="s">complete_json(); citations validated,</text>
-<text x="362" y="982" class="s">numeric-fidelity guardrail, breaker,</text>
-<text x="362" y="997" class="s">timeouts, SOC_LLM_CONCURRENCY</text>
-<text x="362" y="1012" class="s">redaction.py: Redactor pseudonymise /</text>
-<text x="362" y="1027" class="s">restore</text>
-<text x="362" y="1042" class="s">usage_policy.py: budgets, per-person</text>
-<text x="362" y="1057" class="s">limits, per-feature tier, usage_report</text>
-<text x="362" y="1072" class="s">providers/: openai_compatible</text>
-<text x="362" y="1087" class="s">(azure_openai), anthropic_provider</text>
+<text x="362" y="952" class="s">gateway.py: grounded / complete_json /</text>
+<text x="362" y="967" class="s">qualify; citations, figure guardrail,</text>
+<text x="362" y="982" class="s">breaker, timeouts, concurrency</text>
+<text x="362" y="997" class="s">integration.py: provider, sealed creds</text>
+<text x="362" y="1012" class="s">catalogue.py: model lines, checked</text>
+<text x="362" y="1027" class="s">upgrades, approve / roll back</text>
+<text x="362" y="1042" class="s">usage_policy.py: budgets, limits,</text>
+<text x="362" y="1057" class="s">model per feature; redaction.py</text>
+<text x="362" y="1072" class="s">providers/: openai_compatible,</text>
+<text x="362" y="1087" class="s">openrouter, anthropic, gateway SDK</text>
 <circle cx="740" cy="920" r="11" fill="#2563eb"/>
 <text x="740" y="924" class="n" text-anchor="middle">8</text>
 <rect x="764" y="916" width="864" height="154" rx="7" class="key"/>

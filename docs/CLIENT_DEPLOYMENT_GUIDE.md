@@ -783,6 +783,8 @@ backend endpoint exposes:
 | The Claude Messages API (`POST .../v1/messages`) | `anthropic` | Claude models |
 | Azure OpenAI / Azure AI Foundry directly | `azure_foundry` (v1 API) or `azure_openai` | OpenAI models on Azure |
 | Only a vendor-native Gemini API (`generateContent`) and nothing else | - (needs a small provider class, 5.7) | Gemini |
+| Only the platform's own Python SDK, used with a service account (the client's in-house platform) | `enterprise_gateway` - set on the **AI usage** screen (5.9) | every model the platform offers, by its display name |
+| An OpenRouter account (or another API-key provider) instead of the in-house platform | chosen on the **AI usage** screen with its API key (5.9) | every model the account may use |
 
 **Recommended:** `openai_compatible` against the gateway's OpenAI-compatible endpoint. One configuration reaches all
 three vendors, and different features can even use different vendors' models.
@@ -890,6 +892,89 @@ redaction and fallbacks stay as they are. Add a test like `test_openai_compatibl
 6. Failure behaviour to confirm once: point the endpoint at a closed port → screens keep working with deterministic
    text, calls are logged with status `error`, and after 3 failures the circuit opens for 60 s (status
    `circuit_open`) so screens stop waiting.
+
+### 5.9 The in-house platform through its SDK, with a service account
+
+The client's in-house LLM platform is reached through its own Python SDK (installed from the client's internal
+package index) rather than an HTTP API. Every analyst signs in to CyberDome with SSO as usual; **every model call is
+made with one service account**, whose tokens an administrator enters in the console. Each person's use is still
+counted against their own AI limits (AI usage policy), and the call log names who asked.
+
+**1. Build the SDK into the image** (it is never part of this repository, its dependency locks or its CI). Generate a
+hashed requirements file for the SDK and its dependencies from the internal index (for example
+`pip-compile --generate-hashes`), then build with two BuildKit secrets - the index's credentials never enter an image
+layer, and the SDK is installed hash-checked like every other package:
+
+```bash
+docker build --secret id=gateway_sdk_lock,src=gateway-sdk.lock \
+             --secret id=pip_conf,src=pip.conf \
+             --build-arg GATEWAY_SDK_LOCK_SHA256=$(sha256sum gateway-sdk.lock | cut -d' ' -f1) \
+             -f deploy/Dockerfile -t cyberdome:<version> .
+```
+
+The build argument is required with the lock and must be its SHA-256 (the build refuses a mismatch): BuildKit leaves
+a secret's content out of its build cache key, so without it a changed lock would silently reuse the previous SDK
+layer.
+
+**2. Deployment settings** (the deployment names the SDK; the console cannot point prompts anywhere else):
+
+| Setting | Value |
+|---|---|
+| `SOC_LLM_GATEWAY_SDK` | the module that exposes `Session` (as the SDK's documentation imports it) |
+| `SOC_LLM_GATEWAY_SESSION_ARGS` | JSON: which `Session(...)` argument carries which credential. Default `{"auth_token": "auth_token", "session_token": "session_token"}`; set it to the argument names the SDK's *Token and Usage* page documents |
+| `SOC_LLM_GATEWAY_MODELS_CALL` | the session call that lists the models on offer (e.g. `llm.models`), if the SDK has one; without it an administrator adds new model names on the AI usage screen |
+| `SOC_LLM_GATEWAY_CHAT_ARGS` | optional JSON of fixed `llm.chat` arguments per size of work, e.g. `{"small": {"reasoning_effort": "low"}, "large": {"reasoning_effort": "medium"}}` (names as the SDK documents them) |
+| `SOC_LLM_GATEWAY_SYSTEM_ARG` / `SOC_LLM_GATEWAY_MAX_TOKENS_ARG` | the `llm.chat` argument for instructions / the answer cap, if the SDK has them (otherwise the instructions lead the input text and no cap is sent) |
+
+The SDK's first sign-in on a desktop opens an interactive SSO window; a server cannot answer that, which is why the
+platform uses the service account's tokens and never an interactive session.
+
+**3. Enter the service account** - *AI usage -> AI integration*: provider *In-house LLM gateway (service account)*,
+paste the auth token and the session token, and their expiry date if they have one. Saving reads the provider's model
+list at once (so features never ask the new provider for names it does not serve) and then runs **Test connection**,
+which checks each step and names the fix for any that fails: SDK installed, credentials entered, provider starts,
+model list read, one answer passes the platform's evidence check, token usage reported (without usage figures the
+budgets use an estimate of about four characters per token, and the screen says so). This is the first place the real
+SDK is exercised against what the platform expects of it - run it on day one.
+
+The credentials are encrypted with `SOC_DATA_KEY` (mandatory in production), never shown again, never written to the
+logs or the audit trail (which records who replaced which credential, and when). Alternatively the deployment provides
+them from a vault mount - `SOC_LLM_PROVIDER=enterprise_gateway` with `SOC_LLM_GATEWAY_AUTH_TOKEN_FILE` /
+`SOC_LLM_GATEWAY_SESSION_TOKEN_FILE` - and the console shows them as managed by the deployment. A choice saved in the
+console wins over the settings from then on.
+
+**When a token expires**: the gateway refuses the call, the platform writes its own text (nothing fails), the call is
+logged as `auth_error`, and a *high* finding tells the administrators (Teams / Slack / webhook). With an expiry date
+entered, a finding is raised three days before it. Enter the new token, press Test connection, and the finding
+clears.
+
+**Option 2 - an API key instead** (OpenRouter, an OpenAI-compatible endpoint, Anthropic, Azure AI Foundry): choose
+it in the same card and paste the key. Its address must be on `SOC_LLM_APPROVED_ENDPOINTS` (for OpenRouter
+`https://openrouter.ai/api/v1`). Every OpenRouter request asks the upstream vendors not to store or train on the
+prompt (`provider.data_collection: deny`); pseudonymisation applies as with every provider. Credentials are stored per
+provider: switching provider never sends one vendor's key to another.
+
+### 5.10 New model versions: used automatically, after a check
+
+Models on the gateway get new versions from time to time. No version is written in the platform's settings: an
+administrator chooses a model per feature (and a default for routine narrative and for summaries and reports), and the
+choice names a **line** - *GPT 6.1 Sol* is the *GPT Sol* line at version 6.1.
+
+* Every 6 hours (`SOC_JOB_LLM_CATALOGUE_SECONDS`; *Refresh from the provider* runs it at once) the platform reads the
+  models on offer. A newer version **in the same generation** (6.1 -> 6.2) is checked first - a grounded question on
+  synthetic evidence, answered as JSON with valid citations and no invented figure - and used for every feature that
+  follows the line only if it passes. A failed check keeps the current version and raises a finding with the reason.
+* A **new generation** (6.x -> 7) is offered for an administrator's approval (*Approve* on the AI usage screen): cost
+  and behaviour can change a lot between generations. The same check runs before it is used.
+* **Roll back** returns a line to the version before and never adopts the rolled-back one again (*Allow again*
+  lifts that). A feature can be pinned (*newest* unticked); `SOC_LLM_MODEL_VERSION` pins a line for the whole
+  deployment; *Use newer versions automatically* (off) turns every new version into an approval.
+* A version the provider marks as being retired raises a finding before calls start failing.
+* Every change is recorded (from, to, why, by whom or by the platform, the check's result), audited and raised as a
+  finding (*medium*: set `SOC_NOTIFY_MIN_SEVERITY=medium` to receive upgrades and approvals in Teams / Slack too).
+
+A version change never changes a figure, a verdict or an action: the model only writes narrative from evidence the
+platform computed, and its statements are checked against that evidence on every call.
 
 ---
 

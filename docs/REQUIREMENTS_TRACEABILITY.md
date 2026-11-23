@@ -45,7 +45,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | VM-T09 | Notification dispatch | ✅ | `notify.email` (Graph, SOC mailbox) or `ticket.create`, behind approval, dispatch recorded | test_vulnerability |
 | VM-T10 | ITSM integration | ✅ | ServiceNow & Jira: create/update + ticket state pulled back into plans; resolved → validation → false closure reopens ticket | test_vulnerability::test_itsm_bidirectional_sync... |
 | VM-T11 | Workflow orchestration | ✅ | `soc_platform/jobs.py`: run records, retries+backoff, dead letter + alert, DB lease across replicas, replay API; idempotency keys on actions | test_jobs |
-| VM-T12 | Access control | ✅ | Analyst/lead/admin/auditor/automation_admin roles, Entra SSO, per-tool service principals, vault `*_FILE` secrets | test_api, test_access_security |
+| VM-T12 | Access control | ✅ | Analyst/lead/admin/auditor/automation_admin/ciso roles, Entra SSO, per-tool service principals, vault `*_FILE` secrets | test_api, test_access_security |
 | VM-T13 | Observability | ✅ | Connector freshness & reconciliation dashboard, job health, /metrics for Prometheus | test_demo_walkthrough |
 
 ## Incident management – functional
@@ -139,7 +139,7 @@ Legend: ✅ implemented and tested · 🟡 implemented; completion or validation
 | NFR-12 | Change management | ✅ | Versioned policy and versioned connector configuration / organisation lists: propose ≠ approve, re-checked at approval (stale proposals refused, preflight must still match), audited, restorable, exportable; pause is the only immediate change | test_core_governance, test_connector_admin |
 | NFR-13 | Observability | ✅ | Connector freshness, job health, reconciliation, drift monitor, Prometheus metrics with alert rules (scheduler heartbeat, audit chain, failing jobs, unverified actions, break-glass); structured trace-stamped logs (requests, audit, model calls, outbound tool calls, jobs, CLI) with secrets masked; trace view and model-call diagnostics | test_demo_walkthrough, test_jobs, test_intelligence, test_observability |
 | NFR-14 | Portability and vendor neutrality | ✅ | Uniform connector SDK + manifest registry; swapping a tool is a connector change; tools configured and staged from the console (Fixtures → Recording → Read-only → Recommend → Automate) after a preflight; `connector new` / `connector check` for a tool without a connector; one misconfigured tool is isolated | test_connectors, test_connector_conformance, test_connector_admin |
-| NFR-15 | Testability and validation | 🟡 | Golden corpora, regression suites (986 platform tests, 205 engine tests), connector conformance for every stream, record-and-sanitise mode turning live responses into fixtures, shadow agreement; accuracy in the client's environment needs A07 data | all |
+| NFR-15 | Testability and validation | 🟡 | Golden corpora, regression suites (1043 platform tests, 205 engine tests), connector conformance for every stream, record-and-sanitise mode turning live responses into fixtures, shadow agreement; accuracy in the client's environment needs A07 data | all |
 | NFR-16 | Documentation and handover | ✅ | README, ARCHITECTURE, CONNECTORS, OPERATIONS, SECURITY, DEMO_GUIDE, TEST_REPORT, this matrix | - |
 
 ## Use cases
@@ -210,6 +210,9 @@ in the same way.
 | Automatic addition of new optional columns; recorded model response times | `Database._add_missing_columns`, `llm_calls.latency_ms`, `/api/v1/llm/status` | test_schema |
 | Send test message; one-command demo reset | `POST /api/v1/admin/notifications/test`; `python -m soc_platform reset-demo` | test_notify, test_api, test_cli |
 | Every request commits before its response | `Depends(db_session, scope="function")` everywhere | test_commit_before_response |
+| AI provider set in the console: the in-house gateway through its SDK with a service account (auth + session token), or an API key (OpenRouter and others); credentials encrypted and write-only | `llm/integration.py`, `llm/providers/enterprise_gateway.py`, `OpenRouterProvider`, `/api/v1/admin/llm/integration` (+ `/test`) | test_llm_integration |
+| No hard-coded model versions: each chosen model follows its line, newer versions checked then used, a new generation approved, roll back | `llm/model_lines.py`, `llm/catalogue.py`, `LLMGateway.qualify`, `llm_catalogue` job | test_llm_integration |
+| CISO role and executive view (posture, figures against the period before, agenda by due date: overdue / today / tomorrow / this week / later) | `Role.CISO`, `api/executive.py`, `/api/v1/executive` (+ `/brief`), `posture_snapshot` job | test_executive, test_consistency::test_the_executive_view_agrees_with_every_screen_it_links_to |
 
 ## Risks (R01–R16): mitigations in place
 

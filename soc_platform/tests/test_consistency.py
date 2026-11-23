@@ -235,6 +235,38 @@ def test_every_figure_agrees_across_every_surface(api):
 
 
 # --------------------------------------------------------------------------------------------- 2. routes x roles
+def test_the_executive_view_agrees_with_every_screen_it_links_to(api):
+    """The CISO's figures are the platform's figures: each one equals the screen its tile links to."""
+    c, H = api["c"], api["H"]
+    ciso = H(f"cleo@{api['cfg']['org']}", "ciso")
+    ex = J(c.get("/api/v1/executive?days=30&tz_offset_minutes=0", headers=ciso))
+    head = {h["key"]: h["value"] for h in ex["headline"]}
+    dome = J(c.get("/api/v1/dome-score", headers=ciso))
+    vmm = J(c.get("/api/v1/vm/metrics", headers=ciso))
+    ov = J(c.get("/api/v1/dashboard/overview?days=30", headers=ciso))
+    cases = J(c.get("/api/v1/cases", headers=ciso))
+    cov = J(c.get("/api/v1/vm/coverage", headers=ciso))
+    acts = J(c.get("/api/v1/actions?status=recommended,pending_approval", headers=ciso))
+    open_inc = [x for x in cases if x["domain"] == "incident" and x["status"] != "closed"]
+    agree = {
+        "dome score": [head["dome_score"], dome["score"], ex["posture"]["score"]],
+        "KEV open": [head["kev_open"], vmm["kev_open"], ex["vulnerabilities"]["kev_open"]],
+        "open vulnerabilities": [ex["vulnerabilities"]["open"], vmm["open"]],
+        "past SLA": [ex["vulnerabilities"]["sla_breached"], vmm["sla_breached"]],
+        "open critical/high incidents": [head["open_incidents_critical_high"],
+                                         sum(1 for x in open_inc if x["severity"] in ("critical", "high"))],
+        "open incidents": [ex["incidents"]["open"], len(open_inc)],
+        "approvals waiting": [ex["operations"]["pending_approvals"], ov["actions"]["pending_approval"], len(acts)],
+        "machines missing EDR": [ex["coverage"]["missing_edr"], sorted(cov["missing_edr"])],
+        "automation rate": [head["automation_rate_pct"], ov["actions"]["automation_rate_pct"]],
+    }
+    assert not {k: v for k, v in agree.items() if any(x != v[0] for x in v)}, agree
+    # every approval that waits is on the agenda, once, under its case
+    on_agenda = sum(int(x["title"].split(" ", 1)[0]) for x in ex["agenda"]["items"] if x["kind"] == "approval")
+    assert on_agenda == len(acts)
+    assert sum(ex["agenda"]["counts"].values()) == len(ex["agenda"]["items"])
+
+
 def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
     c, H, app = api["c"], api["H"], api["app"]
     lead = api["lead"]
@@ -247,7 +279,7 @@ def test_every_get_route_as_every_role_no_errors_no_leaks_explicit_utc(api):
     by_domain = {d: {x["id"] for x in cases if x["domain"] == d} for d in ("phishing", "incident", "vulnerability")}
     org = api["cfg"]["org"]
     roles = {"lead": lead, "analyst": H(f"alice@{org}", "analyst"), "auditor": H(f"audrey@{org}", "auditor"),
-             "admin": H(f"ada@{org}", "admin"), "phishing_only": H(f"pia@{org}", "analyst", "phishing"),
+             "admin": H(f"ada@{org}", "admin"), "ciso": H(f"cleo@{org}", "ciso"), "phishing_only": H(f"pia@{org}", "analyst", "phishing"),
              "vulnerability_only": H(f"vic@{org}", "analyst", "vulnerability"), "anonymous": {}}
     extra = {"/api/v1/entities/find": f"?kind=identity&key=upn&value={api['cfg']['focus_upn']}", "/api/v1/metrics/shadow": "?domain=phishing"}
     # on a variant estate, no response may mention the built-in estate: nothing in the code is tied to its names

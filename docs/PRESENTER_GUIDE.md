@@ -160,6 +160,23 @@ Checklist (10 minutes before):
 Each walkthrough gives the click path, the line to say, what to point at, and the justification if challenged.
 The full demo takes 25-30 minutes. For a 10-minute slot, do W1 → W4 → W6 → W9.
 
+### W0 - Executive view, as the CISO (2 min, for a leadership audience)
+
+**Click:** sign out, sign in as `cleo@acme-demo.com`, role **CISO**. The console opens on the Executive view.
+**Say:** "This is what the CISO sees first. Every figure is computed from the records by the same calculation as the
+screen behind it - each tile is a link - and none of it is written by AI. The CISO can read everything and change
+nothing: approvals, policy and the kill switch stay with the SOC's leads."
+**Point at:**
+- The headline tiles against the period before (7, 30 or 90 days): Dome Score, open critical / high incidents, time
+  to resolve, known-exploited vulnerabilities, SLA compliance, people who clicked, EDR coverage, automation.
+- **What needs a decision**: Overdue / Today / Tomorrow / This week / Later. Due dates come from response targets
+  (critical 4 h, high 1 day), SLAs and CISA KEV dates, and expiries - in the viewer's own time zone.
+- The sections below: incidents, vulnerabilities by team, phishing, coverage, operations, governance, third parties.
+- *Write a brief from these figures*: the model only narrates the figures and cites each one.
+**If asked "where is the trend?":** "Records rebuild what they can for any period (cases and findings opened and
+closed). The posture history comes from daily snapshots, and the screen says when that history starts instead of
+drawing a line we don't have."
+
 ### W1 - Overview (2 min)
 
 **Click:** Overview.
@@ -597,7 +614,7 @@ and recommendation is identical."
     start rather than running unprotected.
   - Token and session revocation.
 - **Authorisation:**
-  - 5 roles (analyst, lead, admin, automation admin, auditor).
+  - 6 roles (analyst, lead, admin, automation admin, auditor, CISO - read-only, lands on the executive view).
   - Domain scoping (phishing / incident / vulnerability); cross-domain views need all-domain scope. Out-of-scope
     records answer 404.
   - Each role acts only inside its own scope: a phishing lead who is also an all-domain auditor reads everything
@@ -632,16 +649,16 @@ and recommendation is identical."
 
 | Check | Result |
 |---|---|
-| Platform test suite | 986 passed on SQLite (with PostgreSQL's rules enforced) and 983 on PostgreSQL 16 (a few database-specific checks run on only one of them), plus opt-in live tests |
+| Platform test suite | 1043 passed on SQLite (with PostgreSQL's rules enforced) and 1040 on PostgreSQL 16 (a few database-specific checks run on only one of them), plus opt-in live tests |
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
-| Feature → test mapping | **109 of 109** features verified, each mapped to the tests that prove it, run with the live LLM and live feeds ([FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md)) |
+| Feature → test mapping | **112 of 112** features verified, each mapped to the tests that prove it, run with the live LLM and live feeds ([FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md)) |
 | Generalisation | whole platform on a renamed organisation: identical results, 0 leaked names |
 | Browser tour | real server + Chrome, 4 roles, every screen, light and dark, layout audited at 1440/1280/1024/768/390 px (390 is a phone): 0 errors, 0 clipped or overflowing elements, no table needing sideways scroll at desktop width; axe-core accessibility scan (WCAG 2.1 A/AA) with 0 findings; stored-XSS probe with nothing executed |
 | Stress tests | 0 false merges (400 hosts; 300 people) |
 | Output review | every model output of a full run audited for figures not in its evidence (see below) |
-| Consistency suite | the same figure compared across every surface (dashboards, lists, badges, brief, analyst tools, report facts, generated Word documents); every pipeline and job run twice with zero change; LLM on vs off with identical figures; every GET route × 7 roles (no errors, no leaks, explicit UTC); every write route fuzzed; every stored reference resolved |
+| Consistency suite | the same figure compared across every surface (dashboards, lists, badges, brief, analyst tools, report facts, generated Word documents); every pipeline and job run twice with zero change; LLM on vs off with identical figures; every GET route × 8 roles (no errors, no leaks, explicit UTC); the executive view equal to each screen it links to; every write route fuzzed; every stored reference resolved |
 | Screen vs API | the browser tour reads every KPI, badge and tab count off the rendered screens and compares it with the API |
 | Penetration tests | 24 attack tests (authentication, privilege, cross-domain, injection, prompt injection, traversal, uploads, leakage, brute force, races, production surface, Entra token forgery; round 2: mixed-scope roles, scoped self-approval, proxy-header spoofing, vulnerability-workflow abuse, cross-domain leaks, ReDoS in e-mail parsing): all refused (§16, SECURITY.md) |
 | Property-based fuzzing | 11 rules checked against thousands of generated inputs (redaction, guardrail, timestamps, e-mail parser) |
@@ -735,7 +752,10 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | What if the AI is wrong? | It doesn't decide anything. Verdicts, scores and priorities are deterministic; the model explains them and must cite evidence. Uncited statements and unsupported figures are removed, and the removal count is shown. Drift monitoring compares verdicts with analyst decisions. |
 | Can it hallucinate a number into a board report? | No. Figures are computed in code and shown next to the narrative. A narrative sentence stating a figure that isn't in its cited figures is dropped. |
 | Can a prompt injection in an email make it do something? | The model's output can never trigger an action; the analyst assistant can only call read-only tools. The worst case is a bad narrative, and that narrative must still cite evidence. |
-| What data goes to the model? | Only the evidence needed for that task, with internal identities pseudonymised and restored afterwards. Only to an approved endpoint (fail closed), on a pinned model, every prompt logged. Nothing leaves without an LLM configured. |
+| What data goes to the model? | Only the evidence needed for that task, with internal identities pseudonymised and restored afterwards. Only to an approved endpoint (fail closed), every prompt logged with the model version that answered. Nothing leaves without an LLM configured. |
+| How do we connect our own LLM platform's service account? | An administrator enters its auth token and session token on *AI usage -> AI integration*. They are encrypted, never shown again and never logged. Everyone signs in with SSO; every model call uses the service account, and each person's own AI limits still apply. *Test connection* checks every step and names the fix. Or use an API key (OpenRouter and others) instead. |
+| Our platform adds new model versions all the time. Do we have to change settings each time? | No. You choose a model, for example *GPT 6.1 Sol*, and the platform follows that line. When *GPT 6.2 Sol* appears, it checks it first (cited JSON answers, no invented figure) and then uses it, records the change and tells you. A new generation (*GPT 7*) waits for an administrator's approval. Any change can be rolled back, and a feature can be pinned. A version change can't change a figure, verdict or action, because the model only writes the narrative. |
+| What happens when the service account's token expires? | The platform writes its own text (nothing fails), and administrators get a high finding in Teams / Slack. With an expiry date entered, the warning comes three days before. |
 | Why gpt-4.1-mini, not a bigger model? | It's cheap and fast, and the guardrails do the heavy lifting on trust. An administrator picks the model per feature on the AI usage screen - gpt-4.1-nano, gpt-4.1-mini or gpt-4.1 by default, more as you deploy them - and *Check which models answer* shows which ones your endpoint serves. The platform is provider-agnostic. |
 | Could we run the model inside our tenant? | Yes: Azure AI Foundry in the client's subscription, or an OpenAI-compatible self-hosted model (vLLM, Ollama). |
 | We have our own LLM platform (Claude, Gemini and OpenAI models behind one endpoint). Can you use it instead of your Azure? | Yes - it is configuration, not code: point `SOC_LLM_PROVIDER=openai_compatible` (or `anthropic`) at the gateway, list its models, and set its auth header, extra headers and CA if it needs them. Redaction, citations, the numeric guardrail, the budget and the fallback all still apply, and every verdict, score and action stays identical because the model never produces them. Walkthrough: CLIENT_DEPLOYMENT_GUIDE.md section 5. |
@@ -786,7 +806,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 |---|---|
 | Is it hard-coded to the demo data? | No. The generalisation test renames the entire organisation and requires identical results and zero leaked names (W12). |
 | How is the Dome Score worked out, and can we change it? | Eight pillars, each computed from the records and shown with its count (identity, endpoint, vulnerability exposure, cloud posture, email, response, detection coverage, tool health). The score is the weighted average of the pillar scores shown, so anyone can recompute it from the screen. The weights are yours: move a slider to preview the result (nothing is saved), and a lead saves them with a reason; every version is kept and audited. A weight changes how much a pillar counts, never the pillar's own figure, and no figure on that screen comes from AI. |
-| How was it tested? | See §16. In short: 986 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
+| How was it tested? | See §16. In short: 1043 platform tests, 205 engine tests, run on both SQLite and PostgreSQL; live tests (public feeds, the LLM); penetration tests; property-based fuzzing; time-travel tests; a consistency suite; a browser tour with an accessibility scan and an XSS probe; stress tests; and a feature-by-feature verification report. The platform also self-checks hourly. |
 | What happens if the LLM or a tool goes down? | Nothing breaks. Connecting to the model gives up after 10 s; reading an answer after 30 s (short answers) or 120 s (long reviews). After 3 failures a circuit breaker answers from the deterministic path instantly for 60 s. Throttling is retried once. A stopped scheduler shows a banner on every screen. Every case is in FAILURE_MODES.md. |
 | Is it tuned to your demo data? | No. Seeded variants (different organisations, people, machines, volumes) run through the same tests, the browser tour and the live LLM; no output mentions the demo organisation. |
 | Do the numbers agree everywhere? | Yes, and it is proven continuously: the self-check recomputes each shared figure through every code path every hour, and the test suite compares them across dashboards, lists, briefs, answers, reports and the rendered screens. |
@@ -869,9 +889,9 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Report data sources / standard reports | 17 / 7 |
 | ATT&CK techniques in the coverage model | 56 |
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
-| Platform tests / engine tests | 986 SQLite, 983 PostgreSQL / 205 |
+| Platform tests / engine tests | 1043 SQLite, 1040 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
-| Features verified | 109 of 109 |
+| Features verified | 112 of 112 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
 | Risk half-life / bands | 7 days / critical ≥ 80, high ≥ 60, medium ≥ 30 |
@@ -1014,6 +1034,7 @@ it is recorded as executing before the tool is called, and the result is recorde
 | Automation admin | read, read audit, manage connectors, propose policy, kill switch |
 | Admin | read, read audit, manage access (roles, service accounts, session revocation; a privileged grant needs a second admin), manage connectors, kill switch (on only), export evidence |
 | Auditor | read, read audit, export evidence |
+| CISO | read, read audit, export evidence - lands on the Executive view; never approves, changes policy, uses the kill switch or manages access (Entra app role `SOC.CISO`) |
 
 - **Domain scope:** any role can be limited to phishing, incident and/or vulnerability data. Records outside the
   scope answer "not found", including inside reports, the audit log and the access log.
@@ -1039,6 +1060,8 @@ it is recorded as executing before the tool is called, and the result is recorde
 | `weekly_reports` | weekly | The weekly VM report (Word) and the weekly management deck (PowerPoint) |
 | `retention` | daily | Prune old raw payloads, closed-case e-mails and LLM prompt text; keep legal holds |
 | `actions` | 1 minute | Run approved actions still waiting; flag any action whose tool call never reported back ("verify in the tool") |
+| `llm_catalogue` | 6 hours | Read the model provider's models; check, then use, a newer version of each chosen model's line; flag a new generation for approval, a model being retired, and credentials expired or expiring |
+| `posture_snapshot` | 6 hours | Keep the day's headline figures for the Executive view's trends (one row per day) |
 
 Every run is recorded. A run that fails is retried with backoff; after 3 failed runs it is **dead-lettered** and a
 finding is raised. Any job can be replayed from Integrations.
@@ -1229,7 +1252,7 @@ browser."
 
 | Kind of testing | What it proves | Result |
 |---|---|---|
-| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 986 platform tests (on SQLite and PostgreSQL), 205 engine tests |
+| **Unit and workflow tests** | Every workflow, rule and formula behaves as specified | 1043 platform tests (on SQLite and PostgreSQL), 205 engine tests |
 | **Two database engines** | The same suite on SQLite and on PostgreSQL 16, the production engine. SQLite runs are held to PostgreSQL's rules (text length, 32-bit integers, NUL characters), so production-only bugs fail in every run | Both green |
 | **Consistency** | The same figure agrees on every surface (dashboards, lists, badges, brief, analyst tools, reports, generated documents, the rendered screen); re-running every pipeline changes nothing; LLM on or off gives identical figures | Green on 3 estates |
 | **Generalisation** | Seeded variant organisations (different people, machines, volumes, suppliers) give correct results, and no output mentions the demo organisation | Green |

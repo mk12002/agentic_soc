@@ -9,12 +9,17 @@ The administrator sets, in the console (*AI usage* screen), without a restart:
   reports. A default for everyone, an override per role and per user; ``0`` means that user gets no model text
   (answers are written by the platform from the same evidence). Scheduled work (incident and phishing explanations,
   finding narratives, the brief, scheduled reports) counts only against the platform caps.
-* **per-feature settings** - which **model** each feature uses (by name, from the model list: by default
-  ``gpt-4.1-nano``, ``gpt-4.1-mini`` and ``gpt-4.1``; ``SOC_LLM_MODELS`` replaces the list), the most it may write
-  (``max_output_tokens``), or ``enabled: false`` to switch the model off for that feature alone
+* **per-feature settings** - which **model** each feature uses (by name, from the model list: the provider's own
+  catalogue once read - ``llm.catalogue`` - else ``gpt-4.1-nano``, ``gpt-4.1-mini`` and ``gpt-4.1``;
+  ``SOC_LLM_MODELS`` replaces the list), the most it may write (``max_output_tokens``), ``enabled: false`` to switch
+  the model off for that feature alone, or ``follow: false`` to pin it to exactly the version chosen
+* **chosen_defaults** - the model for each size of work (``small`` / ``large``) a feature without its own choice uses
+* **auto_upgrade** - (default true) a chosen model follows its line: the platform moves to the newest version in the
+  same generation after its own check (``llm.catalogue``); false offers every new version for approval instead
 * **prices** per model, so the usage screen can show cost and what another model would cost
 
-The model list comes from the deployment's settings, not the console: a model can only be chosen where it is deployed.
+The model list comes from the provider (its catalogue, read by the platform) or the deployment's settings, not
+typed into the policy: a model can only be chosen where it is offered.
 ``SOC_LLM_MODELS`` is a comma list of names, each optionally ``name=deployment`` when the deployment (Azure) or the
 gateway's model id differs from the name shown. A deployment named in ``SOC_LLM_DEPLOYMENT`` / ``..._SMALL`` that is not
 on the list is added to it, and those two remain the defaults a feature uses until the administrator picks a model.
@@ -50,8 +55,8 @@ DEFAULT_MODELS = (("gpt-4.1-nano", "small", 0.10, 0.40), ("gpt-4.1-mini", "small
                   ("gpt-4.1", "large", 2.00, 8.00))
 ANTHROPIC_MODELS = (("claude-haiku-4-5", "small"), ("claude-opus-5", "large"))   # the Anthropic provider's defaults
 KNOWN_PRICES = {name: (inp, out) for name, _, inp, out in DEFAULT_MODELS}
-COMPUTED = ("models", "default_models")   # derived from the settings on every read; never stored
-ROLES = ("analyst", "lead", "auditor", "automation_admin", "admin")
+COMPUTED = ("models", "default_models", "adopted")   # derived on every read; never stored
+ROLES = ("analyst", "lead", "auditor", "automation_admin", "admin", "ciso")
 
 # Every feature that calls the model: the tier its code asks for, and what it does (for the usage screen).
 KNOWN_WORKFLOWS: dict[str, tuple[str, str, str]] = {
@@ -68,6 +73,8 @@ KNOWN_WORKFLOWS: dict[str, tuple[str, str, str]] = {
     "report.daily_exposure": ("small", "scheduled", "Daily exposure report commentary"),
     "report.weekly_vm": ("small", "scheduled", "Weekly vulnerability report commentary"),
     "llm.model_check": ("small", "person", "An administrator's check that each listed model answers"),
+    "llm.model_upgrade_check": ("small", "scheduled", "The platform's check of a newer model version before using it"),
+    "executive.brief": ("large", "person", "Executive view: the written brief over the computed figures"),
 }
 
 MIN_CALLS_FOR_ADVICE = 20
@@ -90,34 +97,45 @@ def _size(name: str) -> str:
     return "small" if re.search(r"mini|nano|haiku|small|lite|flash", name, re.IGNORECASE) else "large"
 
 
-def models(settings: Any) -> list[dict[str, str]]:
-    """The models a feature may use, in the order offered: ``{name, deployment, size}``."""
-    raw = (os.environ.get("SOC_LLM_MODELS") or "").strip()
+def models(settings: Any, *, provider: str | None = None, catalogue: list[str] | None = None,
+           deployment_settings: bool = True) -> list[dict[str, str]]:
+    """The models a feature may use, in the order offered: ``{name, deployment, size}``. ``catalogue``: the names the
+    provider offers (``llm.catalogue.offered``), which replace the built-in defaults once read; ``provider``: the
+    provider in force (console or settings). ``deployment_settings``: whether SOC_LLM_MODELS and SOC_LLM_DEPLOYMENT*
+    describe that provider - they do only when the provider itself comes from the settings. A provider chosen in the
+    console must not inherit them: features then asked the new provider for an old endpoint's model names."""
+    raw = (os.environ.get("SOC_LLM_MODELS") or "").strip() if deployment_settings else ""
     out: list[dict[str, str]] = []
+    if catalogue:
+        out = [{"name": n[:64], "deployment": n[:128], "size": _size(n)} for n in catalogue]
     if raw:
         for part in raw.split(","):
             name, _, dep = part.strip().partition("=")
-            if name.strip():
+            if name.strip() and not any(m["name"] == name.strip()[:64] for m in out):
                 out.append({"name": name.strip()[:64], "deployment": (dep.strip() or name.strip())[:128],
                             "size": _size(name)})
-    elif (getattr(settings, "llm_provider", "") or "").lower() == "anthropic":
+    elif catalogue:
+        pass
+    elif (provider or getattr(settings, "llm_provider", "") or "").lower() == "anthropic":
         out = [{"name": n, "deployment": n, "size": s} for n, s in ANTHROPIC_MODELS]
     else:
         out = [{"name": n, "deployment": n, "size": s} for n, s, _, _ in DEFAULT_MODELS]
-    for dep in (os.environ.get("SOC_LLM_DEPLOYMENT_SMALL"), getattr(settings, "llm_deployment", None)):
+    deps = (os.environ.get("SOC_LLM_DEPLOYMENT_SMALL"), getattr(settings, "llm_deployment", None)) if deployment_settings else ()
+    for dep in deps:
         if dep and not any(dep in (m["name"], m["deployment"]) for m in out):
             out.append({"name": dep[:64], "deployment": dep[:128], "size": _size(dep)})
     seen: set[str] = set()
     return [m for m in out if not (m["name"] in seen or seen.add(m["name"]))]
 
 
-def default_models(settings: Any, cat: list[dict[str, str]]) -> dict[str, str]:
+def default_models(settings: Any, cat: list[dict[str, str]], *, deployment_settings: bool = True) -> dict[str, str]:
     """The model each size of work uses until the administrator chooses: the configured deployments (one deployment
     serves both, as before), else gpt-4.1-mini for routine narrative and gpt-4.1 for summaries and reports."""
     def find(dep: str | None) -> str | None:
         return next((m["name"] for m in cat if dep and dep in (m["name"], m["deployment"])), None)
 
-    big, small_dep = getattr(settings, "llm_deployment", None), os.environ.get("SOC_LLM_DEPLOYMENT_SMALL")
+    big, small_dep = ((getattr(settings, "llm_deployment", None), os.environ.get("SOC_LLM_DEPLOYMENT_SMALL"))
+                      if deployment_settings else (None, None))
     names = [m["name"] for m in cat]
     large = (find(big) or ("gpt-4.1" if "gpt-4.1" in names else None)
              or next((m["name"] for m in reversed(cat) if m["size"] == "large"), names[-1] if names else ""))
@@ -126,9 +144,10 @@ def default_models(settings: Any, cat: list[dict[str, str]]) -> dict[str, str]:
     return {"small": small, "large": large}
 
 
-def defaults(settings: Any) -> dict[str, Any]:
+def defaults(settings: Any, *, provider: str | None = None, catalogue: list[str] | None = None,
+             deployment_settings: bool = True) -> dict[str, Any]:
     monthly = int(settings.llm_monthly_token_budget or 0)
-    cat = models(settings)
+    cat = models(settings, provider=provider, catalogue=catalogue, deployment_settings=deployment_settings)
     return {
         "monthly_tokens": monthly,
         "daily_tokens": monthly // 10 if monthly else 0,
@@ -140,8 +159,10 @@ def defaults(settings: Any) -> dict[str, Any]:
         "max_output_tokens": {"small": 1_500, "large": 3_000},
         "prices": {m["name"]: {"input": KNOWN_PRICES.get(m["name"], (0.0, 0.0))[0],
                                "output": KNOWN_PRICES.get(m["name"], (0.0, 0.0))[1]} for m in cat},
+        "auto_upgrade": True,
         "models": cat,
-        "default_models": default_models(settings, cat),
+        "default_models": default_models(settings, cat, deployment_settings=deployment_settings),
+        "adopted": {},
     }
 
 
@@ -161,7 +182,7 @@ def validate(doc: Any, model_names: list[str] | None = None) -> list[str]:
         return ["the policy must be an object"]
     out: list[str] = []
     allowed = {"monthly_tokens", "daily_tokens", "alert_at", "user_default", "roles", "users", "workflows",
-               "max_output_tokens", "prices", *COMPUTED}
+               "max_output_tokens", "prices", "auto_upgrade", "chosen_defaults", *COMPUTED}
     names = list(model_names) if model_names is not None else None
 
     def known(m: Any) -> bool:
@@ -175,6 +196,12 @@ def validate(doc: Any, model_names: list[str] | None = None) -> list[str]:
         out.append("daily_tokens cannot be more than monthly_tokens")
     if "alert_at" in doc and not (_number(doc["alert_at"]) and 0 < doc["alert_at"] <= 1):
         out.append("alert_at is a fraction between 0 and 1 (0.8 = warn at 80 %)")
+    if "auto_upgrade" in doc and not isinstance(doc["auto_upgrade"], bool):
+        out.append("auto_upgrade must be true or false")
+    if "chosen_defaults" in doc:
+        cd = doc["chosen_defaults"]
+        if not isinstance(cd, dict) or any(k not in TIERS or not known(v) for k, v in cd.items()):
+            out.append("chosen_defaults: small / large, each one of the offered models: " + ", ".join(names or []))
 
     def limits(where: str, v: Any) -> None:
         if not isinstance(v, dict):
@@ -213,12 +240,12 @@ def validate(doc: Any, model_names: list[str] | None = None) -> list[str]:
                 out.append(f"workflows.{wf}.model must be one of the deployed models: {', '.join(names or [])}")
             elif k == "tier" and x not in TIERS:
                 out.append(f"workflows.{wf}.tier must be small or large")
-            elif k == "enabled" and not isinstance(x, bool):
-                out.append(f"workflows.{wf}.enabled must be true or false")
+            elif k in ("enabled", "follow") and not isinstance(x, bool):
+                out.append(f"workflows.{wf}.{k} must be true or false")
             elif k == "max_output_tokens" and not (_nonneg_int(x) and 200 <= x <= 16_000):
                 out.append(f"workflows.{wf}.max_output_tokens must be between 200 and 16000")
-            elif k not in ("model", "tier", "enabled", "max_output_tokens"):
-                out.append(f"workflows.{wf}.{k}: unknown (model, max_output_tokens, enabled)")
+            elif k not in ("model", "tier", "enabled", "max_output_tokens", "follow"):
+                out.append(f"workflows.{wf}.{k}: unknown (model, max_output_tokens, enabled, follow)")
     for t, x in maps["max_output_tokens"].items():
         if t not in TIERS or not (_nonneg_int(x) and 200 <= x <= 16_000):
             out.append(f"max_output_tokens.{t}: a tier (small / large) and a number between 200 and 16000")
@@ -248,16 +275,44 @@ class UsagePolicyStore:
     def active_row(self) -> LLMUsagePolicy | None:
         return self.s.execute(select(LLMUsagePolicy).order_by(LLMUsagePolicy.id.desc()).limit(1)).scalars().first()
 
+    def _provider(self) -> str:
+        return self._integration()["provider"]
+
+    def _integration(self) -> dict[str, Any]:
+        from soc_platform.llm.integration import IntegrationStore
+
+        return IntegrationStore(self.s, self.settings).status()
+
+    def base(self) -> dict[str, Any]:
+        """The defaults for the provider in force, with the models it offers and the versions adopted per line."""
+        from soc_platform.llm import catalogue
+
+        st = self._integration()
+        provider = st["provider"]
+        base = defaults(self.settings, provider=provider, catalogue=catalogue.offered(self.s, provider),
+                        deployment_settings=st["source"] == "settings")
+        base["adopted"] = catalogue.adopted(self.s, provider)
+        names = {m["name"] for m in base["models"]}
+        for name in base["adopted"].values():            # an adopted version is always choosable
+            if name not in names:
+                base["models"].append({"name": name[:64], "deployment": name[:128], "size": _size(name)})
+                names.add(name)
+        return base
+
     def active(self) -> dict[str, Any]:
-        """The policy in force: the defaults with the newest saved version on top (the model list and the default
-        models always come from the settings)."""
-        base = defaults(self.settings)
+        """The policy in force: the defaults with the newest saved version on top (the model list and the versions
+        in use come from the provider and the settings, never from the saved document)."""
+        base = self.base()
         doc = copy.deepcopy(base)
         row = self.active_row()
         if row:
             for k, v in _upgrade(copy.deepcopy(row.document or {}), base).items():
                 if k not in COMPUTED:
                     doc[k] = v
+        names = {m["name"] for m in doc["models"]}
+        for size, name in (doc.get("chosen_defaults") or {}).items():
+            if size in TIERS and name in names:
+                doc["default_models"][size] = name
         return doc
 
     def save(self, doc: dict[str, Any], by: Any, note: str = "") -> LLMUsagePolicy:
@@ -267,20 +322,45 @@ class UsagePolicyStore:
         if by.is_service or by.is_agent or not by.can(Perm.MANAGE_ACCESS):
             raise PermissionError("an administrator (manage_access) sets AI usage limits")
         doc = {k: v for k, v in (doc or {}).items() if k not in COMPUTED} if isinstance(doc, dict) else doc
-        problems = validate(doc, [m["name"] for m in models(self.settings)])
+        before = self.active()
+        problems = validate(doc, [m["name"] for m in before["models"]])
         if problems:
             raise ValueError("; ".join(problems))
-        before = self.active()
         row = LLMUsagePolicy(document=copy.deepcopy(doc), set_by=by.id, note=(note or "")[:2000])
         self.s.add(row)
         self.s.flush()
         after = self.active()
+        self._record_choices(before, after, by)
         changes = {k: {"from": before.get(k), "to": after.get(k)} for k in sorted(set(before) | set(after))
-                   if before.get(k) != after.get(k)}
+                   if before.get(k) != after.get(k) and k != "adopted"}
         AuditLog(self.s).append(actor_type=by.actor_type, actor_id=by.id, event_type="llm_policy.changed",
                                subject_type="llm_policy", subject_id=str(row.id), payload={"note": note[:500],
                                                                                            "changes": changes})
         return row
+
+    def _record_choices(self, before: dict[str, Any], after: dict[str, Any], by: Any) -> None:
+        """An administrator who picks a different version of a line that has an adopted version makes that choice
+        the line's version in use (otherwise the adopted one would silently win). Unchanged choices record nothing,
+        so saving the screen again never moves a line back."""
+        from soc_platform.llm import catalogue
+        from soc_platform.llm.model_lines import parse
+
+        def chosen(pol: dict[str, Any]) -> dict[str, str]:
+            out = {f"wf:{k}": r["model"] for k, r in (pol.get("workflows") or {}).items()
+                   if isinstance(r, dict) and r.get("model") and r.get("follow", True)}
+            out.update({f"size:{k}": v for k, v in (pol.get("chosen_defaults") or {}).items() if v})
+            return out
+
+        was, now = chosen(before), chosen(after)
+        provider = self._provider()
+        current = after.get("adopted") or {}
+        for key, name in sorted(now.items()):
+            line = parse(name).line
+            if was.get(key) == name or line not in current or current[line] == name:
+                continue
+            catalogue._adopt(self.s, provider, line, name, current[line], "chosen", by.id,
+                             "an administrator chose this version", actor_type=by.actor_type)
+            current[line] = name
 
     def history(self, limit: int = 30) -> list[dict[str, Any]]:
         return [{"id": r.id, "set_by": r.set_by, "note": r.note, "created_at": r.created_at.isoformat(),
@@ -301,12 +381,17 @@ def workflow_key(workflow: str) -> str:
 def rule_for(policy: dict[str, Any], workflow: str, asked_tier: str) -> dict[str, Any]:
     """Model, size, output cap and on/off for one call. A feature without a chosen model (or with one no longer
     deployed) uses the default model for the size its code asks for."""
+    from soc_platform.llm.model_lines import parse
+
     r = (policy.get("workflows") or {}).get(workflow_key(workflow)) or {}
     cat = {m["name"]: m for m in policy.get("models") or []}
     name = r.get("model")
     if name not in cat:
         tier = r.get("tier") or asked_tier
         name = (policy.get("default_models") or {}).get(tier if tier in TIERS else "large")
+    chosen = name
+    if name and r.get("follow", True):                  # the newest version of the line the platform adopted
+        name = (policy.get("adopted") or {}).get(parse(name).line, name)
     m = cat.get(name) or {"name": name or "", "deployment": None,
                           "size": r.get("tier") if r.get("tier") in TIERS else asked_tier if asked_tier in TIERS else "large"}
     # A model chosen for the feature brings its size's cap. Without a choice the default model serves the size of work
@@ -315,8 +400,10 @@ def rule_for(policy: dict[str, Any], workflow: str, asked_tier: str) -> dict[str
     caps = policy.get("max_output_tokens") or {}
     work = r.get("tier") if r.get("tier") in TIERS else asked_tier if asked_tier in TIERS else "large"
     cap = r.get("max_output_tokens") or caps.get(m["size"] if r.get("model") in cat else work)
+    if not m.get("deployment") and name:      # an adopted version not (yet) on the offered list is still callable
+        m = {**m, "deployment": name}
     return {"model": m["name"], "deployment": m["deployment"], "tier": m["size"], "max_output_tokens": cap,
-            "enabled": r.get("enabled", True)}
+            "enabled": r.get("enabled", True), "chosen": chosen or "", "follow": r.get("follow", True)}
 
 
 def limits_for(policy: dict[str, Any], user_id: str, roles: list[str]) -> dict[str, int]:
@@ -442,7 +529,8 @@ def usage_report(session: Session, policy: dict[str, Any], *, days: int = 30) ->
         lat = sorted(a["lat"])
         features.append({
             "workflow": key, "description": what, "triggered_by": who, "code_default_tier": default_tier,
-            "default_model": default_model, "model": rule["model"], "tier": rule["tier"],
+            "default_model": default_model, "model": rule["model"], "chosen": rule["chosen"],
+            "follow": rule["follow"], "tier": rule["tier"],
             "max_output_tokens": rule["max_output_tokens"], "enabled": rule["enabled"],
             "by_model": {m: v[0] + v[1] for m, v in sorted(a["tiers"].items())},
             "calls": n, "refused": a["refused"], "failed": a["failed"], "tokens_in": tin, "tokens_out": tout,

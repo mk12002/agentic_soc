@@ -108,11 +108,11 @@
   <path d="M460,128 L488,128" class="line"/>
   <path d="M680,128 L708,128" class="line"/>
   <path d="M910,128 L938,128" class="line"/>
-  <path d="M805,176 L805,190 L425,190 L425,208" class="line"/>
+  <path d="M720,176 L720,190 L425,190 L425,208" class="line"/>
   <path d="M760,176 L760,208" class="line"/>
   <path d="M1060,176 L1060,208" class="line"/>
   <path d="M910,258 L938,258" class="line"/>
   <path d="M285,176 L285,196 L250,196 L250,400 L268,400" class="dash"/>
   <path d="M760,306 L760,378" class="dash"/>
-  <path d="M440,176 L440,200 L925,200 L925,400 L928,400" class="dash"/><text x="936" y="372" class="lbl">recording stage only</text>
+  <path d="M250,400 L250,625 L1055,625 L1055,544" class="dash"/><text x="1066" y="600" class="lbl">recording stage only</text>
 </svg>

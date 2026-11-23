@@ -74,6 +74,30 @@ configuration change, not a code change - full walkthrough in `docs/CLIENT_DEPLO
 | `SOC_LLM_SERVER_FALLBACK` | `1` | `anthropic` only: `0` if the gateway does not pass the Claude API's beta refusal fallback through |
 | `SSL_CERT_FILE` | empty | CA bundle for every outbound TLS connection (connectors to internal consoles too) |
 
+**The provider and its credentials can be set in the console** (*AI usage -> AI integration*, administrators):
+the in-house LLM gateway through its SDK with a service account (auth token and session token), or an API key for
+OpenRouter, an OpenAI-compatible endpoint, Anthropic or Azure AI Foundry. Credentials are encrypted with
+`SOC_DATA_KEY`, write-only (never returned or logged; the audit records which one changed), and stored per provider.
+Endpoints must still be on `SOC_LLM_APPROVED_ENDPOINTS`. A console choice wins over `SOC_LLM_PROVIDER` once saved;
+*Test connection* checks every step with its fix. Full walkthrough: `docs/CLIENT_DEPLOYMENT_GUIDE.md` section 5.9.
+
+| Setting (in-house gateway) | Default | Meaning |
+|---|---|---|
+| `SOC_LLM_GATEWAY_SDK` | empty | the SDK module exposing `Session` (installed in the image from the organisation's index: CLIENT_DEPLOYMENT_GUIDE 5.9) |
+| `SOC_LLM_GATEWAY_SESSION_ARGS` | `{"auth_token": "auth_token", "session_token": "session_token"}` | JSON: `Session(...)` argument -> credential |
+| `SOC_LLM_GATEWAY_MODELS_CALL` | empty | the session call listing the models on offer (e.g. `llm.models`); empty: administrators add model names |
+| `SOC_LLM_GATEWAY_CHAT_ARGS` | empty | JSON: fixed `llm.chat` arguments per size of work (`small` / `large`) |
+| `SOC_LLM_GATEWAY_SYSTEM_ARG` / `SOC_LLM_GATEWAY_MAX_TOKENS_ARG` | empty | `llm.chat` arguments for the instructions / the answer cap, if the SDK has them |
+| `SOC_LLM_GATEWAY_AUTH_TOKEN` / `SOC_LLM_GATEWAY_SESSION_TOKEN` (`_FILE`) | empty | the service account's tokens from the deployment (vault mount) when `SOC_LLM_PROVIDER=enterprise_gateway` instead of the console |
+
+**Model versions follow their line.** A model chosen per feature (or as the default for a size of work) names a line
+(*GPT 6.1 Sol* = the *GPT Sol* line); the `llm_catalogue` job reads the provider's models every 6 hours, checks a
+newer version in the same generation (grounded JSON, valid citations, no invented figure) and uses it if it passes.
+A new generation waits for an administrator's *Approve*; *Roll back* returns a line to the version before. Each change
+is audited and raised as a finding (medium; credentials refused, expired or expiring and a model in use being retired
+are high). `SOC_LLM_MODEL_VERSION` pins a line; *newest* unticked pins one feature; *Use newer versions automatically*
+off makes every new version an approval.
+
 Check: `GET /api/v1/llm/status`; live test: `SOC_LIVE_LLM=1 pytest soc_platform/tests/test_live_llm.py` (costs
 tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept for `SOC_LLM_LOG_RETENTION_DAYS`.
 
@@ -91,10 +115,13 @@ tokens; a full demo run is about 50k). Prompts (redacted) and responses are kept
 | retention | 24 h | prune raw payloads / emails / prompts / access log / old telemetry events per policy |
 | self_check | 1 h | platform consistency checks (see below) |
 | notify | 1 min | send new findings at or above the threshold to the configured Teams / Slack / webhook channels; retry failures |
+| llm_catalogue | 6 h | read the model provider's models; move each followed model line to its newest version in the same generation once it passes the platform's check; raise findings for a new generation awaiting approval, a failed check, a model being retired, and credentials expired or expiring within 3 days |
+| posture_snapshot | 6 h | the day's headline figures (Dome Score, open critical / high incidents, KEV open, SLA compliance, EDR and ATT&CK coverage, tools not delivering, automation rate, approvals waiting) for the executive view's trends - one row per day, updated by later runs that day |
 | actions | 1 min | run approved actions still waiting (e.g. approved by policy inside a job item, or left by a stopped process); mark any action stuck in `executing` longer than `SOC_ACTION_STUCK_SECONDS` (900) as `unverified` with a high finding - never re-run it |
 
 When several jobs are due at once (first start) they run in this order, vulnerability first, so incidents are
-scored knowing which hosts are exposed. Intervals: `SOC_JOB_<NAME>_SECONDS` (`SOC_JOB_NOTIFY_SECONDS` for notify, `SOC_JOB_ACTIONS_SECONDS` for actions). Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
+scored knowing which hosts are exposed. Intervals: `SOC_JOB_<NAME>_SECONDS` (`SOC_JOB_NOTIFY_SECONDS` for notify, `SOC_JOB_ACTIONS_SECONDS` for actions,
+`SOC_JOB_LLM_CATALOGUE_SECONDS`, `SOC_JOB_POSTURE_SNAPSHOT_SECONDS`). Every run is recorded (`GET /api/v1/jobs`, Integrations screen). A job
 failing 3 runs in a row is marked **dead_letter** and raises a high insight; fix the cause and use
 *Run now* / `POST /api/v1/jobs/{name}/run`. Jobs are idempotent, so replays never duplicate incidents or actions.
 

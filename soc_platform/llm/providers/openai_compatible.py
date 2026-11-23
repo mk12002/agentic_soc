@@ -6,6 +6,9 @@ SOC_LLM_DEPLOYMENT / SOC_LLM_DEPLOYMENT_SMALL are model names, SOC_LLM_API_KEY i
 ``https://<resource>.services.ai.azure.com/openai/v1`` (or ``https://<resource>.openai.azure.com/openai/v1``),
 SOC_LLM_DEPLOYMENT is the deployment name (e.g. ``gpt-4.1-mini``), and SOC_LLM_API_KEY is sent as ``api-key``.
 
+``openrouter`` is the same protocol at ``https://openrouter.ai/api/v1`` with an API key; every request asks the
+upstream vendors not to keep or train on the prompt (``provider.data_collection: deny``).
+
 An organisation's own LLM gateway (one endpoint in front of several vendors' models) usually speaks this protocol
 too; what differs is set without code changes:
   * SOC_LLM_AUTH_HEADER / SOC_LLM_AUTH_PREFIX - the header carrying SOC_LLM_API_KEY (default ``Authorization`` /
@@ -13,13 +16,17 @@ too; what differs is set without code changes:
   * SOC_LLM_EXTRA_HEADERS - JSON object of fixed non-secret headers; SOC_LLM_CA_BUNDLE - corporate CA file
   * SOC_LLM_JSON_MODE=0 - for gateways or models that reject ``response_format``: JSON is then asked for in the
     instructions only (replies are parsed tolerantly either way)
+
+Credentials and endpoint come from the console's AI integration when an administrator set them there
+(``credentials`` / ``endpoint``), otherwise from the settings above.
 """
 
 from __future__ import annotations
 
 import os
+from typing import Any
 
-import httpx  # noqa: F401 - kept importable here: tests patch httpx.post through this module
+import httpx
 
 from soc_platform.config import Settings, secret
 from soc_platform.llm.gateway import (
@@ -27,6 +34,8 @@ from soc_platform.llm.gateway import (
     Provider,
     check_endpoint,
     llm_extra_headers,
+    llm_timeout,
+    llm_verify,
     max_tokens_field,
     post_with_retry,
 )
@@ -38,12 +47,16 @@ JSON_RULE = ("\n\nOutput format: reply with a single JSON object only - no prose
 class OpenAICompatibleProvider(Provider):
     name = "openai_compatible"
     requires_key = False
+    default_endpoint = ""
 
-    def __init__(self, settings: Settings) -> None:
-        self.base = (settings.llm_endpoint or "").rstrip("/")
+    def __init__(self, settings: Settings, *, endpoint: str | None = None,
+                 credentials: dict[str, str] | None = None) -> None:
+        """``credentials`` None: the settings' own (SOC_LLM_API_KEY); a dict: the console's (never the settings')."""
+        self.base = (endpoint or (settings.llm_endpoint if credentials is None else None)
+                     or self.default_endpoint).rstrip("/")
         self.models = {"large": settings.llm_deployment or "",
                        "small": os.environ.get("SOC_LLM_DEPLOYMENT_SMALL") or settings.llm_deployment or ""}
-        self.key = secret("SOC_LLM_API_KEY")
+        self.key = secret("SOC_LLM_API_KEY") if credentials is None else credentials.get("api_key")
         check_endpoint(settings, self.base)
 
     def _headers(self) -> dict[str, str]:
@@ -51,26 +64,49 @@ class OpenAICompatibleProvider(Provider):
         prefix = os.environ.get("SOC_LLM_AUTH_PREFIX", "Bearer ")
         return {**llm_extra_headers(), **({name: f"{prefix}{self.key}"} if self.key else {})}
 
+    def _url(self, path: str) -> str:
+        return self.base + (path if self.base.endswith("/v1") else "/v1" + path)
+
+    def _extra_body(self) -> dict[str, Any]:
+        return {}
+
     def complete(self, system: str, user: str, *, tier: str, max_tokens: int | None = None,
                  model: str | None = None) -> Completion | None:
         model = model or self.models.get(tier) or self.models["large"]
         if not (self.base and model) or (self.requires_key and not self.key):
             return None
-        url = self.base + ("/chat/completions" if self.base.endswith("/v1") else "/v1/chat/completions")
         headers = self._headers()
         body: dict = {"model": model, "temperature": 0.1,
-                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                      **self._extra_body()}
         if max_tokens:
             body[max_tokens_field()] = max_tokens
         if os.environ.get("SOC_LLM_JSON_MODE", "1").strip().lower() in {"0", "false", "no", "off"}:
             body["messages"][0]["content"] = system + JSON_RULE
         else:
             body["response_format"] = {"type": "json_object"}
-        resp = post_with_retry(url, headers=headers, json=body, tier=tier)
+        resp = post_with_retry(self._url("/chat/completions"), headers=headers, json=body, tier=tier)
         body = resp.json()
         usage = body.get("usage") or {}
         return Completion(body["choices"][0]["message"]["content"], int(usage.get("prompt_tokens", 0) or 0),
                           int(usage.get("completion_tokens", 0) or 0), str(body.get("model", model)))
+
+    def list_models(self) -> list[dict[str, Any]]:
+        """The models the endpoint offers (``GET /v1/models``): ``[{name, deprecated}]``."""
+        if not self.base or (self.requires_key and not self.key):
+            return []
+        resp = httpx.get(self._url("/models"), headers=self._headers(), timeout=llm_timeout("small"), **llm_verify())
+        resp.raise_for_status()
+        body = resp.json()
+        items = body.get("data") if isinstance(body, dict) else body
+        out = []
+        for it in items or []:
+            name = it.get("id") if isinstance(it, dict) else it
+            if isinstance(name, str) and name.strip():
+                out.append({"name": name.strip()[:128],
+                            # OpenRouter dates a model's retirement; a listed date means it is on its way out
+                            "deprecated": bool(isinstance(it, dict) and it.get("expiration_date"))})
+        return out
 
 
 class AzureFoundryProvider(OpenAICompatibleProvider):
@@ -81,3 +117,18 @@ class AzureFoundryProvider(OpenAICompatibleProvider):
 
     def _headers(self) -> dict[str, str]:
         return {**llm_extra_headers(), "api-key": self.key or ""}
+
+
+class OpenRouterProvider(OpenAICompatibleProvider):
+    """OpenRouter: one API key, many vendors' models. Prompts carry pseudonymised investigation data, so every
+    request asks that no upstream vendor stores or trains on it."""
+
+    name = "openrouter"
+    requires_key = True
+    default_endpoint = "https://openrouter.ai/api/v1"
+
+    def _headers(self) -> dict[str, str]:
+        return {**llm_extra_headers(), **({"Authorization": f"Bearer {self.key}"} if self.key else {})}
+
+    def _extra_body(self) -> dict[str, Any]:
+        return {"provider": {"data_collection": "deny"}}

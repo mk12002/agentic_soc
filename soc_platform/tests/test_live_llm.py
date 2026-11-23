@@ -184,7 +184,10 @@ def test_every_llm_call_succeeded_on_the_pinned_model(estate):
     s, *_ = estate
     calls = s.query(LLMCall).all()
     assert len(calls) >= 10
-    assert {c.status for c in calls} == {"ok"}, {c.workflow: c.status for c in calls if c.status != "ok"}
+    # the failing call's own error text (exception type and message, endpoint redacted by the provider's error path):
+    # without it an intermittent endpoint error could not be told from a defect
+    assert {c.status for c in calls} == {"ok"}, {c.workflow: f"{c.status}: {(c.response or '')[:200]}"
+                                                 for c in calls if c.status != "ok"}
 
 
 def test_no_pseudonym_placeholders_reach_analysts(estate):

@@ -9,6 +9,7 @@ const arg = (...a) => esc(JSON.stringify(a));
 const nf = n => (n == null || n === '') ? '–' : Number(n).toLocaleString();
 const pct = (x, d = 0) => x == null ? '–' : (x * 100).toFixed(d) + '%';
 const cap = s => { const t = String(s || '').replace(/_/g, ' ').trim(); return t.charAt(0).toUpperCase() + t.slice(1); };
+const roleName = r => (r === 'ciso' ? 'CISO' : cap(r));
 // risk dimensions in plain words ('other' is what the SIEM connectors report)
 const DIM_LABELS = {other: 'SIEM', privileged_access: 'privileged access', threat_intel: 'threat intel'};
 const dimLabel = d => DIM_LABELS[d] || String(d || '').replace(/_/g, ' ');
@@ -87,6 +88,7 @@ const I = {
   filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
   dome: '<path d="M3 19h18M5 19v-3a7 7 0 0 1 14 0v3M12 9V5M9 19v-3a3 3 0 0 1 6 0v3"/>',
+  exec: '<path d="M3 8h18v12H3zM8 8V5h8v3M3 13h18M11 13v2h2v-2"/>',
   collapse: '<path d="M4 4h16v16H4zM9 4v16M16 9l-3 3 3 3"/>',
   expand: '<path d="M4 4h16v16H4zM9 4v16M13 9l3 3-3 3"/>',
 };
@@ -119,7 +121,7 @@ const skeleton = () => `<div class="card"><div class="card-b">${'<div class="ske
 const citeTip = e => [e.source, e.observed_at ? 'observed ' + dt(e.observed_at) : '', e.summary].filter(Boolean).join(' · ');
 const cite = x => {
   const ev = (x.evidence || []).length ? x.evidence : (x.evidence_ids || []).map(ref => ({ref}));
-  return ev.map(e => `<abbr class="cite" tabindex="0" data-fn="jumpEv" data-args="${arg(e.ref)}"${e.summary ? ` data-tip="${esc(citeTip(e))}" aria-label="${esc(e.ref + ': ' + citeTip(e))}"` : ''}>${esc(e.ref)}</abbr>`).join('');
+  return ev.map(e => `<abbr class="cite" tabindex="0" data-fn="jumpEv" data-args="${arg(e.ref)}"${e.summary ? ` data-tip="${esc(citeTip(e))}" aria-label="${esc(e.ref + ': ' + citeTip(e))}"` : ''}>${esc(e.ref)}</abbr>`).join(' ');
 };
 function jumpEv(ref) {
   const row = document.querySelector(`.ev[data-ref="${CSS.escape(ref)}"]`);
@@ -204,7 +206,7 @@ const meter = (v, max = 100) => `<div class="bar"><span style="width:${Math.max(
 // Groups follow CyberDome's modules: Dome Score (posture), Dome Agents (AI investigation and response), the domain
 // workflows, Dome Graph (assets, identities, coverage), Dome Connect (the tools) and Dome Comply (evidence, audit).
 const NAV = [
-  ['Command', [['overview', 'Overview', 'overview'], ['dome-score', 'Dome Score', 'dome', '*']]],
+  ['Command', [['executive', 'Executive view', 'exec', '*'], ['overview', 'Overview', 'overview'], ['dome-score', 'Dome Score', 'dome', '*']]],
   ['Dome Agents', [['intelligence', 'Intelligence', 'intel', '*'], ['cases', 'Cases', 'cases'],
     ['approvals', 'Approvals', 'approvals'], ['tuning', 'Tuning', 'filter'], ['policy', 'Automation policy', 'policy'], ['ai-usage', 'AI usage', 'ai']]],
   ['Domains', [['phishing', 'Phishing', 'phishing', 'phishing'], ['vulnerabilities', 'Vulnerabilities', 'vuln', 'vulnerability'],
@@ -216,8 +218,10 @@ const NAV = [
 ];
 const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity', search: 'Search'};
 
+// a CISO starts on the executive view; everyone else on the overview
+const landing = () => (window.ME && (window.ME.roles || []).includes('ciso') ? 'executive' : 'overview');
 function route() {
-  const parts = (location.hash.replace(/^#\/?/, '') || 'overview').split('/').map(decodeURIComponent);
+  const parts = (location.hash.replace(/^#\/?/, '') || landing()).split('/').map(decodeURIComponent);
   return {name: parts[0], params: parts.slice(1)};
 }
 
@@ -335,7 +339,7 @@ async function signInEntra() {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
   const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
-  sessionStorage.setItem('soc_pkce', JSON.stringify({verifier, state, hash: location.hash || '#/overview'}));
+  sessionStorage.setItem('soc_pkce', JSON.stringify({verifier, state, hash: location.hash || ''}));
   const q = new URLSearchParams({client_id: AUTH.client_id, response_type: 'code', redirect_uri: redirectUri(),
     response_mode: 'query', scope: AUTH.scope + ' openid profile', state, code_challenge: challenge,
     code_challenge_method: 'S256'});
@@ -347,7 +351,7 @@ async function finishEntra() {
   let saved = {};
   try { saved = JSON.parse(sessionStorage.getItem('soc_pkce') || '{}'); } catch (e) { /* ignore */ }
   sessionStorage.removeItem('soc_pkce');
-  history.replaceState(null, '', '/' + (saved.hash || '#/overview'));
+  history.replaceState(null, '', '/' + (saved.hash || ''));
   if (p.has('error') || p.get('state') !== saved.state) {
     toast('Sign-in failed: ' + (p.get('error_description') || p.get('error') || 'state mismatch'), true);
     return false;
@@ -386,7 +390,7 @@ function signInScreen() {
     <div class="brand" style="padding:0">${brand('Security operations platform')}</div>
     <h1>Sign in</h1>
     <div class="field"><label for="si-user">Work email</label><input class="input" id="si-user" value="lena@acme-demo.com" autocomplete="username"></div>
-    <div class="field"><label for="si-role">Role</label><select id="si-role">${['lead', 'analyst', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${cap(r)}</option>`).join('')}</select></div>
+    <div class="field"><label for="si-role">Role</label><select id="si-role">${['lead', 'analyst', 'ciso', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${roleName(r)}</option>`).join('')}</select></div>
     <div class="field"><label for="si-scope">Data scope</label><select id="si-scope">${[['', 'All domains'], ['phishing', 'Phishing only'], ['incident', 'Incident only'], ['vulnerability', 'Vulnerability only']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
     <button class="btn primary" data-fn="signIn" data-args="[]" style="justify-content:center;height:36px">Continue</button>
     <div class="foot">Development sign-in. In production the console uses Microsoft Entra ID single sign-on with MFA; this form is only available when <code>SOC_AUTH_MODE=dev</code>.</div>
@@ -400,8 +404,8 @@ async function signIn() {
   if (!r.ok) { toast('Development sign-in is disabled on this server. Use Entra ID SSO.', true); return; }
   TOKEN = (await r.json()).token;
   try { sessionStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
-  if (!location.hash) location.hash = '#/overview';
-  boot();
+  boot();                       // no page asked for: each role's own landing page
+
 }
 async function signOut(expired = false) {
   if (!expired && TOKEN) { try { await fetch('/api/v1/auth/logout', {method: 'POST', headers: {Authorization: 'Bearer ' + TOKEN}}); } catch (e) { /* ignore */ } }

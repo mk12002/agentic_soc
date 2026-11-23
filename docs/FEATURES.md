@@ -33,7 +33,7 @@ Headline features: **[Attack story](#51-attack-story)** (the whole attack across
 
 A single web console for the whole SOC. It opens in a light theme by default, and a one-click toggle switches to
 dark mode (the choice is remembered per browser).
-Navigation is grouped by CyberDome module - *Command* (overview, Dome Score), *Dome Agents* (intelligence, cases,
+Navigation is grouped by CyberDome module - *Command* (executive view, overview, Dome Score), *Dome Agents* (intelligence, cases,
 approvals, tuning, automation policy, AI usage), *Domains* (phishing, vulnerabilities, cloud posture), *Dome Graph*
 (ATT&CK coverage, shadow IT, supplier risk, watch lists), *Dome Connect* (integrations) and *Dome Comply* (reports,
 audit log, access). The menu retracts to a rail of icons - each keeps its name as a tooltip - from the button at its
@@ -214,7 +214,7 @@ and a unified cross-tool timeline.
   **break-glass** access with a sealed secret (only its hash is configured; exchanged for a 15-minute session; every
   use and failed attempt audited and raised as a critical insight; guesses throttled). The console keeps its token
   for the browser tab only.
-* **Authorisation:** RBAC (analyst, lead, admin, automation admin, auditor) + **domain scoping** (a user can be
+* **Authorisation:** RBAC (analyst, lead, admin, automation admin, auditor, CISO) + **domain scoping** (a user can be
   limited to phishing, incident or vulnerability data; cross-domain views need all-domain access; each role acts
   only inside its own scope, so a phishing lead who is also an all-domain auditor approves phishing actions only) + **step-up
   MFA** for approvals, policy, kill switch, access management and watch-list changes + separation of duties everywhere (no
@@ -236,6 +236,21 @@ and a unified cross-tool timeline.
   person, each model's price, how often answers were usable and how many statements the evidence check removed, and
   advises a smaller or larger model per feature from those figures. Over a limit the platform answers without the
   model and says why.
+* **AI integration** (same screen, administrators): the model provider and its credentials - the organisation's
+  in-house LLM gateway through its SDK with a **service account** (auth token and session token; everyone signs in
+  with SSO, every call uses the service account, each person's own limits still apply), or an **API key** for
+  OpenRouter, an OpenAI-compatible endpoint, Anthropic or Azure AI Foundry. Credentials are encrypted, write-only and
+  audited by name only; endpoints must be on the deployment's approved list. *Test connection* checks every step (SDK,
+  credentials, model list, an answer that passes the evidence check, token usage) and names the fix. An expired or
+  refused token falls back to the platform's own text and raises a high finding; an expiry date gives a warning three
+  days before.
+* **Model versions** (same screen): no version is hard-coded. A chosen model follows its **line** (*GPT 6.1 Sol* = the
+  *GPT Sol* line at 6.1): the platform reads the provider's models every 6 hours, checks a newer version in the same
+  generation (grounded JSON, valid citations, no invented figure) and then uses it; a new generation (6 -> 7) waits
+  for an administrator's *Approve*; *Roll back* returns a line to the version before and blocks the bad one. A feature
+  can be pinned (*newest* off), and automatic upgrades can be switched off. Every change is audited and raised as a
+  finding; models being retired are flagged before calls fail. Providers that publish no model list: an administrator
+  adds new names.
 * **Data protection:** raw tool payloads and reported emails **encrypted at rest** (Fernet, key rotation);
   retention job with legal hold for open cases (old telemetry events are pruned too, unless a case or insight cites
   them, so the context store stays bounded at client volume); PII pseudonymised before any LLM call.
@@ -345,6 +360,32 @@ legitimate vendor, internal and marketing mail).
 ---
 
 ## 5. Intelligence layer
+
+### 5.00 Executive view (CISO)
+
+The first screen a **CISO** sees (a read-only role: Entra app role `SOC.CISO`; it reads every screen, the audit trail
+and evidence exports, and never approves, changes policy or uses the kill switch). Leads and auditors open it too
+(*Command -> Executive view*; it needs all-domain access). Every figure is computed from the records by the same
+functions as the screen it links to - none is written by AI:
+
+* **Headline figures** for the last 7, 30 or 90 days, each against the period before (better / worse): Dome Score,
+  open critical / high incidents, median time to resolve an incident, known-exploited vulnerabilities open,
+  vulnerabilities within SLA, people who clicked a reported phish, machines with EDR, actions run under policy.
+* **What needs a decision** - *Overdue*, *Today*, *Tomorrow*, *This week*, *Later*, by real due dates in the viewer's
+  own day (time zone): open incidents against response targets (critical 4 h, high 1 day, medium 3 days), waiting
+  approvals per case, P1 / P2 vulnerabilities against their SLA and CISA KEV due dates, risk acceptances and tuning
+  rules ending, tools not delivering data, AI credentials expiring, and the highest open findings. Each item says why,
+  who owns it and links to it.
+* **Posture**: the Dome Score with its pillars and its history from the daily snapshots (the screen says when that
+  history starts rather than drawing a line it does not have).
+* **Sections**: threats and incidents (open by severity, unassigned, opened / resolved, techniques seen, most at
+  risk), vulnerabilities and exposure (by priority, KEV, internet-exposed, SLA compliance, fixed in period, opened and
+  fixed by week, by owning team), people and phishing (reported, harmful share, clicks, repeat clickers, auto-closed),
+  coverage and resilience (EDR, ATT&CK coverage and blind spots, CMDB gaps, tools delivering), operations (automation
+  rate, approvals waiting, open and unassigned cases, workload), governance (policy and access changes, break-glass,
+  approvals / rejections, audit events), third parties (suppliers with findings) and AI use against budget.
+* **Brief**: a short written brief over these figures; the model only narrates them and cites each one (without a
+  model the platform writes it). **Board pack** opens Reports (the monthly board deck).
 
 ### 5.0 Dome Score (posture)
 

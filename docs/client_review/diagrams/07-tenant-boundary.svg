@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 760" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
+    <style>
+      .zone{fill:#ecfdf3;stroke:#15803d;stroke-width:2;stroke-dasharray:8 5}
+      .sub{fill:#f8fafc;stroke:#94a3b8;stroke-width:1.2}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .core{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.5}
+      .ext{fill:#fff7e8;stroke:#c2410c;stroke-width:1.2}
+      .opt{fill:#fff7e8;stroke:#c2410c;stroke-width:1.2;stroke-dasharray:5 4}
+      .none{fill:#fef2f2;stroke:#b91c1c;stroke-width:1.2}
+      .egress{fill:#c2410c;stroke:#9a3412;stroke-width:1.2}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .z{fill:#166534;font-weight:700;font-size:14px}
+      .x{fill:#9a3412;font-weight:700;font-size:14px}
+      .w{fill:#ffffff;font-weight:700;font-size:13px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .out{stroke:#c2410c;stroke-width:1.8;fill:none;marker-end:url(#o)}
+      .lbl{fill:#9a3412;font-size:11.5px;font-weight:600}
+      .tl{fill:#9a3412;font-size:11.5px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1240" height="760" fill="#ffffff"/>
+  <text x="30" y="34" class="h" font-size="20">Operating inside the &lt;client&gt; environment - what stays in, what leaves, and to where</text>
+  <text x="30" y="56" class="s">Every store and platform process runs in the &lt;client&gt;'s environment. Traffic leaves only through the &lt;client&gt;'s egress allow-list, to destinations it enables (orange).</text>
+
+  <!-- client boundary -->
+  <rect x="20" y="74" width="760" height="666" rx="14" class="zone"/>
+  <text x="38" y="100" class="z">&lt;client&gt; environment (tenant / data centre) - operated by the &lt;client&gt;</text>
+
+  <!-- users and proxy -->
+  <rect x="40" y="116" width="210" height="74" rx="8" class="box"/><text x="54" y="140" class="t">SOC users (browser)</text><text x="54" y="160" class="s">Entra ID SSO + MFA</text><text x="54" y="176" class="s">app roles -&gt; platform roles</text>
+  <rect x="290" y="116" width="200" height="74" rx="8" class="box"/><text x="304" y="140" class="t">TLS reverse proxy / WAF</text><text x="304" y="160" class="s">HTTPS 443 - the only</text><text x="304" y="176" class="s">inbound path</text>
+  <path d="M250 153 L288 153" class="line"/>
+  <!-- proxy to platform: down into the gap above the subnet, left, then down into the platform box -->
+
+  <!-- private application subnet -->
+  <rect x="40" y="214" width="720" height="226" rx="12" class="sub"/>
+  <text x="530" y="236" class="t">Private application subnet</text>
+  <path d="M330 190 L330 202 L166 202 L166 246" class="line"/>
+  <rect x="56" y="248" width="220" height="176" rx="10" class="core"/><text x="70" y="272" class="t">CyberDome API + console</text><text x="70" y="292" class="s">stateless replicas, non-root</text><text x="70" y="308" class="s">authN, RBAC + domain scope,</text><text x="70" y="324" class="s">action layer + autonomy policy,</text><text x="70" y="340" class="s">LLM gateway (pseudonymise,</text><text x="70" y="356" class="s">approved endpoints, guardrails)</text><text x="70" y="378" class="t">CyberDome scheduler</text><text x="70" y="398" class="s">sync, investigate, correlate,</text><text x="70" y="414" class="s">retention, self-check, catalogue</text>
+  <rect x="300" y="252" width="210" height="76" rx="8" class="box"/><text x="314" y="276" class="t">PostgreSQL 16</text><text x="314" y="296" class="s">all records, audit chain, blobs</text><text x="314" y="312" class="s">(Fernet-encrypted), TLS</text>
+  <rect x="300" y="340" width="210" height="84" rx="8" class="box"/><text x="314" y="364" class="t">Vault (Key Vault or equiv.)</text><text x="314" y="384" class="s">tool credentials, SOC_DATA_KEY,</text><text x="314" y="400" class="s">mounted read-only as files</text>
+  <path d="M276 290 L298 290" class="line"/><path d="M276 380 L298 380" class="line"/>
+  <rect x="530" y="252" width="214" height="76" rx="8" class="box"/><text x="544" y="276" class="t">Log platform / SIEM</text><text x="544" y="296" class="s">JSON logs, audit exports,</text><text x="544" y="312" class="s">hourly audit-chain anchors</text>
+  <rect x="530" y="340" width="214" height="84" rx="8" class="box"/><text x="544" y="364" class="t">Monitoring</text><text x="544" y="384" class="s">/metrics (auditor API key),</text><text x="544" y="400" class="s">/health/live, /health/ready</text>
+  <path d="M510 290 L528 290" class="line"/>
+
+  <!-- outbound trunk: in the gap below the subnet, to the egress bar on the boundary -->
+  <path d="M220 424 L220 450 L766 450" class="out"/>
+  <path d="M120 424 L120 458" class="line"/>
+  <path d="M580 450 L580 458" class="line"/>
+
+  <rect x="40" y="460" width="345" height="122" rx="10" class="box"/><text x="54" y="484" class="t">In-house LLM gateway (optional)</text><text x="54" y="504" class="s">reached through its SDK with a service account</text><text x="54" y="520" class="s">(or an approved internal OpenAI-compatible endpoint)</text><text x="54" y="540" class="s">receives: pseudonymised evidence of one item</text><text x="54" y="556" class="s">never: tool credentials or real identities</text><text x="54" y="572" class="s">(tokens are restored only for the reader)</text>
+  <rect x="405" y="460" width="355" height="122" rx="10" class="box"/><text x="419" y="484" class="t">Internal tools (if used)</text><text x="419" y="504" class="s">Rapid7 console, Delinea Secret Server / Privilege</text><text x="419" y="520" class="s">Manager, ServiceNow on-prem, CMDB file</text><text x="419" y="540" class="s">reached over HTTPS from the platform; read by</text><text x="419" y="556" class="s">default, written only by an approved action</text>
+
+  <rect x="40" y="600" width="720" height="124" rx="10" class="none"/>
+  <text x="54" y="624" class="t">Not present / not sent</text>
+  <text x="54" y="646" class="s">- No data, telemetry, crash reports or usage analytics to the &lt;delivery team&gt;; no inbound access for the &lt;delivery team&gt; is needed</text>
+  <text x="54" y="664" class="s">- No agent installed on endpoints; no tool connects in (except an optional SIEM pushing alerts with an API key)</text>
+  <text x="54" y="682" class="s">- No URL found in e-mail content is ever fetched; the phishing ML engine runs offline (network blocked in code)</text>
+  <text x="54" y="700" class="s">- No model training or fine-tuning on &lt;client&gt; data; internal IPs and the &lt;client&gt;'s own domains never go to threat intel</text>
+
+  <!-- egress allow-list on the boundary -->
+  <rect x="768" y="116" width="62" height="556" rx="8" class="egress"/>
+  <text x="806" y="394" class="w" text-anchor="middle" transform="rotate(-90 806 394)">Egress allow-list (firewall / proxy) - HTTPS only</text>
+
+  <!-- outside -->
+  <text x="850" y="100" class="x">Outside the &lt;client&gt; environment</text>
+  <rect x="850" y="116" width="370" height="96" rx="10" class="ext"/><text x="864" y="140" class="t">&lt;client&gt;'s SaaS security tools</text><text x="864" y="160" class="s">Microsoft Graph / Defender / Sentinel, CrowdStrike,</text><text x="864" y="176" class="s">Wiz, Avanan, Umbrella, Canary, ServiceNow / Jira cloud</text><text x="864" y="196" class="lbl">sent: API queries; approved actions and their targets</text>
+  <rect x="850" y="228" width="370" height="76" rx="10" class="ext"/><text x="864" y="252" class="t">Public vulnerability feeds</text><text x="864" y="272" class="s">NIST NVD, FIRST EPSS, CISA KEV</text><text x="864" y="292" class="lbl">sent: CVE identifiers only (KEV: nothing)</text>
+  <rect x="850" y="320" width="370" height="76" rx="10" class="opt"/><text x="864" y="344" class="t">Threat-intel sources (opt-in, per key)</text><text x="864" y="364" class="s">VirusTotal, AbuseIPDB, OTX, URLhaus, GreyNoise ...</text><text x="864" y="384" class="lbl">sent: external indicators only (public IP, domain, hash)</text>
+  <rect x="850" y="412" width="370" height="76" rx="10" class="opt"/><text x="864" y="436" class="t">API-key LLM provider (only if chosen)</text><text x="864" y="456" class="s">OpenRouter / Anthropic / Azure AI Foundry (approved list)</text><text x="864" y="476" class="lbl">sent: pseudonymised evidence; OpenRouter: no-retention flag</text>
+  <rect x="850" y="504" width="370" height="76" rx="10" class="opt"/><text x="864" y="528" class="t">Teams / Slack / webhook (optional)</text><text x="864" y="548" class="s">destinations from deployment settings, HTTPS only</text><text x="864" y="568" class="lbl">sent: finding title, severity, next steps, link</text>
+  <rect x="850" y="596" width="370" height="76" rx="10" class="opt"/><text x="864" y="620" class="t">Microsoft Entra ID</text><text x="864" y="640" class="s">sign-in, signing keys (JWKS), connector tokens</text><text x="864" y="660" class="lbl">sent: token requests (client credentials)</text>
+
+  <path d="M830 164 L848 164" class="out"/>
+  <path d="M830 266 L848 266" class="out"/>
+  <path d="M830 358 L848 358" class="out"/>
+  <path d="M830 450 L848 450" class="out"/>
+  <path d="M830 542 L848 542" class="out"/>
+  <path d="M830 634 L848 634" class="out"/>
+</svg>

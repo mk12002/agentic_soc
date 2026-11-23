@@ -48,6 +48,14 @@ x-platform-env: &platform-env
   SOC_LLM_CA_BUNDLE: ${SOC_LLM_CA_BUNDLE:-}
   SOC_LLM_JSON_MODE: ${SOC_LLM_JSON_MODE:-1}
   SOC_LLM_SERVER_FALLBACK: ${SOC_LLM_SERVER_FALLBACK:-1}
+  # in-house LLM gateway through its SDK (built into the image with the gateway_sdk_lock secret; tokens are entered by
+  # an administrator on the AI usage screen, or given here from a vault mount: SOC_LLM_GATEWAY_AUTH_TOKEN_FILE)
+  SOC_LLM_GATEWAY_SDK: ${SOC_LLM_GATEWAY_SDK:-}
+  SOC_LLM_GATEWAY_SESSION_ARGS: ${SOC_LLM_GATEWAY_SESSION_ARGS:-}
+  SOC_LLM_GATEWAY_CHAT_ARGS: ${SOC_LLM_GATEWAY_CHAT_ARGS:-}
+  SOC_LLM_GATEWAY_SYSTEM_ARG: ${SOC_LLM_GATEWAY_SYSTEM_ARG:-}
+  SOC_LLM_GATEWAY_MAX_TOKENS_ARG: ${SOC_LLM_GATEWAY_MAX_TOKENS_ARG:-}
+  SOC_LLM_GATEWAY_MODELS_CALL: ${SOC_LLM_GATEWAY_MODELS_CALL:-}
   SSL_CERT_FILE: ${SSL_CERT_FILE:-}                     # corporate CA bundle for internal consoles and gateways
   # security & data protection
   SOC_DATA_KEY: ${SOC_DATA_KEY:-}                       # mandatory when SOC_ENVIRONMENT=prod

@@ -83,10 +83,11 @@ def cmd_demo() -> None:
     analyst = Principal(f"demo.analyst@{org[0]}", "Demo Analyst", frozenset({Role.ANALYST}))
     with _db().session() as s:
         from soc_platform.llm.gateway import LLMGateway
+        from soc_platform.llm.integration import configured
 
         # with an approved model configured the demo cases get its written explanation, as the scheduled jobs give
         # theirs: verdicts, scores and actions are computed first and are identical either way
-        gw = LLMGateway(s, st) if st.llm_provider != "none" else None
+        gw = LLMGateway(s, st) if configured(s, st) else None
         vm = VulnerabilityService(s, reg)
         r = vm.refresh()
         print(f"[VM] {r['consolidation']['raw_findings']} raw findings -> {r['consolidation']['consolidated']} consolidated; "

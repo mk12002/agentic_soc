@@ -24,7 +24,7 @@
 
   <rect x="480" y="86" width="250" height="96" rx="10" class="chk"/><text x="494" y="112" class="t">Autonomy policy decision</text><text x="494" y="134" class="s">preconditions · hard target limit ·</text><text x="494" y="150" class="s">kill switch · destructive → max L3 ·</text><text x="494" y="166" class="s">VIP / critical · target count · four-eyes</text>
 
-  <rect x="760" y="86" width="200" height="96" rx="10" class="hum"/><text x="774" y="112" class="t">Human approval</text><text x="774" y="134" class="s">permission per role, in the</text><text x="774" y="150" class="s">action's domain; step-up MFA;</text><text x="774" y="166" class="s">no self-approval; never API key</text>
+  <rect x="760" y="86" width="200" height="96" rx="10" class="hum"/><text x="774" y="112" class="t">Human approval (L2 / L3)</text><text x="774" y="134" class="s">permission per role, in the</text><text x="774" y="150" class="s">action's domain; step-up MFA;</text><text x="774" y="166" class="s">no self-approval; never API key</text>
 
   <rect x="990" y="86" width="190" height="96" rx="10" class="ok"/><text x="1004" y="112" class="t">Execute once</text><text x="1004" y="134" class="s">preconditions re-checked;</text><text x="1004" y="150" class="s">conditional update = exactly</text><text x="1004" y="166" class="s">once; result recorded</text>
 
@@ -65,7 +65,7 @@
 
   <path d="M210,134 L238,134" class="line"/>
   <path d="M450,134 L478,134" class="line"/>
-  <path d="M730,134 L758,134" class="line"/><text x="731" y="154" class="lbl" font-size="11">L2/L3</text>
+  <path d="M730,134 L758,134" class="line"/>
   <path d="M960,134 L988,134" class="line"/>
   <path d="M605,182 L605,220" class="line"/>
   <path d="M860,182 L860,220" class="line"/>

@@ -31,7 +31,7 @@ These belong to the client; the platform uses them, it does not replace them.
 
 | Box | What to say |
 |---|---|
-| **SOC users** | Five roles: analyst, lead, automation administrator, administrator, auditor. Each role can be limited to a domain - for example an analyst who only sees vulnerability work. What you can *see* and what you can *do* are checked separately. |
+| **SOC users** | Six roles: analyst, lead, automation administrator, administrator, auditor, CISO (sees everything on the executive view and behind it, changes nothing). Each role can be limited to a domain - for example an analyst who only sees vulnerability work. What you can *see* and what you can *do* are checked separately. |
 | **Microsoft Entra ID** | All sign-in goes through the client's Entra ID: standard OIDC with PKCE, MFA enforced by their Conditional Access, roles assigned as Entra app roles. The platform never stores passwords. The `JWKS` arrow is the platform fetching Entra's public keys to verify each token's signature. |
 | **Key Vault** | Every secret - tool API credentials, database password, encryption key - lives in the client's vault and is mounted into the containers as a file. Secrets are never in configuration files, the database or the console; the console only shows "set" or "not set". If a mounted secret file is missing or empty, the platform refuses to start. |
 | **SIEM** | Two flows. Out: the platform's structured logs, access log and audit export, so the client's SOC can monitor the platform itself. In (optional): the SIEM can push alerts into the platform, authenticated with an API key; replays are ignored and one bad alert never rejects a whole batch. |

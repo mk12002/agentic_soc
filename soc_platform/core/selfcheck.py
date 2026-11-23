@@ -146,8 +146,9 @@ def llm_budget_alert(s: Session, settings: Any) -> dict[str, Any] | None:
     from soc_platform.intelligence.correlation import _key
     from soc_platform.intelligence.models import Insight
     from soc_platform.llm.gateway import LLMGateway
+    from soc_platform.llm.integration import configured
 
-    if (settings.llm_provider or "none") == "none":
+    if not configured(s, settings):
         return None
     b = LLMGateway(s, settings).budget_status()      # the budget the administrator set (AI usage policy)
     _daily_budget_alert(s, b)

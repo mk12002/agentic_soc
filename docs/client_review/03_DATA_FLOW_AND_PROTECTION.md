@@ -89,7 +89,7 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 | Platform to database | TLS to PostgreSQL with the server certificate verified (`sslmode=verify-full`); production refuses anything weaker | Implemented (enforced), configured at deployment |
 | Files at rest | Fernet via MultiFernet. `SOC_DATA_KEY` holds one or more keys: the first encrypts, all decrypt, so keys rotate without bulk re-encryption; mandatory in production (the platform refuses to start without it) | Implemented |
 | Database at rest | The organisation's database encryption (managed-service or disk encryption) | Configured at deployment |
-| Secrets | In the organisation's vault, mounted as files; never in configuration, the database or logs; the console shows *set / not set* only | Implemented |
+| Secrets | Tool credentials: in the organisation's vault, mounted as files; never in configuration, the database or logs; the console shows *set / not set* only. **Exception - AI provider credentials** (the LLM gateway's service-account tokens or a provider's API key) may instead be entered by an administrator in the console: then they are stored in the database sealed with `SOC_DATA_KEY` (Fernet), write-only (never returned, logged or audited by value), per provider; or the deployment supplies them from the vault as files | Implemented |
 | Backups | Database point-in-time backups - with `SOC_BLOB_STORE=database` stored e-mails and reports are inside them, still Fernet-encrypted (with the file store, also the file volume); keep the data keys in the vault, separate from backups, escrowed in two places | Configured at deployment |
 
 ## 6 Retention and deletion

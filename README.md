@@ -140,7 +140,7 @@ Without an LLM every feature still works, with deterministic, cited answers.
 | Control | Summary |
 |---|---|
 | Identity | Entra ID SSO (RS256/JWKS); step-up MFA for approvals, policy, kill switch and access management; service-account API keys (hashed, expiring, can never approve); sealed break-glass access (audited + alerted); token and session revocation |
-| Authorisation | RBAC (analyst, lead, admin, automation admin, auditor) + domain scoping + separation of duties (no self-approval of four-eyes actions, policies, exceptions or grants) |
+| Authorisation | RBAC (analyst, lead, admin, automation admin, auditor, CISO - read-only) + domain scoping + separation of duties (no self-approval of four-eyes actions, policies, exceptions or grants) |
 | Automation safety | Autonomy L0–L4, destructive never autonomous, VIP / blast-radius / four-eyes gates, durable kill switch, idempotent actions with rollback |
 | Data | Raw payloads, emails and generated reports encrypted at rest (Fernet, rotation); retention with legal hold; PII pseudonymised before any LLM call |
 | LLM | Approved-endpoint allow-list (fail closed), pinned model, token budget, prompts logged; every statement must cite evidence or is removed; report figures and story steps never come from the model |

@@ -197,6 +197,16 @@ How to think about it:
 - Nothing numeric changes either way: figures, verdicts, scores and actions are computed in code; the model changes
   only the wording quality and the cost.
 
+**New versions of a chosen model** are adopted automatically within a generation after the platform's own check
+(`llm.model_upgrade_check`: one grounded question on synthetic evidence - an 890-character prompt with the answer capped at
+800 tokens - counted against the budgets and refused when over them). It runs once per new
+version (a failed version is re-checked a day later), so its cost is negligible next to the features. The **By
+feature** table keeps working across a version change: every call records the version that answered. A new
+generation waits for an administrator; compare its price before approving (*Models* card).
+
+**The executive view's written brief** (`executive.brief`, asked for by a person, so their limits apply) narrates the
+view's computed figures on the large model; without a model the platform writes it from the same figures.
+
 ---
 
 ## 5. Measuring it yourself

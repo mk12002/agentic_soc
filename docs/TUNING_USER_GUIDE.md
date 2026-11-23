@@ -80,7 +80,7 @@ see a domain can read its rules.
 |---|---|---|---|---|
 | Lead | Yes, in their domains | Yes, in their domains | Yes, but never a rule they proposed | Yes, in their domains |
 | Analyst | Yes, in their domains | No | No | No |
-| Automation admin, admin, auditor | Yes, in their domains | No | No | No |
+| Automation admin, admin, auditor, CISO | Yes, in their domains | No | No | No |
 | API key or agent | - | Never | Never | Never |
 
 - **The permission.** It is `tune_detections`, and only the Lead role has it.

@@ -341,6 +341,12 @@ async function visit(page, hash, name, full = true) {
   await shot(page, '18-access');
   await visit(page, 'ai-usage', '33-ai-usage');
   if (!(await page.$('[data-fn="saveLlmPolicy"]'))) problems.push('admin cannot save AI usage limits');
+  // AI integration: the provider and its write-only credentials, and the model versions each chosen model follows
+  if (!(await page.$('#ai-prov'))) problems.push('AI integration: no provider choice for the administrator');
+  if (!/Model versions/.test(await page.textContent('#main'))) problems.push('AI integration: no model versions card');
+  await page.selectOption('#ai-prov', 'enterprise_gateway');
+  if (!(await page.$('#ai-s-auth_token')) || !(await page.$('#ai-s-session_token'))) problems.push('AI integration: the gateway asks for no auth / session token');
+  if ((await page.getAttribute('#ai-s-auth_token', 'type')) !== 'password') problems.push('AI integration: a token field shows what is typed');
   await page.goto(`${BASE}/#/integrations`); await settle(page);
   if (await page.$('[data-fn="notifyTest"]')) {
     await page.click('[data-fn="notifyTest"]'); await page.waitForTimeout(1500);
@@ -359,6 +365,29 @@ async function visit(page, hash, name, full = true) {
   await page.click('[data-fn="proposeConfig"]'); await page.waitForTimeout(1500); await settle(page);
   if (!(await page.textContent('#main')).includes('awaiting approval')) problems.push('proposed change not listed for approval');
   await shot(page, '32-change-awaiting-approval', false);
+  // CISO: lands on the executive view without asking for it, sees the same figures as the API, and can change nothing
+  await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
+  await page.evaluate(() => history.replaceState(null, '', '/'));
+  await page.fill('#si-user', `cleo@${EST.org}`); await page.selectOption('#si-role', 'ciso');
+  await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar'); await settle(page);
+  if (!/Executive view/.test(await page.textContent('#main h1'))) problems.push('CISO did not land on the executive view');
+  await page.evaluate(() => { const t = document.getElementById('toast'); if (t) t.hidden = true; });   // an earlier step's message
+  await shot(page, '43-executive');
+  const ex = await page.evaluate(async () => {
+    const r = await fetch('/api/v1/executive?days=30&tz_offset_minutes=' + (-new Date().getTimezoneOffset()),
+      {headers: {Authorization: 'Bearer ' + sessionStorage.getItem('soc_token')}});
+    const v = await r.json();
+    return {tiles: v.headline.map(h => h.value == null ? '–' : Number(h.value).toLocaleString() + (h.unit || '')),
+            shown: [...document.querySelectorAll('.exec-kpi .value')].map(x => x.textContent.trim()),
+            counts: Object.values(v.agenda.counts).map(String),
+            tabs: [...document.querySelectorAll('[data-fn="execBucket"] .muted')].map(x => x.textContent.trim())};
+  });
+  same('executive', 'headline figures', ex.shown.join(' | '), ex.tiles.join(' | '));
+  same('executive', 'agenda counts', ex.tabs.join(','), ex.counts.join(','));
+  await axe(page, 'executive view (CISO)');
+  await page.goto(`${BASE}/#/approvals`); await settle(page);
+  if (await page.$('[data-fn="act"], [data-fn="approveBundle"]')) problems.push('CISO is offered an approval button');
+
   // auditor: compliance pack
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
   await page.fill('#si-user', `audrey@${EST.org}`); await page.selectOption('#si-role', 'auditor');
@@ -426,7 +455,7 @@ async function visit(page, hash, name, full = true) {
   await page.click('[data-fn="tunePreview"]'); await page.waitForSelector('#tune-pv .callout');
   await page.evaluate(() => window.scrollTo(0, 0)); await shot(page, '38-tuning-vuln-priority'); await axe(page, 'tuning vulnerability priority preview');
   if (!/open findings/i.test(await page.textContent('#tune-pv'))) problems.push('tuning: the vulnerability preview does not count the open findings');
-  const routes = ['overview', 'dome-score', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
+  const routes = ['executive', 'overview', 'dome-score', 'intelligence', 'cases', `cases/${phishCase.id}`, `cases/${incCase.id}`, `entity/${jane.id}`, 'approvals',
     `story/${phishCase.id}`, 'phishing', 'suppliers', 'vulnerabilities', 'cloud', 'coverage', 'shadow-it', 'integrations', 'policy', 'ai-usage', 'reports', 'access', 'audit',
     'watchlists', 'tuning', `search/${encodeURIComponent(term)}`];
   // 390 px is a phone: tables scroll sideways there, so axe also runs at that width (a scroll region must be focusable)
@@ -437,7 +466,8 @@ async function visit(page, hash, name, full = true) {
       if (w === 1280 || w === 390) await axe(page, `${w}px ${theme} ${r}`);
       const ov = await page.evaluate(() => {   // how far the page scrolls sideways, and the element reaching furthest
         let worst = null, right = window.innerWidth;
-        for (const el of document.querySelectorAll('body *')) { const x = el.getBoundingClientRect().right; if (x > right + 1) { right = x; worst = el; } }
+        const scrolled = el => { for (let q = el.parentElement; q; q = q.parentElement) { const o = getComputedStyle(q).overflowX; if (o === 'auto' || o === 'scroll') return true; } return false; };
+        for (const el of document.querySelectorAll('body *')) { if (scrolled(el)) continue; const x = el.getBoundingClientRect().right; if (x > right + 1) { right = x; worst = el; } }
         const name = worst ? `${worst.tagName.toLowerCase()}${worst.id ? '#' + worst.id : ''}.${String(worst.className || '').trim().split(/\s+/).join('.')}` : '';
         return [document.documentElement.scrollWidth - window.innerWidth, name];
       });

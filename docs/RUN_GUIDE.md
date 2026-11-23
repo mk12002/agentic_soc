@@ -171,7 +171,7 @@ where people sign in with Microsoft Entra ID and MFA.)
 | Field | What to enter |
 |---|---|
 | **Work email** | Any address at the organisation's domain, e.g. `lena@acme-demo.com`. It does not need to exist anywhere; it is the name that appears in approvals, notes and the audit log. |
-| **Role** | Lead, Analyst, Auditor, Automation admin or Admin (what each can do is below). |
+| **Role** | Lead, Analyst, CISO, Auditor, Automation admin or Admin (what each can do is below). |
 | **Data scope** | *All domains* (normal), or *Phishing only* / *Incident only* / *Vulnerability only* to show a person limited to one team's data. |
 
 Press **Continue**. The sidebar footer shows the role and scope you are signed in with. A sign-in lasts 8 hours and
@@ -196,6 +196,7 @@ Use these so the names match the rest of this guide and the presenter guide:
 | `ada@acme-demo.com` | **Admin** | All domains | Manage access (grant / revoke roles, service-account keys), connectors (test, run jobs), kill switch, export evidence | Access management and separation of duties |
 | `max@acme-demo.com` | **Automation admin** | All domains | Propose automation-policy changes, connectors and jobs, kill switch | Policy change control: they propose, a Lead approves |
 | `audrey@acme-demo.com` | **Auditor** | All domains | Read everything, audit log and verification, compliance pack and audit export | Audit and compliance, read-only |
+| `cleo@acme-demo.com` | **CISO** | All domains | Read everything, starting on the **Executive view** (posture, figures against the period before, what needs a decision today / tomorrow / this week); audit log and evidence export; never approves, changes policy or uses the kill switch | The leadership view: every figure computed, each tile links to the screen behind it |
 
 The permissions of every role are listed on **Access → Role permissions**, so you can show them on screen.
 
@@ -454,7 +455,7 @@ python -m soc_platform token lena@acme-demo.com lead            # prints a token
 (Invoke-RestMethod "http://127.0.0.1:8080/api/v1/dev/token?user=pia@acme-demo.com&roles=analyst&domains=phishing").token   # phishing-only
 ```
 
-**Roles:** `analyst`, `lead`, `auditor`, `automation_admin`, `admin`. Add `domains=phishing` (or `incident`,
+**Roles:** `analyst`, `lead`, `ciso`, `auditor`, `automation_admin`, `admin`. Add `domains=phishing` (or `incident`,
 `vulnerability`) to scope a user to one domain. The same user then sees 404 for everything else.
 
 **API documentation (dev mode only):** http://127.0.0.1:8080/docs lists every endpoint. Production mode hides it.
@@ -666,7 +667,7 @@ analysts before go-live. To serve many analysts, start several processes: `$env:
 |---|---|
 | Sign-in does nothing, "not available", or "Development sign-in is disabled on this server" | `serve` prints why at start-up (`sign-in: development sign-in OFF - ...`). Usually `SOC_DEV_JWT_SECRET` is missing in this window - a bare `python -m soc_platform serve` in a new Command Prompt also runs the system Python instead of `.venv`. Add it to `.env` (§3), run `. .\scripts\load_env.ps1`, restart `serve`. From Command Prompt (`load_env.ps1` is PowerShell-only) start with `scripts\serve_with_env.cmd` instead (`scripts\serve_with_env.cmd reset` resets the demo first). |
 | Signed in as the wrong person / the other window changed user | Tabs of one browser share the sign-in. Use a private window or another browser profile for the second person (§4, *Signing in*). |
-| No Approve buttons | You are signed in as Admin, Auditor or Automation admin (none of them approve, by design), or the action needs a Lead. Sign in as `lena@acme-demo.com`, Lead. |
+| No Approve buttons | You are signed in as Admin, CISO, Auditor or Automation admin (none of them approve, by design), or the action needs a Lead. Sign in as `lena@acme-demo.com`, Lead. |
 | A screen says it needs all-domain scope | You signed in with a *... only* data scope. Sign out and choose *All domains*. |
 | Sign-in fails from another computer | By design, dev sign-in is served only to this machine. For a demo on a big screen, present from this laptop. |
 | "Only one usage of each socket address" / port in use | Another server is on 8080. Find it with `netstat -ano \| findstr :8080`, then stop that process: `Stop-Process -Id <PID>`. Or use `$env:SOC_PORT = "8081"`. |

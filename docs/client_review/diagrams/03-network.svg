@@ -17,7 +17,7 @@
   </defs>
   <rect width="1200" height="800" fill="#ffffff"/>
   <text x="30" y="36" class="h" font-size="20">Hosting model and network connectivity</text>
-  <text x="30" y="58" class="s">Reference deployment on containers (Docker / Kubernetes / VM). Labels give protocol and port; the arrow starts at the side that opens the connection.</text>
+  <text x="30" y="58" class="s">Reference deployment on containers (Docker / Kubernetes / VM). Protocols and ports are in the boxes; each arrow starts at the side that opens the connection.</text>
 
   <!-- user zone -->
   <rect x="20" y="80" width="230" height="300" rx="12" class="zone"/>
@@ -29,7 +29,7 @@
   <!-- edge -->
   <rect x="285" y="80" width="200" height="300" rx="12" class="zone"/>
   <text x="299" y="104" class="z">Edge</text>
-  <rect x="300" y="150" width="170" height="210" rx="8" class="box"/><text x="312" y="176" class="t">TLS reverse proxy</text><text x="312" y="196" class="s">/ WAF / App Gateway</text><text x="312" y="216" class="s">terminates TLS, sets</text><text x="312" y="232" class="s">X-Forwarded-For/-Proto</text><text x="312" y="248" class="s">(trusted proxy list)</text><text x="312" y="280" class="s">rate limit / WAF rules</text><text x="312" y="298" class="s">in front of the API</text>
+  <rect x="300" y="150" width="170" height="210" rx="8" class="box"/><text x="312" y="176" class="t">TLS reverse proxy (443)</text><text x="312" y="196" class="s">/ WAF / App Gateway</text><text x="312" y="216" class="s">terminates TLS, sets</text><text x="312" y="232" class="s">X-Forwarded-For/-Proto</text><text x="312" y="248" class="s">(trusted proxy list)</text><text x="312" y="280" class="s">rate limit / WAF rules</text><text x="312" y="298" class="s">in front of the API</text>
 
   <!-- app zone -->
   <rect x="520" y="80" width="330" height="440" rx="12" class="zoneb"/>
@@ -80,14 +80,14 @@
   <text x="904" y="740" class="s">/metrics needs an auditor API key.</text>
 
   <!-- arrows -->
-  <path d="M232,155 L298,185" class="line"/><text x="238" y="150" class="lbl">HTTPS 443</text>
+  <path d="M232,155 L298,185" class="line"/>
   <path d="M232,245 L298,245" class="line"/>
   <path d="M232,330 L298,330" class="line"/>
-  <path d="M470,190 L538,170" class="line"/><text x="476" y="168" class="lbl">HTTP 8080</text>
+  <path d="M470,190 L538,170" class="line"/>
   <path d="M540,190 L530,190 L530,630 L538,630" class="line"/>
   <path d="M540,272 L530,272" stroke="#475569" stroke-width="1.5"/>
   <path d="M530,630 L530,726 L538,726" class="line"/>
   <text x="400" y="560" class="lbl">TCP 5432 / TLS</text><text x="400" y="576" class="lbl">and file mount</text>
-  <path d="M832,160 L888,160" class="line"/><text x="838" y="152" class="lbl">443</text>
+  <path d="M832,160 L888,160" class="line"/>
   <path d="M832,272 L860,272 L860,420 L888,420" class="line"/>
 </svg>

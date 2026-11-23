@@ -35,7 +35,7 @@
   <rect x="496" y="114" width="210" height="88" rx="8" class="chk"/><text x="508" y="138" class="t">2. Circuit breaker</text><text x="508" y="158" class="s">endpoint failing 3 times in a</text><text x="508" y="174" class="s">row → skip it for 60 s</text>
   <rect x="726" y="114" width="210" height="88" rx="8" class="chk"/><text x="738" y="138" class="t">3. Pseudonymise</text><text x="738" y="158" class="s">internal e-mails, names, phones,</text><text x="738" y="174" class="s">national ids, card numbers →</text><text x="738" y="190" class="s">USER_1, HOST_2 ... tokens</text>
 
-  <rect x="726" y="226" width="210" height="88" rx="8" class="chk"/><text x="738" y="250" class="t">4. Approved endpoint</text><text x="738" y="270" class="s">allow-list (fail closed); pinned</text><text x="738" y="286" class="s">model version; timeouts 10 s</text><text x="738" y="302" class="s">connect, 30 / 120 s read</text>
+  <rect x="726" y="226" width="210" height="88" rx="8" class="chk"/><text x="738" y="250" class="t">4. Approved endpoint</text><text x="738" y="270" class="s">allow-list (fail closed); version</text><text x="738" y="286" class="s">that answered logged; 10 s</text><text x="738" y="302" class="s">connect, 30 / 120 s read</text>
   <rect x="496" y="226" width="210" height="88" rx="8" class="chk"/><text x="508" y="250" class="t">5. Grounding check</text><text x="508" y="270" class="s">untrusted JSON type-checked;</text><text x="508" y="286" class="s">uncited claims and figures not</text><text x="508" y="302" class="s">in the cited evidence removed</text>
   <rect x="266" y="226" width="210" height="88" rx="8" class="chk"/><text x="278" y="250" class="t">6. Restore + log</text><text x="278" y="270" class="s">names restored for the reader;</text><text x="278" y="286" class="s">call logged: feature, who, tokens,</text><text x="278" y="302" class="s">removed statements + reason</text>
 
@@ -46,7 +46,7 @@
 
   <rect x="990" y="190" width="190" height="150" rx="10" class="ext"/>
   <text x="1004" y="214" class="t">Organisation's LLM</text>
-  <text x="1004" y="232" class="t">gateway</text>
+  <text x="1004" y="232" class="t">gateway (HTTPS)</text>
   <text x="1004" y="254" class="s">in-house endpoint in front</text>
   <text x="1004" y="270" class="s">of the approved models</text>
   <text x="1004" y="290" class="s">receives pseudonymised</text>
@@ -61,7 +61,7 @@
 
   <rect x="20" y="450" width="1160" height="170" rx="10" class="box"/>
   <text x="34" y="476" class="t">What the model can never do</text>
-  <text x="34" y="500" class="s">• Produce or change a figure, verdict, score, priority or severity - all computed in code; a test proves LLM on / off gives identical results on three sample organisations.</text>
+  <text x="34" y="500" class="s">• Produce or change a figure, verdict, score, priority or severity - all computed in code; a test proves LLM on / off gives identical results on four sample organisations.</text>
   <text x="34" y="522" class="s">• Trigger an action - model output has no path to the action layer; actions come only from deterministic recommendations and human approval under the autonomy policy.</text>
   <text x="34" y="544" class="s">• Reach data outside the item it explains - each prompt carries only that item's evidence; the analyst assistant may only call a fixed catalogue of read-only tools (unknown tools ignored).</text>
   <text x="34" y="566" class="s">• Reach the internet - the only model destination is the approved endpoint; the phishing ML models are local files verified by SHA-256 before loading and make no network calls.</text>
@@ -72,7 +72,7 @@
   <path d="M476,158 L494,158" class="line"/>
   <path d="M706,158 L724,158" class="line"/>
   <path d="M831,202 L831,224" class="line"/>
-  <path d="M936,250 L988,250" class="line"/><text x="944" y="242" class="lbl">HTTPS</text>
+  <path d="M936,250 L988,250" class="line"/>
   <path d="M988,290 L938,290" class="line"/>
   <path d="M724,290 L708,290" class="line" transform="translate(0,0)"/>
   <path d="M494,270 L478,270" class="line"/>

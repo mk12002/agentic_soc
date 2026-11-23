@@ -114,6 +114,7 @@ class Database:
 
     @staticmethod
     def _register_models() -> None:
+        from soc_platform.api import executive as _executive  # noqa: F401
         from soc_platform.core import blobstore as _blobs  # noqa: F401
         from soc_platform.core import models  # noqa: F401  (register tables)
         from soc_platform.core import notify as _notify  # noqa: F401
@@ -124,6 +125,8 @@ class Database:
         from soc_platform.domains.vulnerability import models as _vm  # noqa: F401
         from soc_platform.intelligence import dome_score as _dome  # noqa: F401
         from soc_platform.intelligence import models as _intel  # noqa: F401
+        from soc_platform.llm import catalogue as _llm_catalogue  # noqa: F401
+        from soc_platform.llm import integration as _llm_integration  # noqa: F401
         from soc_platform.llm import usage_policy as _llm_policy  # noqa: F401
         from soc_platform.reporting import models as _rep  # noqa: F401
         from soc_platform.reporting import style as _style  # noqa: F401

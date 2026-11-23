@@ -45,6 +45,7 @@ class Completion:
     prompt_tokens: int
     completion_tokens: int
     model: str
+    estimated: bool = False      # the provider reported no token counts: estimated from the text's length
 
 
 def llm_timeout(tier: str = "large") -> httpx.Timeout:
@@ -196,8 +197,12 @@ class AzureOpenAIProvider(Provider):
                           int(usage.get("completion_tokens", 0)), str(body.get("model", deployment)))
 
 
-def build_provider(settings: Settings) -> Provider:
-    """Provider factory: none | azure_openai | azure_foundry | anthropic | openai_compatible (SOC_LLM_PROVIDER)."""
+def build_provider(settings: Settings, eff: Any = None) -> Provider:
+    """Provider factory (none | azure_openai | azure_foundry | anthropic | openai_compatible | openrouter |
+    enterprise_gateway). ``eff``: the provider in force (``llm.integration.Effective``) - an administrator's console
+    choice with its own credentials; None or from the settings: SOC_LLM_PROVIDER with the SOC_LLM_* credentials."""
+    if eff is not None and eff.source == "console":
+        return _console_provider(settings, eff)
     name = (settings.llm_provider or "none").lower()
     if name == "azure_openai":
         return AzureOpenAIProvider(settings)
@@ -213,6 +218,35 @@ def build_provider(settings: Settings) -> Provider:
         from soc_platform.llm.providers.openai_compatible import AzureFoundryProvider
 
         return AzureFoundryProvider(settings)
+    if name == "openrouter":
+        from soc_platform.llm.providers.openai_compatible import OpenRouterProvider
+
+        return OpenRouterProvider(settings)
+    if name == "enterprise_gateway":       # tokens from the environment or a vault mount (<NAME>_FILE)
+        from soc_platform.llm.providers.enterprise_gateway import EnterpriseGatewayProvider
+
+        creds = {"auth_token": secret("SOC_LLM_GATEWAY_AUTH_TOKEN") or "",
+                 "session_token": secret("SOC_LLM_GATEWAY_SESSION_TOKEN") or ""}
+        return EnterpriseGatewayProvider(settings, credentials={k: v for k, v in creds.items() if v})
+    return NullProvider()
+
+
+def _console_provider(settings: Settings, eff: Any) -> Provider:
+    creds = dict(eff.secrets)
+    if eff.provider == "enterprise_gateway":
+        from soc_platform.llm.providers.enterprise_gateway import EnterpriseGatewayProvider
+
+        return EnterpriseGatewayProvider(settings, credentials=creds)
+    if eff.provider == "anthropic":
+        from soc_platform.llm.providers.anthropic_provider import AnthropicProvider
+
+        return AnthropicProvider(settings, endpoint=eff.endpoint, credentials=creds)
+    if eff.provider in ("openai_compatible", "openrouter", "azure_foundry"):
+        from soc_platform.llm.providers import openai_compatible as oc
+
+        cls = {"openai_compatible": oc.OpenAICompatibleProvider, "openrouter": oc.OpenRouterProvider,
+               "azure_foundry": oc.AzureFoundryProvider}[eff.provider]
+        return cls(settings, endpoint=eff.endpoint, credentials=creds)
     return NullProvider()
 
 
@@ -277,7 +311,19 @@ class LLMGateway:
         self._lock = threading.RLock()
         self.settings = settings
         if provider is None:
-            provider = build_provider(settings)
+            from soc_platform.llm.integration import effective
+
+            try:
+                eff = effective(session, settings)
+            except ValueError as exc:     # a stored credential that cannot be read: no model, said why
+                import logging
+
+                logging.getLogger(__name__).warning("AI provider credentials unreadable: %s", exc)
+                eff = None
+                provider = NullProvider()
+            if provider is None:
+                provider = (build_provider(settings, eff) if eff is not None and eff.source == "console"
+                            else build_provider(settings))
         self.provider = provider
         base_domains = set(settings.org_domains) | (set(redactor.internal_domains) if redactor else set())
         base_names = set(redactor.known_names) if redactor else set()
@@ -404,8 +450,20 @@ class LLMGateway:
         try:
             out = self.provider.complete(system, prompt, **kwargs)
         except Exception as exc:  # noqa: BLE001 - logged; the caller falls back to the deterministic text
+            from soc_platform.llm.integration import is_auth_error
+
             _Breaker.record(False)
-            self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error", status="error",
+            if is_auth_error(exc):          # an expired or revoked token: tell the administrators at once
+                from soc_platform.llm.integration import raise_insight
+
+                with self._lock:
+                    raise_insight(self.s, "credentials", severity="high",
+                                  title="AI provider refused the platform's credentials: AI text falls back to the "
+                                        "platform's own wording",
+                                  steps=["Enter a new token or key in the AI integration card (AI usage screen)",
+                                         "Then press Test connection"])
+            self._log(workflow, prompt, f"{type(exc).__name__}: {exc}", 0, 0, "error",
+                      status="auth_error" if is_auth_error(exc) else "error",
                       latency_ms=round((time.perf_counter() - started) * 1000), tier=rule["tier"],
                       max_tokens=kwargs.get("max_tokens"), requested_model=rule["model"])
             return None, None
@@ -432,11 +490,7 @@ class LLMGateway:
         if not valid:
             return {"summary": "Insufficient evidence: no evidence was retrieved for this question.",
                     "claims": [], "grounded": True, "insufficient_evidence": True, "source": "deterministic"}
-        lines = "\n".join(f"[{e['id']}] ({e.get('source', e.get('dimension', ''))}) {e['claim']}" for e in evidence)
-        user = (f"QUESTION:\n{question}\n\nEVIDENCE (cite by id):\n{lines}\n\n"
-                'Return JSON: {"summary": "...", "insufficient_evidence": false, "missing": ["..."], '
-                '"claims": [{"text": "...", "kind": "fact|inference", "evidence_ids": ["E1"]}]'
-                f"{extra_schema}}}")
+        user = grounded_prompt(question, evidence, extra_schema)
         try:
             data, row = self._complete(workflow, GROUNDING_RULES, user, tier=tier, redactor=redactor)
         except BudgetExceeded:
@@ -506,6 +560,56 @@ class LLMGateway:
             out.append({"model": m["name"], "ok": True, "latency_ms": ms, "answered_by": c.model})
         return out
 
+    def qualify(self, model: dict[str, str]) -> dict[str, Any]:
+        """The check a model version must pass before the platform uses it (an automatic upgrade, or an
+        administrator's approval of a new generation): one grounded question on synthetic evidence, answered as JSON,
+        every statement citing evidence that was provided, no figure the evidence does not hold. A few hundred
+        tokens, logged as ``llm.model_upgrade_check`` and counted against the budgets (refused when over them)."""
+        wf = "llm.model_upgrade_check"
+        refused = self._refusal(wf)
+        if refused:
+            return {"ok": False, "detail": f"not checked: {refused[1]}", "refused": True}
+        evidence = QUALIFY_EVIDENCE
+        valid = {e["id"] for e in evidence}
+        user = grounded_prompt(QUALIFY_QUESTION, evidence)
+        kwargs: dict[str, Any] = {"tier": model.get("size") or "small"}
+        if _accepts(self.provider, "model"):
+            kwargs["model"] = model.get("deployment") or model["name"]
+        if _accepts_max_tokens(self.provider):
+            kwargs["max_tokens"] = 800
+        started = time.perf_counter()
+        try:
+            c = self.provider.complete(GROUNDING_RULES, user, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - the outcome is the point: reported and logged, never raised
+            from soc_platform.llm.integration import is_auth_error
+
+            ms = round((time.perf_counter() - started) * 1000)
+            self._log(wf, user, f"{type(exc).__name__}: {exc}", 0, 0, "error",
+                      status="auth_error" if is_auth_error(exc) else "error", latency_ms=ms, tier=kwargs["tier"],
+                      requested_model=model["name"])
+            return {"ok": False, "latency_ms": ms, "detail": _probe_error(exc), "auth_error": is_auth_error(exc)}
+        ms = round((time.perf_counter() - started) * 1000)
+        if c is None:
+            return {"ok": False, "detail": "no model provider is configured"}
+        data = _parse_json(c.text)
+        self._log(wf, user, c.text, c.prompt_tokens, c.completion_tokens, c.model,
+                  status="ok" if data is not None else "unparseable", latency_ms=ms, tier=kwargs["tier"],
+                  requested_model=model["name"])
+        out = {"latency_ms": ms, "answered_by": c.model, "usage_reported": not c.estimated}
+        if data is None:
+            return {**out, "ok": False, "detail": "the answer was not the JSON the platform asks for"}
+        raw = [x for x in model_list(data.get("claims")) if isinstance(x, dict) and str(x.get("text", "")).strip()]
+        claims = validate_claims(raw, valid)
+        if not claims:
+            return {**out, "ok": False, "detail": "no statement cited the evidence it was given"}
+        if len(claims) < len(raw):
+            return {**out, "ok": False, "detail": f"{len(raw) - len(claims)} statement(s) cited no evidence provided"}
+        by_id = {e["id"]: e["claim"] for e in evidence}
+        if any(unsupported_numbers(x["text"], QUALIFY_QUESTION + " " + " ".join(by_id[i] for i in x["evidence_ids"]))
+               for x in claims):
+            return {**out, "ok": False, "detail": "a statement gave a figure its evidence does not contain"}
+        return {**out, "ok": True, "detail": f"{len(claims)} cited statement(s), all supported by the evidence"}
+
     def _log(self, workflow: str, prompt: str, response: str, pt: int, ct: int, model: str, *, status: str,
              latency_ms: int | None = None, tier: str | None = None, max_tokens: int | None = None,
              requested_model: str | None = None) -> LLMCall:
@@ -532,6 +636,23 @@ class LLMGateway:
 # hashes or dates (host01, 10.2.3.4, CVE-2021-44228, 2026-09-20) are identifiers, not figures, and are ignored.
 _QTY = re.compile(r"(?<![\w.\-])\d+(?:\.\d+)?(?![\w\-]|\.\d)")
 _TRIVIAL = {"0", "1"}
+
+
+# The synthetic evidence a model version is checked on before use (``LLMGateway.qualify``): no real data.
+QUALIFY_QUESTION = "In two or three statements, what does the evidence show about host H-1?"
+QUALIFY_EVIDENCE = [
+    {"id": "E1", "claim": "Host H-1 raised 3 endpoint alerts in the last 24 hours", "source": "edr"},
+    {"id": "E2", "claim": "User U-1 signed in to host H-1 from a country not seen before", "source": "identity"},
+    {"id": "E3", "claim": "The last scan of host H-1 found no malware", "source": "edr"},
+]
+
+
+def grounded_prompt(question: str, evidence: list[dict[str, Any]], extra_schema: str = "") -> str:
+    lines = "\n".join(f"[{e['id']}] ({e.get('source', e.get('dimension', ''))}) {e['claim']}" for e in evidence)
+    return (f"QUESTION:\n{question}\n\nEVIDENCE (cite by id):\n{lines}\n\n"
+            'Return JSON: {"summary": "...", "insufficient_evidence": false, "missing": ["..."], '
+            '"claims": [{"text": "...", "kind": "fact|inference", "evidence_ids": ["E1"]}]'
+            f"{extra_schema}}}")
 
 
 def _norm(n: str) -> str:

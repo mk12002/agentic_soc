@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .code{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.3}
+      .ai{fill:#f5f3ff;stroke:#6d28d9;stroke-width:1.3;stroke-dasharray:5 3}
+      .gov{fill:#fff7e8;stroke:#c2410c;stroke-width:1.5}
+      .human{fill:#ecfdf3;stroke:#15803d;stroke-width:1.5}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .k{fill:#334155;font-size:12px;font-weight:600}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .dash{stroke:#6d28d9;stroke-width:1.3;fill:none;stroke-dasharray:5 4;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect width="1200" height="720" fill="#ffffff"/>
+  <text x="30" y="34" class="h" font-size="20">Multi-agent workflow - who does what, and who may change a security tool</text>
+  <text x="30" y="56" class="s">Blue: deterministic agents in code (they compute every figure, verdict, score and recommendation). Purple, dashed: optional LLM steps (wording and planning only).</text>
+  <text x="30" y="72" class="s">Orange: governance. Green: people. Agents run as an "agent:" identity with no roles: they can only recommend; only the action layer writes to a tool, after the policy and a person allow it.</text>
+
+  <rect x="20" y="92" width="200" height="110" rx="10" class="code"/><text x="34" y="116" class="t">1 Collection agents</text><text x="34" y="136" class="s">21 connectors: read pages,</text><text x="34" y="152" class="s">normalise to one schema,</text><text x="34" y="168" class="s">per-tool rate budget,</text><text x="34" y="184" class="s">read-only identities</text>
+  <rect x="250" y="92" width="200" height="110" rx="10" class="code"/><text x="264" y="116" class="t">2 Entity resolution</text><text x="264" y="136" class="s">one host / one person across</text><text x="264" y="152" class="s">tools; vendor ids never</text><text x="264" y="168" class="s">merged; unsure -> analyst</text><text x="264" y="184" class="s">review queue</text>
+  <rect x="480" y="92" width="230" height="110" rx="10" class="code"/><text x="494" y="116" class="t">3 Domain agents</text><text x="494" y="136" class="s">phishing: decompose + rules +</text><text x="494" y="152" class="s">7-model ML engine (offline);</text><text x="494" y="168" class="s">incident: cluster alerts;</text><text x="494" y="184" class="s">vulnerability: one finding/CVE</text>
+  <rect x="740" y="92" width="210" height="110" rx="10" class="code"/><text x="754" y="116" class="t">4 Investigation agent</text><text x="754" y="136" class="s">parallel look-ups in every</text><text x="754" y="152" class="s">enabled tool (16 at once,</text><text x="754" y="168" class="s">20 s deadline); evidence with</text><text x="754" y="184" class="s">source and deep link</text>
+  <rect x="980" y="92" width="200" height="110" rx="10" class="code"/><text x="994" y="116" class="t">5 Scoring agents</text><text x="994" y="136" class="s">severity, verdict, priority,</text><text x="994" y="152" class="s">MITRE, risk - computed in</text><text x="994" y="168" class="s">code, identical with the</text><text x="994" y="184" class="s">LLM on or off</text>
+  <path d="M220 147 L248 147" class="line"/><path d="M450 147 L478 147" class="line"/><path d="M710 147 L738 147" class="line"/><path d="M950 147 L978 147" class="line"/>
+
+  <rect x="980" y="240" width="200" height="110" rx="10" class="code"/><text x="994" y="264" class="t">6 Response planner</text><text x="994" y="284" class="s">recommended actions with</text><text x="994" y="300" class="s">rationale, targets, blast</text><text x="994" y="316" class="s">radius, reverse action;</text><text x="994" y="332" class="s">identity "agent:..." - request</text>
+  <path d="M1080 202 L1080 238" class="line"/>
+
+  <rect x="700" y="240" width="250" height="110" rx="10" class="gov"/><text x="714" y="264" class="t">7 Autonomy policy</text><text x="714" y="284" class="s">L0-L4 (default L2 recommend);</text><text x="714" y="300" class="s">preconditions, hard limits,</text><text x="714" y="316" class="s">VIP / blast radius, four-eyes,</text><text x="714" y="332" class="s">kill switch, tool stage ceiling</text>
+  <path d="M978 295 L952 295" class="line"/>
+
+  <rect x="420" y="240" width="250" height="110" rx="10" class="human"/><text x="434" y="264" class="t">8 Analyst / lead decides</text><text x="434" y="284" class="s">approve or reject in the console;</text><text x="434" y="300" class="s">step-up MFA; no self-approval;</text><text x="434" y="316" class="s">four-eyes = two different leads;</text><text x="434" y="332" class="s">disposition recorded (feedback)</text>
+  <path d="M698 295 L672 295" class="line"/>
+
+  <rect x="140" y="240" width="250" height="110" rx="10" class="gov"/><text x="154" y="264" class="t">9 Action layer (only writer)</text><text x="154" y="284" class="s">idempotency key, exactly-once,</text><text x="154" y="300" class="s">re-checked preconditions,</text><text x="154" y="316" class="s">commit before the tool call,</text><text x="154" y="332" class="s">reverse action for roll back</text>
+  <path d="M418 295 L392 295" class="line"/>
+  <rect x="20" y="240" width="96" height="110" rx="10" class="box"/><text x="32" y="270" class="t">Security</text><text x="32" y="288" class="t">tool</text><text x="32" y="310" class="s">write with the</text><text x="32" y="326" class="s">tool's own</text><text x="32" y="342" class="s">identity</text>
+  <path d="M138 295 L118 295" class="line"/>
+
+  <rect x="20" y="390" width="1160" height="1" fill="#cbd5e1"/>
+  <text x="30" y="416" class="k">Optional LLM steps (through the platform's LLM gateway: usage policy, pseudonymisation, approved endpoint, citation and figure guardrails)</text>
+
+  <rect x="20" y="430" width="270" height="124" rx="10" class="ai"/><text x="34" y="454" class="t">Narrator</text><text x="34" y="474" class="s">case summary, phishing explanation,</text><text x="34" y="490" class="s">finding narrative, situation and</text><text x="34" y="506" class="s">executive brief: every statement</text><text x="34" y="522" class="s">cites evidence ids; uncited or</text><text x="34" y="538" class="s">invented figures removed</text>
+  <rect x="310" y="430" width="270" height="124" rx="10" class="ai"/><text x="324" y="454" class="t">Analyst assistant (agentic RAG)</text><text x="324" y="474" class="s">the model picks from 13 read-only</text><text x="324" y="490" class="s">tools; the platform runs them and</text><text x="324" y="506" class="s">hands back results; the answer must</text><text x="324" y="522" class="s">cite them. No SQL, no write tool,</text><text x="324" y="538" class="s">all-domain users only</text>
+  <rect x="600" y="430" width="270" height="124" rx="10" class="ai"/><text x="614" y="454" class="t">Deep analysis / report planner</text><text x="614" y="474" class="s">attack-story review, report plan</text><text x="614" y="490" class="s">from a request in words: the plan</text><text x="614" y="506" class="s">selects data sources; figures come</text><text x="614" y="522" class="s">only from the sources' code</text>
+  <rect x="890" y="430" width="290" height="124" rx="10" class="ai"/><text x="904" y="454" class="t">Tuning drafter</text><text x="904" y="474" class="s">a lead's request in words -> a draft</text><text x="904" y="490" class="s">rule from a fixed menu; checked</text><text x="904" y="506" class="s">against the request and the data,</text><text x="904" y="522" class="s">previewed, approved by a second lead</text>
+
+  <rect x="20" y="580" width="1160" height="120" rx="10" class="box"/>
+  <text x="34" y="604" class="t">What an agent can never do</text>
+  <text x="34" y="626" class="s">- approve an action, change a policy, the kill switch or access (human-only permissions, never held by an agent or a service account)</text>
+  <text x="34" y="646" class="s">- call a tool's write API (only the action layer does, after the policy and an approval); the LLM cannot request actions or run write tools</text>
+  <text x="34" y="666" class="s">- produce a figure, verdict, score or decision (the model's output is narrative; it is parsed as untrusted input and checked against the evidence)</text>
+  <text x="34" y="686" class="s">- reach data outside the requesting person's domain scope (screens, reports, assistant and audit log are scope-filtered; out-of-scope records answer "not found")</text>
+</svg>

@@ -66,7 +66,7 @@ left = [
     ("Reverse proxy + WAF", ["Azure App Gateway / Front Door /", "nginx / IIS ARR; TLS 443 -> :8080;", "SOC_TRUSTED_PROXIES for", "X-Forwarded-For"]),
     ("Microsoft Entra ID", ["OIDC auth code + PKCE (console)", "RS256 access tokens, JWKS keys", "App roles SOC.<Role>[.<Domain>]", "MFA via Conditional Access"]),
     ("Azure Key Vault", ["Secrets mounted as files:", "<NAME>_FILE (DB URL, SOC_DATA_KEY,", "tool keys, PEM certificates,", "SOC_LLM_API_KEY, webhooks)"]),
-    ("Client LLM gateway", ["Azure OpenAI / AI Foundry, or", "Anthropic / OpenAI-compatible", "endpoint approved by the client", "(SOC_LLM_PROVIDER, _ENDPOINT)"]),
+    ("Client LLM gateway", ["In-house platform (its SDK,", "service account) or an API", "key: OpenRouter, OpenAI-", "compatible, Anthropic, Azure"]),
     ("SIEM (Microsoft Sentinel)", ["Log agent reads container stdout", "(SOC_LOG_FORMAT=json) + audit", "export; optional push to", "POST /api/v1/ingest/alerts"]),
     ("Teams / Slack / JSON webhook", ["SOC_NOTIFY_WEBHOOKS (HTTPS only)", "kind|url; label kind:host only"]),
     ("Prometheus / monitoring", ["GET /metrics (auditor key) + alert", "rules; GET /health details when", "signed in: scheduler, audit chain"]),
@@ -159,11 +159,11 @@ badge(X0 + 12 + 2 * (qw + 12) - 18, y + 36 + 74, 7, "#c2410c")
 # R5 llm + connectors framework
 y = 916
 box(X0, y, 400, "llm/ - model access (optional)", [
-    "gateway.py: LLMGateway grounded() /", "complete_json(); citations validated,",
-    "numeric-fidelity guardrail, breaker,", "timeouts, SOC_LLM_CONCURRENCY",
-    "redaction.py: Redactor pseudonymise /", "restore", "usage_policy.py: budgets, per-person",
-    "limits, per-feature tier, usage_report", "providers/: openai_compatible",
-    "(azure_openai), anthropic_provider"], "key")
+    "gateway.py: grounded / complete_json /", "qualify; citations, figure guardrail,",
+    "breaker, timeouts, concurrency", "integration.py: provider, sealed creds",
+    "catalogue.py: model lines, checked", "upgrades, approve / roll back",
+    "usage_policy.py: budgets, limits,", "model per feature; redaction.py",
+    "providers/: openai_compatible,", "openrouter, anthropic, gateway SDK"], "key")
 badge(X0 + 388, y + 4, 8)
 box(X0 + 412, y, CW - 412, "connectors/ - integration framework", [
     "base.py: BaseConnector, TokenBucket (thread-safe rate budget), with_backoff (Retry-After <= 120 s), SyncRunner",

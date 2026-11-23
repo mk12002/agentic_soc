@@ -39,6 +39,10 @@ JOBS: dict[str, tuple[str, int]] = {
     "self_check": ("SOC_JOB_SELF_CHECK_SECONDS", 3600),
     "notify": ("SOC_JOB_NOTIFY_SECONDS", 60),
     "actions": ("SOC_JOB_ACTIONS_SECONDS", 60),
+    # the provider's models: a newer version of a chosen model is checked, then used (llm/catalogue.py)
+    "llm_catalogue": ("SOC_JOB_LLM_CATALOGUE_SECONDS", 6 * 3600),
+    # the day's headline figures for the executive view's trends (api/executive.py); idempotent per day
+    "posture_snapshot": ("SOC_JOB_POSTURE_SNAPSHOT_SECONDS", 6 * 3600),
 }
 ACTION_STUCK_SECONDS = 900   # an action "executing" this long lost its process: marked unverified (SOC_ACTION_STUCK_SECONDS)
 RETRIES = 3
@@ -180,6 +184,16 @@ def _body(name: str, s: Session) -> dict[str, Any]:
         ran = svc.execute_pending()
         return {"executed": sum(r.status == "executed" for r in ran), "failed": sum(r.status == "failed" for r in ran),
                 "held": sum(r.status in ("pending_approval", "blocked") for r in ran), "unverified": len(stuck)}
+    if name == "posture_snapshot":
+        from soc_platform.api.app import registry
+        from soc_platform.api.executive import snapshot
+
+        return snapshot(s, registry(), sv["vulnerability"])
+    if name == "llm_catalogue":
+        from soc_platform.llm.catalogue import refresh
+
+        s.commit()                       # no write lock held while the provider lists models and answers the checks
+        return refresh(s, get_settings())
     raise KeyError(f"unknown job {name}")
 
 

@@ -37,6 +37,7 @@ class Role(str, Enum):
     ADMIN = "admin"
     AUTOMATION_ADMIN = "automation_admin"
     AUDITOR = "auditor"
+    CISO = "ciso"            # sees everything, changes nothing (Entra app role SOC.CISO)
 
 
 class Perm(str, Enum):
@@ -83,6 +84,9 @@ ROLE_PERMS: dict[Role, set[Perm]] = {
     Role.ADMIN: {Perm.READ, Perm.MANAGE_CONNECTORS, Perm.READ_AUDIT, Perm.KILL_SWITCH, Perm.MANAGE_ACCESS,
                  Perm.EXPORT_EVIDENCE, Perm.MANAGE_REPORT_STYLE, Perm.MANAGE_OWNERSHIP},
     Role.AUDITOR: {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE},
+    # The executive view and every screen behind it, the audit trail and evidence exports; never an approval, a
+    # policy, the kill switch or access management - those stay with the SOC's leads (separation of duties).
+    Role.CISO: {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE},
 }
 
 

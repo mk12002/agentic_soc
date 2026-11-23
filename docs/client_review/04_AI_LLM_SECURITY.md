@@ -114,13 +114,15 @@ brackets. Because prompts arrive pseudonymised, the gateway's own logs hold no i
 
 | Control | Detail | Status |
 |---|---|---|
-| Endpoint allow-list | A provider refuses any endpoint not listed in `SOC_LLM_APPROVED_ENDPOINTS` (fail closed) | Implemented |
-| Model pinning | A response from a different model version is logged as a mismatch | Implemented |
+| Endpoint allow-list | A provider refuses any endpoint not listed in `SOC_LLM_APPROVED_ENDPOINTS` (fail closed). An administrator choosing a provider in the console chooses among the approved endpoints only; the in-house gateway's SDK and its location are deployment settings, never console ones | Implemented |
+| Model versions (changed: no longer pinned by default) | A chosen model follows its line: a newer version in the same generation is used only after the platform's own check (grounded JSON answer, valid citations, no invented figure); a new generation needs an administrator's approval (checked the same way); every change is audited with its check result, raised as a finding, and reversible (roll back blocks the version). Pins remain: per feature, per line (`SOC_LLM_MODEL_VERSION`, a response from another version is logged as a mismatch), or automatic upgrades off. A version change cannot change a figure, a verdict or an action (section 2) | Implemented |
 | Who can trigger model use | Analyst assistant: users with all-domain read access; deep analysis: users with the `investigate` permission; reports: any reader, with the content limited to their domain scope; scheduled features run under the platform's own identity | Implemented |
-| Who can change AI settings | Only administrators (`manage_access`, step-up MFA): budgets, per-person and per-role limits (0 = no model text for that person), per-feature tier, answer cap and on / off. Each change is a new version, audited | Implemented |
+| Who can change AI settings | Only administrators (`manage_access`, step-up MFA): the provider and its credentials, budgets, per-person and per-role limits (0 = no model text for that person), per-feature model, answer cap and on / off, model-version approvals and roll-backs. Each change is a new version, audited | Implemented |
 | Who can read the model-call log | Users with `read_audit` and all-domain scope | Implemented |
 | Data scope | A person's question or report only uses data within that person's domains | Implemented |
-| Credentials | The gateway key is a vault-mounted secret; it is never placed in a prompt or log | Implemented |
+| Credentials | The service account's tokens (in-house gateway) or a provider's API key are entered by an administrator, encrypted at rest with the platform's data key, write-only (never returned by the API or shown again), never placed in a prompt, a log or the audit trail (which records who replaced which credential), and stored per provider so one vendor's key never reaches another. Alternatively a vault-mounted secret. An expired or refused token falls back to the platform's own text and raises a high finding; an expiry date entered gives a warning three days before | Implemented |
+| Shared service account | Everyone signs in with SSO; model calls use one service account. Each person's own limits still apply and the call log records who asked | Implemented |
+| Third-party routers (OpenRouter) | If chosen instead of the in-house gateway, every request asks the upstream vendors not to keep or train on the prompt (`provider.data_collection: deny`); pseudonymisation applies as for every provider | Implemented |
 
 ## 7 Safeguards against unauthorised or unsafe outcomes
 
@@ -152,13 +154,14 @@ brackets. Because prompts arrive pseudonymised, the gateway's own logs hold no i
 
 | Test | What it proves |
 |---|---|
-| LLM on / off on three sample organisations | Identical figures, verdicts and actions |
+| LLM on / off on four sample organisations | Identical figures, verdicts and actions |
 | Guardrail tests | Uncited claims and unsupported figures are removed; restored names never leave placeholders |
 | Model-output fuzzing | Any shape of model answer (lists for words, numbers for lists, broken JSON) is handled without a crash |
 | Prompt injection (penetration suite) | A reported e-mail instructing the model to classify it benign does not change the verdict |
 | Usage-policy tests | Budgets, per-person limits, tier routing, answer caps and refusals behave as configured |
 | Breaker and timeout tests | A failing endpoint trips the breaker; screens fall back instantly |
 | Live LLM suite (opt-in) | On the configured real model: grounded, cited, redacted answers; every call on the pinned model |
+| AI integration tests | Credentials write-only and encrypted, audited by name only; administrator only; approved endpoints only; no key reused across providers; an expired token falls back and raises a finding; a newer version is checked before use, a failing one is not used, a new generation waits for approval, roll back blocks, pins hold (`test_llm_integration.py`) |
 | Offline engine test | Zero network attempts by the ML engine with keys present |
 
 ## 10 Decisions requested from the organisation

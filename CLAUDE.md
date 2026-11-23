@@ -55,6 +55,13 @@ it, the conventions the code relies on, and the traps that have already cost tim
 - An **intelligence layer** correlates across domains: explainable risk per user/host, 13 correlation rules, the
   **attack story** (cross-tool kill-chain reconstruction), optional LLM deep analysis, analyst Q&A, situation brief,
   ATT&CK coverage, shadow IT, drift monitoring, and a report builder (Word/PowerPoint).
+- **Executive view and CISO role**: a read-only `ciso` role (Entra `SOC.CISO`) that lands on `#/executive` - posture,
+  headline figures against the period before, an agenda by due date (overdue / today / tomorrow / this week / later,
+  in the viewer's time zone) and every section, computed by the same functions as the screens it links to.
+- **AI integration**: an administrator chooses the model provider in the console - the client's in-house gateway
+  through its SDK with a service account (auth + session token), or an API key (OpenRouter and others); credentials
+  sealed and write-only. No model version is hard-coded: a chosen model follows its line and newer versions are
+  checked, then used (a new generation needs an administrator).
 - **Governance**: RBAC + domain scope + step-up MFA, four-eyes, versioned autonomy policy, durable kill switch,
   hash-chained audit log, encryption at rest, retention with legal hold, self-check.
 - **Teamwork and alerting**: case owner (take / assign), append-only analyst notes, global search over cases, every
@@ -113,7 +120,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 109 features
+python scripts/verify_features.py                                 # tests mapped to 112 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -164,6 +171,7 @@ soc_platform/
   scheduler.py           Scheduler (embedded in serve by default), heartbeat, status() for /health
   api/app.py             FastAPI: middleware (body cap, NUL/rate limit, headers, access log), auth deps, ALL routes
   api/dashboards.py      read models: overview, ATT&CK coverage, shadow IT, Prometheus text
+  api/executive.py       the executive (CISO) view + agenda + `posture_snapshots` (job posture_snapshot)
   api/static/            index.html, app.js (shell/router/auth/click delegation), views.js (screens), theme.js, styles.css
   connectors/base.py     BaseConnector, TokenBucket, with_backoff, SyncRunner (sync, sync_many), Page, LookupResult
   connectors/http.py     Transport protocol, HttpTransport, FixtureTransport (fake mode; `times`, `headers`), auth
@@ -231,7 +239,13 @@ soc_platform/
   llm/usage_policy.py    AI usage policy (budgets, per-person limits, per-feature tier / answer cap / on-off), its
                          store (admin-only, versioned, audited) and usage_report (cost, quality, tier advice)
   llm/redaction.py       pseudonymisation before any prompt leaves; restore after
-  llm/providers/         openai_compatible (also azure_foundry), anthropic_provider
+  llm/integration.py     the provider in force (console version > settings), credentials sealed + write-only
+                         (`llm_integrations`, `llm_secrets`), connection_check, AI findings (raise_insight)
+  llm/model_lines.py     a model name -> line + version (pure); newest() in the same / next generation
+  llm/catalogue.py       the provider's models (`llm_catalogue_models`) and the version adopted per line
+                         (`llm_line_adoptions`, append-only): refresh (job llm_catalogue), approve, rollback, unblock
+  llm/providers/         openai_compatible (also azure_foundry, OpenRouterProvider), anthropic_provider,
+                         enterprise_gateway (the in-house SDK, async, on one background loop; module from settings)
   reporting/             builder.py (18 sources, 7 standard reports, planner), reports.py, compliance.py,
                          style.py (the organisation's report style: templates, logo, brand, writing guide; uploads
                          validated; use_style() sets design.STYLE around every render - render inside it),
@@ -345,6 +359,10 @@ fingerprints hash the evidence.
 - A route that calls the model on a person's behalf builds its gateway with `llm(s, p)` (their limits apply) and
   returns `_with_notice(out, gw)`; scheduled work uses `llm(s)`. A new feature name goes into
   `usage_policy.KNOWN_WORKFLOWS` (tier, who triggers it, description) or it cannot be configured.
+- **Never hard-code a model version.** Features take a model from the AI usage policy; `rule_for` resolves it to
+  the newest version its line has adopted (`llm/catalogue.py`) unless the feature is pinned (`follow: false`).
+  Provider credentials go only through `IntegrationStore` (sealed with `SOC_DATA_KEY`, never returned or logged).
+  Anywhere that asks "is AI on?" uses `llm.integration.configured(s, settings)`, not `settings.llm_provider`.
 - Providers implement `complete(system, user, *, tier, max_tokens=None, model=None)`; the gateway passes the cap and
   the chosen model only to providers whose signature accepts them. Code asks for a size (small for routine narrative,
   large for summaries / deep analysis / reports); the AI usage policy maps each feature to a model by name
@@ -392,7 +410,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   PG rules via listeners (over-long strings except `BoundedText`, 32-bit Integer overflow, NUL in query params) -
   a `PostgresRuleViolation` in a test means production would fail.
 - **Test files by concern**: `test_demo_rehearsal.py` (defects found by rehearsing the demo as written: no write lock across model calls, a failing model reads like no model, plain words on screen), `test_consistency.py` (same figure on every surface; re-runs change nothing; LLM on/off
-  identical; every GET route × 7 roles; write-route fuzzing; references resolve), `test_time.py` (clock travel),
+  identical; every GET route × 8 roles; the executive view equals each screen it links to; write-route fuzzing; references resolve), `test_time.py` (clock travel),
   `test_pentest.py` (24 attack tests incl. round 2: per-role scope, ReDoS), `test_properties.py` (Hypothesis), `test_scheduler.py`,
   `test_audit_concurrency.py`, `test_generalisation.py`/`test_variants.py` (no demo names leak on other orgs),
   `test_story.py`, `test_phishing.py` (incl. a latency test that fails if lookups become sequential),
@@ -440,6 +458,12 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   `test_live_wire.py` (every connector built as a live tool - `manifest.live_transport`, real `HttpTransport`, real
   sign-in code - answered over HTTP from the fixtures: same records as fake mode, credentials on every request; a
   sign-in that cannot complete is a connector error; next links only to the tool's own hosts),
+  `test_llm_integration.py` (model names -> line + version; credentials write-only, encrypted, audited by name,
+  admin only, approved endpoints, never reused across providers; the gateway SDK through the stand-in
+  `tests/fake_gateway_sdk.py`: answers, expired token, missing SDK, overlapping calls, vault-mounted tokens; checked
+  automatic upgrades, failed checks, generation approval, roll back, pins, retirement, expiry; OpenRouter's
+  no-retention request; the API), `test_executive.py` (the CISO reads and changes nothing; due dates in the viewer's
+  day; snapshots; the brief cites only the figures; the API),
   `test_dome_score.py` (each pillar is the published count, weighted average of the scores shown, weights never
   change a pillar, validation, lead-only + audited + versioned, a broken pillar left out, preview saves nothing, API),
   `test_live_llm.py` / `test_live_public_feeds.py` (opt-in).
@@ -447,8 +471,8 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 986 platform tests passing on SQLite and 983 on PostgreSQL (1004 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
-  engine tests, 109/109 features verified with `--browser --engine --live --llm` (round 35); the go-live round's
+- Current counts (keep docs in sync when they change): 1043 platform tests passing on SQLite and 1040 on PostgreSQL (1061 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
+  engine tests, 112/112 features verified with `--browser --engine --live --llm` (round 37); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
 ---
@@ -743,6 +767,23 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - **The Dome Score's weights only combine pillars.** A pillar's own figure must never depend on a weight, and a new
   pillar needs a published formula, a link to its records and a default weight (`DEFAULT_WEIGHTS`); old weight rows
   get the default for it (`_full`).
+- **The in-house gateway's SDK is named only by a deployment setting** (`SOC_LLM_GATEWAY_SDK`): its module name
+  contains the client's abbreviation, and the package is installed only in the client's image (a hashed requirements
+  file passed as a build secret, `deploy/Dockerfile`). Tests use `soc_platform/tests/fake_gateway_sdk.py`, shaped
+  like the SDK's documentation; the real interface is first exercised by *Test connection* in their environment.
+- **BuildKit leaves a secret's content out of the cache key.** With the SDK lock passed only as a build secret, a build
+  without the secret reused the cached SDK layer and a changed lock reused the old SDK (found by actually building
+  both). The lock's SHA-256 is now a required build argument, checked against the mounted lock.
+- **A process-wide limiter is shared by every test module**: `test_api.py` sends more than the production budget and
+  got 429 on its last test whenever it ran right after the consistency suite. Modules that are not about rate limiting
+  install their own unlimited `_RateLimiter` and restore the original.
+- **pytest collects any imported function named `test_*`**: a helper imported into a test module as
+  `test_connection` ran as a test with missing fixtures (renamed `connection_check`).
+- **A fallback must read like the platform wrote it**: the executive brief first showed `deterministic_grounded`'s
+  "14 evidence item(s) from 1 source(s)" as its summary. Features with no model write their own sentences from the
+  figures (`executive.deterministic_brief`).
+- **A provider switch must read its model list at once**: until then features asked the new provider for the built-in
+  default names (`gpt-4.1`) it did not serve, and quietly fell back for up to six hours (the save route refreshes).
 - **Patch files, not heredocs, for multi-line edits** - the Bash tool also mangled quotes in long Python heredocs
   (`unexpected EOF`); the Write tool + a `.py` patch is reliable. The Write tool drops trailing spaces, so a patch
   whose search text ends in a space will not match.

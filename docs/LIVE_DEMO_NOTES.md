@@ -115,7 +115,7 @@ AI gathers and explains, code computes every figure and verdict, and a person ap
 - 56 ATT&CK techniques in the coverage model
 - 11 scheduled jobs
 - 14 self-checks
-- 986 platform tests on SQLite, 983 on PostgreSQL, and 205 phishing-engine tests
+- 1043 platform tests on SQLite, 1040 on PostgreSQL, and 205 phishing-engine tests
 
 **Say these limits first, before anyone asks.** It buys credibility.
 1. It has not yet run against a real tenant. Every connector is built to the vendor's documented API and is
@@ -1502,7 +1502,7 @@ needs *export_evidence* with all-domain scope (Lead, Admin, Auditor). Use Audrey
     records. Right after a reset it says *not run yet*, because no self-check has run.
   - **Retention:** kept indefinitely. The platform never edits or deletes audit records, the retention job doesn't
     touch them, and the database itself refuses to change or delete them.
-  - **Who can see it:** read - Admin, Analyst, Auditor, Automation admin, Lead. Export - Admin, Auditor, Lead.
+  - **Who can see it:** read - Admin, Analyst, Auditor, Automation admin, CISO, Lead. Export - Admin, Auditor, CISO, Lead.
   - **What it records:** chips of record counts by kind (`action`, `case`, `phishing`, `watchlist`, `audit`...).
   - **How it is protected:** append-only, hash-chained, verified, anchored, attributed, and exports audited (see
     below).
@@ -1624,8 +1624,8 @@ The typed text is always treated literally (no injection).
 - The organisation's own volumes are first seen in its environment.
 
 **"How was it tested?"**
-- 986 platform tests (SQLite, with PostgreSQL's rules enforced) and 983 on PostgreSQL; 205 engine tests.
-- 109 of 109 features verified feature by feature.
+- 1043 platform tests (SQLite, with PostgreSQL's rules enforced) and 1040 on PostgreSQL; 205 engine tests.
+- 112 of 112 features verified feature by feature.
 - 24 penetration tests and 11 fuzzing properties.
 - Time-travel tests (0 / 45 / 400 days).
 - A consistency suite: the same figure on every surface, every pipeline run twice, AI on vs off identical.

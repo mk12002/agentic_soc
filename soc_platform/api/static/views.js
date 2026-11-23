@@ -137,7 +137,7 @@ async function askIntel() {
   $('#ia').innerHTML = `<div class="inline muted mt"><span class="spin"></span> Gathering evidence…</div>`;
   const r = await post('/api/v1/intelligence/ask', {question: q});
   $('#ia').innerHTML = `<div class="divider"></div><div class="prose">${esc(r.answer)}</div>
-    ${(r.claims || []).length ? (() => { const row = c => `<div class="${c.kind === 'fact' ? 'fact' : 'inf'}">${esc(c.text)} ${(c.evidence_ids || []).map(x => `<abbr class="cite">${esc(x)}</abbr>`).join('')}</div>`;
+    ${(r.claims || []).length ? (() => { const row = c => `<div class="${c.kind === 'fact' ? 'fact' : 'inf'}">${esc(c.text)} ${(c.evidence_ids || []).map(x => `<abbr class="cite">${esc(x)}</abbr>`).join(' ')}</div>`;
       return `<div class="mt small"><div class="strong" style="margin-bottom:4px">Evidence behind the answer</div>${r.claims.slice(0, 6).map(row).join('')}${r.claims.length > 6 ? `<details><summary>${r.claims.length - 6} more</summary>${r.claims.slice(6).map(row).join('')}</details>` : ''}</div>`; })() : ''}
     <div class="small muted mt">How this was answered: ${r.planner === 'llm' ? 'AI-planned look-ups' : 'rule-based look-ups'} · ${r.tool_calls.map(t => `<span class="tag">${esc(t.tool)}</span>`).join('')}</div>${llmNotice(r)}`;
 }
@@ -869,10 +869,78 @@ const llmNotice = r => r && r.llm_notice ? `<div class="callout info mt"><div cl
 const ADV_K = {'try small': 'ok', 'use large': 'high', keep: 'info', 'not enough data': 'info'};
 const tok = n => n == null ? '–' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
 const usd = x => x == null ? '–' : '$' + (x < 1 ? x.toFixed(4) : x.toFixed(2));
+// ---- AI integration: the provider, its write-only credentials, and the model versions in use
+function aiCredFields(prov) {
+  const I = window.__aiint, spec = (I.providers || {})[prov] || {secrets: []};
+  const have = Object.fromEntries((I.provider === prov ? I.credentials : []).map(c => [c.name, c]));
+  const ep = spec.endpoint === 'none' ? '' : `<label class="small" for="ai-ep">Endpoint${spec.endpoint === 'required' ? '' : ' (optional)'}</label>
+    <input class="input" id="ai-ep" style="width:100%" value="${esc(I.provider === prov ? (I.endpoint || '') : (spec.default_endpoint || ''))}" placeholder="${esc(spec.default_endpoint || 'https://…')}">
+    <div class="t-sub">${I.approved_endpoints.length ? 'Approved for this deployment: ' + I.approved_endpoints.map(esc).join(', ') : 'No approved list in this deployment (required in production: SOC_LLM_APPROVED_ENDPOINTS)'}</div>`;
+  const gw = prov === 'enterprise_gateway' ? `<div class="small mt">${I.gateway_sdk.installed ? status('ok', 'Gateway SDK installed') : status('high', I.gateway_sdk.configured ? 'Gateway SDK not installed here' : 'Gateway SDK not configured')}
+    <div class="t-sub">Installed and named by the deployment (SOC_LLM_GATEWAY_SDK), never from this screen.</div></div>` : '';
+  const creds = spec.secrets.map(c => { const h = have[c.name];
+    return `<label class="small" for="ai-s-${esc(c.name)}">${esc(c.label)} ${h ? chip('set', 'low plain') : chip('not set', 'medium plain')}</label>
+      <input class="input" id="ai-s-${esc(c.name)}" type="password" autocomplete="off" style="width:100%" placeholder="${h ? 'leave empty to keep the one stored' : 'paste it here'}">`; }).join('');
+  return `${ep}${gw}<div class="stack mt" style="gap:6px">${creds}</div>${spec.secrets.length ? `<label class="small mt" style="display:block" for="ai-exp">Expires on (optional - you are warned 3 days before)</label><input class="input" id="ai-exp" type="date">` : ''}`;
+}
+function aiProvider(el) { $('#ai-fields').innerHTML = aiCredFields(el.value); }
+function aiIntegrationCard(I, edit) {
+  const cr = I.credentials.map(c => c.managed_by_deployment ? `<tr><td class="small">${esc(c.label)}</td><td>${c.set ? status('ok', 'Set') : status('medium', 'Not set')}</td><td class="small muted" colspan="2">managed by the deployment (environment or vault)</td></tr>` : `<tr><td class="small">${esc(c.label)}</td><td>${c.set ? status(c.expired ? 'high' : c.expires_soon ? 'medium' : 'ok', c.expired ? 'Expired' : c.expires_soon ? 'Expires soon' : 'Set') : status('medium', 'Not set')}${c.set && c.encrypted === false ? '<div class="t-sub">stored without encryption (no data key)</div>' : ''}</td>
+    <td class="small muted">${c.set ? esc(c.set_by) + ' · ' + dt(c.set_at) : '–'}</td><td class="mono small">${c.expires_at ? dt(c.expires_at) : '–'}</td></tr>`);
+  const form = edit ? `<div class="mt" style="border-top:1px solid var(--border);padding-top:12px">
+      <label class="small" for="ai-prov">Provider</label>
+      <select id="ai-prov" data-input="aiProvider" style="width:100%">${Object.entries(I.providers).map(([k, v]) => `<option value="${esc(k)}"${k === I.provider ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}</select>
+      <div id="ai-fields">${aiCredFields(I.provider)}</div>
+      <div class="form-row mt"><input class="input" id="ai-note" aria-label="Why" placeholder="Why (kept in the history and the audit log)">${btn('Save', 'saveIntegration', [], 'primary')}${btn('Test connection', 'testIntegration', [], 'sm')}</div>
+      <div class="t-sub">Credentials are encrypted, never shown again and never written to the logs or the audit trail (which records who changed which one).</div>
+      <div id="ai-test"></div></div>` : '';
+  return card('AI integration', `<dl class="kv"><dt>Provider</dt><dd>${esc(I.label)}${I.source === 'settings' ? ' <span class="t-sub">(from the deployment settings)</span>' : ''}</dd>
+      ${I.endpoint ? `<dt>Endpoint</dt><dd class="mono small">${esc(I.endpoint)}</dd>` : ''}${I.set_by ? `<dt>Set by</dt><dd class="small">${esc(I.set_by)} · ${dt(I.set_at)}</dd>` : ''}</dl>
+    ${I.credentials.length ? table(['Credential', 'State', 'Set', 'Expires'], cr, {flush: true}) : ''}${form}`,
+    {sub: 'everyone signs in with SSO; model calls use this account, and each person\'s own limits still apply'});
+}
+function aiVersionsCard(C, edit) {
+  const ln = C.lines.map(l => `<tr><td class="mono small">${esc(l.line)}</td><td class="small" style="white-space:nowrap">${esc(l.chosen)}</td>
+    <td><span class="tag" style="white-space:nowrap">${esc(l.in_use)}</span>${l.pinned ? ' ' + chip('pinned', 'medium plain') : ''}${l.last_change ? `<div class="t-sub">${esc(cap(l.last_change.reason))} ${dt(l.last_change.at)}${l.last_change.from ? ' · from ' + esc(l.last_change.from) : ''}</div>` : ''}</td>
+    <td class="small">${l.newer_same_generation ? esc(l.newer_same_generation) + '<div class="t-sub">checked and adopted on the next refresh</div>' : '–'}</td>
+    <td class="small">${l.next_generation ? esc(l.next_generation) + (edit ? `<div class="mt">${btn('Approve', 'approveLine', [l.line, l.next_generation], 'sm')}</div>` : '<div class="t-sub">awaiting an administrator</div>') : '–'}</td>
+    <td>${edit && l.can_roll_back ? btn('Roll back', 'rollbackLine', [l.line], 'sm') : ''}</td></tr>`);
+  const ms = C.models.map(m => `<tr><td class="small">${esc(m.name)}${m.in_use ? ' ' + chip('in use', 'low plain') : ''}</td><td class="mono small">${esc(m.line)}</td><td class="mono small">${esc(m.version || '–')}</td>
+    <td class="small">${[m.deprecated ? 'being retired' : '', m.preview ? 'preview' : '', !m.available ? 'no longer offered' : '', m.blocked ? 'rolled back' : ''].filter(Boolean).map(x => chip(x, 'medium plain')).join(' ') || '–'}</td>
+    <td class="small">${m.check ? status(m.check === 'passed' ? 'ok' : 'high', cap(m.check)) + `<div class="t-sub" style="white-space:normal">${esc(m.check_detail || '')}</div>` : '–'}</td>
+    <td>${edit && m.blocked ? btn('Allow again', 'unblockModel', [m.name], 'sm') : ''}</td></tr>`);
+  return card('Model versions', `<div class="small muted" style="margin-bottom:8px">A feature set to a model follows that model's line: when the provider offers a newer version in the same generation (6.1 → 6.2) the platform checks it - grounded, cited answers with no invented figure - then uses it. A new generation (6 → 7) waits for an administrator. The model never decides a figure, a verdict or an action, so a version change cannot change them.</div>
+    ${table(['Line', 'Chosen', 'In use', 'Newer, same generation', 'New generation', ''], ln, {flush: true, empty: 'No model chosen yet - choose one per size of work below.'})}
+    ${edit ? `<div class="form-row mt">${btn('Refresh from the provider', 'refreshCatalogue', [], 'sm')}<input class="input" id="ai-addm" aria-label="Model name" placeholder="Add a model name exactly as the provider writes it">${btn('Add', 'addModel', [], 'sm')}</div>` : ''}
+    <details class="mt"><summary class="small">Every model the provider offers (${C.models.length})</summary>${table(['Model', 'Line', 'Version', 'State', 'Check', ''], ms, {flush: true, empty: 'Not read yet - refresh from the provider.'})}</details>
+    <details class="mt"><summary class="small">Changes (${C.history.length})</summary>${table(['When', 'Line', 'From', 'To', 'Why', 'By'], C.history.map(h => `<tr><td class="mono small">${dt(h.at)}</td><td class="mono small">${esc(h.line)}</td><td class="small">${esc(h.from || '–')}</td><td class="small">${esc(h.to)}</td><td class="small">${esc(cap(h.reason))}<div class="t-sub">${esc(h.detail || '')}</div></td><td class="small">${esc(h.by)}</td></tr>`), {flush: true, empty: 'No version change yet.'})}</details>`,
+    {sub: C.auto_upgrade ? 'newest version in each line, used automatically after the check' : 'automatic upgrades are off: every new version waits for approval'});
+}
+async function saveIntegration() {
+  const I = window.__aiint, prov = $('#ai-prov').value, spec = I.providers[prov] || {secrets: []}, secrets = {};
+  spec.secrets.forEach(c => { const v = ($('#ai-s-' + c.name) || {}).value || ''; if (v.trim()) secrets[c.name] = v.trim(); });
+  const exp = ($('#ai-exp') || {}).value;
+  const body = {provider: prov, endpoint: ($('#ai-ep') || {}).value || null, secrets, note: $('#ai-note').value.trim(),
+                expires_at: exp ? exp + 'T00:00:00Z' : null};
+  await api('/api/v1/admin/llm/integration', {method: 'PUT', body: JSON.stringify(body)});
+  toast('AI provider saved - testing the connection'); await AiUsage(); return testIntegration();
+}
+async function testIntegration() {
+  const r = await post('/api/v1/admin/llm/integration/test', {});
+  const el = $('#ai-test'); if (el) el.innerHTML = `<div class="mt">${r.steps.map(x => `<div class="brow">${status(x.ok ? (x.warning ? 'medium' : 'ok') : 'high', x.ok ? (x.warning ? 'Note' : 'Passed') : 'Failed')} <b class="small">${esc(x.step)}</b> <span class="small muted">${esc(x.detail)}</span>${!x.ok && x.fix ? `<div class="t-sub" style="width:100%">Fix: ${esc(x.fix)}</div>` : ''}</div>`).join('')}</div>`;
+  toast(r.ok ? 'Connection works' : 'Connection check failed - see the steps', !r.ok);
+}
+async function refreshCatalogue() { const r = await post('/api/v1/admin/llm/catalogue/refresh', {}); toast(`${r.result.listed == null ? 'No list from the provider' : r.result.listed + ' model(s) offered'}; ${r.result.adopted.length} upgraded`); AiUsage(); }
+async function addModel() { const n = ($('#ai-addm').value || '').trim(); if (!n) return; await post('/api/v1/admin/llm/catalogue/models', {name: n}); toast('Model added'); AiUsage(); }
+async function approveLine(line, model) { toast('Checking ' + model + '…'); await post('/api/v1/admin/llm/lines/approve', {line, model}); toast(model + ' passed the check and is in use'); AiUsage(); }
+async function rollbackLine(line) { await post('/api/v1/admin/llm/lines/rollback', {line}); toast('Rolled back'); AiUsage(); }
+async function unblockModel(name) { await post('/api/v1/admin/llm/models/unblock', {name}); toast(name + ' may be adopted again'); AiUsage(); }
+
 async function AiUsage() {
   const __g = GEN;
-  const [u, pol] = await Promise.all([api('/api/v1/admin/llm/usage?days=30'), api('/api/v1/admin/llm/policy')]);
-  window.__llmpol = pol;
+  const [u, pol, I, C] = await Promise.all([api('/api/v1/admin/llm/usage?days=30'), api('/api/v1/admin/llm/policy'),
+    api('/api/v1/admin/llm/integration'), api('/api/v1/admin/llm/catalogue')]);
+  window.__llmpol = pol; window.__aiint = I;
   const edit = can('manage_access'), P = pol.policy, b = u.budget;
   const bar = (used, cap) => cap ? `${meter(Math.min(100, 100 * used / cap))}<div class="small muted">${tok(used)} of ${tok(cap)} tokens (${Math.round(100 * used / cap)} %)</div>` : `<div class="small muted">${tok(used)} tokens · no cap</div>`;
   const wf = f => { const r = (P.workflows || {})[f.workflow] || {};
@@ -884,11 +952,14 @@ async function AiUsage() {
       <td>${status(ADV_K[f.advice] || 'info', cap(f.advice))}<div class="t-sub">${esc(f.why)}</div></td>
       <td>${edit ? `<select id="wt-${esc(f.workflow)}" aria-label="Model for ${esc(f.workflow)}"><option value="">${esc(f.default_model)} (default)</option>${pol.models.map(m => `<option value="${esc(m.name)}"${r.model === m.name ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
         <input class="input" style="width:90px;margin-top:4px" id="wm-${esc(f.workflow)}" aria-label="Output cap for ${esc(f.workflow)}" placeholder="cap ${esc(P.max_output_tokens[f.tier] || '')}" value="${esc(r.max_output_tokens || '')}">
-        <label class="inline small" style="margin-top:4px"><input type="checkbox" id="we-${esc(f.workflow)}"${r.enabled === false ? '' : ' checked'}> on</label>`
-        : `<span class="tag" style="white-space:nowrap">${esc(f.model)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}`}</td></tr>`; };
+        <label class="inline small" style="margin-top:4px"><input type="checkbox" id="we-${esc(f.workflow)}"${r.enabled === false ? '' : ' checked'}> on</label>
+        <label class="inline small" style="margin-top:4px" title="Follow the newest version of this model's line"><input type="checkbox" id="wf-${esc(f.workflow)}"${r.follow === false ? '' : ' checked'}> newest</label>
+        ${f.chosen && f.model !== f.chosen ? `<div class="t-sub">in use: ${esc(f.model)}</div>` : ''}`
+        : `<span class="tag" style="white-space:nowrap">${esc(f.model)}</span>${f.enabled ? '' : ' ' + chip('off', 'medium plain')}${f.follow === false ? ' ' + chip('pinned', 'medium plain') : ''}`}</td></tr>`; };
   const lim = (id, v, ph, label) => `<input class="input" style="width:100%;min-width:11ch;max-width:130px" id="${id}" aria-label="${esc(label || id)}" value="${v == null ? '' : esc(v)}" placeholder="${esc(ph || '')}"${edit ? '' : ' readonly'}>`;
-  const roleRows = pol.roles.map(r => { const v = (P.roles || {})[r] || {}; return `<tr><td class="small">${esc(cap(r))}</td><td>${lim('rh-' + r, v.hourly_tokens, 'everyone', cap(r) + ' per hour')}</td><td>${lim('rd-' + r, v.daily_tokens, 'everyone', cap(r) + ' per day')}</td></tr>`; });
+  const roleRows = pol.roles.map(r => { const v = (P.roles || {})[r] || {}; return `<tr><td class="small">${esc(roleName(r))}</td><td>${lim('rh-' + r, v.hourly_tokens, 'everyone', roleName(r) + ' per hour')}</td><td>${lim('rd-' + r, v.daily_tokens, 'everyone', roleName(r) + ' per day')}</td></tr>`; });
   const row2 = (label, a, b) => `<tr><td class="small">${label}</td><td>${a}</td><td>${b || ''}</td></tr>`;
+  const defSel = size => `<select id="cd-${size}" aria-label="Default model, ${size === 'small' ? 'routine narrative' : 'summaries and reports'}"${edit ? '' : ' disabled'} style="width:100%;max-width:150px;min-width:0"><option value="">${esc(pol.default_models[size] || '')} (as deployed)</option>${pol.models.map(m => `<option value="${esc(m.name)}"${(P.chosen_defaults || {})[size] === m.name ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select>`;
   const userOver = Object.entries(P.users || {}).map(([k, v]) => `${k} | ${v.hourly_tokens ?? ''} | ${v.daily_tokens ?? ''}`).join('\n');
   setMainG(__g, page('AI usage & limits', 'Who and what uses the model, what it costs, and the limits that apply. Over any limit the platform answers from the same evidence without the model - nothing fails.', '',
     `<div class="grid g-3">
@@ -896,6 +967,8 @@ async function AiUsage() {
       ${card('Today', bar(b.today_used, b.daily_tokens), {sub: 'resets at midnight UTC'})}
       ${kpi('Cost, last 30 days', usd(u.cost_total), 'at the prices set below')}
     </div>
+    <div class="mt">${aiIntegrationCard(I, edit)}</div>
+    <div class="mt">${aiVersionsCard(C, edit)}</div>
     <div class="mt">${card('By feature - which model each uses, and whether it should', table(['Feature', {h: 'Calls', num: 1}, {h: 'Tokens in / out', num: 1}, {h: 'Cost', num: 1}, {h: 'Usable', num: 1}, {h: 'p95', num: 1}, 'Advice', 'Model · cap · on'], u.features.map(wf)),
       {flush: true, sub: 'advice is computed from these figures: usable answers, statements the evidence check removed, answer length'})}</div>
     <div class="grid g-2e mt">
@@ -903,7 +976,9 @@ async function AiUsage() {
           row2('Monthly tokens', lim('lp-month', P.monthly_tokens, '', 'Monthly tokens')),
           row2('Daily tokens', lim('lp-day', P.daily_tokens, '', 'Daily tokens')),
           row2('Warn at (fraction of the month)', lim('lp-alert', P.alert_at, '', 'Warn at')),
-          row2('Longest answer: smaller / larger models', lim('lp-cs', P.max_output_tokens.small, '', 'Longest answer, smaller models'), lim('lp-cl', P.max_output_tokens.large, '', 'Longest answer, larger models'))]), {flush: true, sub: 'tokens; 0 = no cap'})}
+          row2('Longest answer: smaller / larger models', lim('lp-cs', P.max_output_tokens.small, '', 'Longest answer, smaller models'), lim('lp-cl', P.max_output_tokens.large, '', 'Longest answer, larger models')),
+          row2('Default model: routine / reports', defSel('small'), defSel('large')),
+          row2('Newer versions automatically', `<label class="inline small"><input type="checkbox" id="lp-auto"${P.auto_upgrade === false ? '' : ' checked'}${edit ? '' : ' disabled'}> after a check</label>`)]), {flush: true, sub: 'tokens; 0 = no cap'})}
       ${card('Limits per person', `<div class="small muted" style="margin-bottom:6px">Questions, deep analysis and reports a person asks for. Scheduled work counts only against the budgets. 0 = no model text for them.</div>
         ${table(['Who', 'Per hour', 'Per day'], [row2('<b>Everyone</b>', lim('lu-h', P.user_default.hourly_tokens, '', 'Everyone per hour'), lim('lu-d', P.user_default.daily_tokens, '', 'Everyone per day')), ...roleRows], {flush: true})}
         <label class="small" style="display:block;margin-top:10px" for="lusers">Per person (overrides the role), one per line: <span class="mono">name@company.com | per hour | per day</span></label>
@@ -921,7 +996,7 @@ async function AiUsage() {
     <div class="grid g-2e mt">
       ${card('Who used it (last 30 days)', table(['Person', {h: 'Last hour', num: 1}, {h: 'Today', num: 1}, {h: '30 days', num: 1}, {h: 'Calls', num: 1}], u.users.map(x => `<tr><td class="small">${esc(x.user)}</td><td class="num small">${tok(x.hour)}</td><td class="num small">${tok(x.today)}</td><td class="num small">${tok(x.period)}</td><td class="num small">${nf(x.calls)}</td></tr>`), {flush: true, empty: 'No one has asked the model for anything yet.'}))}
       ${card('Recent model calls', `<div class="form-row" style="margin-bottom:8px"><select id="lc-wf" aria-label="Feature"><option value="">Every feature</option>${Object.keys(pol.workflows).map(w => `<option>${esc(w)}</option>`).join('')}</select>
-        <select id="lc-st" aria-label="Outcome"><option value="">Every outcome</option>${['ok', 'error', 'unparseable', 'user_limit', 'daily_budget_exceeded', 'budget_exceeded', 'disabled_by_policy', 'circuit_open'].map(s => `<option>${s}</option>`).join('')}</select>${btn('Show', 'loadCalls', [], 'sm')}</div><div id="lcalls"></div>`, {sub: 'open one to see its prompt, answer and what the evidence check removed'})}
+        <select id="lc-st" aria-label="Outcome"><option value="">Every outcome</option>${['ok', 'error', 'auth_error', 'unparseable', 'user_limit', 'daily_budget_exceeded', 'budget_exceeded', 'disabled_by_policy', 'circuit_open'].map(s => `<option>${s}</option>`).join('')}</select>${btn('Show', 'loadCalls', [], 'sm')}</div><div id="lcalls"></div>`, {sub: 'open one to see its prompt, answer and what the evidence check removed'})}
       ${card('History', table(['Version', 'By', 'When', 'Why'], pol.history.map(h => `<tr><td class="mono">#${esc(h.id)}</td><td class="small">${esc(h.set_by)}</td><td class="mono small muted">${dt(h.created_at)}</td><td class="small">${esc(h.note || '')}</td></tr>`), {flush: true, empty: 'Defaults in force - nothing changed yet.'}))}
     </div>`));
 }
@@ -948,8 +1023,10 @@ async function saveLlmPolicy() {
   P.user_default = {hourly_tokens: num('lu-h') ?? 0, daily_tokens: num('lu-d') ?? 0};
   P.roles = {}; pol.roles.forEach(r => { const h = num('rh-' + r), d = num('rd-' + r); if (h != null || d != null) P.roles[r] = {...(h != null ? {hourly_tokens: h} : {}), ...(d != null ? {daily_tokens: d} : {})}; });
   P.users = {}; ($('#lusers').value || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(l => { const [who, h, d] = l.split('|').map(x => (x || '').trim()); const o = {}; if (h !== '') o.hourly_tokens = parseInt(h, 10); if (d !== '' && d !== undefined) o.daily_tokens = parseInt(d, 10); P.users[who] = o; });
-  P.workflows = {}; Object.keys(pol.workflows).forEach(w => { const t = $(`[id="wt-${w}"]`), m = $(`[id="wm-${w}"]`), e = $(`[id="we-${w}"]`); if (!t) return; const r = {};
-    if (t.value) r.model = t.value; if ((m.value || '').trim()) r.max_output_tokens = parseInt(m.value, 10); if (!e.checked) r.enabled = false; if (Object.keys(r).length) P.workflows[w] = r; });
+  P.workflows = {}; Object.keys(pol.workflows).forEach(w => { const t = $(`[id="wt-${w}"]`), m = $(`[id="wm-${w}"]`), e = $(`[id="we-${w}"]`), fo = $(`[id="wf-${w}"]`); if (!t) return; const r = {};
+    if (t.value) r.model = t.value; if ((m.value || '').trim()) r.max_output_tokens = parseInt(m.value, 10); if (!e.checked) r.enabled = false; if (fo && !fo.checked) r.follow = false; if (Object.keys(r).length) P.workflows[w] = r; });
+  P.chosen_defaults = {}; ['small', 'large'].forEach(k => { const v = ($('#cd-' + k) || {}).value; if (v) P.chosen_defaults[k] = v; });
+  P.auto_upgrade = !!($('#lp-auto') || {}).checked; delete P.adopted;
   try { await post('/api/v1/admin/llm/policy', {policy: P, note: $('#lp-note').value.trim()}); toast('AI usage policy saved - in force for the next model call'); AiUsage(); }
   catch (e) { let d; try { d = JSON.parse(e.message).detail; } catch (x) { d = null; } if (d) $('#lpout').innerHTML = `<div class="callout danger mt"><div class="small">${esc(d)}</div></div>`; }
 }
@@ -1110,14 +1187,14 @@ async function Access() {
       ${card('Role assignments', table(['Principal', 'Role', 'Scope', 'Expires', ''], grants.map(g => `<tr><td><div class="t-title">${esc(g.principal_id)}</div><div class="t-sub">${esc(g.reason)} · by ${esc(g.granted_by)}</div></td>
         <td>${esc(cap(g.role))}</td><td class="small">${esc(g.domains.includes('*') ? 'All domains' : g.domains.join(', '))}</td><td class="mono small">${day(g.expires_at) === '–' ? 'never' : day(g.expires_at)}</td><td>${g.status === 'proposed' ? `<span class="tag">Awaiting a second admin</span>${g.granted_by !== me.id ? btn('Approve', 'approveGrant', [g.id], 'sm primary') : ''}` : ''}${btn('Revoke', 'revokeGrant', [g.id], 'sm danger')}</td></tr>`), {empty: 'No platform grants - roles come from Entra.'}) +
         `<div class="card-b" style="border-top:1px solid var(--border)"><div class="form-row">
-          <input class="input" id="gp" placeholder="user@company.com"><select id="gr">${['analyst', 'lead', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${cap(r)}</option>`).join('')}</select>
+          <input class="input" id="gp" placeholder="user@company.com"><select id="gr">${['analyst', 'lead', 'ciso', 'auditor', 'automation_admin', 'admin'].map(r => `<option value="${r}">${roleName(r)}</option>`).join('')}</select>
           <select id="gd"><option value="*">All domains</option><option value="phishing">Phishing</option><option value="incident">Incident</option><option value="vulnerability">Vulnerability</option></select>
           <input class="input" id="gdays" placeholder="Days (blank = none)" style="flex:0 1 150px"></div><div class="form-row" style="margin-top:8px"><input class="input" style="flex:1" id="greason" placeholder="Justification (required)">${btn('Grant', 'grant', [], 'primary')}</div></div>`, {flush: true})}
       ${card('Service accounts', table(['Name', 'Roles', 'Expires', 'Last used', ''], keys.map(k => `<tr><td class="t-title">${esc(k.name)}</td><td class="small">${esc(k.roles.map(cap).join(', '))}<div class="t-sub">${esc(k.domains.includes('*') ? 'All domains' : k.domains.join(', '))}</div></td>
         <td class="mono small">${day(k.expires_at)}</td><td class="mono small muted">${dt(k.last_used_at)}</td><td>${k.active ? btn('Revoke', 'revokeKey', [k.id], 'sm danger') : '<span class="muted small">Inactive</span>'}</td></tr>`), {empty: 'No service accounts'}) +
         `<div class="card-b" style="border-top:1px solid var(--border)"><div class="inline"><input class="input" style="flex:1" id="kn" placeholder="Name, e.g. prometheus"><select id="kr"><option value="auditor">Auditor</option><option value="analyst">Analyst</option><option value="automation_admin">Automation admin</option></select>${btn('Create key', 'newKey', [], 'primary')}</div><div id="kout"></div></div>`, {flush: true, sub: 'can never approve actions'})}
     </div>
-    <div class="grid g-2e mt">${mine}${card('Role permissions', table(['Role', 'Permissions'], Object.entries(perms).map(([r, ps]) => `<tr><td class="t-title">${r.startsWith('_') ? '<span style="color:var(--crit)">Never granted to service accounts</span>' : esc(cap(r))}</td><td>${ps.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</td></tr>`)), {flush: true})}</div>`));
+    <div class="grid g-2e mt">${mine}${card('Role permissions', table(['Role', 'Permissions'], Object.entries(perms).map(([r, ps]) => `<tr><td class="t-title">${r.startsWith('_') ? '<span style="color:var(--crit)">Never granted to service accounts</span>' : esc(roleName(r))}</td><td>${ps.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</td></tr>`)), {flush: true})}</div>`));
 }
 async function grant() {
   await post('/api/v1/admin/roles', {principal_id: $('#gp').value.trim(), role: $('#gr').value, domains: [$('#gd').value], days: parseInt($('#gdays').value, 10) || null, reason: $('#greason').value.trim()});
@@ -1144,7 +1221,7 @@ async function Audit() {
       <dt>Recorded by</dt><dd>${Object.entries(info.by_actor_type).map(([k, n]) => `${esc(cap(k))} ${nf(n)}`).join(' · ') || '–'}</dd>
       <dt>Last full check</dt><dd>${lv ? (lv.ok ? `Verified up to #${esc(lv.seq)} at ${dt(lv.at)} UTC` : `<b>Broken</b> at #${esc(lv.first_bad_seq)}`) : 'not run yet'}${info.self_check_seconds ? ` · runs every ${every(info.self_check_seconds)} with the self-check; the health check verifies newer records` : ''}</dd>
       <dt>Retention</dt><dd>${esc(cap(info.retention.audit))}.</dd>
-      <dt>Who can see it</dt><dd>Read: ${info.access.read.map(r => esc(cap(r))).join(', ')} · export: ${info.access.export.map(r => esc(cap(r))).join(', ')}<div class="t-sub">${esc(cap(info.access.scope))}.</div></dd>
+      <dt>Who can see it</dt><dd>Read: ${info.access.read.map(r => esc(roleName(r))).join(', ')} · export: ${info.access.export.map(r => esc(roleName(r))).join(', ')}<div class="t-sub">${esc(cap(info.access.scope))}.</div></dd>
     </dl>
     <h3 class="small strong" style="margin:14px 0 6px">What it records</h3>${info.by_category.map(c => `<span class="tag">${esc(c.category)} ${nf(c.records)}</span>`).join(' ') || empty('Nothing yet')}
     <h3 class="small strong" style="margin:14px 0 6px">How it is protected</h3><ul class="small" style="margin:0;padding-left:18px">${info.protection.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
@@ -1512,7 +1589,7 @@ async function Story(id) {
   const a = st.assessment, b = st.blast_radius.stats;
   const evById = Object.fromEntries(st.events.map(e => [e.ref, e]));
   const refs = rs => rs.map(r => { const e = evById[r]; const tip = e ? `${e.tool} · ${e.ts ? dt(e.ts) : 'time not reported'} · ${e.title}` : r;
-    return `<abbr class="cite" tabindex="0" data-tip="${esc(tip)}" aria-label="${esc(r + ': ' + tip)}">${esc(r)}</abbr>`; }).join('');
+    return `<abbr class="cite" tabindex="0" data-tip="${esc(tip)}" aria-label="${esc(r + ': ' + tip)}">${esc(r)}</abbr>`; }).join(' ');
   const kc = st.kill_chain.map(k => `<div class="stg ${esc(k.state)}" title="${esc(k.name)}: ${esc(cap(k.state))}"><b>${esc(k.name)}</b>${
     {observed: 'Observed', blocked: 'Blocked', no_evidence: 'Checked - none', blind_spot: 'Blind spot', before_scope: '-'}[k.state] || esc(k.state)}</div>`).join('');
   const steps = st.steps.map(s => `<div class="stp ${s.outcome === 'blocked' ? 'blocked' : ''}">
@@ -1563,7 +1640,7 @@ async function Story(id) {
 function deepHtml(d, evById) {
   if (!d.ok) return `<div class="callout">${esc(d.reason || 'Deep analysis unavailable')}</div>`;
   const cite = ids => (ids || []).map(r => { const tip = evById[r] ? `${evById[r].tool} · ${evById[r].title}` : r;
-    return `<abbr class="cite" tabindex="0" data-tip="${esc(tip)}" aria-label="${esc(r + ': ' + tip)}">${esc(r)}</abbr>`; }).join('');
+    return `<abbr class="cite" tabindex="0" data-tip="${esc(tip)}" aria-label="${esc(r + ': ' + tip)}">${esc(r)}</abbr>`; }).join(' ');
   return `${d.disagreement ? `<div class="callout danger">${esc(d.disagreement)}</div>` : ''}
     <div class="inline" style="margin-bottom:8px">${chip(d.confidence === 'high' ? 'critical' : d.confidence === 'medium' ? 'medium' : 'info', 'plain')}<span class="small">model confidence <b>${esc(d.confidence)}</b> · ${esc(d.provider)} ${esc(d.model || '')} · ${esc(dt(d.generated_at))}${d.cached ? ' · cached' : ''}</span>
       ${d.dropped_statements ? `<span class="small" style="color:var(--high)">${d.dropped_statements} unsupported statement(s) removed</span>` : '<span class="small muted">every statement cited</span>'}</div>
@@ -1690,10 +1767,106 @@ async function saveDomeWeights() {
   DomeScore();
 }
 
+// ================================================================= Executive view (CISO)
+const EXEC = {days: 30, bucket: 'today'};
+const BUCKET_LABEL = {overdue: 'Overdue', today: 'Today', tomorrow: 'Tomorrow', this_week: 'This week', later: 'Later'};
+const KIND_LABEL = {incident: 'Incident', approval: 'Approval', vulnerability: 'Vulnerability', risk_acceptance: 'Risk acceptance',
+  tuning: 'Tuning', tool: 'Tool', ai_credential: 'AI', finding: 'Finding'};
+function sparkLine(points, o = {}) {
+  const pts = points.filter(x => x.value != null);
+  if (pts.length < 2) return `<div class="small muted">${esc(o.empty || 'Not enough history yet')}</div>`;
+  const w = 360, h = 90, pad = 6, lo = Math.min(...pts.map(x => x.value)), hi = Math.max(...pts.map(x => x.value)), span = Math.max(1, hi - lo);
+  const xy = pts.map((x, i) => [pad + i * (w - 2 * pad) / (pts.length - 1), h - 18 - (x.value - lo) / span * (h - 30)]);
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="${esc(o.label || 'trend')}">
+    <polyline fill="none" stroke-width="2" style="stroke:var(--accent)" points="${xy.map(([x, y]) => x.toFixed(1) + ',' + y.toFixed(1)).join(' ')}"/>
+    ${xy.map(([x, y], i) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" style="fill:var(--accent)"><title>${esc(pts[i].label)}: ${pts[i].value}</title></circle>`).join('')}
+    <text x="0" y="${h - 4}">${esc(pts[0].label)}</text><text x="${w}" y="${h - 4}" text-anchor="end">${esc(pts[pts.length - 1].label)}</text></svg>`;
+}
+function execTile(h) {
+  const v = h.value == null ? '–' : `${nf(h.value)}${h.unit || ''}`;
+  const arrow = h.delta == null ? '' : h.delta > 0 ? '▲' : h.delta < 0 ? '▼' : '■';
+  const tone = {better: 'var(--low)', worse: 'var(--crit)', flat: 'var(--text-3)'}[h.trend] || 'var(--text-3)';
+  const foot = h.delta == null ? (h.previous == null ? 'no figure for the period before yet' : `previous ${nf(h.previous)}${h.unit || ''}`)
+    : `<span style="color:${tone}">${arrow} ${nf(Math.abs(h.delta))}${h.unit === '%' ? ' pts' : h.unit || ''}</span> vs previous ${nf(h.previous)}${h.unit || ''}`;
+  return `<a class="card kpi exec-kpi" href="${esc(h.link)}"><div class="label">${esc(h.label)}</div><div class="value">${v}</div><div class="foot">${foot}</div></a>`;
+}
+function execAgenda(a) {
+  const tabs = `<div class="seg" role="group" aria-label="When">${Object.keys(BUCKET_LABEL).map(b => `<button class="${b === EXEC.bucket ? 'on' : ''}" data-fn="execBucket" data-args="${arg(b)}">${esc(BUCKET_LABEL[b])} <span class="muted">${nf(a.counts[b])}</span></button>`).join('')}</div>`;
+  const items = a.items.filter(x => x.bucket === EXEC.bucket);
+  const rows = items.map(x => `<div class="list-row"><div>${status(x.severity === 'critical' ? 'critical' : x.severity === 'high' ? 'high' : x.severity === 'medium' ? 'medium' : 'info', cap(x.severity))}</div>
+    <div class="grow"><div class="t-title"><a href="${esc(x.link)}">${esc(x.title)}</a></div><div class="t-sub">${esc(KIND_LABEL[x.kind] || cap(x.kind))} · ${esc(x.why)} · owner ${esc(x.owner)}</div></div>
+    <div class="small mono" title="due (UTC)">${esc(dt(x.due))}</div></div>`).join('');
+  return card('What needs a decision', `${tabs}<div class="mt" id="exec-items">${rows || `<div class="empty">Nothing ${EXEC.bucket === 'overdue' ? 'overdue' : 'due ' + BUCKET_LABEL[EXEC.bucket].toLowerCase()}.</div>`}</div>`,
+    {sub: 'due dates from response targets, SLAs, CISA KEV dates and expiries; "today" is your local day'});
+}
+function weekly(trend) {
+  const weeks = {};
+  trend.forEach(d => { const k = d.date.slice(0, 10); const w = new Date(k + 'T00:00:00Z'); w.setUTCDate(w.getUTCDate() - ((w.getUTCDay() + 6) % 7));
+    const key = w.toISOString().slice(5, 10); weeks[key] = weeks[key] || {opened: 0, fixed: 0}; weeks[key].opened += d.opened; weeks[key].fixed += d.fixed; });
+  return Object.entries(weeks).map(([label, values]) => ({label: 'week of ' + label, values}));
+}
+async function Executive() {
+  const __g = GEN;
+  const tz = -new Date().getTimezoneOffset();
+  const v = await api(`/api/v1/executive?days=${EXEC.days}&tz_offset_minutes=${tz}`);
+  window.__exec = v;
+  if (!v.agenda.counts[EXEC.bucket] && EXEC.bucket === 'today') EXEC.bucket = Object.keys(BUCKET_LABEL).find(b => v.agenda.counts[b]) || 'today';
+  const I = v.incidents, V = v.vulnerabilities, P = v.phishing, C = v.coverage, O = v.operations, G = v.governance;
+  const period = `<div class="seg" role="group" aria-label="Period">${v.periods.map(d => `<button class="${d === v.period_days ? 'on' : ''}" data-fn="execPeriod" data-args="${arg(d)}">${d} days</button>`).join('')}</div>`;
+  const posture = card('Posture', `<div class="dome-hero">${domeRing(v.posture.score)}<div class="stack" style="gap:6px">
+      <div class="dome-band ${esc(String(v.posture.band || '').replace(' ', '-'))}">${esc(DOME_BAND[v.posture.band] || v.posture.band || '')}</div>
+      ${v.posture.pillars.filter(x => x.counted).map(x => `<div class="inline small" style="gap:8px"><a href="${esc(x.link)}" style="min-width:110px">${esc(x.name)}</a>${pbar(x.score)}<span class="score">${x.score == null ? '–' : x.score}</span></div>`).join('')}</div></div>
+    <div class="mt"><div class="small muted">Dome Score over the period</div>${sparkLine(v.history.snapshots.map(x => ({label: x.day.slice(5), value: x.dome_score})), {label: 'Dome Score history', empty: v.history.note || 'Not enough history yet'})}</div>`,
+    {sub: 'Dome Score and pillars now; history from the daily snapshots'});
+  const inc = card('Threats and incidents', `<dl class="kv"><dt>Open</dt><dd>${nf(I.open)} ${Object.entries(I.open_by_severity).map(([k, n]) => chip(`${n} ${k}`, k + ' plain')).join(' ')}</dd>
+      <dt>Unassigned</dt><dd>${nf(I.open_unassigned)}</dd><dt>Opened / resolved</dt><dd>${nf(I.period.opened)} / ${nf(I.period.closed)} <span class="t-sub">previous ${nf(I.previous.opened)} / ${nf(I.previous.closed)}</span></dd>
+      <dt>Median time to resolve</dt><dd>${I.period.mttr_hours == null ? '–' : nf(I.period.mttr_hours) + ' h'}</dd></dl>
+    <div class="small muted mt">Most at risk</div>${table(['Who / what', {h: 'Risk', num: 1}], I.most_at_risk.map(x => `<tr><td><a href="${esc(x.link)}">${esc(x.name)}</a></td><td class="num">${chip(x.band, x.band + ' plain')} ${nf(x.score)}</td></tr>`), {flush: true, empty: 'Nobody at risk'})}
+    ${I.techniques.length ? `<div class="small muted mt">Techniques seen</div><div>${I.techniques.map(t => `<span class="tag mono">${esc(t.technique)} · ${nf(t.cases)}</span>`).join(' ')}</div>` : ''}`, {sub: `last ${v.period_days} days`});
+  const vul = card('Vulnerabilities and exposure', `<dl class="kv"><dt>Open</dt><dd>${nf(V.open)} ${Object.entries(V.by_priority).sort().map(([k, n]) => chip(`${n} ${k}`, (k === 'P1' ? 'critical' : k === 'P2' ? 'high' : 'medium') + ' plain')).join(' ')}</dd>
+      <dt>Known exploited</dt><dd>${nf(V.kev_open)}</dd><dt>Internet-exposed</dt><dd>${nf(V.internet_exposed_open)}</dd><dt>Within SLA</dt><dd>${V.sla_compliance_pct == null ? '–' : nf(V.sla_compliance_pct) + ' %'} <span class="t-sub">${nf(V.sla_breached)} past SLA</span></dd>
+      <dt>Fixed in period</dt><dd>${nf(V.period.fixed)} <span class="t-sub">${nf(V.period.fixed_within_sla)} within SLA${V.period.mean_days_to_fix == null ? '' : ' · mean ' + nf(V.period.mean_days_to_fix) + ' days'}</span></dd></dl>
+    <div class="small muted mt">Opened and fixed by week</div>${hbars(weekly(V.trend), ['opened', 'fixed'], {label: 'findings opened and fixed by week', empty: 'No findings opened or fixed in this period'})}
+    <div class="small muted mt">By owning team</div>${hbars(Object.entries(V.per_team).map(([t, x]) => ({label: t, values: {'past SLA': x.sla_breached, 'within SLA': x.open - x.sla_breached}})), ['past SLA', 'within SLA'], {label: 'open findings by team'})}`);
+  const ph = card('People and phishing', `<dl class="kv"><dt>Reported</dt><dd>${nf(P.period.reported)} <span class="t-sub">previous ${nf(P.previous.reported)}</span></dd>
+      <dt>Harmful</dt><dd>${P.period.harmful_share_pct == null ? '–' : nf(P.period.harmful_share_pct) + ' %'}</dd><dt>Clicked</dt><dd>${nf(P.period.people_who_clicked)} ${P.period.people_who_clicked === 1 ? 'person' : 'people'}${P.period.repeat_clickers.length ? ` · ${nf(P.period.repeat_clickers.length)} more than once` : ''}</dd>
+      <dt>Closed automatically</dt><dd>${nf(P.period.auto_closed)}</dd><dt>People reporting</dt><dd>${nf(P.period.reporters)}</dd></dl>
+    <div class="mt">${donut(P.period.verdicts, CHART_COLOR)}</div>`);
+  const cov = card('Coverage and resilience', `<dl class="kv"><dt>Machines with EDR</dt><dd>${C.edr_coverage_pct == null ? '–' : nf(C.edr_coverage_pct) + ' %'} <span class="t-sub">${C.missing_edr.length ? 'missing: ' + C.missing_edr.map(esc).join(', ') : 'none missing'}</span></dd>
+      <dt>ATT&amp;CK coverage</dt><dd>${C.attack_coverage_pct == null ? '–' : nf(C.attack_coverage_pct) + ' %'} <span class="t-sub">${nf(C.priority_blind_spots)} priority blind spots · ${nf(C.single_source_priority)} seen by one tool only</span></dd>
+      <dt>Assets not in the CMDB</dt><dd>${nf(C.not_in_cmdb)}</dd><dt>Tools</dt><dd>${nf(C.tools.enabled)} connected${C.tools.unhealthy.length ? ' · ' + status('high', C.tools.unhealthy.length + ' not delivering') : ' · all delivering'}</dd></dl>`);
+  const ops = card('Operations', `<dl class="kv"><dt>Actions run under policy</dt><dd>${nf(O.automation_rate_pct)} %</dd><dt>Approvals waiting</dt><dd>${nf(O.pending_approvals)}</dd>
+      <dt>Open cases</dt><dd>${nf(O.open_cases)} <span class="t-sub">${nf(O.unassigned_cases)} unassigned</span></dd></dl>
+    ${O.workload.length ? table(['Analyst', {h: 'Open cases', num: 1}], O.workload.map(x => `<tr><td class="small">${esc(x.analyst)}</td><td class="num">${nf(x.open_cases)}</td></tr>`), {flush: true}) : ''}`);
+  const gov = card('Governance', `<dl class="kv"><dt>Policy changes</dt><dd>${nf(G.policy_changes)}</dd><dt>Access changes</dt><dd>${nf(G.access_changes)}</dd>
+      <dt>Break-glass sign-ins</dt><dd>${nf(G.break_glass_uses)}</dd><dt>Actions approved / rejected</dt><dd>${nf(G.actions_approved)} / ${nf(G.actions_rejected)}</dd><dt>Audit events</dt><dd>${nf(G.audit_events)}</dd></dl>`,
+    {sub: `last ${v.period_days} days · from the audit log`});
+  const sup = card('Third parties', table(['Supplier', 'Criticality', {h: 'Findings', num: 1}], v.suppliers.map(x => `<tr><td>${esc(x.supplier)}</td><td>${chip(x.criticality || '–', 'plain')}</td><td class="num">${nf(x.findings)} ${chip(x.worst, x.worst + ' plain')}</td></tr>`), {flush: true, empty: 'No supplier finding in this period'}));
+  const ai = v.ai ? card('AI use', `${meter(v.ai.fraction == null ? 0 : 100 * v.ai.fraction)}<div class="small muted">${nf(v.ai.used_tokens)} of ${v.ai.monthly_budget ? nf(v.ai.monthly_budget) : 'no cap'} tokens this month</div>`) : '';
+  const brief = `<div id="exec-brief">${btn('Write a brief from these figures', 'execBrief', [], 'sm')}</div>`;
+  setMainG(__g, page('Executive view', `Everything security across the organisation, computed from the records - no figure here is written by AI. Last ${v.period_days} days against the ${v.period_days} before; computed ${esc(dt(v.generated_at))} UTC.`,
+    `${period}${btn('Board pack', 'goTo', ['#/reports'], 'sm')}`,
+    `<div class="grid g-4 exec-kpis">${v.headline.map(execTile).join('')}</div>
+    <div class="grid g-2e mt">${execAgenda(v.agenda)}${posture}</div>
+    <div class="mt">${card('Brief', brief, {sub: 'the model only narrates the figures above and cites each one; without it the platform writes the brief'})}</div>
+    <div class="grid g-2 mt">${inc}${vul}</div>
+    <div class="grid g-3 mt">${ph}${cov}${ops}</div>
+    <div class="grid g-3 mt">${gov}${sup}${ai}</div>`));
+}
+function execPeriod(d) { EXEC.days = d; Executive(); }
+function execBucket(b) { EXEC.bucket = b; const v = window.__exec; if (v) { const el = $('#exec-items'); const tmp = document.createElement('div'); tmp.innerHTML = execAgenda(v.agenda); const card = el.closest('.card'); card.outerHTML = tmp.innerHTML; } }
+async function execBrief() {
+  const tz = -new Date().getTimezoneOffset();
+  const r = await post(`/api/v1/executive/brief?days=${EXEC.days}&tz_offset_minutes=${tz}`);
+  const cites = c => (c.evidence_ids || []).map(i => `<abbr class="cite" tabindex="0" data-tip="${esc((r.evidence.find(e => e.id === i) || {}).claim || '')}">${esc(i)}</abbr>`).join(' ');
+  $('#exec-brief').innerHTML = `<p style="margin-top:0">${esc(r.summary || '')}</p>${(r.claims || []).length ? `<ul>${r.claims.map(c => `<li>${esc(c.text)} ${cites(c)}</li>`).join('')}</ul>` : ''}
+    <div class="t-sub">${r.source === 'llm' ? 'Written by the model from the figures above; each statement cites the figure it rests on.' : 'Written by the platform from the figures above.'}</div>${llmNotice(r)}`;
+}
+
 // ================================================================= registry
-window.VIEWS = {trace: Trace, search: Search, story: Story, overview: Overview, 'dome-score': DomeScore, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
+window.VIEWS = {executive: Executive, trace: Trace, search: Search, story: Story, overview: Overview, 'dome-score': DomeScore, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit, watchlists: Watchlists, tuning: Tuning};
-Object.assign(ALLOWED, {domeWeight, resetDomeWeights, saveDomeWeights, saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {execPeriod, execBucket, execBrief, domeWeight, resetDomeWeights, saveDomeWeights, saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, ownUpload, ownClear, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
-  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, tuneDraft, tuneBlank, tuneSuggest, tunePreview, tunePropose, tuneDecide, tuneAutoclose, tuneActSuggest, styleUpload, styleSave, styleRemove, styleReset});
+  rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, aiProvider, saveIntegration, testIntegration, refreshCatalogue, addModel, approveLine, rollbackLine, unblockModel, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, tuneDraft, tuneBlank, tuneSuggest, tunePreview, tunePropose, tuneDecide, tuneAutoclose, tuneActSuggest, styleUpload, styleSave, styleRemove, styleReset});

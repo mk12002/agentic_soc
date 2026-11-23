@@ -10,6 +10,7 @@ reference to the others. The Markdown files stay the source of truth; the .docx 
 from __future__ import annotations
 
 import argparse
+import html
 import re
 import subprocess
 import sys
@@ -26,7 +27,9 @@ SRC = ROOT / "docs" / "client_review"
 DOCS = ["01_SOLUTION_ARCHITECTURE.md", "02_SECURITY_TOOL_INTEGRATIONS.md",
         "03_DATA_FLOW_AND_PROTECTION.md", "04_AI_LLM_SECURITY.md", "05_SECURITY_RISK_AND_GOVERNANCE.md",
         "06_DEPLOYMENT_AND_VALIDATION.md", "07_USE_CASE_MAPPING.md", "08_ARCHITECTURE_AND_DATA_FLOW_OVERVIEW.md",
-        "09_DEVELOPMENT_ROADMAP_AND_READINESS.md"]
+        "09_DEVELOPMENT_ROADMAP_AND_READINESS.md", "10_CISO_SOLUTION_AND_SECURITY_ASSESSMENT.md"]
+# documents written for a US reader: US Letter instead of A4
+LETTER = {"10_CISO_SOLUTION_AND_SECURITY_ASSESSMENT.md"}
 INLINE = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*\s][^*]*\*)")
 
 
@@ -39,6 +42,7 @@ def render_diagrams(out: Path) -> dict[str, Path]:
 
 
 def add_runs(par, text: str) -> None:
+    text = html.unescape(text)          # "&lt;client&gt;" in the Markdown reads "<client>" in Word
     for part in INLINE.split(text):
         if not part:
             continue
@@ -85,17 +89,27 @@ def add_table(doc, rows: list[list[str]]) -> None:
         for i in range(cols):
             cells[i].text = ""
             add_runs(cells[i].paragraphs[0], (row[i] if i < len(row) else "").strip().replace("<br>", "\n"))
-    # widths follow content: a short "#" or "Status" column should not take as much room as "Controls in place"
+    # widths follow content, but no column is narrower than its longest word: a proportional share alone gave a
+    # "Status" column 1 cm and broke "Implemented" into three lines
     all_rows = ([] if blank_header else [header]) + body
-    weight = [max(7, min(60, max((len(r[c].strip()) if c < len(r) else 0) for r in all_rows))) for c in range(cols)]
-    total = sum(weight)
+
+    def cell_text(r, c):
+        return re.sub(r"[*`]", "", html.unescape(r[c].strip())) if c < len(r) else ""
+    weight = [max(7, min(60, max(len(cell_text(r, c)) for r in all_rows))) for c in range(cols)]
+    word = [max((len(w) for r in all_rows for w in cell_text(r, c).split()), default=4) for c in range(cols)]
+    floor = [min(4.2, 0.19 * min(word[c], 22) + 0.35) for c in range(cols)]          # cm at 9 pt Calibri
+    width = 17.0
+    if sum(floor) > width:
+        floor = [f * width / sum(floor) for f in floor]
+    spare = width - sum(floor)
+    widths = [floor[c] + spare * weight[c] / sum(weight) for c in range(cols)]
     t.autofit = False
     for row in t.rows:
         for c, cell in enumerate(row.cells):
-            cell.width = Cm(17.0 * weight[c] / total)
+            cell.width = Cm(widths[c])
             for p in cell.paragraphs:
                 for r in p.runs:
-                    r.font.size = Pt(8.5)
+                    r.font.size = Pt(9)
     doc.add_paragraph()
 
 
@@ -136,10 +150,16 @@ def convert(md: Path, doc, pngs: dict[str, Path]) -> None:
             png = pngs.get(m.group(2))
             if png and png.exists():
                 doc.add_picture(str(png), width=Cm(16.5))
-                cap = doc.add_paragraph(m.group(1))
-                cap.runs[0].italic = True
+                caption(doc, m.group(1))
+        elif m := re.match(r"!\[([^\]]*)\]\((screenshots/[^)]+\.png)\)", line.strip()):
+            shot = SRC / m.group(2)
+            if shot.exists():
+                doc.add_picture(str(shot), width=Cm(16.5))
+                caption(doc, m.group(1))
+        elif line.strip() == "[[TOC]]":
+            toc(doc)
         elif m := re.match(r"^(#{1,4})\s+(.*)", line):
-            doc.add_heading(m.group(2), level=min(len(m.group(1)) - 1, 3) if len(m.group(1)) > 1 else 0)
+            doc.add_heading(html.unescape(m.group(2)), level=min(len(m.group(1)) - 1, 3) if len(m.group(1)) > 1 else 0)
             list_num = None
         elif re.match(r"^\s*[-*]\s+", line) or re.match(r"^\s*\d+\.\s+", line):
             numbered = bool(re.match(r"^\s*\d+\.\s+", line))
@@ -163,12 +183,59 @@ def convert(md: Path, doc, pngs: dict[str, Path]) -> None:
         i += 1
 
 
-def new_document():
+def caption(doc, text: str) -> None:
+    cap = doc.add_paragraph()
+    run = cap.add_run("Figure: " + html.unescape(text))
+    run.italic = True
+    run.font.size = Pt(9)
+
+
+def _field(par, instruction: str, placeholder: str = "") -> None:
+    """A Word field (page number, table of contents): Word fills it in when the document is opened or printed."""
+    for kind, text in (("begin", None), ("instr", instruction), ("separate", None), ("text", placeholder), ("end", None)):
+        if kind == "instr":
+            el = OxmlElement("w:instrText")
+            el.set(qn("xml:space"), "preserve")
+            el.text = text
+            par.add_run()._r.append(el)
+        elif kind == "text":
+            par.add_run(text)
+        else:
+            el = OxmlElement("w:fldChar")
+            el.set(qn("w:fldCharType"), kind)
+            if kind == "begin":
+                el.set(qn("w:dirty"), "true")       # ask Word to update the field when the document opens
+            par.add_run()._r.append(el)
+
+
+def toc(doc) -> None:
+    title = doc.add_paragraph()                  # not a heading style: the contents must not list itself
+    run = title.add_run("Contents")
+    run.bold = True
+    run.font.size = Pt(14)
+    _field(doc.add_paragraph(), 'TOC \\o "1-2" \\h \\z \\u', "Right-click and choose Update Field to build the table of contents.")
+    doc.add_page_break()
+
+
+def footer(doc, title: str) -> None:
+    for sec in doc.sections:
+        par = sec.footer.paragraphs[0]
+        par.text = ""
+        run = par.add_run(f"{title} - Confidential    Page ")
+        run.font.size = Pt(8)
+        _field(par, "PAGE", "1")
+        par.add_run(" of ").font.size = Pt(8)
+        _field(par, "NUMPAGES", "1")
+
+
+def new_document(letter: bool = False):
     doc = Document()
     st = doc.styles["Normal"]
     st.font.name = "Calibri"
-    st.font.size = Pt(10)
+    st.font.size = Pt(10.5)
     for s in doc.sections:
+        if letter:
+            s.page_width, s.page_height = Cm(21.59), Cm(27.94)
         s.left_margin = s.right_margin = Cm(2)
         s.top_margin = s.bottom_margin = Cm(2)
     for lvl, size in ((0, 20), (1, 14), (2, 12), (3, 11)):
@@ -188,8 +255,10 @@ def main() -> int:
     for stale in ("00_REVIEW_PACK_INDEX.docx", "Agentic_SOC_Review_Pack.docx"):   # earlier builds; documents stand alone
         (out / stale).unlink(missing_ok=True)
     for name in DOCS:
-        doc = new_document()
+        doc = new_document(letter=name in LETTER)
         convert(SRC / name, doc, pngs)
+        first = (SRC / name).read_text(encoding="utf-8").splitlines()[0].lstrip("# ").strip()
+        footer(doc, html.unescape(first))
         target = out / name.replace(".md", ".docx")
         doc.save(target)
         print(target)

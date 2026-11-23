@@ -49,7 +49,8 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_AUTH_MODE": ("choice", ("dev", "entra")),
     "SOC_CONNECTOR_MODE": ("choice", ("fake", "live")),
     "SOC_BLOB_STORE": ("choice", ("file", "database")),
-    "SOC_LLM_PROVIDER": ("choice", ("none", "azure_openai", "azure_foundry", "anthropic", "openai_compatible")),
+    "SOC_LLM_PROVIDER": ("choice", ("none", "azure_openai", "azure_foundry", "anthropic", "openai_compatible",
+                                    "openrouter", "enterprise_gateway")),
     "SOC_LOG_LEVEL": ("choice", ("debug", "info", "warning", "error", "critical")),
     "SOC_LOG_FORMAT": ("choice", ("json", "text")),
     "SOC_NOTIFY_MIN_SEVERITY": ("choice", ("informational", "low", "medium", "high", "critical")),
@@ -104,6 +105,7 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_REQUIRE_MODEL_MANIFEST": ("bool", None), "SOC_PHISHING_SANDBOX": ("bool", None),
     "SOC_LLM_ENDPOINT": ("url", None), "SOC_PUBLIC_URL": ("url", None), "SOC_ALERT_API_URL": ("url", None),
     "SOC_LLM_EXTRA_HEADERS": ("json", None),
+    "SOC_LLM_GATEWAY_SESSION_ARGS": ("json", None), "SOC_LLM_GATEWAY_CHAT_ARGS": ("json", None),
     "SOC_CLOCK_FREEZE": ("datetime", None),
     "SOC_CONNECTORS_CONFIG": ("file", None), "SOC_SUPPLIERS_FILE": ("file", None), "SOC_LLM_CA_BUNDLE": ("file", None),
     "SOC_FIXTURES_DIR": ("dir", None), "SOC_SAMPLE_CORPUS_DIR": ("dir", None),
@@ -118,7 +120,10 @@ SPEC: dict[str, tuple[str, Any]] = {
 TEXT = {"SOC_HOST", "SOC_DB_RUNTIME_ROLE", "SOC_ENTRA_TENANT_ID", "SOC_ENTRA_AUDIENCE", "SOC_ENTRA_SCOPE", "SOC_ENTRA_SPA_CLIENT_ID",
         "SOC_DEV_JWT_SECRET", "SOC_MFA_AUTH_CONTEXT", "SOC_RAW_PAYLOAD_DIR", "SOC_REPORT_OUTPUT_DIR",
         "SOC_LLM_API_KEY", "SOC_LLM_API_VERSION", "SOC_LLM_AUTH_HEADER", "SOC_LLM_AUTH_PREFIX", "SOC_LLM_DEPLOYMENT",
-        "SOC_LLM_DEPLOYMENT_SMALL", "SOC_LLM_MODEL_VERSION", "SOC_LLM_MODELS", "SOC_NOTIFY_WEBHOOKS", "SOC_RECORD_FIXTURES_DIR",
+        "SOC_LLM_DEPLOYMENT_SMALL", "SOC_LLM_MODEL_VERSION", "SOC_LLM_MODELS", "SOC_LLM_GATEWAY_SDK",
+        "SOC_LLM_GATEWAY_SYSTEM_ARG", "SOC_LLM_GATEWAY_MAX_TOKENS_ARG", "SOC_LLM_GATEWAY_MODELS_CALL",
+        "SOC_LLM_GATEWAY_AUTH_TOKEN", "SOC_LLM_GATEWAY_SESSION_TOKEN", "SOC_JOB_LLM_CATALOGUE_SECONDS",
+        "SOC_JOB_POSTURE_SNAPSHOT_SECONDS", "SOC_NOTIFY_WEBHOOKS", "SOC_RECORD_FIXTURES_DIR",
         "SOC_RECORD_SALT", "SOC_LOG_FILE", "SOC_SCHEDULER_LIVENESS_FILE", "SOC_PHISHING_HOME", "SOC_PHISHING_ENGINE_LOG_LEVEL", "SOC_ENV_FILE",
         "SOC_JOB_ACTIONS_SECONDS", "SOC_JOB_DAILY_REPORT_SECONDS", "SOC_JOB_FOLLOWUP_SECONDS", "SOC_JOB_INCIDENT_SECONDS",
         "SOC_JOB_INTELLIGENCE_SECONDS", "SOC_JOB_NOTIFY_SECONDS", "SOC_JOB_PHISHING_SECONDS",
@@ -314,7 +319,12 @@ def check_environment(env: Mapping[str, str] | None = None) -> list[SettingProbl
                                       "server's certificate (libpq's default 'prefer' can be downgraded or intercepted)",
                                       "add ?sslmode=verify-full&sslrootcert=system (managed server) or "
                                       "sslmode=verify-ca&sslrootcert=<cluster CA> (HIGH_AVAILABILITY.md section 4)"))
-        if lower.get("SOC_LLM_PROVIDER", "none") != "none":
+        if lower.get("SOC_LLM_PROVIDER", "none") == "enterprise_gateway":
+            # the gateway's SDK knows its own address (installed and configured by the deployment, not the console)
+            if not (env.get("SOC_LLM_GATEWAY_SDK") or "").strip():
+                out.append(SettingProblem("error", "SOC_LLM_GATEWAY_SDK", "the in-house gateway is the provider but its "
+                                          "SDK module is not named", "set the module that exposes Session"))
+        elif lower.get("SOC_LLM_PROVIDER", "none") != "none":
             approved = [u.strip() for u in (env.get("SOC_LLM_APPROVED_ENDPOINTS") or "").split(",") if u.strip()]
             if not approved:
                 out.append(SettingProblem("error", "SOC_LLM_APPROVED_ENDPOINTS", "a model provider is set but no endpoint "

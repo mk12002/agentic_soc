@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" font-family="Segoe UI, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.3}
+      .chk{fill:#e0ecff;stroke:#2f6bb3;stroke-width:1.3}
+      .ok{fill:#ecfdf3;stroke:#15803d;stroke-width:1.3}
+      .gov{fill:#fff7e8;stroke:#c2410c;stroke-width:1.3}
+      .h{font-weight:600;fill:#0f172a}
+      .t{font-weight:600;fill:#1e293b;font-size:13.5px}
+      .s{fill:#475569;font-size:12px}
+      .line{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .lbl{fill:#1e293b;font-size:11.5px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1200" height="640" fill="#ffffff"/>
+  <text x="30" y="34" class="h" font-size="20">Customer AI platform integration - provider, credentials and model versions</text>
+  <text x="30" y="56" class="s">An administrator chooses the provider on the AI usage screen. No model version is written in the platform's settings: a chosen model follows its line.</text>
+
+  <text x="30" y="92" class="t">A. Choosing the provider (administrator, step-up MFA, audited)</text>
+  <rect x="20" y="104" width="270" height="132" rx="10" class="box"/><text x="34" y="128" class="t">Option 1 - in-house gateway</text><text x="34" y="148" class="s">the &lt;client&gt;'s AI platform through its</text><text x="34" y="164" class="s">Python SDK, installed only in the</text><text x="34" y="180" class="s">&lt;client&gt;'s image build; one service</text><text x="34" y="196" class="s">account: auth token + session token</text><text x="34" y="218" class="lbl">everyone signs in with SSO</text>
+  <rect x="310" y="104" width="270" height="132" rx="10" class="box"/><text x="324" y="128" class="t">Option 2 - API-key provider</text><text x="324" y="148" class="s">OpenRouter, Azure AI Foundry /</text><text x="324" y="164" class="s">Azure OpenAI, Anthropic API, any</text><text x="324" y="180" class="s">OpenAI-compatible endpoint (e.g. a</text><text x="324" y="196" class="s">gateway in front of AWS Bedrock)</text><text x="324" y="218" class="lbl">endpoint must be on the approved list</text>
+  <rect x="600" y="104" width="280" height="132" rx="10" class="chk"/><text x="614" y="128" class="t">Credential store</text><text x="614" y="148" class="s">sealed with SOC_DATA_KEY (Fernet),</text><text x="614" y="164" class="s">write-only: never returned, logged or</text><text x="614" y="180" class="s">audited by value; per provider (a key</text><text x="614" y="196" class="s">never follows a switch); or vault files</text><text x="614" y="218" class="lbl">expiry date -> finding 3 days before</text>
+  <rect x="900" y="104" width="280" height="132" rx="10" class="ok"/><text x="914" y="128" class="t">Test connection</text><text x="914" y="148" class="s">SDK installed - credentials - provider</text><text x="914" y="164" class="s">starts - model list - one grounded</text><text x="914" y="180" class="s">answer passes the evidence check -</text><text x="914" y="196" class="s">token usage reported; each failure</text><text x="914" y="212" class="s">with its fix</text>
+  <path d="M290 170 L304 170" class="line"/><path d="M580 170 L598 170" class="line"/><path d="M880 170 L898 170" class="line"/>
+
+  <text x="30" y="276" class="t">B. Model versions follow their line (every 6 hours, and on "Refresh")</text>
+  <rect x="20" y="288" width="210" height="140" rx="10" class="box"/><text x="34" y="312" class="t">1 Read the catalogue</text><text x="34" y="332" class="s">the provider's model list</text><text x="34" y="348" class="s">(or names an admin adds);</text><text x="34" y="364" class="s">"GPT 6.2 Sol" = line</text><text x="34" y="380" class="s">"gpt sol", version 6.2;</text><text x="34" y="396" class="s">retiring models flagged</text>
+  <rect x="250" y="288" width="210" height="140" rx="10" class="chk"/><text x="264" y="312" class="t">2 Same generation?</text><text x="264" y="332" class="s">6.1 -> 6.2: candidate for</text><text x="264" y="348" class="s">automatic adoption</text><text x="264" y="370" class="s">6.x -> 7: waits for an</text><text x="264" y="386" class="s">administrator's approval</text><text x="264" y="408" class="lbl">pinned lines / features skipped</text>
+  <rect x="480" y="288" width="230" height="140" rx="10" class="chk"/><text x="494" y="312" class="t">3 The platform's check</text><text x="494" y="332" class="s">grounded question on synthetic</text><text x="494" y="348" class="s">evidence: valid JSON, every</text><text x="494" y="364" class="s">statement cites given evidence,</text><text x="494" y="380" class="s">no figure the evidence lacks</text><text x="494" y="408" class="lbl">fail -> stay, finding, retry in 1 day</text>
+  <rect x="730" y="288" width="210" height="140" rx="10" class="ok"/><text x="744" y="312" class="t">4 Adopt</text><text x="744" y="332" class="s">append-only adoption record</text><text x="744" y="348" class="s">(from, to, why, by, check);</text><text x="744" y="364" class="s">audited; finding raised;</text><text x="744" y="380" class="s">every call logs the version</text><text x="744" y="396" class="s">that answered</text>
+  <rect x="960" y="288" width="220" height="140" rx="10" class="gov"/><text x="974" y="312" class="t">5 Roll back</text><text x="974" y="332" class="s">one click returns the line</text><text x="974" y="348" class="s">to the version before and</text><text x="974" y="364" class="s">blocks the bad one; "allow</text><text x="974" y="380" class="s">again" lifts the block</text>
+  <path d="M230 358 L248 358" class="line"/><path d="M460 358 L478 358" class="line"/><path d="M710 358 L728 358" class="line"/><path d="M940 358 L958 358" class="line"/>
+
+  <rect x="20" y="456" width="1160" height="164" rx="10" class="box"/>
+  <text x="34" y="480" class="t">Why automatic adoption is safe here - and what remains the &lt;client&gt;'s choice</text>
+  <text x="34" y="502" class="s">- A model version cannot change a figure, verdict, score or action: the model only writes narrative from evidence the platform computed, and each statement is checked on every call.</text>
+  <text x="34" y="522" class="s">- Each feature (or a default per size of work) can be pinned; SOC_LLM_MODEL_VERSION pins a line for the whole deployment; "use newer versions automatically" can be switched off.</text>
+  <text x="34" y="542" class="s">- Every person's AI use counts against their own hourly / daily limits even though calls use one service account; monthly and daily budgets cap the whole platform.</text>
+  <text x="34" y="562" class="s">- An expired or refused token never breaks a workflow: the platform writes its own cited text, logs auth_error and raises a high finding for administrators (Teams / Slack / webhook).</text>
+  <text x="34" y="582" class="s">- The in-house SDK's interface was built from its documentation and tested against a stand-in; its first contact with the real SDK is Test connection in the &lt;client&gt;'s environment.</text>
+  <text x="34" y="602" class="s">- Status: provider choice, credential store, model lines, checked upgrades, approvals and roll back - Implemented; real-SDK validation - to do in the controlled PoC.</text>
+</svg>

@@ -35,7 +35,12 @@ def client(tmp_path_factory):
     from soc_platform.api import app as appmod
 
     appmod.registry.cache_clear()
+    # this module sends more than the production rate budget (burst 120, 20/s) from one client: with the shared
+    # process-wide limiter its last tests got 429 whenever the module ran fast enough (seen after the consistency
+    # suite). Rate limiting itself is tested in test_resilience_security / test_pentest.
+    limiter, appmod._limiter = appmod._limiter, appmod._RateLimiter(1e9, 10**9)
     yield TestClient(appmod.app)
+    appmod._limiter = limiter
     if saved_offset is None:
         os.environ.pop("SOC_CLOCK_OFFSET_SECONDS", None)
     else:

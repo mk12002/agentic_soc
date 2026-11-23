@@ -11,6 +11,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY requirements/ requirements/
 RUN if [ "$WITH_PHISHING_ENGINE" = "true" ]; then LOCK=requirements/image-engine.lock; else LOCK=requirements/image.lock; fi \
  && pip install --no-cache-dir --require-hashes --prefix=/install -r "$LOCK"
+# The organisation's in-house LLM gateway SDK is never part of this repository or its locks. The organisation's own
+# build adds it from its internal package index, hash-checked like every other package, with two build secrets and
+# the lock's SHA-256 as a build argument:
+#   docker build --secret id=gateway_sdk_lock,src=gateway-sdk.lock [--secret id=pip_conf,src=pip.conf] \
+#     --build-arg GATEWAY_SDK_LOCK_SHA256=$(sha256sum gateway-sdk.lock | cut -d' ' -f1) -f deploy/Dockerfile .
+# gateway-sdk.lock: the SDK and its dependencies with --hash lines; pip.conf: the internal index (and its credentials,
+# which never enter an image layer). The build argument is required with the lock: BuildKit leaves a secret's content
+# out of its cache key, so without it a changed lock reused the old SDK layer, and a build without the secret reused a
+# cached SDK layer (found by building both). Without the secrets this step does nothing (CLIENT_DEPLOYMENT_GUIDE 5.9).
+ARG GATEWAY_SDK_LOCK_SHA256=""
+RUN --mount=type=secret,id=gateway_sdk_lock --mount=type=secret,id=pip_conf \
+    if [ -f /run/secrets/gateway_sdk_lock ]; then \
+      echo "${GATEWAY_SDK_LOCK_SHA256}  /run/secrets/gateway_sdk_lock" | sha256sum -c - >/dev/null \
+        || { echo "GATEWAY_SDK_LOCK_SHA256 must be the SHA-256 of the gateway_sdk_lock secret" >&2; exit 1; }; \
+      if [ -f /run/secrets/pip_conf ]; then export PIP_CONFIG_FILE=/run/secrets/pip_conf; fi; \
+      pip install --no-cache-dir --require-hashes --prefix=/install -r /run/secrets/gateway_sdk_lock; \
+    fi
 
 FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce
 RUN apt-get update && apt-get install -y --no-install-recommends libzbar0 libgomp1 \

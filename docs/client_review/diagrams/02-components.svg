@@ -21,10 +21,10 @@
   <rect x="20" y="78" width="1160" height="96" rx="10" class="layer"/>
   <text x="34" y="98" class="L">API layer - request path (every call)</text>
   <g>
-    <rect x="34" y="108" width="150" height="54" rx="7" class="box"/><text x="44" y="129" class="t">Body limit</text><text x="44" y="148" class="s">30 MB on the byte stream</text>
+    <rect x="34" y="108" width="150" height="54" rx="7" class="box"/><text x="44" y="129" class="t">Body limit</text><text x="44" y="148" class="s">30 MB stream cap</text>
     <rect x="198" y="108" width="170" height="54" rx="7" class="box"/><text x="208" y="129" class="t">Security middleware</text><text x="208" y="148" class="s">NUL refusal · size · rate limit</text>
     <rect x="382" y="108" width="190" height="54" rx="7" class="box"/><text x="392" y="129" class="t">Authentication</text><text x="392" y="148" class="s">Entra · API key · break-glass</text>
-    <rect x="586" y="108" width="190" height="54" rx="7" class="box"/><text x="596" y="129" class="t">Authorisation</text><text x="596" y="148" class="s">role → permission · domain scope</text>
+    <rect x="586" y="108" width="190" height="54" rx="7" class="box"/><text x="596" y="129" class="t">Authorisation</text><text x="596" y="148" class="s">role · permission · scope</text>
     <rect x="790" y="108" width="180" height="54" rx="7" class="box"/><text x="800" y="129" class="t">Handler</text><text x="800" y="148" class="s">one transaction, commit first</text>
     <rect x="984" y="108" width="182" height="54" rx="7" class="box"/><text x="994" y="129" class="t">Response</text><text x="994" y="148" class="s">security headers · access log</text>
     <path d="M184,135 L196,135" class="line"/><path d="M368,135 L380,135" class="line"/><path d="M572,135 L584,135" class="line"/><path d="M776,135 L788,135" class="line"/><path d="M970,135 L982,135" class="line"/>
@@ -39,7 +39,7 @@
   <rect x="20" y="256" width="1160" height="110" rx="10" class="layer"/>
   <text x="34" y="276" class="L">Intelligence layer (reads every domain)</text>
   <rect x="34" y="286" width="210" height="66" rx="7" class="box"/><text x="44" y="307" class="t">Risk engine</text><text x="44" y="325" class="s">explainable, per user / host,</text><text x="44" y="341" class="s">time-decayed</text>
-  <rect x="258" y="286" width="210" height="66" rx="7" class="box"/><text x="268" y="307" class="t">Correlation</text><text x="268" y="325" class="s">12 cross-domain rules,</text><text x="268" y="341" class="s">findings with evidence</text>
+  <rect x="258" y="286" width="210" height="66" rx="7" class="box"/><text x="268" y="307" class="t">Correlation</text><text x="268" y="325" class="s">13 cross-domain rules,</text><text x="268" y="341" class="s">findings with evidence</text>
   <rect x="482" y="286" width="210" height="66" rx="7" class="box"/><text x="492" y="307" class="t">Attack story</text><text x="492" y="325" class="s">ATT&amp;CK kill chain, blast</text><text x="492" y="341" class="s">radius, phased response</text>
   <rect x="706" y="286" width="210" height="66" rx="7" class="box"/><text x="716" y="307" class="t">Analyst assistant · brief</text><text x="716" y="325" class="s">read-only tool catalogue,</text><text x="716" y="341" class="s">cited answers</text>
   <rect x="930" y="286" width="236" height="66" rx="7" class="box"/><text x="940" y="307" class="t">Coverage · shadow IT · drift</text><text x="940" y="325" class="s">report builder (Word / PPT),</text><text x="940" y="341" class="s">compliance evidence pack</text>
@@ -76,7 +76,7 @@
   <text x="810" y="686" class="L">LLM gateway (optional leaf)</text>
   <text x="810" y="708" class="s">approved endpoint · usage policy · pseudonymisation</text>
   <text x="810" y="726" class="s">grounding + numeric guardrail · breaker · call log</text>
-  <text x="810" y="744" class="s">providers: OpenAI-compatible, Azure, Anthropic</text>
+  <text x="810" y="744" class="s">OpenAI-compatible, Azure, Anthropic, OpenRouter, SDK</text>
 
   <!-- storage -->
   <rect x="20" y="768" width="1160" height="72" rx="10" class="layer"/>

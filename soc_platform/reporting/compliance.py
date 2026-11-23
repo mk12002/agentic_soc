@@ -114,9 +114,9 @@ def build_evidence(session: Session, settings: Settings, *, period_days: int = 9
         {"control": "NFR-11 / R02 / R10 LLM governance",
          "tests": [_test("PII redaction before model calls enabled", settings.llm_redact_pii,
                          f"llm_redact_pii={settings.llm_redact_pii}"),
-                   _test("model calls only to approved endpoints", settings.llm_provider == "none" or
-                         bool(settings.llm_approved_endpoints),
-                         f"provider={settings.llm_provider}; approved endpoints={len(settings.llm_approved_endpoints)}")],
+                   _test("model calls only to approved endpoints", _llm_endpoint_ok(session, settings),
+                         f"provider={_llm_provider(session, settings)}; "
+                         f"approved endpoints={len(settings.llm_approved_endpoints)}")],
          "figures": {"calls_in_period": len(llm_calls), "models": dict(llm_models),
                      "tokens": sum((c.prompt_tokens or 0) + (getattr(c, "completion_tokens", 0) or 0) for c in llm_calls)}},
         {"control": "NFR-08 / R10 Data protection (encryption at rest, retention)",
@@ -175,3 +175,22 @@ def build_pack(session: Session, settings: Settings, out_dir: str | Path, *, per
     from soc_platform.core.blobstore import BlobStore
 
     return BlobStore(session, settings).store_generated(path, f"reports/{path.name}"), ev
+
+
+def _llm_provider(session: Any, settings: Any) -> str:
+    from soc_platform.llm.integration import IntegrationStore
+
+    return IntegrationStore(session, settings).status()["provider"]
+
+
+def _llm_endpoint_ok(session: Any, settings: Any) -> bool:
+    """Prompts go only to an approved endpoint: no provider; the in-house gateway (its SDK, set by the deployment,
+    knows its address); or an endpoint on SOC_LLM_APPROVED_ENDPOINTS."""
+    from soc_platform.llm.integration import IntegrationStore
+
+    st = IntegrationStore(session, settings).status()
+    if st["provider"] in ("none", "enterprise_gateway"):
+        return True
+    approved = [a.rstrip("/") for a in settings.llm_approved_endpoints]
+    endpoint = (st["endpoint"] or "").rstrip("/")
+    return bool(approved) and (not endpoint or endpoint in approved)

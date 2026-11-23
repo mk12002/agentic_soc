@@ -1,6 +1,6 @@
 # Test report - CyberDome platform
 
-Date: 2026-11-21 (rounds 15-36; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-11-23 (rounds 15-37; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,59 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 36 (2026-11-21) - latest results: EDR coverage by category, URL path values, phones
+## 0. Round 37 (2026-11-23) - latest results: AI integration, model versions, CISO executive view
+
+Aim: let an administrator connect the organisation's in-house AI platform (its SDK, a service account) or an API-key
+provider without a redeploy; stop hard-coding model versions; give the CISO a read-only role and an executive view -
+and prove each works as deployed, not only in unit tests.
+
+**What changed.** `llm/integration.py` (provider and credentials set in the console: sealed with the data key,
+write-only, per provider, audited by name; *Test connection*), `llm/providers/enterprise_gateway.py` (the in-house
+SDK named only by a deployment setting, run on one background event loop), `OpenRouterProvider`, `llm/model_lines.py`
+and `llm/catalogue.py` (a chosen model follows its line; a newer version in the same generation is checked, then
+used; a new generation waits for an administrator; roll back), the `llm_catalogue` and `posture_snapshot` jobs, the
+`ciso` role, `api/executive.py` and the Executive view, a hash-checked optional SDK step in the Dockerfile (build
+secrets), and the CISO security assessment in the review pack.
+
+**Tests added:** `test_llm_integration.py` (39: names read as line and version; credentials write-only and encrypted;
+administrator only; approved endpoints; no key reused across providers; the gateway SDK through a stand-in shaped
+like its documentation - answers, expired token, missing SDK, overlapping calls, vault-mounted tokens; checked
+upgrades, failed checks, generation approval, roll back, pins, retirement, expiry, idempotent refresh; OpenRouter's
+no-retention request; the API), `test_executive.py` (14: the CISO reads and changes nothing; due dates in the viewer's
+own day; snapshots; the brief cites only the figures, written by the model or by the platform; the API),
+`test_consistency.py::test_the_executive_view_agrees_with_every_screen_it_links_to` (on all four sample
+organisations) and the CISO added to the every-route sweep. The browser tour now signs in as the CISO (landing page,
+tiles and agenda counts against the API, no approval buttons) and checks the AI integration card.
+
+**Found and fixed during the round:**
+
+| Defect | Found by | Fix |
+|---|---|---|
+| After switching provider, features asked the new provider for the built-in default names (`gpt-4.1`) it did not serve, and quietly fell back for up to six hours | A test of the brief through the gateway stand-in | Saving the provider reads its model list at once |
+| The executive brief's fallback showed `deterministic_grounded`'s "14 evidence item(s) from 1 source(s)" as its summary | Rehearsing the deployed flow against a real server | The platform writes the brief from the figures itself |
+| Test connection tested a built-in default model the gateway did not offer | A test | It tests a model the provider lists |
+| With the provider chosen in the console, the settings' model names (`SOC_LLM_DEPLOYMENT`, `SOC_LLM_MODELS`) still entered the model list and defaults: features asked the gateway for an old endpoint's models and fell back | Feature verification with a live `.env` | Those settings apply only to a provider configured in the settings (regression test fails without the fix) |
+| Phone width: a long unbroken token in model-written case text (URL, hash, path) widened the page by 88 px | Feature verification's browser tour with the model on | Narrative text breaks long tokens; the tour's overflow report skips content inside scrollers |
+| Phone width, model text on: a run of citation chips (E15 E17 E19 ...) was joined with no space - one unbreakable run that pushed the page 164 px wide; a citation's tooltip opened past the right edge of the screen | Browser tour with the live model | Chips joined with spaces in all five places they are built; claim text breaks long tokens; on phones the tooltip is pinned to the bottom of the screen |
+| A live deep analysis took longer than the tour's 180 s wait once (slow endpoint, not a defect); a run with `.env` loaded into the shell ran the offline suites against live services | Feature verification | Verification run as documented (the script reads `SOC_LLM_*` itself); the tour re-run with the live model |
+| A helper imported as `test_connection` was collected by pytest as a test | The first test run | Renamed `connection_check` |
+| The executive view loaded every case, finding and reported e-mail ever stored | Review for scale | Only what is open or inside the two periods |
+| AI usage screen: model names wrapped, two tables needed sideways scrolling at 1280 px; the posture card repeated its note; "1 people" | The browser tour and its screenshots | Full-width cards, no-wrap names, narrower controls, wording |
+| A leftover notice from an earlier step appeared on the executive screenshot | Reading the screenshot | The tour clears notices first |
+| The SDK build step's cache: BuildKit leaves a secret's content out of the cache key, so a build without the SDK secret reused a cached SDK layer, and a changed lock would have reused the old SDK | Building the image both ways (Docker 29.8) | The lock's SHA-256 is a required build argument, checked against the mounted lock; verified: with the right hash the package installs, a build without the secret straight after has none, a wrong hash is refused |
+| `test_api.py` sent more than the production rate budget through the shared limiter; its last test got 429 when it ran right after the consistency suite | Re-running the files edited mid-round | The module installs its own unlimited limiter and restores the original (rate limiting stays covered by the security suites) |
+| Review pack: "secrets never in the database" no longer true for AI credentials; "model pinning" no longer the default; "three sample organisations" (four) | Writing the CISO assessment | Corrected in `03`, `04`, the diagrams |
+
+**Deployed-path rehearsal.** A real server (scheduler on) over the demonstration database created before this round:
+the new tables appeared on start-up; *Test connection* passed every step through the SDK stand-in; the catalogue was
+read and the line moved 6 -> 6.1 after its check; both new jobs ran under the scheduler; the CISO read every screen and
+was refused the kill switch and the AI provider; no token appeared in any response or in the audit trail.
+
+**Counts:** 1061 collected. SQLite: 1043 passed, 18 skipped, 0 failed (full run 42 min 8 s; the files edited during the round re-run afterwards). PostgreSQL 16: 1040 passed, 21 skipped, 0 failed (full run 1 h 43 min 52 s, both suites at once; edited files re-run). `verify_features.py --browser --engine --live --llm`: **112 of 112** features (three new: the executive view, the AI provider, model lines), 267 mapped tests run, 0 failed; browser tour with the live model 0 problems; engine 205 passed. Live LLM suite on the configured Azure endpoint: 11 passed. Browser tour: 41 screenshots,
+1440 / 1280 / 1024 / 768 / 390 px, 0 problems. ruff, bandit, pip-audit (no known vulnerabilities), the lock check and
+the secret / confidential-name scan clean.
+
+## 0.0 Round 36 (2026-11-21): EDR coverage by category, URL path values, phones
 
 Aim: find defects the existing tests could not see.
 

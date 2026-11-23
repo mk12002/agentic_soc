@@ -522,8 +522,10 @@ def _iso(value: datetime | None) -> str | None:
 def llm(s: Session, p: Principal | None = None) -> LLMGateway | None:
     """The gateway for this request. ``p``: the person asking (analyst questions, deep analysis, reports) - their
     AI usage limits apply; omitted for scheduled and shared work (platform budgets only)."""
+    from soc_platform.llm.integration import configured
+
     st = get_settings()
-    return LLMGateway(s, st, actor=p) if st.llm_provider != "none" else None
+    return LLMGateway(s, st, actor=p) if configured(s, st) else None
 
 
 def _with_notice(out: Any, gw: LLMGateway | None) -> Any:
@@ -2081,11 +2083,14 @@ def deep_analysis(cid: str, body: DeepBody | None = None, p: Principal = Depends
 
 @app.get("/api/v1/llm/status")
 def llm_status(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
+    from soc_platform.llm.integration import IntegrationStore, configured
+
     st = get_settings()
-    return {"configured": st.llm_provider != "none", "provider": st.llm_provider,
+    on = configured(s, st)
+    return {"configured": on, "provider": IntegrationStore(s, st).status()["provider"],
             "model_pinned": st.llm_model_version, "redaction": st.llm_redact_pii,
-            "budget": LLMGateway(s, st).budget_status() if st.llm_provider != "none" else None,
-            "latency": LLMGateway(s, st).latency_status() if st.llm_provider != "none" else None}
+            "budget": LLMGateway(s, st).budget_status() if on else None,
+            "latency": LLMGateway(s, st).latency_status() if on else None}
 
 
 @app.get("/api/v1/metrics/shadow")
@@ -2115,11 +2120,11 @@ class LlmPolicyBody(BaseModel):
 def llm_policy_get(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
     """The AI usage policy in force (budgets, per-user limits, per-feature model), the models that can be chosen,
     its defaults and its history."""
-    from soc_platform.llm.usage_policy import KNOWN_WORKFLOWS, ROLES, TIERS, UsagePolicyStore, defaults
+    from soc_platform.llm.usage_policy import KNOWN_WORKFLOWS, ROLES, TIERS, UsagePolicyStore
 
     st = UsagePolicyStore(s, get_settings())
     pol = st.active()
-    return {"policy": pol, "defaults": defaults(get_settings()), "history": st.history(),
+    return {"policy": pol, "defaults": st.base(), "history": st.history(),
             "workflows": {k: {"default_tier": v[0], "triggered_by": v[1], "description": v[2]}
                           for k, v in KNOWN_WORKFLOWS.items()}, "roles": list(ROLES), "tiers": list(TIERS),
             "models": pol["models"], "default_models": pol["default_models"]}
@@ -2129,13 +2134,14 @@ def llm_policy_get(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = D
 def llm_models_check(p: Principal = Depends(need(Perm.MANAGE_ACCESS)), s: Session = Depends(db_session, scope="function")):
     """Send one tiny request to each listed model: which ones the endpoint really serves (a model that is not
     deployed would make every call of a feature fall back to the platform's own text)."""
-    from soc_platform.llm.usage_policy import models
+    from soc_platform.llm.usage_policy import UsagePolicyStore
 
+    listed = UsagePolicyStore(s, get_settings()).active()["models"]
     s.commit()                                     # no write lock held while the endpoint answers
     gw = llm(s, p)
-    results = (gw.probe(models(get_settings())) if gw is not None else
-               [{"model": m["name"], "ok": False, "detail": "no model provider is configured (SOC_LLM_PROVIDER)"}
-                for m in models(get_settings())])
+    results = (gw.probe(listed) if gw is not None else
+               [{"model": m["name"], "ok": False, "detail": "no model provider is configured (AI integration)"}
+                for m in listed])
     AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="llm.models_checked", subject_type="llm_policy",
                        subject_id="models", payload={"results": [{k: r.get(k) for k in ("model", "ok")} for r in results]})
     return {"results": results}
@@ -2168,6 +2174,167 @@ def llm_usage(days: int = Query(30, ge=1, le=366), _: Principal = Depends(need(P
 @app.get("/api/v1/llm/budget")
 def llm_budget(_: Principal = Depends(need(Perm.READ)), s: Session = Depends(db_session, scope="function")):
     return LLMGateway(s, get_settings()).budget_status()
+
+
+# ----------------------------------------------------------------------------- AI integration (provider, models)
+
+
+class LlmIntegrationBody(BaseModel):
+    provider: str = Field(max_length=32)
+    endpoint: str | None = Field(default=None, max_length=512)
+    # write-only: a value replaces the stored credential, null clears it, a missing name leaves it as it is
+    secrets: dict[str, str | None] = Field(default_factory=dict, max_length=4)
+    expires_at: datetime | None = None
+    note: str = Field(default="", max_length=2000)
+
+
+class LlmModelBody(BaseModel):
+    name: str = Field(max_length=128)
+
+
+class LlmLineBody(BaseModel):
+    line: str = Field(max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+
+
+@app.get("/api/v1/admin/llm/integration")
+def llm_integration_get(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
+    """The provider in force and whether each of its credentials is set - never a credential's value."""
+    import importlib.util
+    import os
+
+    from soc_platform.llm.integration import PROVIDERS, SECRET_LABELS, IntegrationStore
+
+    st = get_settings()
+    store = IntegrationStore(s, st)
+    mod = os.environ.get("SOC_LLM_GATEWAY_SDK", "").strip()
+    try:
+        sdk_found = bool(mod) and importlib.util.find_spec(mod) is not None
+    except (ImportError, ValueError):
+        sdk_found = False
+    return {**store.status(), "history": store.history(),
+            "providers": {k: {"label": v["label"], "endpoint": v["endpoint"],
+                              "default_endpoint": v.get("default_endpoint"),
+                              "secrets": [{"name": n, "label": SECRET_LABELS.get(n, n)} for n in v["secrets"]]}
+                          for k, v in PROVIDERS.items()},
+            "approved_endpoints": list(st.llm_approved_endpoints),
+            "gateway_sdk": {"configured": bool(mod), "installed": sdk_found}}
+
+
+@app.put("/api/v1/admin/llm/integration")
+def llm_integration_set(body: LlmIntegrationBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                        s: Session = Depends(db_session, scope="function")):
+    """Choose the model provider and enter its credentials (administrators; audited without the values; in force
+    for the next model call)."""
+    from soc_platform.llm.catalogue import refresh
+    from soc_platform.llm.integration import IntegrationStore
+
+    try:
+        IntegrationStore(s, get_settings()).save(provider=body.provider, endpoint=body.endpoint, secrets=body.secrets,
+                                                 expires_at=body.expires_at, by=p, note=body.note)
+    except Exception as exc:
+        raise _err(exc) from exc
+    s.commit()                     # saved whatever the provider answers next; no write lock held while it answers
+    # read the new provider's models at once: until then features would ask it for the built-in default names
+    try:
+        listed = refresh(s, get_settings(), gateway=llm(s, p)).get("listed")
+    except Exception as exc:  # noqa: BLE001 - the choice is saved; Test connection names what is wrong
+        import logging
+
+        logging.getLogger(__name__).warning("model list not read after the provider changed: %s", type(exc).__name__)
+        listed = None
+    return {**IntegrationStore(s, get_settings()).status(), "models_listed": listed}
+
+
+@app.post("/api/v1/admin/llm/integration/test")
+def llm_integration_test(p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                         s: Session = Depends(db_session, scope="function")):
+    """Every step the provider must pass (SDK, credentials, model list, a checked answer, token counts)."""
+    from soc_platform.llm.integration import connection_check
+
+    s.commit()                                     # no write lock held while the provider answers
+    out = connection_check(s, get_settings(), p)
+    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="llm.integration_tested",
+                       subject_type="llm_integration", subject_id="test",
+                       payload={"ok": out["ok"], "steps": [{k: x[k] for k in ("step", "ok")} for x in out["steps"]]})
+    return out
+
+
+@app.get("/api/v1/admin/llm/catalogue")
+def llm_catalogue_get(_: Principal = Depends(need(Perm.READ_AUDIT)), s: Session = Depends(db_session, scope="function")):
+    """The models the provider offers, each model line in use (chosen, in use, newer versions) and every change."""
+    from soc_platform.llm.catalogue import view
+
+    return view(s, get_settings())
+
+
+@app.post("/api/v1/admin/llm/catalogue/refresh")
+def llm_catalogue_refresh(p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                          s: Session = Depends(db_session, scope="function")):
+    """Read the provider's model list now and move each followed line to its newest checked version."""
+    from soc_platform.llm.catalogue import refresh, view
+
+    s.commit()
+    out = refresh(s, get_settings(), gateway=llm(s, p))
+    AuditLog(s).append(actor_type="human", actor_id=p.id, event_type="llm.catalogue_refreshed",
+                       subject_type="llm_catalogue", subject_id="refresh",
+                       payload={k: out.get(k) for k in ("listed", "adopted", "awaiting_approval", "failed_checks")})
+    return {"result": out, "catalogue": view(s, get_settings())}
+
+
+@app.post("/api/v1/admin/llm/catalogue/models")
+def llm_catalogue_add(body: LlmModelBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                      s: Session = Depends(db_session, scope="function")):
+    """Add a model name the provider offers (for providers that publish no list)."""
+    from soc_platform.llm.catalogue import add_model, view
+
+    try:
+        add_model(s, get_settings(), body.name, p)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return view(s, get_settings())
+
+
+@app.post("/api/v1/admin/llm/lines/approve")
+def llm_line_approve(body: LlmLineBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                     s: Session = Depends(db_session, scope="function")):
+    """Move a model line to a newer generation: checked first, refused with the reason when the check fails."""
+    from soc_platform.llm.catalogue import approve, view
+
+    if not body.model:
+        raise HTTPException(400, "name the model to move to")
+    s.commit()
+    try:
+        approve(s, get_settings(), body.line, body.model, p, gateway=llm(s, p))
+    except Exception as exc:
+        raise _err(exc) from exc
+    return view(s, get_settings())
+
+
+@app.post("/api/v1/admin/llm/lines/rollback")
+def llm_line_rollback(body: LlmLineBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                      s: Session = Depends(db_session, scope="function")):
+    """Return a model line to the version before its last change; the rolled-back version is never adopted again."""
+    from soc_platform.llm.catalogue import rollback, view
+
+    try:
+        rollback(s, get_settings(), body.line, p)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return view(s, get_settings())
+
+
+@app.post("/api/v1/admin/llm/models/unblock")
+def llm_model_unblock(body: LlmModelBody, p: Principal = Depends(need(Perm.MANAGE_ACCESS)),
+                      s: Session = Depends(db_session, scope="function")):
+    """Let a rolled-back model version be adopted again."""
+    from soc_platform.llm.catalogue import unblock, view
+
+    try:
+        unblock(s, get_settings(), body.name, p)
+    except Exception as exc:
+        raise _err(exc) from exc
+    return view(s, get_settings())
 
 
 # ----------------------------------------------------------------------------- phishing
@@ -2852,6 +3019,42 @@ def dome_score_set(body: DomeWeightsBody, p: Principal = Depends(need(Perm.APPRO
     except Exception as exc:
         raise _err(exc) from exc
     return dome_score(s, registry())
+
+
+@app.get("/api/v1/executive")
+def executive_get(days: int = Query(30), tz_offset_minutes: int = Query(0),
+                  _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
+    """The executive view: posture, headline figures against the period before, the agenda by due date (in the
+    viewer's day: ``tz_offset_minutes`` east of UTC) and every section - all computed from the records. Spans every
+    domain, so it needs all-domain access (a CISO, a lead, an auditor)."""
+    from soc_platform.api.executive import view
+
+    try:
+        return view(s, registry(), _services(s)["vulnerability"], days=days, tz_offset_minutes=tz_offset_minutes)
+    except Exception as exc:
+        raise _err(exc) from exc
+
+
+@app.post("/api/v1/executive/brief")
+def executive_brief(days: int = Query(30), tz_offset_minutes: int = Query(0),
+                    p: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
+    """A short written brief over the executive view's figures. The model only narrates figures it is handed and
+    cites them; without a model (or over a limit) the platform writes it from the same figures."""
+    from soc_platform.api.executive import deterministic_brief, evidence, view
+
+    try:
+        v = view(s, registry(), _services(s)["vulnerability"], days=days, tz_offset_minutes=tz_offset_minutes)
+    except Exception as exc:
+        raise _err(exc) from exc
+    ev = evidence(v)
+    s.commit()                                     # no write lock held while the model writes
+    gw = llm(s, p)
+    question = (f"Write a brief for the CISO on the last {days} days: overall posture, what improved or worsened "
+                "against the previous period, and what needs a decision first. Use only the figures given.")
+    out = gw.grounded("executive.brief", question, ev) if gw is not None else None
+    if out is None or out.get("source") != "llm":      # no model, over a limit, or nothing survived the evidence check
+        out = deterministic_brief(v, ev)
+    return _with_notice({**out, "evidence": ev, "period_days": days}, gw)
 
 
 @app.get("/api/v1/dome-score/history")
