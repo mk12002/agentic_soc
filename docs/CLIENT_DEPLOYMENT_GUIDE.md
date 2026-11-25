@@ -14,14 +14,14 @@ connector reference), `docs/OPERATIONS.md` (settings, jobs, monitoring), `docs/S
 
 | Area | Demo | Client environment | Section |
 |---|---|---|---|
-| Hosting | laptop, SQLite or local PostgreSQL | container host / VM / Kubernetes, PostgreSQL 16, TLS reverse proxy | 1, 2 |
+| Hosting | laptop, SQLite or local PostgreSQL | **Windows host(s)**: Windows Server, Python 3.13, PostgreSQL 16, IIS as the TLS reverse proxy (`deploy/windows`); containers / Kubernetes remain an alternative | 1, 1A, 2 |
 | Data | `python -m soc_platform demo` loads the Acme sample organisation | **never run `demo`**; data arrives from the client's tools | 2.4 |
 | Organisation facts | `acme-demo.com`, demo suppliers | the client's mail domains, supplier list, sanctioned SaaS list | 2.3 |
 | Sign-in | dev tokens (`SOC_AUTH_MODE=dev`) | Entra ID single sign-on with app roles and MFA (`SOC_AUTH_MODE=entra`) | 3 |
 | Connectors | `mode: fake` (vendor-shaped fixtures) | `mode: live` per tool, credentials from a vault | 4 |
 | LLM | the developer's Azure AI Foundry deployment | the client's in-house LLM platform (Claude / Gemini / OpenAI models behind it) | 5 |
 | Actions | recommended, approved in the demo | recommended only (L2) until the client's change board promotes them | 6 |
-| Secrets | `.env` on a laptop | Key Vault (or similar) mounted as files: `<NAME>_FILE` | 2.2 |
+| Secrets | `.env` on a laptop | files only administrators and the service account can read (`C:\ProgramData\CyberDome\secrets`), or Key Vault mounted as files: `<NAME>_FILE` | 1A, 2.2 |
 
 **Code changes needed:** none for a standard deployment. Everything below is configuration. The exceptions (an LLM
 gateway that needs OAuth tokens instead of a static key, or a tool API the client runs in a non-standard way) are
@@ -29,7 +29,7 @@ called out where they apply, with the file to change.
 
 **Deployment order** (each step is usable on its own):
 
-1. Platform up on PostgreSQL with Entra sign-in, no connectors live (section 1-3).
+1. Platform up on PostgreSQL with Entra sign-in, no connectors live (sections 1-3; on Windows hosts section 1A).
 2. Read-only connectors, one at a time: identity and EDR first, then e-mail, then vulnerability, then the rest (4).
 3. The in-house LLM (5). The platform is fully functional before this; the LLM only adds narrative.
 4. Write permissions and action rollout, per action type, through the autonomy policy (6).
@@ -42,7 +42,7 @@ called out where they apply, with the file to change.
                         Analysts' browsers (Entra SSO + MFA)
                                      │ HTTPS
                           ┌──────────▼──────────┐
-                          │ TLS reverse proxy /  │  (App Gateway, nginx, IIS ARR...)
+                          │ TLS reverse proxy /  │  (IIS + ARR on the Windows host; App Gateway...)
                           │ WAF                  │
                           └──────────┬──────────┘
                                      │ HTTP 8080 (private)
@@ -63,8 +63,10 @@ called out where they apply, with the file to change.
 - **Compose reference:** `deploy/docker-compose.yml` (`postgres`, `platform-api`, `platform-scheduler`; the
   `engine` profile services are the ML engine's own legacy services and are **not** needed - the engine runs inside
   the platform process).
-- **Windows hosts** are supported (the platform is developed and fully tested on Windows 11 with SQLite and
-  PostgreSQL); containers on Linux are the recommended production shape.
+- **Windows hosts are the agreed production shape** (section 1A): the platform runs as two Windows scheduled tasks
+  under a low-privilege service account, installed from a hash-pinned lock by `deploy/windows/install.ps1`, behind IIS.
+  The container images, Compose and Kubernetes packages below remain supported for an organisation that prefers them;
+  the application, its settings and its behaviour are the same on both.
 - **High availability and scaling:** the API is stateless (any number of replicas behind the proxy) and schedulers
   take renewed database leases, so several are safe and a dead one's job is taken over within two minutes. Set
   `SOC_BLOB_STORE=database` so stored e-mails and reports are in PostgreSQL, readable by every replica. The
@@ -87,6 +89,99 @@ called out where they apply, with the file to change.
 - **Encryption at rest:** files the platform writes (raw payloads, reported e-mail, reports) are encrypted with
   `SOC_DATA_KEY`; the database is protected by the managed PostgreSQL service's encryption or encrypted volumes
   (Azure Disk Encryption / BitLocker / LUKS) - confirm one is on before go-live.
+
+---
+
+## 1A. Windows host deployment (the agreed shape)
+
+Everything the platform needs on Windows is in `deploy/windows`; each script is PowerShell 5.1 (the version every
+Windows Server has) and is run from an elevated PowerShell in the release folder.
+
+| Script | What it does |
+|---|---|
+| `install.ps1` | checks Python, copies the release to `C:\Program Files\CyberDome\app`, creates `...\venv` and installs every package from the hash-pinned Windows lock with `--require-hashes`, creates `C:\ProgramData\CyberDome` with NTFS permissions and a new data-encryption key, optionally adds the in-house LLM gateway SDK and runs `init-db`, registers and starts the scheduled tasks. Re-running it upgrades in place (settings, key and data kept) |
+| `setup_postgres.ps1` | optional, for PostgreSQL on the same host: owner and runtime roles with random passwords, TLS certificate for `localhost`, `ssl = on`, scram-sha-256, localhost only, a `pg_hba.conf` block that allows the two roles only over TLS, then writes both connection files and runs `init-db` |
+| `run.ps1` | the launcher the tasks run: loads the settings file, sets the production defaults the container image sets, starts `python -m soc_platform serve` (or `scheduler`) and restarts it if it exits (5 s doubling to 5 min); one log file per start, kept 30 days |
+| `cyberdome.ps1` | `start`, `stop` (ends the whole process tree by its recorded id), `restart`, `status` (task, process, `/health/live`, `/health/ready`), `check` (`config check` with the settings loaded) |
+| `setup_iis.ps1` + `iis/web.config` | the HTTPS site in IIS: Application Request Routing passes every request to `127.0.0.1:8080` (300 s timeout, 30 MB bodies, encoded paths unchanged) |
+| `backup.ps1` | `pg_dump` of the database to `C:\ProgramData\CyberDome\backups` with retention; `-Register` schedules it daily |
+| `uninstall.ps1` | removes the tasks; the program folder and the data only when asked |
+
+### 1A.1 What the host needs
+
+| Item | Requirement |
+|---|---|
+| Operating system | Windows Server 2022 or 2025 (64-bit), with Windows PowerShell 5.1 (built in). The platform and these scripts are developed and tested on Windows 11 with the same PowerShell, Task Scheduler and NTFS permission model; CI's Windows job runs the full suite and a real install on GitHub's Windows Server runner. The first install on the organisation's server image is the final check (`cyberdome.ps1 status` and the go-live checklist, section 8) |
+| Size | One host with PostgreSQL on it: 4 vCPU, 16 GB RAM, 100 GB SSD for data (an estimate: `measure_scale.py` and `load_test.py` re-size it in week one). Two hosts for high availability, with a managed or separate PostgreSQL: 2 vCPU, 8 GB each (`INFRASTRUCTURE_AND_COSTS.md` section 10.1b) |
+| Python | **3.13, 64-bit, installed for all users** (python.org installer: *Install for all users*; the service account must be able to run it). 3.11 and 3.12 also work; 3.13 is what the Windows lock is built with and CI tests on Windows. Note: python.org publishes Windows installers only while a version receives bug fixes - the last ones are 3.11.9 and **3.13.17** (3.13 has been security-fix-only, source releases, since 25 October 2026). Plan the move to Python 3.14 (still receiving Windows installers) as the next platform upgrade |
+| PostgreSQL | 16 or later: Azure Database for PostgreSQL Flexible Server (recommended for HA) or the EDB Windows installer on the same host (`setup_postgres.ps1`). The `pg_trgm` extension (in the standard Windows build) backs search |
+| Reverse proxy | IIS with the URL Rewrite and Application Request Routing modules, and a certificate from the organisation's PKI in `LocalMachine\My` |
+| Visual C++ runtime | the Microsoft Visual C++ 2015-2022 Redistributable (x64), which python.org's installer and the scientific packages rely on (present on most servers) |
+| Network | inbound: HTTPS 443 to IIS only (8080 is bound to 127.0.0.1); outbound: HTTPS to the tools (section 4.18), Entra ID, the LLM gateway, `pypi.org` / `files.pythonhosted.org` (or the organisation's package mirror) during install only |
+| Accounts | an administrator to install; the service account the tasks run as: **LOCAL SERVICE** by default (no password, no rights elsewhere), or a group managed service account (`DOMAIN\name$`, needs *Log on as a batch job*) when the database uses Windows-integrated policies or a proxy needs a domain identity |
+| Protection | BitLocker on the data volume, the organisation's EDR agent and host firewall on, Windows Update on the organisation's schedule |
+| Not needed | Docker, WSL, a compiler. Node.js and a browser only on a machine that runs the browser tour (testing) |
+
+### 1A.2 Install
+
+```powershell
+# 1. Python 3.13 for all users, IIS with URL Rewrite + ARR, PostgreSQL 16 (or a managed server).
+# 2. From the release folder, elevated:
+.\deploy\windows\install.ps1 -Python "C:\Program Files\Python313\python.exe"      # -NoEngine: without the phishing ML engine
+# 3. Database on this host (else: write the managed server's runtime URL to ...\secrets\database_url and
+#    re-run install.ps1 -OwnerDatabaseUrlFile <file with the owner's URL>):
+.\deploy\windows\setup_postgres.ps1 -PgBin "C:\Program Files\PostgreSQL\16\bin" `
+    -PgData "C:\Program Files\PostgreSQL\16\data" -ServiceName postgresql-x64-16
+# 4. Settings: edit C:\ProgramData\CyberDome\config\cyberdome.env (Entra, domains, tools; secrets as NAME_FILE)
+.\deploy\windows\cyberdome.ps1 check          # every configuration problem with its fix; exit 0 when clean
+.\deploy\windows\cyberdome.ps1 start
+# 5. IIS in front (certificate thumbprint from the organisation's PKI):
+.\deploy\windows\setup_iis.ps1 -CertificateThumbprint <thumbprint> -HostName cyberdome.example.com
+.\deploy\windows\cyberdome.ps1 status         # tasks running, /health/live 200, /health/ready 200
+# 6. Nightly database dump (a database on this host):
+.\deploy\windows\backup.ps1 -PgBin "C:\Program Files\PostgreSQL\16\bin" -Register
+```
+
+The in-house LLM gateway's SDK is added at install time from the organisation's package index, hash-checked like
+every other package (section 5.9): `install.ps1 ... -GatewaySdkLock gateway-sdk.lock -GatewaySdkLockSha256
+<SHA-256 of the lock> -PipConfig pip.ini`. The index credentials stay in `pip.ini` (never in the program folder).
+
+### 1A.3 Where everything is
+
+| Path | Contents | Service account | Administrators |
+|---|---|---|---|
+| `C:\Program Files\CyberDome\app` | the release: code, console, models, configuration templates | read + run | full |
+| `C:\Program Files\CyberDome\venv` | Python environment from `requirements\windows-engine.lock` | read + run | full |
+| `C:\ProgramData\CyberDome\config` | `cyberdome.env` (settings), `connectors.yaml`, `suppliers.yaml` - never overwritten by an upgrade | read | full |
+| `C:\ProgramData\CyberDome\secrets` | `data_key` (generated), `database_url`, tool credentials (`NAME_FILE`) | read | full |
+| `C:\ProgramData\CyberDome\admin` | `database_owner_url` (only `init-db` uses it) | none | full |
+| `C:\ProgramData\CyberDome\certs` | `db-ca.crt` (verifies PostgreSQL), a corporate CA bundle if needed | read | full |
+| `C:\ProgramData\CyberDome\data`, `logs`, `run` | scratch files and reports, one log per process start, process ids and stop requests | modify | full |
+| `C:\ProgramData\CyberDome\backups` | database dumps | none | full |
+
+Inheritance is removed on each folder, so nobody else (Users, Authenticated Users) can read them, and files the
+platform writes later inherit the same protection. **Back up `secrets\data_key` with the database**: protected columns
+cannot be read without it.
+
+### 1A.4 How it runs
+
+- **Two scheduled tasks** under `\CyberDome\`: `API` (`serve`: the console, the API and the built-in scheduler) and,
+  with `install.ps1 -SeparateScheduler`, `Scheduler`. Each starts at boot, runs as the service account, has no time
+  limit, is restarted by Task Scheduler if its launcher fails, and the launcher restarts the platform if it exits.
+- **Settings** come only from `cyberdome.env` plus the defaults the container image also sets (`SOC_ENVIRONMENT=prod`,
+  Entra sign-in, database blob store, `127.0.0.1:8080`, one worker per CPU core, the connector rate share). The
+  platform refuses to start in production without Entra settings, a data key and a verified TLS database connection.
+- **Logs**: `C:\ProgramData\CyberDome\logs\api-<time>.log` (one JSON object per line with `SOC_LOG_FORMAT=json`) and
+  `api-supervisor.log` (starts, exits, restarts). Point the organisation's log agent (Azure Monitor Agent, the SIEM's
+  Windows forwarder) at the folder.
+- **Upgrade**: stop, unpack the new release, re-run `install.ps1` with the same arguments (it runs `init-db` when given
+  `-OwnerDatabaseUrlFile`, or `setup_postgres.ps1` does), start. **Roll back**: re-run the previous release's
+  `install.ps1` and restore the database dump taken before the upgrade if the schema changed.
+- **High availability on Windows**: two hosts in two zones, each running the same install, against one managed
+  zone-redundant PostgreSQL (`SOC_BLOB_STORE=database`), behind the organisation's load balancer or Application
+  Gateway (or IIS ARR on each host behind it). Job leases in the database make the two schedulers safe; a dead host's
+  job is taken over within one lease (120 s). One host with PostgreSQL on it has no failover: a pilot or small-site
+  shape (`HIGH_AVAILABILITY.md` section 3.4).
 
 ---
 
@@ -900,7 +995,12 @@ package index) rather than an HTTP API. Every analyst signs in to CyberDome with
 made with one service account**, whose tokens an administrator enters in the console. Each person's use is still
 counted against their own AI limits (AI usage policy), and the call log names who asked.
 
-**1. Build the SDK into the image** (it is never part of this repository, its dependency locks or its CI). Generate a
+**1a. On a Windows host** (section 1A) the SDK is added by the installer, hash-checked, from the internal index:
+`install.ps1 -Python <python.exe> -GatewaySdkLock gateway-sdk.lock -GatewaySdkLockSha256 (Get-FileHash
+gateway-sdk.lock).Hash -PipConfig pip.ini`. The installer refuses a lock whose SHA-256 differs; `pip.ini` (the index and
+its credentials) is read only during the install and never copied into the program folder.
+
+**1. Build the SDK into the image** (container deployments; it is never part of this repository, its dependency locks or its CI). Generate a
 hashed requirements file for the SDK and its dependencies from the internal index (for example
 `pip-compile --generate-hashes`), then build with two BuildKit secrets - the index's credentials never enter an image
 layer, and the SDK is installed hash-checked like every other package:
@@ -1017,13 +1117,18 @@ After each step: Integrations screen green, reconciliation matches the tool's ow
 ## 8. Production hardening checklist
 
 - [ ] `SOC_ENVIRONMENT=prod`, `SOC_AUTH_MODE=entra`, `SOC_REQUIRE_MFA=1`, `SOC_DEV_JWT_SECRET` unset.
+- [ ] Windows hosts (section 1A): Python 3.13 64-bit installed for all users; packages installed only by `install.ps1`
+  (hash-pinned lock); the tasks run as LOCAL SERVICE or a gMSA, never an administrator; `C:\ProgramData\CyberDome`
+  permissions as in 1A.3 (`icacls` shows no Users / Authenticated Users entries); BitLocker, EDR and the host firewall
+  on, inbound 443 only; `cyberdome.ps1 status` shows both health checks 200 after a reboot; `secrets\data_key` backed
+  up with the database; Windows Update and Python patching owned by the server team.
 - [ ] `SOC_DATA_KEY` from the vault; rotation = prepend a new key, `python -m soc_platform blobs reencrypt`, remove the old.
 - [ ] TLS at the reverse proxy (TLS 1.2+); `SOC_TRUSTED_PROXIES` set to the proxy (address or subnet) only; port 8080
   not reachable otherwise. Internet-facing: WAF in prevention mode with the rate-limit rule (deploy/azure/main.bicep,
   `internetFacing=true`). Internal: the existing gateway's owner grants the AGIC identity Contributor on it.
 - [ ] PostgreSQL: `sslmode=verify-full`, the owner / runtime role split (`SOC_DB_RUNTIME_ROLE`, `SOC_SCHEMA_MANAGE=0`),
   `pg_trgm` allowed, backups and a tested restore (`docs/OPERATIONS.md` - Backups).
-- [ ] Images: built by the release workflow, deployed **by digest**, signature verified at admission
+- [ ] Containers (if used instead of Windows hosts): images built by the release workflow, deployed **by digest**, signature verified at admission
   (`deploy/kubernetes/policy/verify-images.yaml`: Kyverno; or Azure Policy with Ratify).
 - [ ] Network: default-deny policies applied; the database reachable only from the platform's pods (overlay
   `soc-database-egress`); the ingress rule matches the real gateway (Azure: the Application Gateway subnet).

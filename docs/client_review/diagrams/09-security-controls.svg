@@ -19,7 +19,7 @@
   <rect x="20" y="74" width="1160" height="92" rx="10" class="l5"/>
   <text x="36" y="98" class="t">1 Edge and network</text>
   <text x="36" y="118" class="s">TLS reverse proxy / WAF is the only inbound path · API port private · outbound allow-list to enabled tools only · TLS verified on every outbound call</text>
-  <text x="36" y="136" class="s">default-deny Kubernetes network policies · no SSH / management port · no Docker socket · request body cap 30 MB · rate limit 20/s (burst 120) per client</text>
+  <text x="36" y="136" class="s">Windows: LOCAL SERVICE, NTFS-limited folders · Kubernetes: default-deny policies · no SSH / management port · request body cap 30 MB · rate limit 20/s (burst 120) per client</text>
   <text x="36" y="156" class="m">&lt;client&gt;: proxy, firewall / egress allow-list, WAF</text>
 
   <rect x="20" y="176" width="1160" height="92" rx="10" class="l1"/>

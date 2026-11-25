@@ -33,13 +33,13 @@
 
 ## 1 Executive summary
 
-CyberDome is an **AI-assisted investigation and automation layer for a security operations centre (SOC)**. It is deployed **inside the &lt;client&gt;'s own environment** - on the &lt;client&gt;'s Kubernetes, container hosts or virtual machines, with the &lt;client&gt;'s PostgreSQL database and vault - and sits on top of the security tools the &lt;client&gt; already owns. It is not a SaaS service and is not operated by the &lt;delivery team&gt;.
+CyberDome is an **AI-assisted investigation and automation layer for a security operations centre (SOC)**. It is deployed **inside the &lt;client&gt;'s own environment** - on **Windows Server hosts** (the agreed hosting; Kubernetes or container hosts remain possible), with the &lt;client&gt;'s PostgreSQL database and vault - and sits on top of the security tools the &lt;client&gt; already owns. It is not a SaaS service and is not operated by the &lt;delivery team&gt;.
 
 - **What it does.** It reads from 21 tool integrations (EDR, e-mail security, identity, DNS, deception, privileged access, vulnerability scanners, cloud posture, ITSM / CMDB, SIEM, public vulnerability intelligence, threat intelligence), resolves every record to one host or one person, and runs three workflows on that shared picture: **reported phishing**, **incident management** and **vulnerability management**. A cross-domain intelligence layer adds explainable risk per person and host, 13 correlation rules, a reconstructed attack story per case, an analyst assistant, reports and a **CISO executive view**.
 - **Agents recommend; people decide.** Specialised agents collect, resolve, investigate, score and plan a response. Every write to a security tool is an *action request* governed by a versioned autonomy policy whose default for every action type is **recommend**: a person approves each action. High-impact actions need two different people. A durable kill switch stops all autonomous execution at once.
 - **The AI never decides.** Every figure, verdict, score, priority and recommended action is computed in code and is identical with the language model switched on, off, or on another vendor. An optional LLM - the &lt;client&gt;'s own AI platform through its SDK and a service account, or an approved API provider - only writes narrative, must cite the evidence it was given, and has statements with unsupported figures removed before anyone reads them. Identities are pseudonymised before any prompt leaves the platform.
 - **Built for review.** Hash-chained audit log, step-up MFA, role- and domain-scoped access in the user's own context, per-tool least-privilege service identities, encryption of stored content, hash-locked dependencies, signed-image pipeline, SBOM, and an automated security and penetration suite run on every build.
-- **Where it stands.** The platform is a **working prototype**: all three workflows, governance and the AI integration are built and tested end to end on synthetic, vendor-shaped data (1,061 automated tests at the version date: 1,043 passing on SQLite and 1,040 on PostgreSQL 16, none failing - the rest are opt-in live tests and database-specific checks; a live-model suite against an Azure AI Foundry endpoint; a real-browser tour of every screen at five widths; 112 of 112 features verified feature by feature). The next step is a **controlled proof of concept** in the &lt;client&gt;'s environment: tools connected read-only one at a time, then a shadow period measured against analyst decisions (section 21).
+- **Where it stands.** The platform is a **working prototype**: all three workflows, governance and the AI integration are built and tested end to end on synthetic, vendor-shaped data (1,079 automated tests at the version date: 1,060 passing on SQLite and 1,055 on PostgreSQL 16, none failing, on Python 3.11 and 3.13 - the rest are opt-in live tests, the opt-in Windows install test and database-specific checks; a real Windows install from the hash-pinned lock; a live-model suite against an Azure AI Foundry endpoint; a real-browser tour of every screen at five widths; 113 of 113 features verified feature by feature). The next step is a **controlled proof of concept** in the &lt;client&gt;'s environment: tools connected read-only one at a time, then a shadow period measured against analyst decisions (section 21).
 
 ## 2 Platform overview and business value
 
@@ -100,7 +100,7 @@ The platform includes a **value scorecard** that measures each benefit against a
 | AI | Retrieval over the platform's own records (agentic RAG with read-only tools) | Implemented |
 | AI | Retrieval over documents (runbooks, policies) with a vector index | Planned |
 | AI | Model Context Protocol (MCP) server or client | Planned |
-| Operations | High availability package (Kubernetes base, Azure and on-premises overlays), Bicep template, Docker Compose | Implemented - not yet deployed in the &lt;client&gt;'s environment |
+| Operations | Windows host package (`deploy/windows`: hash-checked install, scheduled tasks with restart, NTFS permissions, IIS front end, local PostgreSQL with TLS, backups); high availability package (Kubernetes base, Azure and on-premises overlays), Bicep template, Docker Compose | Implemented and tested on Windows 11 - not yet run on the &lt;client&gt;'s Windows Server image |
 | Identity | Microsoft Entra ID SSO | Implemented |
 | Identity | Other identity providers (Okta, Ping, generic OIDC / SAML) | Planned |
 
@@ -108,7 +108,8 @@ The platform includes a **value scorecard** that measures each benefit against a
 
 | Component | Technology | Notes |
 |---|---|---|
-| Language and runtime | Python 3.11 (3.11-3.13 tested) | |
+| Language and runtime | Python 3.13 on the Windows hosts (3.11-3.13 tested; the container image uses 3.11) | python.org's last Windows installer for 3.13 is 3.13.17; moving to 3.14 is the planned next runtime upgrade |
+| Windows host integration | Windows PowerShell 5.1, Task Scheduler, NTFS permissions, IIS URL Rewrite + Application Request Routing | Scripts in `deploy/windows`, exercised by an automated test suite |
 | API and web server | FastAPI, Uvicorn | Plain synchronous routes; one process per CPU core |
 | Data access | SQLAlchemy 2.0 | Same code on PostgreSQL and SQLite; PostgreSQL rules enforced in SQLite test runs |
 | Database | PostgreSQL 16 in production | SQLite only for development and demonstrations |
@@ -119,7 +120,7 @@ The platform includes a **value scorecard** that measures each benefit against a
 | Documents | python-docx, python-pptx | Reports in the &lt;client&gt;'s Word / PowerPoint templates |
 | Phishing ML engine | scikit-learn 1.8, XGBoost, LightGBM, LangGraph | CPU only, no GPU, no PyTorch; offline in process |
 | LLM providers | OpenAI-compatible HTTP, Azure AI Foundry / Azure OpenAI, Anthropic SDK, OpenRouter, the &lt;client&gt;'s in-house SDK | All through one governed gateway |
-| Containers | `python:3.11-slim` pinned by digest; hash-locked packages | Non-root (uid 1001), no package manager in the runtime image |
+| Containers (alternative) | `python:3.11-slim` pinned by digest; hash-locked packages | Non-root (uid 1001), no package manager in the runtime image |
 | Orchestration | Kubernetes (Kustomize base + Azure / on-premises overlays), Docker Compose | Kyverno policy verifying image signatures |
 | Infrastructure as code | Azure Bicep (network, AKS, PostgreSQL, Key Vault, registry, optional WAF, logging) | |
 | Quality and security gates | ruff, bandit, pip-audit, gitleaks, CycloneDX SBOM, Trivy, pytest (SQLite and PostgreSQL), Playwright browser tour with axe-core | Defined in CI; run locally before every commit |
@@ -168,14 +169,15 @@ Network work (tool calls, model calls) runs in parallel threads; database work s
 
 | Aspect | Design | Status |
 |---|---|---|
-| Where | The &lt;client&gt;'s environment: Kubernetes (AKS or on-premises), Docker hosts or VMs | Implemented (package); not yet deployed at the &lt;client&gt; |
+| Where | The &lt;client&gt;'s environment: **Windows Server hosts** (agreed) - one host with PostgreSQL on it, or two hosts with a managed zone-redundant PostgreSQL for high availability; Kubernetes or Docker hosts as an alternative | Implemented (package); not yet deployed at the &lt;client&gt; |
+| Windows host | `install.ps1` installs from a hash-pinned lock with `--require-hashes`; the platform runs as a scheduled task under LOCAL SERVICE or a group managed service account (never an administrator), restarted if it exits; settings, secrets and data under `C:\ProgramData\CyberDome` with NTFS permissions limited to administrators, SYSTEM and the service account; IIS terminates TLS and forwards to `127.0.0.1:8080` | Implemented; tested on Windows 11 (install from the lock, permissions, restart, stop) |
 | Services | API with console (stateless replicas); scheduler (one or more replicas with renewed job leases); one-shot migration job; PostgreSQL 16 | Implemented |
 | Tenancy | One organisation per deployment; no shared multi-tenant component | Implemented |
 | Image | Multi-stage build on a digest-pinned base, every package installed against a SHA-256, non-root, no package manager or curl, production defaults (refuses to start without production settings), health check | Implemented |
 | Configuration | Environment variables plus `connectors.yaml` and the console's versioned configuration; secrets as vault files; every setting validated at start-up with its fix | Implemented |
-| Upgrades | New image digest; the migration step (the only holder of schema rights) adds new tables and nullable columns; the platform runs without schema rights; previous image runs on the upgraded schema | Implemented |
+| Upgrades | Windows: re-run `install.ps1` from the new release; containers: new image digest. The migration step (the only holder of schema rights) adds new tables and nullable columns; the platform runs without schema rights; previous image runs on the upgraded schema | Implemented |
 | Kubernetes package | Base + Azure overlay (three zones, managed zone-redundant PostgreSQL, Key Vault, Application Gateway / WAF v2) + on-premises overlay (three-instance PostgreSQL cluster, pooler, backups); restricted pod security; default-deny network policies; image-signature admission policy | Implemented - not yet run on the &lt;client&gt;'s clusters |
-| In-house AI SDK | Added to the image by the &lt;client&gt;'s build from its internal package index, hash-checked, as a build secret; never part of the platform's repository | Implemented (build step) - first build at the &lt;client&gt; |
+| In-house AI SDK | Added at install time from the &lt;client&gt;'s internal package index, hash-checked (Windows: `install.ps1 -GatewaySdkLock`; containers: a build secret); never part of the platform's repository | Implemented - first install at the &lt;client&gt; |
 
 **Measured capacity** (test bed; to be re-measured on the target environment during the PoC with the included load and scale scripts): four API processes served 100 simulated analysts at 150 requests/s with no error or timeout on SQLite and 127 requests/s on PostgreSQL; ingestion about 146 records/s on SQLite and 75 on PostgreSQL, flat as the estate grew (29 SQL statements per record at every size tested up to 21,675 records); all database connections busy answers 503 with `Retry-After`, never a hang.
 
@@ -532,7 +534,7 @@ The platform holds privileged credentials for the &lt;client&gt;'s security tool
 | Additional SAST (CodeQL / Semgrep) | - | Planned |
 | Dependency scanning | pip-audit over the locks (no known vulnerabilities at the version date); npm audit for test tooling | Implemented |
 | Container scanning | Trivy on both images; the build fails on any fixable high or critical finding | Implemented |
-| Pinned and hash-locked builds | Base images pinned by digest; every Python package installed with `--require-hashes`; every CI action pinned to a commit SHA (a test fails on an unpinned one); locks checked against the environment | Implemented |
+| Pinned and hash-locked builds | Base images pinned by digest; every Python package installed with `--require-hashes` (container images and Windows hosts, from locks held to the same versions); every CI action pinned to a commit SHA (a test fails on an unpinned one); locks checked against the environment | Implemented |
 | Secret scanning | gitleaks over the git history; deployment-secret and confidential-name scan before every commit | Implemented |
 | Image signing (code signing) | Release job signs images by digest with cosign (keyless, identity of the CI workflow); a Kyverno policy admits only signed images by digest | Partially implemented - the pipeline is defined but no release has been tagged, so no signed image exists yet |
 | Build provenance (SLSA attestation) | - | Planned |
@@ -546,7 +548,7 @@ The platform holds privileged credentials for the &lt;client&gt;'s security tool
 
 | # | Threat | Main controls | Residual |
 |---|---|---|---|
-| 1 | Platform compromised and used as a pivot into the security tools | Client-hosted, private network, SSO + MFA, least-privilege per-tool identities, every write policy-gated and human-approved, secrets in the vault, non-root containers, penetration suite on every build | Medium |
+| 1 | Platform compromised and used as a pivot into the security tools | Client-hosted, private network, SSO + MFA, least-privilege per-tool identities, every write policy-gated and human-approved, secrets in the vault or access-controlled files, the platform never runs as an administrator (Windows) or root (containers), penetration suite on every build | Medium |
 | 2 | Stolen analyst session used for high-impact decisions | Token validation, step-up MFA, revocation, service accounts never approve, dev sign-in refused in production | Low |
 | 3 | Insider misuse or over-privilege | Least-privilege roles, domain scope, no self-approval, second-admin grants, audit | Low |
 | 4 | Over-automation disrupts the business | Default recommend, four-eyes, destructive never autonomous, limits, kill switch, rollback | Low |
@@ -727,7 +729,7 @@ R = responsible, A = accountable, C = consulted, I = informed.
 
 | Phase | Scope | Entry | Exit criteria (measured by the platform) |
 |---|---|---|---|
-| **0 Prototype (current)** | All workflows, governance and AI integration on synthetic, vendor-shaped data | - | Met: 1,043 tests passing on SQLite and 1,040 on PostgreSQL, none failing; 112 of 112 features verified; browser tour clean; penetration suite, fuzzing, SAST, dependency and image scans clean |
+| **0 Prototype (current)** | All workflows, governance and AI integration on synthetic, vendor-shaped data | - | Met: 1,060 tests passing on SQLite and 1,055 on PostgreSQL, none failing; 113 of 113 features verified; browser tour clean; penetration suite, fuzzing, SAST, dependency and image scans clean |
 | **1 Controlled PoC - platform baseline** | Deployed in the &lt;client&gt;'s environment with no tool live | Security review of this document; hosting, database, vault, Entra registration ready | `config check` clean; sign-in with MFA, roles and scope verified; dev sign-in refused; kill switch and break-glass tested; backup restored and audit chain verified; load test with the expected analyst count: median below 0.5 s, no server errors; first signed release admitted by signature |
 | **2 Controlled PoC - tools read-only** | Tools connected one at a time (recording -> read-only); AI platform connected | Per-tool identities with read scopes | Every in-scope tool preflight *ready*; records ingested within 1 % of each tool's own totals or explained; every stream within its cadence for 5 consecutive days; no false merges in the sampled entity review; AI *Test connection* passes on the real SDK |
 | **3 Shadow mode** | The platform investigates and recommends; nothing is written | Phase 2 exit | Phishing agreement with analyst dispositions at least 90 % on at least 100 reports and no malicious report called safe; incident agreement target set with the SOC lead; every scanner finding accounted for and owners on at least 95 % of findings; AI: at least 95 % usable answers and at most 15 % of statements removed per feature; dead-lettered jobs none older than 1 working day; audit chain valid throughout |

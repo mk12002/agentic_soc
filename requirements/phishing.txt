@@ -7,7 +7,7 @@ numpy>=1.26.0
 scipy>=1.11.0
 joblib>=1.3.0
 python-whois>=0.9.0
-yara-python>=4.3.0; platform_system!="Windows"
+yara-python>=4.3.0     # YARA rules in the attachment agent: the same verdicts on Windows and Linux hosts
 reportlab>=4.0.0
 pika>=1.3.2
 redis>=5.0.1

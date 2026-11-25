@@ -333,6 +333,20 @@ FEATURES: list[tuple[str, str, list[str]]] = [
       "test_observability.py::test_stopping_the_server_writes_the_last_access_log_rows_first",
       "test_connectors.py::test_processes_calling_a_tool_split_its_request_budget",
       "test_api.py::test_case_and_action_lists_page_without_overlap"]),
+    ("Operations", ("Windows host deployment: hash-checked install, settings never printed, crash restart, clean stop, "
+                    "least-privilege folders, production defaults as the image, Windows locks match the image, "
+                    "YARA on every host"),
+     ["test_windows_deployment.py::test_the_settings_template_names_only_real_settings_and_holds_no_secret",
+      "test_windows_deployment.py::test_the_launcher_sets_every_production_default_the_container_image_sets",
+      "test_windows_deployment.py::test_the_windows_locks_are_hashed_and_run_the_containers_versions",
+      "test_windows_deployment.py::test_the_settings_loader_follows_the_env_file_rules_and_prints_no_value",
+      "test_windows_deployment.py::test_the_launcher_check_runs_the_configuration_check_with_the_settings_and_prints_no_value",
+      "test_windows_deployment.py::test_the_launcher_restarts_a_process_that_exits_and_gives_up_at_its_limit",
+      "test_windows_deployment.py::test_a_stop_request_ends_the_process_tree_and_the_launcher_without_a_restart",
+      "test_windows_deployment.py::test_folder_permissions_give_the_service_account_only_its_right",
+      "test_windows_deployment.py::test_starting_a_server_returns_when_the_starter_exits_not_when_the_server_does",
+      "test_cli.py::test_cli_commands_never_change_the_schema_when_running_as_the_runtime_role",
+      "test_phishing_engine.py::test_the_attachment_agent_scans_with_its_yara_rules_on_every_host"]),
     # ---------------------------------------------------------------- generalisation
     ("Generalisation", "Whole platform on a renamed organisation (other domain, people, hosts, IPs, suppliers): identical results",
      ["test_generalisation.py::test_renamed_estate_gives_structurally_identical_results",

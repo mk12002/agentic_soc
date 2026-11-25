@@ -20,7 +20,7 @@ For *what to say* while presenting, use [PRESENTER_GUIDE.md](PRESENTER_GUIDE.md)
 8. [With and without the LLM](#8-with-and-without-the-llm)
 9. [A different organisation (to prove nothing is hard-coded)](#9-a-different-organisation)
 10. [Resetting between demos](#10-resetting-between-demos)
-11. [Running with Docker and PostgreSQL](#11-running-with-docker-and-postgresql)
+11. [Running with Docker and PostgreSQL](#11-running-with-docker-and-postgresql) (and on a Windows server)
 12. [Connecting real tools (after the demo)](#12-connecting-real-tools)
 13. [Proving it works: the test and verification commands](#13-proving-it-works)
 14. [Troubleshooting](#14-troubleshooting)
@@ -48,8 +48,10 @@ Open **http://127.0.0.1:8080**. Sign in with work email `lena@acme-demo.com` and
 ## 2. One-time setup
 
 **You need:**
-- Python 3.11, 3.12 or 3.13 (the platform and the ML engine are tested on 3.11 and 3.13; on 3.13 the optional
-  `pgserver` test helper - an embedded PostgreSQL for local test runs - has no build and is skipped).
+- Python 3.13 (recommended: the client's Windows hosts run it), or 3.11 / 3.12. The platform and the ML engine are
+  tested on 3.11 and 3.13; on 3.13 the optional `pgserver` test helper - an embedded PostgreSQL for local test runs -
+  has no build and is skipped (start it from a 3.11 environment and pass its URI, §13). python.org's last Windows
+  installer for 3.13 is 3.13.17.
 - Git.
 - Optionally Node.js 18+, only for the automated browser tour (§13).
 
@@ -546,7 +548,19 @@ behaviour. Re-running `demo` on the same database changes nothing; a fresh datab
 
 ## 11. Running with Docker and PostgreSQL
 
-For a production-like run: API, scheduler and PostgreSQL in containers. It needs Docker Desktop. Add to `.env`:
+**The client's hosts run Windows without Docker**: the production install is `deploy\windows\install.ps1` (Python
+3.13, the platform as scheduled tasks under a low-privilege account, IIS in front) - the full procedure is
+[CLIENT_DEPLOYMENT_GUIDE.md](CLIENT_DEPLOYMENT_GUIDE.md) section 1A. To try it on a laptop without registering tasks
+or touching IIS, install into folders of your own and start the launcher by hand:
+
+```powershell
+.\deploy\windows\install.ps1 -Python "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe" `
+    -InstallDir C:\cd-try\prog -DataDir C:\cd-try\data -NoTasks -ServiceAccount $env:USERNAME -AdminPrincipal $env:USERNAME
+# edit C:\cd-try\data\config\cyberdome.env (dev sign-in and SQLite are fine here), then:
+.\deploy\windows\run.ps1 -InstallDir C:\cd-try\prog -DataDir C:\cd-try\data
+```
+
+The rest of this section runs the containers. For a production-like run: API, scheduler and PostgreSQL in containers. It needs Docker Desktop. Add to `.env`:
 
 ```ini
 POSTGRES_PASSWORD=<a strong password>        # the schema owner: used only by the one-shot platform-migrate service

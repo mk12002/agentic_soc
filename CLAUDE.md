@@ -72,6 +72,10 @@ it, the conventions the code relies on, and the traps that have already cost tim
   auto-close, adjust vulnerability priority weights / SLA days or mark an action analysts keep rejecting; the request becomes a checked draft rule, previewed on past data and approved by a second lead; the
   platform suggests changes from analysts' decisions. High / critical, deception, exercise and KEV-host alerts are never
   suppressed; 1 in 10 suppressions stays open; a threat found pauses the rule; a raise never changes a verdict.
+- **Hosting: Windows Server** (agreed with the client): `deploy/windows` installs Python 3.13 packages from the
+  hash-pinned `requirements/windows-engine.lock`, runs the platform as a scheduled task under LOCAL SERVICE behind IIS,
+  settings and secrets under `C:\ProgramData\CyberDome` (CLIENT_DEPLOYMENT_GUIDE.md section 1A). The container images,
+  Compose and Kubernetes packages stay supported; a change to runtime behaviour must work on both.
 - Every connector has **fake mode** (vendor-shaped fixtures through the same parsing code) so the whole platform runs
   and demos with no tenant access.
 - **Phishing ML engine** (`soc_platform/domains/phishing/engine/`, ~24k lines, earlier code base): 7-agent ML swarm
@@ -109,7 +113,11 @@ kubectl kustomize deploy/kubernetes/overlays/azure             # render the HA p
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --env-file .env up -d --build  # demo stack
 # (the base compose file is PRODUCTION: Entra, TLS-verified PostgreSQL, owner / runtime roles; the demo is the override)
 # minimum env for a local run: SOC_DEV_JWT_SECRET=<32+ random chars>, SOC_ORG_DOMAINS=acme-demo.com
-# Python 3.11-3.13 (both suites pass on 3.11 and 3.13; pgserver has no 3.13 build - dev.txt skips it there)
+# Python 3.11-3.13 (both suites pass on 3.11 and 3.13; pgserver has no 3.13 build - dev.txt skips it there; start it
+# from the 3.11 .venv and pass its URI). Production hosts are WINDOWS SERVER on Python 3.13 (deploy/windows):
+#   .\deploy\windows\install.ps1 -Python <python.exe> [-NoTasks -InstallDir X -DataDir Y -AdminPrincipal $env:USERNAME]
+#   .\deploy\windows\cyberdome.ps1 start|stop|restart|status|check;  setup_postgres.ps1, setup_iis.ps1, backup.ps1
+#   SOC_WINDOWS_INSTALL_TEST=1 python -m pytest soc_platform/tests/test_windows_deployment.py   # real install (~6 min)
 
 # tests (full suite ~25 min SQLite, ~50 min PostgreSQL when both run at once; run the relevant files first)
 python -m pytest soc_platform/tests -q -p no:cacheprovider
@@ -120,7 +128,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 112 features
+python scripts/verify_features.py                                 # tests mapped to 113 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -134,7 +142,8 @@ python scripts/verify_features.py --browser --engine --live --llm # + browser to
 CI (`.github/workflows/ci.yml`) runs all of these on every push, plus both test suites, the SBOM and Trivy scans of
 both images (platform, engine); a `v*` tag also pushes and signs them. Every action is pinned to a commit SHA and every
 image to a digest (`test_deployment_manifests.py` fails otherwise). After adding or upgrading a dependency:
-`python scripts/supply_chain.py lock`, then `python scripts/supply_chain.py image-lock` (Docker: the hashed Linux
+`python scripts/supply_chain.py lock`, then `python scripts/supply_chain.py image-lock`, then (on Windows, with the
+3.13 environment: `.venv313/Scripts/python scripts/supply_chain.py windows-lock`, needs pip-tools) the Windows locks (Docker: the hashed Linux
 locks `requirements/image.lock` / `image-engine.lock` the Dockerfile installs with `--require-hashes`), and commit all
 three. A new base-image digest goes in the Dockerfile and `supply_chain.BASE_IMAGE` together.
 
@@ -256,6 +265,10 @@ soc_platform/
   tests/                 platform tests (conftest.py has PG mode, PG-rules enforcement, estates)
 config/                  connectors.yaml, suppliers.yaml, sanctioned_services.yaml
 artifacts/phishing/      labelled corpus (corpus/*.eml + labels.json), engine models/data
+deploy/windows/          the agreed production shape: install.ps1 (hash-checked install, NTFS permissions, scheduled
+                         tasks), run.ps1 (settings file + image defaults, restart loop), cyberdome.ps1 (start/stop/status/
+                         check), setup_postgres.ps1, setup_iis.ps1 + iis/web.config, backup.ps1, uninstall.ps1, common.ps1,
+                         cyberdome.env.example - Windows PowerShell 5.1, plain ASCII
 deploy/                  Dockerfile (digest-pinned, hash-locked, non-root, prod defaults), docker-compose.yml (production:
                          db-certs, postgres with TLS + roles, platform-migrate, api, scheduler; tls / backup / engine
                          profiles), docker-compose.demo.yml (dev override), postgres/init-roles.sh, tls/Caddyfile,
@@ -435,6 +448,10 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   (per-connector paging and behaviour),
   `test_high_availability.py` (database blob store, migration, lease renewal / takeover / stuck release, poison items,
   schema race, liveness / readiness, Entra key outage, one sync per stream, raw payload opt-in),
+  `test_windows_deployment.py` (the Windows host package: scripts parse on PowerShell 5.1, the settings template names
+  only real settings, the launcher prints no value / runs config check / restarts / stops the process tree, the image's
+  defaults, folder permissions, the installer refuses an unsupported Python, Windows locks match the image; the real
+  install with `SOC_WINDOWS_INSTALL_TEST=1`),
   `test_deployment_manifests.py` (the Kubernetes package: replicas, probes, pod security, secrets, overlays render;
   digests / commit SHAs everywhere; schema rights only in init-db; Compose production defaults),
   `test_go_live_hardening.py` (fail-closed settings, dev sign-in never with live tools, LLM allow-list, credential
@@ -471,8 +488,10 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   decays with time, so a slower run otherwise rounds differently.
 - **New behaviour needs a test**; a bug fix needs a regression test that failed before the fix. Don't hard-code
   demo-specific values in new tests - derive from settings/data or run over `ESTATES`.
-- Current counts (keep docs in sync when they change): 1043 platform tests passing on SQLite and 1040 on PostgreSQL (1061 collected; skips: 14 opt-in live tests, 3 per-estate repeats of input fuzzing, and database-specific checks - 1 on SQLite, 4 on PostgreSQL), 205
-  engine tests, 112/112 features verified with `--browser --engine --live --llm` (round 37); the go-live round's
+- Current counts (keep docs in sync when they change): 1060 platform tests passing on SQLite on Python 3.11 and 3.13, and 1055 on PostgreSQL (full run; the 2 tests added
+  after it passed on PostgreSQL in a re-run of their files) - 1079 collected; skips: 14 opt-in live tests, the opt-in
+  real Windows install, 3 per-estate repeats of input fuzzing, and database-specific checks (1 on SQLite, 4 on
+  PostgreSQL); 205 engine tests on 3.11 and 3.13, 113/113 features verified with `--browser --engine --live --llm` on Python 3.13 (round 38); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
 ---
@@ -784,6 +803,23 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   figures (`executive.deterministic_brief`).
 - **A provider switch must read its model list at once**: until then features asked the new provider for the built-in
   default names (`gpt-4.1`) it did not serve, and quietly fell back for up to six hours (the save route refreshes).
+- **Windows PowerShell 5.1 leaves `$PSScriptRoot` empty in parameter defaults**: `install.ps1`'s default `-Source`
+  broke; resolve script-relative defaults after the `param()` block.
+- **`powershell -File script.ps1 -Name -c ...` reads `-c` as a parameter name**, so a value starting with `-` cannot be
+  passed that way (the launcher's test hook is `-Code`, not an argument list).
+- **`icacls /grant:r` replaces the grantee's entry**: granting the service account RX on a folder whose administrator is
+  the same account removed full control (`Set-FolderAccess` now skips that grant).
+- **python.org ships Windows installers only while a version gets bug fixes**: 3.11 stopped at 3.11.9, 3.13 at 3.13.17
+  (2026-10-25). A Windows host cannot patch Python from source; the next runtime upgrade is 3.14.
+- **A requirements marker can change verdicts per OS**: `yara-python; platform_system!="Windows"` made the attachment agent
+  skip its YARA rules on Windows only. Ask whether a platform marker is still needed before keeping it.
+- **`Path.write_text` on Windows writes CRLF**, and a heredoc can turn `\r` into a bare carriage return: git then shows
+  the whole file changed. Patch with bytes (`read_bytes` / `write_bytes`) and check `git diff --stat` after editing docs.
+- **Never pipe a program that starts a server** (`pg_ctl start | Out-Null`, `$(pg_ctl ...)`): the server inherits the
+  pipe and the pipeline waits for ever. `deploy/windows/common.ps1` `Invoke-Starter` waits for the starter alone.
+- **A CLI path must not call `create_all()` after `get_database()`**: with `SOC_SCHEMA_MANAGE=0` the runtime role has
+  no DDL rights, and `config check` silently fell back to `connectors.yaml` (found on a real PostgreSQL with the role
+  split). `get_database()` already creates or only checks the schema as the setting says.
 - **Patch files, not heredocs, for multi-line edits** - the Bash tool also mangled quotes in long Python heredocs
   (`unexpected EOF`); the Write tool + a `.py` patch is reliable. The Write tool drops trailing spaces, so a patch
   whose search text ends in a space will not match.

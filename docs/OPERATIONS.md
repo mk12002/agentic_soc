@@ -36,6 +36,25 @@ only later, mid-request. A setting name the platform does not know is reported w
 
 Environment: see `.env.example`. Secrets are read from `<NAME>_FILE` (vault mount) or `<NAME>`.
 
+### On a Windows host (`deploy/windows`, CLIENT_DEPLOYMENT_GUIDE.md section 1A)
+
+| Task | Command (elevated PowerShell, in `C:\Program Files\CyberDome\app`) |
+|---|---|
+| Start / stop / restart | `.\deploy\windows\cyberdome.ps1 start` / `stop` / `restart` - `stop` writes a stop request and ends the platform's whole process tree by its recorded id (`C:\ProgramData\CyberDome\run\api.pid`), so uvicorn's workers do not outlive it |
+| Status | `.\deploy\windows\cyberdome.ps1 status` - each scheduled task's state and last result, the process, `/health/live` and `/health/ready` |
+| Check the settings | `.\deploy\windows\cyberdome.ps1 check` - `config check` with `cyberdome.env` loaded and the launcher's defaults applied; values are never printed |
+| Change a setting | edit `C:\ProgramData\CyberDome\config\cyberdome.env` (secrets as `NAME_FILE` pointing into `...\secrets`), then `check` and `restart` |
+| Upgrade | `stop`; unpack the new release; re-run `install.ps1` with the same arguments (packages from the new hash-pinned lock; settings, key and data kept; `-OwnerDatabaseUrlFile` runs `init-db`); `start` |
+| Logs | `C:\ProgramData\CyberDome\logs`: `api-<UTC time>.log` / `.err.log` per process start and `api-supervisor.log` (starts, exit codes, restarts); kept 30 days |
+| Database dump | `.\deploy\windows\backup.ps1 -PgBin <PostgreSQL bin>` (now) or `-Register` (daily at 02:00, as SYSTEM), kept 14 days |
+| Remove | `.\deploy\windows\uninstall.ps1` (tasks only; `-RemoveProgram`, `-RemoveData` to delete folders) |
+
+The launcher (`run.ps1`) sets the same defaults the container image does when `cyberdome.env` leaves them out:
+`SOC_ENVIRONMENT=prod`, `SOC_AUTH_MODE=entra`, `SOC_BLOB_STORE=database`, `SOC_HOST=127.0.0.1`, `SOC_PORT=8080`,
+`SOC_API_WORKERS` = CPU cores, `SOC_CONNECTOR_RATE_SHARE` = workers + 1, `SOC_DATA_KEY_FILE` = `...\secrets\data_key`,
+`SOC_CONNECTORS_CONFIG` / `SOC_SUPPLIERS_FILE` in `...\config`, data folders in `...\data`, `SOC_PHISHING_HOME` in the
+program folder. If the process exits it is restarted after 5 s, doubling to 5 minutes while it keeps failing.
+
 ## LLM (optional)
 
 Everything works without an LLM. To enable narratives, deep analysis and prompt-planned reports with Azure AI
@@ -577,7 +596,8 @@ write to a tool, also **pause** that tool (Integrations). `SOC_KILL_SWITCH=1` fo
 
 Back up the database (point-in-time; Azure: 35 days, geo-redundant in deploy/azure/main.bicep; on-prem:
 CloudNativePG base backups + WAL, encrypted in the bucket; single host: `docker compose --profile backup` writes a
-nightly dump kept 14 days - copy it off the host, encrypted). With `SOC_BLOB_STORE=database` that is everything; with the file store, also
+nightly dump kept 14 days, and on a Windows host `deploy\windows\backup.ps1 -Register` does the same - copy it off the
+host, encrypted). With `SOC_BLOB_STORE=database` that is everything; with the file store, also
 the raw payload and report folders. Escrow `SOC_DATA_KEY` in two places: without it stored e-mails and reports cannot
 be decrypted. After a restore: `GET /api/v1/audit/verify` (the chain is intact) and `python -m soc_platform blobs
 check` (every stored file resolves). Recovery targets, the failover drill and the reference HA deployments are in

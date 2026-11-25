@@ -135,6 +135,37 @@ def test_database_url_comes_from_a_vault_file_and_init_db_never_prints_its_passw
         get_settings.cache_clear()
 
 
+def test_cli_commands_never_change_the_schema_when_running_as_the_runtime_role(tmp_path, monkeypatch, capsys):
+    """Found on a Windows host with the production role split: `config check` called create_all() itself, which the
+    runtime role may not do (PostgreSQL: permission denied for schema public), so it reported the database as
+    unreachable and checked connectors.yaml alone, ignoring the console's configuration versions."""
+    from soc_platform.core import db as dbm
+
+    d = dbm.Database(f"sqlite:///{(tmp_path / 'rt.db').as_posix()}")
+    d.create_all()                                             # init-db, as the schema owner
+
+    def refused(self):
+        raise AssertionError("DDL attempted as the runtime role")
+
+    monkeypatch.setenv("SOC_SCHEMA_MANAGE", "0")
+    monkeypatch.setenv("SOC_DATABASE_URL", f"sqlite:///{(tmp_path / 'rt.db').as_posix()}")
+    from soc_platform.config import get_settings
+    get_settings.cache_clear()
+    monkeypatch.setattr(dbm, "_default", None)
+    monkeypatch.setattr(dbm.Database, "create_all", refused)
+    try:
+        s = cli._store_session()
+        assert s is not None, capsys.readouterr().err
+        with s as session:                                     # the console's versions are readable
+            from soc_platform.core.connector_config import ConfigStore
+            ConfigStore(session).active_row()
+        cli.cmd_blobs("check")                                 # the other CLI path that read the store
+    finally:
+        dbm._default.engine.dispose() if dbm._default is not None else None
+        get_settings.cache_clear()
+    assert "not reachable" not in capsys.readouterr().err
+
+
 def test_serve_says_at_start_why_development_sign_in_is_off(monkeypatch):
     """A server started without .env answered every sign-in with 'disabled on this server' and logged nothing."""
     from soc_platform.config import get_settings

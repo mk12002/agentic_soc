@@ -10,6 +10,7 @@ secrets/
 
 # --- environments / caches ---
 .venv/
+.venv*/
 venv/
 __pycache__/
 *.py[cod]

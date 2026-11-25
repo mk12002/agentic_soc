@@ -41,13 +41,13 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 
 | Prerequisite | Detail | Owner |
 |---|---|---|
-| Hosting | Container platform or VMs in a private application subnet | Organisation |
+| Hosting | Windows Server host(s) in a private application subnet (agreed): Windows Server 2022 / 2025, Python 3.13 for all users, IIS with URL Rewrite and ARR, BitLocker, EDR and host firewall on; the platform installed by `deploy/windows/install.ps1` (alternative: a container platform) | Organisation |
 | Database | PostgreSQL 16, dedicated database and login, TLS, backups with point-in-time recovery | Organisation |
-| Storage | Persistent volume / blob for the encrypted file store | Organisation |
-| Vault | Key Vault (or equivalent) mounted as files into the containers; platform keys generated (data-encryption key, break-glass secret and its hash) | Organisation |
+| Storage | None beyond PostgreSQL (`SOC_BLOB_STORE=database`, the Windows launcher's default); on a Windows host, `C:\ProgramData\CyberDome` for settings, secrets, logs and scratch files | Organisation |
+| Vault | Secrets as files only administrators and the service account can read (`C:\ProgramData\CyberDome\secrets` on a Windows host), or Key Vault mounted as files into containers; platform keys generated (data-encryption key, break-glass secret and its hash) | Organisation |
 | Edge | TLS reverse proxy / WAF in front of the API; its address listed as a trusted proxy | Organisation |
 | Egress | Outbound HTTPS allow-list for the tools in scope; forward proxy and inspecting CA bundle if used | Organisation |
-| Logging and monitoring | Container stdout to the log platform / SIEM; Prometheus scrape with an auditor API key | Organisation |
+| Logging and monitoring | Windows hosts: the JSON log files in `C:\ProgramData\CyberDome\logs` collected by the organisation's log agent (containers: stdout) into the log platform / SIEM; Prometheus scrape with an auditor API key | Organisation |
 
 ### Identity
 
@@ -146,9 +146,9 @@ immediately (section 6).
 
 | Activity | Result at the time of writing |
 |---|---|
-| Platform test suite on SQLite and PostgreSQL 16 | 1043 on SQLite, 1040 on PostgreSQL (database-specific checks run on only one of them) |
+| Platform test suite on SQLite and PostgreSQL 16 | 1060 on SQLite (Python 3.11 and 3.13), 1055 on PostgreSQL (database-specific checks run on only one of them) |
 | Phishing ML engine tests | 205 passing |
-| Feature verification (including a real-browser tour, live public feeds and a live LLM) | 112 of 112 features verified |
+| Feature verification (including a real-browser tour, live public feeds and a live LLM) | 113 of 113 features verified |
 | Penetration suite, input fuzzing, static analysis, dependency audit | No open findings |
 | Container deployment | Built and run end to end from empty volumes (Docker), demonstration figures identical to the reference run, restart persistence verified |
 
@@ -203,8 +203,11 @@ Confirmed before the platform is promoted beyond the read-only stage:
 - [ ] PostgreSQL: certificate-verified TLS (`sslmode=verify-full`), the schema owner used only by the migration step
   and the platform running as a role without schema rights and with INSERT / SELECT only on the audit table; backups
   and a tested restore.
-- [ ] Images deployed by digest, signed by the release pipeline and verified at admission; default-deny network
-  policies in place.
+- [ ] Windows hosts: packages installed only by `install.ps1` from the hash-pinned lock; the scheduled task runs as
+  LOCAL SERVICE or a group managed service account, never an administrator; folder permissions as documented (no
+  Users / Authenticated Users entries); inbound 443 only; `cyberdome.ps1 status` healthy after a reboot.
+- [ ] Containers (if used instead): images deployed by digest, signed by the release pipeline and verified at
+  admission; default-deny network policies in place.
 - [ ] Every connector credential in the vault; least privilege per tool; write permissions only for approved action
   types; certificate credentials for Microsoft app registrations.
 - [ ] Break-glass secret sealed with two custodians; only its hash configured; tested once.
@@ -213,7 +216,7 @@ Confirmed before the platform is promoted beyond the read-only stage:
 - [ ] Monitoring: `/metrics` scraped with an auditor API key; the delivered alert rules routed to on-call (scheduler
   stopped, audit chain broken, break-glass used, action outcome unknown, failing jobs, stale connectors, kill switch);
   the hourly audit-chain heads kept in write-once retention in the log platform.
-- [ ] Logs: container stdout (JSON) collected into the organisation's log platform / SIEM; alerts on warnings, errors,
+- [ ] Logs: the platform's JSON logs (Windows: `C:\ProgramData\CyberDome\logs`; containers: stdout) collected into the organisation's log platform / SIEM; alerts on warnings, errors,
   failed jobs and model-call errors.
 - [ ] Retention periods and the legal-hold process agreed and configured.
 - [ ] No demonstration data loaded; no tool the organisation owns left on sample data.

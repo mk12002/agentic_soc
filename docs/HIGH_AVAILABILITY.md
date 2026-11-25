@@ -14,8 +14,8 @@ of each and a highly available PostgreSQL.
 
 | Component | Redundancy | When one instance fails | Recovery |
 |---|---|---|---|
-| **API** (`soc-api`) | 2+ replicas on different nodes / zones, behind a load balancer | The load balancer stops routing to it (readiness fails or the pod is gone); requests go to the others. No session is lost: sign-in tokens are checked on every request and revocations live in the database. | Kubernetes restarts or reschedules it. |
-| **Scheduler** (`soc-scheduler`) | 2 replicas, each with a local liveness probe | A job the dead replica was running is **taken over within `SOC_JOB_LEASE_SECONDS` (120 s)** by the other replica; nothing runs twice. | Restarted by the orchestrator. `/health` shows `stale` if no scheduler beats for 180 s. |
+| **API** (`soc-api`) | 2+ replicas on different nodes / zones, behind a load balancer | The load balancer stops routing to it (readiness fails or the pod is gone); requests go to the others. No session is lost: sign-in tokens are checked on every request and revocations live in the database. | Kubernetes restarts or reschedules it; on Windows hosts the launcher restarts the process and Task Scheduler the launcher (section 3.4). |
+| **Scheduler** (`soc-scheduler`) | 2 replicas, each with a local liveness probe | A job the dead replica was running is **taken over within `SOC_JOB_LEASE_SECONDS` (120 s)** by the other replica; nothing runs twice. | Restarted by the orchestrator (Windows hosts: section 3.4). `/health` shows `stale` if no scheduler beats for 180 s. |
 | **PostgreSQL** | Managed zone-redundant HA (cloud) or a 3-instance cluster with a synchronous replica (on-prem) | The standby is promoted. Replicas check connections before use and replace broken ones; requests during the switch answer **503 + Retry-After** instead of failing, and readiness takes replicas out of the load balancer until the database answers. | Automatic failover by the service / operator. |
 | **Stored files** (reported e-mails, reports; original vendor payloads with `SOC_STORE_RAW_PAYLOADS`) | In PostgreSQL (`SOC_BLOB_STORE=database`) | Covered by the database's HA: nothing to fail separately. | With the database. |
 | **Ingress / WAF** | Zone-redundant Application Gateway, or 2+ ingress controller replicas behind the organisation's load-balancer pair | The other instance serves. | The service / orchestrator. |
@@ -115,11 +115,34 @@ Two virtual machines, each running the API and scheduler containers (`deploy/doc
 PostgreSQL and `SOC_BLOB_STORE=database` (the compose default). Same guarantees as section 2; capacity is
 added by adding VMs. Kubernetes adds self-healing, rolling deploys and autoscaling on top.
 On Azure, with two `Standard_D2s_v5` VMs in two zones and a zone-redundant PostgreSQL Flexible Server, this costs
-about $554 a month on demand and $351 with 1-year reservations - the recommended size for a small SOC
+about $554 a month on demand and $351 with 1-year reservations on Linux VMs - the recommended size for a small SOC (on the agreed Windows Server VMs, section 3.4: $723 / $520)
 (`INFRASTRUCTURE_AND_COSTS.md` section 10.1a).
 
 A single host running the whole compose file (`deploy/docker-compose.yml` as shipped) is right for a demo or a pilot:
 it is a single point of failure by design.
+
+### 3.4 Windows hosts (the agreed hosting)
+
+The same shape as 3.3 with Windows Server VMs instead of containers (`CLIENT_DEPLOYMENT_GUIDE.md` section 1A): each VM
+runs `deploy/windows/install.ps1`'s install - the platform as the scheduled task `\CyberDome\API` (API, console and
+built-in scheduler) under a low-privilege service account - against one shared zone-redundant PostgreSQL with
+`SOC_BLOB_STORE=database` (the launcher's default), behind the organisation's load balancer or Application Gateway
+pointed at each VM's IIS. Every guarantee of section 2 holds unchanged: the application code, leases and health checks
+are the same; only the process supervisor differs.
+
+| Failure | What happens on a Windows host | Evidence |
+|---|---|---|
+| The platform process exits or crashes | `run.ps1` restarts it after 5 s (doubling to 5 min while it keeps failing; reset after 10 minutes up) and logs the exit code | `test_windows_deployment.py` (restart and give-up limit) |
+| The launcher itself fails | Task Scheduler restarts the task every minute (up to 999 times) | task settings set by `install.ps1` |
+| The VM reboots (patching) | the task starts at boot, before anyone signs in; the other VM serves meanwhile and takes over its jobs within one 120 s lease | `test_high_availability.py` (lease takeover) |
+| A VM or zone is lost | as 3.3: the load balancer stops sending to it (its `/health/ready` fails), the other VM carries the load | section 2 |
+| A stop for maintenance | `cyberdome.ps1 stop` ends the whole process tree (uvicorn's workers outlive their parent otherwise) and the launcher exits without restarting | `test_windows_deployment.py` (stop request) |
+
+On Azure two `Standard_D2s_v5` Windows VMs with the zone-redundant database cost about $723 a month on demand, $520
+with 1-year reservations, or $385 when the organisation's Windows Server licences cover the VMs
+(`INFRASTRUCTURE_AND_COSTS.md` section 10.1b). **One Windows VM with PostgreSQL on it** (`setup_postgres.ps1`) is a
+pilot or small-site shape with no failover: a VM loss stops the platform until it is restored from backup
+(`backup.ps1` dumps nightly; keep `secrets\data_key` with the dumps).
 
 ---
 

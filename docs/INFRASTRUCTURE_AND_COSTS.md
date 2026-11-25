@@ -20,9 +20,9 @@ measurement method), `CLIENT_DEPLOYMENT_GUIDE.md` (per-tool permissions and setu
 
 | Question | Answer | Basis |
 |---|---|---|
-| What does it run on? | Two small application services (API, scheduler) in containers and **one PostgreSQL database**. Nothing else is required. | Architecture |
-| Recommended hosting | **Azure** (the organisation's identity, Defender, Sentinel and Azure OpenAI are already there), across three availability zones. On premises is fully supported with the same images. | Section 9 |
-| Monthly infrastructure, production HA | **Small SOC: ≈ $554 on demand, ≈ $351 with 1-year reservations (lean HA, no Kubernetes, section 10.1a).** Small-to-mid with Kubernetes: **≈ $701 pay-as-you-go; ≈ $470 with 1-year reservations** (Azure, small-to-mid SOC, every component redundant across three availability zones). Large SOC: ≈ $1,386 / $924. Add $389 for a dedicated WAF **only if** the console is reachable from the internet. | [P] section 10.1 |
+| What does it run on? | Two small application services (API, scheduler) and **one PostgreSQL database**. The agreed hosting is **Windows Server** (Python 3.13, the services as scheduled tasks, IIS in front: `CLIENT_DEPLOYMENT_GUIDE.md` section 1A); the same application also ships as container images. Nothing else is required. | Architecture |
+| Recommended hosting | **Azure** (the organisation's identity, Defender, Sentinel and Azure OpenAI are already there): two Windows Server VMs in two zones and a zone-redundant managed PostgreSQL. On premises is fully supported with the same install. | Section 9, 10.1b |
+| Monthly infrastructure, production HA | **Windows hosts, small SOC: ≈ $723 on demand, ≈ $520 with 1-year reservations, ≈ $413 with 3-year (lean HA, section 10.1b; ≈ $588 / $385 / $279 when the organisation's Windows Server licences cover the VMs - Azure Hybrid Benefit).** Linux hosts, the same design: ≈ $554 / $351 (section 10.1a). Small-to-mid with Kubernetes: **≈ $701 pay-as-you-go; ≈ $470 with 1-year reservations** (Azure, small-to-mid SOC, every component redundant across three availability zones). Large SOC: ≈ $1,386 / $924. Add $389 for a dedicated WAF **only if** the console is reachable from the internet. | [P] section 10.1 |
 | Monthly LLM cost | **$5-$26 (small / mid SOC) on gpt-4.1-mini**; $1.50-$7.50 on Claude Haiku 5.5; about $93-$100 on premium models for a mid SOC. Capped by a hard budget. | [M] tokens x [P] prices, section 11 |
 | Storage | **About 5.7 KB per stored record**, all indexes and links included. A mid-size SOC needs roughly 30-60 GB for a full year. | [M] section 5 |
 | Capacity | 100 concurrent analysts served at 150 requests/s with no error by four server processes on a laptop; sync of 21,691 records in 6 minutes on PostgreSQL. A real SOC's load is a fraction of this. | [M] section 6 |
@@ -36,7 +36,7 @@ measurement method), `CLIENT_DEPLOYMENT_GUIDE.md` (per-tool permissions and setu
 
 | Component | What it is | Resources it needs | Replicas in production |
 |---|---|---|---|
-| `soc-api` | The API and the analyst console (Python 3.11, FastAPI, uvicorn) | 1 vCPU / 1-2 GB per pod (1 worker process) | 2-4 (autoscaled on CPU); 3-4 on Azure, one per zone |
+| `soc-api` | The API and the analyst console (Python 3.13 on Windows hosts, 3.11 in the container image; FastAPI, uvicorn) | 1 vCPU / 1-2 GB per pod (1 worker process) | 2-4 (autoscaled on CPU); 3-4 on Azure, one per zone |
 | `soc-scheduler` | The scheduled jobs: syncs, investigations, correlation, reports, retention, notifications | 0.25 vCPU requested / 1-2 GB (mostly waits on the tools' APIs) | 2 |
 | PostgreSQL 16 | **All** state: records, cases, actions, audit chain, stored e-mails and reports | 2 vCore / 8 GB and 64 GiB for a small-to-mid SOC; 4 vCore / 16 GB and 256 GiB for a large SOC (sections 5, 10.1) | 1 primary + 1 synchronous standby in another zone (cloud) or 3-node cluster (on-prem) |
 | Ingress / WAF | TLS termination; a web application firewall when the console is internet-facing | the organisation's existing gateway or an internal load balancer; a dedicated WAF only if internet-facing (section 10.2, D5) | 2+ / managed |
@@ -271,7 +271,7 @@ scenarios in the organisation's data-types workbook.
 | Operations effort [A] | ≈ 1 person-day/month: image updates, reviewing alerts; the database, its patching, backups and failover are managed | ≈ 3-4 person-days/month: OS, Kubernetes and PostgreSQL upgrades, backup and restore drills, storage, hardware lifecycle |
 | Time to production [A] | days, from the Kubernetes package and a managed database | weeks, if a Kubernetes and PostgreSQL platform must first be built |
 | Connectivity to on-prem tools | Needs the existing private link (VPN / ExpressRoute) for the Rapid7 console and self-hosted Delinea | Local |
-| Cash cost | **$470-$701/month** for production HA, small-to-mid SOC ([P], section 10.1) | Hardware or VM capacity at internal rates + people time; no licence is required (all components open source) |
+| Cash cost | **$520-$723/month** for lean HA on Windows hosts, small SOC ([P], section 10.1b); $470-$701 with Kubernetes, small-to-mid SOC (10.1) | Hardware or VM capacity at internal rates + people time; Windows Server licences for Windows hosts (under the organisation's agreement); everything else open source |
 | Data residency | The organisation chooses the Azure region (prices here: Central India) | On site |
 
 **When on premises is the better choice:** the organisation already runs a Kubernetes platform and PostgreSQL with
@@ -381,6 +381,38 @@ vault and registry: **≈ $168.60 a month** on demand. A zone outage means a poi
 Neither burstable size has been measured with the platform: run `scripts/load_test.py` and
 `scripts/measure_scale.py` against it, as for every size in this section.
 
+### 10.1b Lean HA on Windows hosts - the agreed hosting [P]
+
+The same lean design as 10.1a with the application on **Windows Server** VMs (`CLIENT_DEPLOYMENT_GUIDE.md` section
+1A): each VM runs the platform as scheduled tasks behind IIS; the database is the same zone-redundant managed
+PostgreSQL. Unit prices from the Azure Retail Prices API, Central India, read **2026-11-24**: `Standard_D2s_v5`
+Windows $0.193/h against $0.101/h for Linux, so the Windows Server licence adds **$0.092/h per 2-vCPU VM ($67.16 a
+month)**. Reservations cover compute only - the licence part is still paid hourly - unless the organisation's existing
+Windows Server licences with Software Assurance cover the VMs (**Azure Hybrid Benefit**: the licence part is $0).
+Windows Server images use a 127 GiB operating-system disk (Premium SSD P10, $19.71 a month); 10.1a's Linux figures
+leave the operating-system disks out. No container registry is needed on Windows hosts.
+
+| Item | Unit price [P] | On demand | 1-year reserved | 3-year reserved | With Azure Hybrid Benefit (1-year) |
+|---|---|---|---|---|---|
+| 2 VMs `Standard_D2s_v5` Windows (2 vCPU, 8 GB), one per availability zone, each running the API and the scheduler | $0.193/h; reserved compute $546 per year / $1,048 per 3 years + licence $0.092/h | $281.78 | $225.32 | $192.54 | $91.00 |
+| 2 operating-system disks, Premium SSD P10 (128 GiB) | $19.71 per month each | $39.42 | $39.42 | $39.42 | $39.42 |
+| PostgreSQL Flexible Server, General Purpose 2 vCore + zone-redundant standby | as 10.1 | $366.46 | $220.00 | $146.56 | $220.00 |
+| PostgreSQL storage, primary and standby | as 10.1 | $16.77 | $16.77 | $16.77 | $16.77 |
+| Log Analytics 5 GB, Key Vault | as 10.1 | $18.20 | $18.20 | $18.20 | $18.20 |
+| Load balancing | the organisation's existing Application Gateway or load balancer [A] | $0 | $0 | $0 | $0 |
+| **Total** | | **$722.63** | **$519.71** | **$413.49** | **$385.39** |
+
+With Azure Hybrid Benefit on demand: $588.31; 3-year: $279.17. Against the Linux lean design (10.1a) the Windows
+licence adds $134.32 a month for the two VMs, and the operating-system disks $39.42 (Linux VMs need smaller ones,
+not priced in 10.1a).
+
+**One Windows VM with PostgreSQL on it (pilot or small site, no failover):** `Standard_D4s_v5` Windows (4 vCPU,
+16 GB) $0.386/h = $281.78 on demand ($225.32 with a 1-year compute reservation plus the licence; $91.00 with Azure
+Hybrid Benefit), an operating-system disk and a 128 GiB data disk (2 x $19.71) and the same $18.20 of logs and vault:
+**≈ $339.40 a month on demand, ≈ $282.94 with a 1-year reservation**. A VM or zone failure stops the platform until the
+VM is restored from backup (`HIGH_AVAILABILITY.md` section 3.4). Not yet measured with the platform on these sizes:
+run `scripts/load_test.py` and `scripts/measure_scale.py` against the provisioned hosts, as for every size here.
+
 ### 10.2 Every availability decision, justified
 
 All of the platform's state - records, cases, approvals, the audit chain, stored e-mails and reports - is in
@@ -427,7 +459,8 @@ while it runs ($0.101/h).
 | Backup object store (MinIO or existing S3-compatible storage) at a second location | 1 | 1-2 TB | base backups + WAL for point-in-time recovery |
 | Load-balancer pair / ingress | existing | - | TLS and the shared rate limit |
 
-**Software licences: none required.** Kubernetes, PostgreSQL, CloudNativePG, PgBouncer, ingress-nginx and MinIO are
+**Software licences:** for Windows hosts, Windows Server licences under the organisation's agreement (not priced here);
+otherwise none required. Kubernetes, PostgreSQL, CloudNativePG, PgBouncer, ingress-nginx and MinIO are
 open source (MinIO is AGPL-3.0; internal use is fine, or use existing S3-compatible storage). Optional commercial
 support (an OpenShift or Tanzu subscription, PostgreSQL vendor support) at the organisation's choice.
 
@@ -445,7 +478,7 @@ server loses one VM of each kind, which the design tolerates), so each server ca
 | Power and cooling | about 0.4 kW of equipment, 0.6 kW with cooling (PUE 1.5), 730 h, at $0.10-0.18 per kWh [A] | $45-80 |
 | Hardware support | about 10 % of the hardware price a year [A] | $100-150 |
 | Platform operations | 3-4 person-days a month at $150-300 a day [A] | $450-1,200 |
-| Software licences | none (open source) | $0 |
+| Software licences | none for the open-source stack; Windows Server licences when the hosts run Windows (under the organisation's agreement, not priced) | $0 + Windows Server |
 | **Total** | | **≈ $820-1,760** |
 
 People are half to two-thirds of the total. On an **existing** virtualisation or Kubernetes platform with spare
@@ -524,9 +557,14 @@ How to read it:
 | **Recommended HA**, small SOC, 1-year reserved | $470 | $5 | $1.50 | **≈ $475** |
 | **Recommended HA**, mid-size SOC, pay-as-you-go | $701 | $26 | $7.50 | **≈ $727** |
 | **Recommended HA**, mid-size SOC, 1-year reserved | $470 | $26 | $7.50 | **≈ $496** |
-| **Lean HA (10.1a)**, small SOC, on demand | $554 | $5 | $1.50 | **≈ $559** |
-| **Lean HA (10.1a)**, small SOC, 1-year reserved | $351 | $5 | $1.50 | **≈ $356** |
-| **Lean HA (10.1a)**, small SOC, 3-year reserved | $245 | $5 | $1.50 | **≈ $250** |
+| **Lean HA on Windows hosts (10.1b)**, small SOC, on demand | $723 | $5 | $1.50 | **≈ $728** |
+| **Lean HA on Windows hosts (10.1b)**, small SOC, 1-year reserved | $520 | $5 | $1.50 | **≈ $525** |
+| **Lean HA on Windows hosts (10.1b)**, small SOC, 3-year reserved | $413 | $5 | $1.50 | **≈ $418** |
+| Lean HA on Windows hosts, Azure Hybrid Benefit, 1-year reserved | $385 | $5 | $1.50 | **≈ $390** |
+| One Windows VM with PostgreSQL on it (no HA), on demand | $339 | $5 | $1.50 | **≈ $344** |
+| **Lean HA (10.1a)**, Linux hosts, small SOC, on demand | $554 | $5 | $1.50 | **≈ $559** |
+| **Lean HA (10.1a)**, Linux hosts, small SOC, 1-year reserved | $351 | $5 | $1.50 | **≈ $356** |
+| **Lean HA (10.1a)**, Linux hosts, small SOC, 3-year reserved | $245 | $5 | $1.50 | **≈ $250** |
 | Pilot, single VM + burstable database (10.1a) | $169 | $5 | $1.50 | **≈ $174** |
 | Large SOC HA, pay-as-you-go | $1,386 | $148 | $43 | **≈ $1,534** |
 | Large SOC HA, 1-year reserved | $924 | $148 | $43 | **≈ $1,072** |
@@ -615,7 +653,9 @@ removed) and replays them through the test suite, then read-only and shadow mode
   with 1- and 3-year reservations; Azure Database for PostgreSQL Flexible Server General Purpose Ddsv5 compute and
   reservations; Flexible Server storage and backup storage; Application Gateway WAF v2 and Standard v2; Azure
   Kubernetes Service; Log Analytics; Key Vault; Container Registry; Foundry Models (Azure OpenAI) gpt-4.1,
-  gpt-4.1-mini, gpt-4.1-nano.
+  gpt-4.1-mini, gpt-4.1-nano. Queried again 2026-11-24 for section 10.1b: Virtual Machines `Standard_D2s_v5` and
+  `Standard_D4s_v5` Windows (product "Virtual Machines Dsv5 Series Windows", consumption) beside the Linux meters
+  (unchanged since 2026-10-18), and Managed Disks Premium SSD P10 LRS.
 - Microsoft Learn, read 2026-10-18: AKS pricing tiers and uptime SLA,
   `https://learn.microsoft.com/en-us/azure/aks/free-standard-pricing-tiers`; PostgreSQL Flexible Server high
   availability (zone-redundant vs same-zone, failover time, SLA, user errors replicating to the standby),

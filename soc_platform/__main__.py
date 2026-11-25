@@ -303,9 +303,10 @@ def _store_session():
     from sqlalchemy.exc import SQLAlchemyError
 
     try:
-        db = _db()
-        db.create_all()
-        return db.session()
+        # get_database() creates the schema, or with SOC_SCHEMA_MANAGE=0 (a runtime role without DDL rights) only
+        # checks it: a second create_all() here failed as that role and the check silently ignored the console's
+        # configuration versions
+        return _db().session()
     except SQLAlchemyError as exc:
         print(f"note: database not reachable ({type(exc).__name__}); using config/connectors.yaml alone", file=sys.stderr)
         return None
@@ -511,8 +512,7 @@ def cmd_blobs(*args: str) -> None:
     m.add_argument("--delete-files", action="store_true", help="remove each file once its row is committed")
     sub.add_parser("reencrypt", help="seal legacy plaintext and re-encrypt every blob under the newest data key")
     a = ap.parse_args(list(args))
-    db = _db()
-    db.create_all()
+    db = _db()                       # schema created or (runtime role) checked by get_database()
     with db.session() as s:
         if a.action == "check":
             out = check_references(s, sample=a.sample)

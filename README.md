@@ -35,7 +35,7 @@ and requires identical results with no original name in any output ([details](do
 Every connector has a **fake mode** that replays vendor-shaped fixture data through the same code as the live API,
 so the whole platform runs end to end on a laptop.
 
-You need Python 3.11-3.13 and [Git LFS](https://git-lfs.com) (the phishing models are stored with it - install it
+You need Python 3.11-3.13 (3.13 recommended: the production Windows hosts run it) and [Git LFS](https://git-lfs.com) (the phishing models are stored with it - install it
 **before** cloning, or run `git lfs pull` afterwards).
 
 ```bash
@@ -80,7 +80,9 @@ of failure - two or more API and scheduler replicas across nodes and zones, high
 piece of state - use the Kubernetes package (`kubectl apply -k deploy/kubernetes/overlays/azure` or `.../onprem`); see
 [docs/HIGH_AVAILABILITY.md](docs/HIGH_AVAILABILITY.md).
 
-Requirements: Python 3.11 to 3.13 (tested on both; the container image uses 3.11), SQLite (dev) or PostgreSQL 14+ (prod). The console is plain HTML/JS/CSS served by the
+Requirements: Python 3.11 to 3.13 (tested on both; Windows hosts run 3.13, the container image 3.11), SQLite (dev) or PostgreSQL 14+ (prod).
+
+**Production on Windows Server** (the agreed hosting): `deploy\windows\install.ps1` installs from a hash-pinned lock, runs the platform as scheduled tasks under a low-privilege account behind IIS, and `deploy\windows\setup_postgres.ps1` prepares a local PostgreSQL with TLS - see [docs/CLIENT_DEPLOYMENT_GUIDE.md](docs/CLIENT_DEPLOYMENT_GUIDE.md) section 1A. The console is plain HTML/JS/CSS served by the
 API - no Node build step, no external CDNs - and works in current Chrome, Edge, Firefox and Safari.
 
 ## Console

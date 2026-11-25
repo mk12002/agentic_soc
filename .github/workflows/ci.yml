@@ -1,5 +1,6 @@
 # Every push and pull request runs the same gates the project runs before a commit (CLAUDE.md §9), plus scans of
-# both container images. A failing gate fails the run; protect the main branch so merges need a green run.
+# both container images. The platform tests run on Linux with Python 3.11 and 3.13 and on Windows with 3.13 (the
+# Windows host deployment: deploy/windows, installed from the hash-pinned Windows lock, real install included). A failing gate fails the run; protect the main branch so merges need a green run.
 # Repository secret BANNED_NAMES_REGEX holds the confidential-name pattern (never committed).
 # Every action is pinned to a commit SHA (a tag can be moved to other code - it has happened to a scanner action);
 # the comment names the release. tests/test_deployment_manifests.py fails on an unpinned action.
@@ -50,6 +51,7 @@ jobs:
         run: |
           python -m pip_audit -r requirements/platform.lock --no-deps --disable-pip
           python -m pip_audit -r requirements/image-engine.lock --no-deps --disable-pip
+          python -m pip_audit -r requirements/windows-engine.lock --no-deps --disable-pip
       - name: Locks match the requirements, image locks hashed and in step
         run: python scripts/supply_chain.py check
       - name: Console JavaScript parses
@@ -70,14 +72,18 @@ jobs:
           path: sbom/platform.cdx.json
 
   tests-sqlite:
-    name: platform tests (SQLite, PostgreSQL rules enforced)
+    name: platform tests (SQLite, PostgreSQL rules enforced, Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
       - name: Install
         run: |
@@ -115,6 +121,28 @@ jobs:
           SOC_TEST_POSTGRES: postgresql://postgres:postgres@localhost:5432/postgres
         run: python -m pytest soc_platform/tests -q -p no:cacheprovider
 
+  tests-windows:
+    name: platform tests on Windows (Python 3.13, the Windows host install)
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      SOC_WINDOWS_INSTALL_TEST: "1"         # test_windows_deployment.py installs from the lock and starts a server
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          lfs: true                         # the phishing engine's trained models
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install (hash-pinned Windows lock, then the test tools)
+        run: |
+          python -m pip install --require-hashes --no-deps -r requirements/windows-engine.lock
+          python -m pip install -r requirements/dev.txt
+          python -m pip install --no-deps -e .
+      - name: pytest
+        run: python -m pytest soc_platform/tests -q -p no:cacheprovider
+
   image:
     name: container images build and vulnerability scan (trivy)
     runs-on: ubuntu-latest
@@ -142,7 +170,7 @@ jobs:
   release:
     name: push and sign the images (tags v*)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [quality, tests-sqlite, tests-postgres, image]
+    needs: [quality, tests-sqlite, tests-postgres, tests-windows, image]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

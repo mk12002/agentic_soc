@@ -1,6 +1,6 @@
 # Test report - CyberDome platform
 
-Date: 2026-11-23 (rounds 15-37; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9, CPU only · Branch: `main`
+Date: 2026-11-25 (rounds 15-38; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9 and 3.13.17, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,62 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 37 (2026-11-23) - latest results: AI integration, model versions, CISO executive view
+## 0. Round 38 (2026-11-24/25) - latest results: Windows Server hosting, Python 3.13
+
+Aim: the platform is hosted on **Windows Server** (agreed with the client) on **Python 3.13** - make that a tested
+deployment, not a statement, and prove nothing behaves differently from the container image.
+
+**What changed.** `deploy/windows` (PowerShell 5.1: `install.ps1`, `run.ps1`, `cyberdome.ps1`, `setup_postgres.ps1`,
+`setup_iis.ps1` + `iis/web.config`, `backup.ps1`, `uninstall.ps1`, `common.ps1`, `cyberdome.env.example`);
+hash-pinned Windows locks (`requirements/windows.lock`, `windows-engine.lock`; `supply_chain.py windows-lock`, and
+`check` holds them to the image locks' versions); `yara-python` on every platform; CI runs the platform tests on Linux
+with 3.11 and 3.13 and on Windows with 3.13 (with the real install); the deployment, operations, cost, availability,
+security and review documents and the customer deck (slides 11-15) describe Windows hosting.
+
+**Tests added:** `test_windows_deployment.py` (16: the scripts parse on Windows PowerShell 5.1 and are ASCII; the
+settings template names only real settings and holds no secret; the launcher sets every production default the image
+sets, loads settings by the `.env` rules and never prints a value, runs `config check`, restarts a process that exits
+and gives up at its limit, ends the process tree on a stop request; folder permissions give the service account only
+its right; the installer refuses Python 3.10, 3.14 and 32-bit; a starter that launches a server returns; the Windows
+locks are hashed and match the image; the IIS front end forwards to the platform's port with its body limit; CI tests
+Windows and 3.13; and, opt-in, a real install from the lock, an upgrade in place and a running server),
+`test_phishing_engine.py::test_the_attachment_agent_scans_with_its_yara_rules_on_every_host`,
+`test_cli.py::test_cli_commands_never_change_the_schema_when_running_as_the_runtime_role`.
+
+**Found and fixed during the round:**
+
+| Defect | Found by | Fix |
+|---|---|---|
+| On Windows the phishing engine's attachment agent skipped its YARA rules: `requirements/phishing.txt` excluded `yara-python` there, so macro and script attachments scored lower on a Windows host than in the container | Preparing the Windows install (checking every platform marker) | Installed everywhere (Windows wheels exist for 3.11-3.13); a test fails without it |
+| `config check` run as the runtime role (production role split, `SOC_SCHEMA_MANAGE=0`) created the schema a second time, was refused ("permission denied for schema public") and silently checked `connectors.yaml` alone, ignoring the console's configuration versions - on any host, Compose included | The production-mode run on a real PostgreSQL 16.16 with the role split | The CLI relies on `get_database()`, which only checks the schema in that mode; regression test fails without the fix |
+| `setup_postgres.ps1` never finished after restarting PostgreSQL without a service name: `pg_ctl` was piped and the server it starts kept the pipe open | The production-mode run | `Invoke-Starter` waits for the starter alone; regression test (the old form timed out in the same check) |
+| `install.ps1` failed at once: Windows PowerShell 5.1 leaves `$PSScriptRoot` empty in parameter defaults | The installer tests | Resolved after the parameter block |
+| A mistyped `SOC_API_WORKERS` crashed the launcher before `config check` could name it | The launcher test | The launcher only derives the rate share from a valid number |
+| With the same account as administrator and service account, `icacls /grant:r` replaced its full control, and the installer could not create its own folders | The real install test | The grant is skipped for that account; tested both ways |
+| The test helper's PostgreSQL (pgserver) is built without SSL, so the TLS path could not be exercised with it | The production-mode run | The run uses the EnterpriseDB PostgreSQL 16.16 Windows build (signature verified) |
+
+**Production-mode run on Windows 11** (install without tasks, Python 3.13.17, EnterpriseDB PostgreSQL 16.16):
+`setup_postgres.ps1` created the owner and runtime roles, a CA and a certificate for `localhost`, `ssl = on` and the
+`pg_hba.conf` block, restarted PostgreSQL and ran `init-db` as the owner over `sslmode=verify-full`; the runtime role
+had no CREATE on the schema and no UPDATE on `audit_log` (INSERT only); a non-TLS connection as that role was refused;
+`config check` with production settings: 0 errors, 0 warnings; `run.ps1` started the platform in production mode
+(Entra sign-in, verified TLS, runtime role, database blob store): `/health/ready` 200, an unsigned API call 401; a
+stop request ended the process tree and closed the port; `backup.ps1` wrote a 140 KB dump. Not run here (need
+administrator rights or IIS): registering the scheduled tasks, `setup_iis.ps1`, a Windows service restart.
+
+**Python 3.13.** python.org's last Windows installer for 3.13 is 3.13.17 (3.13.18, 2026-10-25, is source-only); the
+last for 3.11 was 3.11.9. Recorded as a risk with the move to 3.14 as the next runtime upgrade.
+
+**Counts:** 1079 collected. SQLite: **1060 passed, 19 skipped, 0 failed on Python 3.11 and on 3.13** (41 min each,
+run at the same time, after every fix). PostgreSQL 16 on Python 3.13: 1055 passed, 22 skipped, 0 failed (full run,
+1 h 47 min, before the last two regression tests, which then passed on PostgreSQL in a re-run of their files: 46
+passed, 1 skipped). Real Windows install test: passed (13 min). Phishing ML engine: 205 passed, 2 skipped on 3.11 and
+3.13. Feature verification on Python 3.13 with `--browser --engine --live --llm`: **113 of 113**; 278 mapped tests run,
+0 failed; browser tour with the live model at 1440 / 1280 / 1024 / 768 / 390 px, 0 problems. ruff, bandit, pip-audit
+(platform, engine image and Windows locks: no known vulnerabilities), the lock check and the secret / confidential-name
+scan clean.
+
+## 0.0 Round 37 (2026-11-23): AI integration, model versions, CISO executive view
 
 Aim: let an administrator connect the organisation's in-house AI platform (its SDK, a service account) or an API-key
 provider without a redeploy; stop hard-coding model versions; give the CISO a read-only role and an executive view -

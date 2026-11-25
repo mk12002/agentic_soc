@@ -19,8 +19,10 @@ client deployment follows [CLIENT_DEPLOYMENT_GUIDE.md](CLIENT_DEPLOYMENT_GUIDE.m
 ## 2. Size and software
 
 Suggested size (estimate, confirm with IT): 4 vCPU, 16 GB RAM, 100 GB disk, Windows or Linux - the full test suite
-on SQLite and PostgreSQL in parallel is the heaviest load. Software: Git, Python 3.11, Docker (platform containers,
-PostgreSQL 16), Node.js 20 with Chrome or Edge (the automated browser tour).
+on SQLite and PostgreSQL in parallel is the heaviest load. Software: Git, Python 3.13 (the production Windows hosts'
+version) and 3.11 (the container image's), Docker (platform containers, PostgreSQL 16), Node.js 20 with Chrome or
+Edge (the automated browser tour). A Windows VM also rehearses the production install: `deploy\windows\install.ps1
+-NoTasks` into folders of its own (RUN_GUIDE.md section 11).
 
 ## 3. Network
 

@@ -13,9 +13,10 @@ exercised against the organisation's own tenants, volumes or users (covered by t
 
 ## 1 Summary
 
-- The platform is **client-hosted**: it runs in the organisation's own environment (containers on the organisation's
-  Kubernetes, Docker hosts or VMs; Windows hosts are also supported). It is not a vendor-operated SaaS and sends no
-  data or telemetry to its developers.
+- The platform is **client-hosted**: it runs in the organisation's own environment, on **Windows Server hosts** (the
+  agreed hosting: Python 3.13, the platform as scheduled tasks under a low-privilege account, IIS in front); the same
+  application is also packaged as container images for Kubernetes or Docker hosts. It is not a vendor-operated SaaS and
+  sends no data or telemetry to its developers.
 - It consists of **two application services** (API with web console; scheduler), **one PostgreSQL database** and
   **one encrypted file store**. There is no message bus, cache cluster or agent to install on endpoints.
 - It accepts inbound traffic **only through the organisation's TLS reverse proxy**. All integration traffic is
@@ -70,12 +71,13 @@ rate a vendor allows.
 
 | Aspect | Design |
 |---|---|
-| Where | The organisation's environment: a container platform (Kubernetes / AKS, Docker hosts) or VMs; Linux containers recommended; Windows supported |
+| Where | The organisation's environment: **Windows Server hosts** (agreed; on-premises or Azure VMs); alternatively a container platform (Kubernetes / AKS, Docker hosts) |
+| Windows host install | `deploy/windows/install.ps1` (PowerShell 5.1): checks Python (3.13, 64-bit, all users), installs every package from a hash-pinned Windows lock (`--require-hashes`), puts settings, secrets and data under `C:\ProgramData\CyberDome` with NTFS permissions (administrators and SYSTEM full control; the service account reads settings and secrets, writes only data and logs; nobody else listed), generates the data-encryption key, registers the platform as a scheduled task that starts at boot under LOCAL SERVICE or a group managed service account and restarts on failure; IIS with Application Request Routing terminates TLS; `setup_postgres.ps1` prepares a local PostgreSQL with TLS and separated roles |
 | Who operates | The organisation (or its appointed operator); the platform needs no inbound access for its developers |
 | Tenancy | Single organisation per deployment; no shared multi-tenant components |
-| Image | Multi-stage build on `python:3.11-slim` pinned by digest; every package installed against a SHA-256; runs as a non-root user (uid 1001) that cannot modify the code; no package manager or curl; production defaults (it refuses to start until production settings are present); health check on `/health/ready`; the phishing ML engine is included by a build argument; release images signed |
+| Image (container alternative) | Multi-stage build on `python:3.11-slim` pinned by digest; every package installed against a SHA-256; runs as a non-root user (uid 1001) that cannot modify the code; no package manager or curl; production defaults (it refuses to start until production settings are present); health check on `/health/ready`; the phishing ML engine is included by a build argument; release images signed |
 | Configuration | Environment variables plus `config/connectors.yaml`; secrets as files mounted from the vault (`<NAME>_FILE`); every setting is validated at start-up and a wrong value refuses the start with the fix |
-| Upgrades | New image digest; the migration step (`init-db`, the only process with the schema owner's credentials) creates new tables, adds new nullable columns and widens text columns; the platform itself runs without schema rights; a change needing a scripted migration is announced with its script |
+| Upgrades | Windows: re-run `install.ps1` from the new release (settings, key and data kept); containers: new image digest. In both, the migration step (`init-db`, the only process with the schema owner's credentials) creates new tables, adds new nullable columns and widens text columns; the platform itself runs without schema rights; a change needing a scripted migration is announced with its script |
 | Infrastructure as code | Kubernetes package (base + Azure and on-premises overlays) and, for Azure, a Bicep template for the network, cluster, database, Key Vault, registry, optional WAF and logging |
 
 **Reference deployment** (from `deploy/docker-compose.yml`, verified end to end on Docker Desktop on 2026-10-07):
@@ -95,7 +97,8 @@ RabbitMQ and Redis). **It is not needed**: the platform runs the trained models 
 
 | Component | Requirement | Owner |
 |---|---|---|
-| Container runtime / orchestrator | Docker or Kubernetes able to run Linux containers; CPU cores per API replica = worker count | Organisation |
+| Windows Server host(s) | Windows Server 2022 / 2025 64-bit; Python 3.13 installed for all users; IIS with URL Rewrite and ARR; a TLS certificate from the organisation's PKI; BitLocker, EDR and host firewall on; 4 vCPU / 16 GB / 100 GB with PostgreSQL on the host, or 2 x (2 vCPU / 8 GB) with a managed database (estimates, re-sized in week one) | Organisation |
+| Container runtime / orchestrator (alternative) | Docker or Kubernetes able to run Linux containers; CPU cores per API replica = worker count | Organisation |
 | PostgreSQL 16 | Dedicated database and login; TLS; backups with a tested restore; `max_connections` above `workers x (SOC_DB_POOL_SIZE + SOC_DB_MAX_OVERFLOW)` (defaults 20 + 20 per process) | Organisation |
 | Persistent storage | None beyond PostgreSQL with `SOC_BLOB_STORE=database` (recommended for several hosts); otherwise a volume for the encrypted reported e-mail and reports | Organisation |
 | Secrets vault | Azure Key Vault or equivalent, mounted as files into the containers | Organisation |
@@ -186,7 +189,8 @@ supplying the organisation's CA bundle (`SSL_CERT_FILE`, `SOC_LLM_CA_BUNDLE`), n
 
 | Component | Technology |
 |---|---|
-| Language / runtime | Python 3.11 |
+| Language / runtime | Python 3.13 on Windows hosts (3.11-3.13 supported and tested; the container image uses 3.11) |
+| Host integration (Windows) | Windows PowerShell 5.1 scripts, Task Scheduler, NTFS permissions (icacls), IIS URL Rewrite + Application Request Routing |
 | Web framework / server | FastAPI, Uvicorn |
 | Data access | SQLAlchemy 2.0 (same code on PostgreSQL and SQLite) |
 | Database | PostgreSQL 16 (production); SQLite (development and demonstrations only) |

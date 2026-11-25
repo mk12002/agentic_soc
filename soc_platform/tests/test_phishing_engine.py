@@ -334,3 +334,14 @@ def test_sender_reputation_stays_quiet_when_the_engine_database_is_off(monkeypat
     finally:
         engine_log.remove(sink)
     assert called == [] and warnings == []
+
+
+@needs_models
+def test_the_attachment_agent_scans_with_its_yara_rules_on_every_host():
+    """yara-python was once left out on Windows (a requirements marker): the attachment agent silently skipped its
+    rules there, so a macro or script attachment scored lower on a Windows host than in the container."""
+    from soc_platform.domains.phishing.engine.agents.attachment_agent import agent
+
+    assert agent._yara_compiled is not None
+    hits = {m.rule for m in agent._yara_compiled.match(data=b"Sub AutoOpen()\n Shell \"calc\"\nEnd Sub")}
+    assert hits == {"Suspicious_Macro"}
