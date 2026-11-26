@@ -198,7 +198,7 @@ Use these so the names match the rest of this guide and the presenter guide:
 | `ada@acme-demo.com` | **Admin** | All domains | Manage access (grant / revoke roles, service-account keys), connectors (test, run jobs), kill switch, export evidence | Access management and separation of duties |
 | `max@acme-demo.com` | **Automation admin** | All domains | Propose automation-policy changes, connectors and jobs, kill switch | Policy change control: they propose, a Lead approves |
 | `audrey@acme-demo.com` | **Auditor** | All domains | Read everything, audit log and verification, compliance pack and audit export | Audit and compliance, read-only |
-| `cleo@acme-demo.com` | **CISO** | All domains | Read everything, starting on the **Executive view** (posture, figures against the period before, what needs a decision today / tomorrow / this week); audit log and evidence export; never approves, changes policy or uses the kill switch | The leadership view: every figure computed, each tile links to the screen behind it |
+| `cleo@acme-demo.com` | **CISO** | All domains | Starts on the **Executive view** - the CISO's alone (posture, figures against the period before, what needs a decision today / tomorrow / this week; the detail behind *More detail*). The menu holds only Executive view, Dome Score and Reports; each figure drills down to its screen. Audit log and evidence export; never approves, changes policy or uses the kill switch | The leadership view: every figure computed, each tile links to the screen behind it |
 
 The permissions of every role are listed on **Access → Role permissions**, so you can show them on screen.
 

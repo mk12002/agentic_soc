@@ -365,12 +365,16 @@ async function visit(page, hash, name, full = true) {
   await page.click('[data-fn="proposeConfig"]'); await page.waitForTimeout(1500); await settle(page);
   if (!(await page.textContent('#main')).includes('awaiting approval')) problems.push('proposed change not listed for approval');
   await shot(page, '32-change-awaiting-approval', false);
+  // the executive view is the CISO's alone: not in an admin's menu (nor a lead's, checked below)
+  if (await page.$('.nav-item[data-nav="executive"]')) problems.push('the admin is offered the executive view');
   // CISO: lands on the executive view without asking for it, sees the same figures as the API, and can change nothing
+  // switching user from the admin's page: sign-out clears it, so the CISO lands on the executive view
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
-  await page.evaluate(() => history.replaceState(null, '', '/'));
   await page.fill('#si-user', `cleo@${EST.org}`); await page.selectOption('#si-role', 'ciso');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar'); await settle(page);
   if (!/Executive view/.test(await page.textContent('#main h1'))) problems.push('CISO did not land on the executive view');
+  const cisoMenu = await page.$$eval('.nav-item', xs => xs.map(x => x.dataset.nav).join(','));
+  if (cisoMenu !== 'executive,dome-score,reports') problems.push(`CISO menu should be the essentials only, got: ${cisoMenu}`);
   await page.evaluate(() => { const t = document.getElementById('toast'); if (t) t.hidden = true; });   // an earlier step's message
   await shot(page, '43-executive');
   const ex = await page.evaluate(async () => {
@@ -384,6 +388,8 @@ async function visit(page, hash, name, full = true) {
   });
   same('executive', 'headline figures', ex.shown.join(' | '), ex.tiles.join(' | '));
   same('executive', 'agenda counts', ex.tabs.join(','), ex.counts.join(','));
+  await page.$eval('.exec-more', d => { d.open = true; });                 // the detail cards, audited open
+  await audit(page, 'executive view (CISO), more detail open');
   await axe(page, 'executive view (CISO)');
   await page.goto(`${BASE}/#/approvals`); await settle(page);
   if (await page.$('[data-fn="act"], [data-fn="approveBundle"]')) problems.push('CISO is offered an approval button');
@@ -444,6 +450,9 @@ async function visit(page, hash, name, full = true) {
   await page.click('.user'); await page.click('[data-fn="signOut"]'); await page.waitForSelector('#si-user');
   await page.fill('#si-user', EST.lead); await page.selectOption('#si-role', 'lead');
   await page.click('[data-fn="signIn"]'); await page.waitForSelector('.sidebar');
+  if (await page.$('.nav-item[data-nav="executive"]')) problems.push('a lead is offered the executive view');
+  await settle(page);                                   // a new user starts on their own landing page, not the last one's
+  if (!/^Overview/.test((await page.textContent('#main h1')).trim())) problems.push(`after switching user the lead did not land on the overview (${await page.evaluate(() => location.hash)})`);
   // ---------- tuning: a request in words becomes a draft rule and its preview (nothing is stored)
   await page.goto(`${BASE}/#/tuning`); await settle(page);
   await page.fill('#tune-req', 'Red-team exercise on lab-* hosts for the next 5 days');

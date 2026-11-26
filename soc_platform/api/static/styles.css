@@ -475,3 +475,7 @@ tr.adetail > td { background: var(--surface-2); }
 .dome-preview { font-size: 13px; }
 .dome-preview b { font-size: 18px; }
 @media (max-width: 700px) { .wgrid { grid-template-columns: 1fr 72px; } .wgrid .slider, .wgrid .share { display: none; } }
+/* executive view: the detail cards behind one "More detail" bar, closed by default (the CISO sees the essentials) */
+.exec-more > summary { padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  font-size: 13px; color: var(--text); font-weight: 550; }
+.exec-more[open] > summary { margin-bottom: 4px; }

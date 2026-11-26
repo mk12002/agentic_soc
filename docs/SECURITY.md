@@ -272,6 +272,19 @@ interpolated value and the Content-Security-Policy allows no inline script. Foun
 | 5 | **Small disclosures and unbounded inputs.** Every answer carried `server: uvicorn`; the vulnerability question and eight request bodies had free text with no length limit; evidence text showed Python values (`standing admin role: False`). | Low | Server header off; every free-text field bounded; flags read "yes" / "no" (`test_evidence_text_never_shows_a_python_value`) |
 | 6 | **Dependencies with published advisories.** `pip-audit` on the locks (the CI gate) reported Pillow 12.3.0, certifi and setuptools in the platform lock, and pyasn1, opentelemetry-api and soupsieve in the engine image lock; the development environment a further six packages. | Medium | Upgraded (Pillow 13.0.0, certifi 2026.10.23, setuptools 84.2.1 and the rest), floors raised in `requirements/`, `platform.lock` and both hashed image locks regenerated; `pip-audit` reports no known vulnerability on the environment or any lock |
 
+### Penetration test (2026-11-26): attack suites, live probing, code review
+
+Full report, with every control, the live probe results and the demo host's configuration findings:
+[PENETRATION_TEST_REPORT.md](PENETRATION_TEST_REPORT.md). 41 live probes against a separate running instance (every
+route without credentials, forged tokens, every role, domain scope, injection, traversal, request limits, headers,
+rate limiting) all passed; bandit 0 issues, pip-audit 0 known vulnerabilities. Found and fixed, each with a test:
+
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 1 | **The executive view was open to every all-domain role** (lead, analyst, auditor, admin) and in their menus. | Medium | `view_executive` held by the CISO role only, enforced on both routes; the menu and a direct link follow it; a CISO's menu holds the essentials only (`test_only_the_ciso_opens_the_executive_view`) |
+| 2 | **`/health` could report a false broken audit chain.** It remembered the last verified head for the whole process, not per database, and trusted it when the database no longer held that record (a restore from backup; a test's second database). Real tampering was never hidden (the hourly full pass is separate). Found because a security test failed only in one suite order. | Low | The remembered head belongs to one database, and a mismatch is re-checked from the checkpoint or in full before the chain is called broken (`test_the_health_audit_check_belongs_to_one_database_and_survives_a_restore`) |
+| 3 | **Sign-out kept the previous user's page** in the address, so the next person to sign in opened on it. | Low | Sign-out clears it; each role starts on its landing page (browser tour: admin -> CISO, analyst -> lead) |
+
 ## Supply chain and build pipeline
 
 | Control | How |

@@ -30,7 +30,8 @@ def _view(session, **kw):
 
 # ============================================================================== the role
 def test_the_ciso_sees_everything_and_changes_nothing():
-    assert ROLE_PERMS[Role.CISO] == {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE}
+    assert ROLE_PERMS[Role.CISO] == {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE, Perm.VIEW_EXECUTIVE}
+    assert [r for r, perms in ROLE_PERMS.items() if Perm.VIEW_EXECUTIVE in perms] == [Role.CISO]   # the CISO's alone
     ciso = Principal("cleo@acme-demo.com", "Cleo", frozenset({Role.CISO}))
     for perm in (Perm.APPROVE_ACTION, Perm.APPROVE_HIGH_IMPACT, Perm.APPROVE_POLICY, Perm.KILL_SWITCH,
                  Perm.MANAGE_ACCESS, Perm.MANAGE_CONNECTORS, Perm.REQUEST_ACTION, Perm.INVESTIGATE, Perm.TUNE_DETECTIONS):
@@ -134,7 +135,7 @@ def test_the_ciso_reads_the_executive_view_and_cannot_change_anything(client):
     c, tok = client
     ciso = tok("cleo@acme-demo.com", "ciso")
     me = c.get("/api/v1/me", headers=ciso).json()
-    assert me["roles"] == ["ciso"] and me["permissions"] == ["export_evidence", "read", "read_audit"]
+    assert me["roles"] == ["ciso"] and me["permissions"] == ["export_evidence", "read", "read_audit", "view_executive"]
     v = c.get("/api/v1/executive?days=7&tz_offset_minutes=330", headers=ciso)
     assert v.status_code == 200 and set(v.json()["agenda"]["counts"]) == set(BUCKETS)
     assert c.get("/api/v1/executive?days=45", headers=ciso).status_code == 400
@@ -173,3 +174,18 @@ def test_with_a_model_the_brief_is_written_by_it_and_cites_only_the_figures(clie
     plain = c.get("/api/v1/executive?days=30", headers=ciso).json()          # the figures are the same either way
     assert [h["value"] for h in plain["headline"]] == [h["value"] for h in
                                                        c.get("/api/v1/executive?days=30", headers=ciso).json()["headline"]]
+
+
+def test_only_the_ciso_opens_the_executive_view(client):
+    """Every role with all-domain access could open the executive view and saw it in the menu: it is the CISO's
+    screen. The others keep their own (the overview, cases, approvals); their data access is unchanged."""
+    c, tok = client
+    for user, role in (("lena@acme-demo.com", "lead"), ("ann@acme-demo.com", "analyst"), ("ada@acme-demo.com", "admin"),
+                       ("audrey@acme-demo.com", "auditor"), ("max@acme-demo.com", "automation_admin")):
+        h = tok(user, role)
+        assert c.get("/api/v1/executive?days=30", headers=h).status_code == 403, role
+        assert c.post("/api/v1/executive/brief?days=30", headers=h).status_code == 403, role
+        assert "view_executive" not in c.get("/api/v1/me", headers=h).json()["permissions"], role
+    ciso = tok("cleo@acme-demo.com", "ciso")
+    assert c.get("/api/v1/executive?days=30", headers=ciso).status_code == 200
+    assert c.post("/api/v1/executive/brief?days=30", headers=ciso).status_code == 200

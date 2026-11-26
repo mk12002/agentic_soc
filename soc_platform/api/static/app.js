@@ -206,7 +206,7 @@ const meter = (v, max = 100) => `<div class="bar"><span style="width:${Math.max(
 // Groups follow CyberDome's modules: Dome Score (posture), Dome Agents (AI investigation and response), the domain
 // workflows, Dome Graph (assets, identities, coverage), Dome Connect (the tools) and Dome Comply (evidence, audit).
 const NAV = [
-  ['Command', [['executive', 'Executive view', 'exec', '*'], ['overview', 'Overview', 'overview'], ['dome-score', 'Dome Score', 'dome', '*']]],
+  ['Command', [['executive', 'Executive view', 'exec', '*', 'view_executive'], ['overview', 'Overview', 'overview'], ['dome-score', 'Dome Score', 'dome', '*']]],
   ['Dome Agents', [['intelligence', 'Intelligence', 'intel', '*'], ['cases', 'Cases', 'cases'],
     ['approvals', 'Approvals', 'approvals'], ['tuning', 'Tuning', 'filter'], ['policy', 'Automation policy', 'policy'], ['ai-usage', 'AI usage', 'ai']]],
   ['Domains', [['phishing', 'Phishing', 'phishing', 'phishing'], ['vulnerabilities', 'Vulnerabilities', 'vuln', 'vulnerability'],
@@ -216,6 +216,11 @@ const NAV = [
   ['Dome Connect', [['integrations', 'Integrations', 'plug']]],
   ['Dome Comply', [['reports', 'Reports', 'reports'], ['audit', 'Audit log', 'audit'], ['access', 'Access', 'access']]],
 ];
+// A CISO (and no other role) gets the essentials only: the executive view, the Dome Score and the reports. Every
+// figure still drills down from those screens; the analysts' working pages stay out of the menu.
+const CISO_MENU = new Set(['executive', 'dome-score', 'reports']);
+const cisoOnly = () => { const r = (window.ME && window.ME.roles) || []; return r.length > 0 && r.every(x => x === 'ciso'); };
+const inMenu = ([id, , , d, perm]) => (!d || inDomain(d)) && (!perm || can(perm)) && (!cisoOnly() || CISO_MENU.has(id));
 const TITLES = {...Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), story: 'Attack story', entity: 'Entity', search: 'Search'};
 
 // a CISO starts on the executive view; everyone else on the overview
@@ -233,7 +238,7 @@ function shell() {
       <div class="brand">${brand('Security operations')}
         <button class="icon-btn nav-toggle" id="nav-toggle" data-fn="toggleNav" data-args="[]" aria-controls="side-nav"></button></div>
       <nav class="side-nav" id="side-nav">
-      ${NAV.map(([g, items]) => { const shown = items.filter(([, , , d]) => !d || inDomain(d)); return shown.length ? `<div class="nav-group">${esc(g)}</div>` + shown.map(([id, label, ic]) =>
+      ${NAV.map(([g, items]) => { const shown = items.filter(inMenu); return shown.length ? `<div class="nav-group">${esc(g)}</div>` + shown.map(([id, label, ic]) =>
         `<a class="nav-item" href="#/${id}" data-nav="${id}" title="${esc(label)}">${icon(ic)}<span class="nav-label">${esc(label)}</span>${id === 'approvals' ? '<span class="count" id="nav-approvals" hidden></span>' : ''}</a>`).join('') : ''; }).join('')}
       </nav>
       <div class="sidebar-foot">Signed in as ${esc(me.auth_method === 'api_key' ? 'service account' : me.roles.join(', ') || 'no role')}<br>${esc(me.domains.includes('*') ? 'All domains' : me.domains.join(', '))}<br>All times UTC</div>
@@ -311,6 +316,10 @@ async function render() {
   main.innerHTML = skeleton();
   if (!view) { main.innerHTML = empty('Page not found'); return; }
   const scope = NAV.flatMap(([, items]) => items).find(([id]) => id === name);   // a screen outside the user's data scope
+  if (scope && scope[4] && !can(scope[4])) {                                      // a screen for one role (the CISO's)
+    main.innerHTML = page(title, '', '', empty('This screen is for the CISO.'));
+    return;
+  }
   if (scope && scope[3] && !inDomain(scope[3])) {
     main.innerHTML = page(title, '', '', empty(scope[3] === '*' ? 'This screen spans every domain, so it needs all-domain access. Your sign-in is limited to ' + window.ME.domains.join(', ') + '.'
       : `This screen shows ${scope[3]} data, which is outside your data scope (${window.ME.domains.join(', ')}).`));
@@ -404,13 +413,16 @@ async function signIn() {
   if (!r.ok) { toast('Development sign-in is disabled on this server. Use Entra ID SSO.', true); return; }
   TOKEN = (await r.json()).token;
   try { sessionStorage.setItem('soc_token', TOKEN); } catch (e) { /* ignore */ }
-  boot();                       // no page asked for: each role's own landing page
+  boot();                       // sign-out cleared the page: each role starts on its own landing page
 
 }
 async function signOut(expired = false) {
   if (!expired && TOKEN) { try { await fetch('/api/v1/auth/logout', {method: 'POST', headers: {Authorization: 'Bearer ' + TOKEN}}); } catch (e) { /* ignore */ } }
   TOKEN = '';
   try { sessionStorage.removeItem('soc_token'); } catch (e) { /* ignore */ }
+  // the next person starts on their own role's landing page, not on the page the last one left open (an expired
+  // session is the same person signing back in: they return to where they were)
+  if (!expired) history.replaceState(null, '', location.pathname);
   if (!expired && AUTH && AUTH.mode === 'entra') {       // end the Entra session too, then come back here
     location.assign(`${entraBase()}/logout?post_logout_redirect_uri=${encodeURIComponent(redirectUri())}`);
     return;

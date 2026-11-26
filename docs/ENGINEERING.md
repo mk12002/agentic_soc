@@ -998,7 +998,7 @@ changes no number, verdict or action; the test suite proves it on three estates.
 
 ### 13.2 Authorisation
 
-- **Roles → permissions** (`ROLE_PERMS`): analyst, lead, automation_admin, admin, auditor, ciso (read, audit, evidence export - never an approval, a policy, the kill switch or access) (PRESENTER_GUIDE.md §15.3).
+- **Roles → permissions** (`ROLE_PERMS`): analyst, lead, automation_admin, admin, auditor, ciso (read, audit, evidence export and the executive view, which no other role has - never an approval, a policy, the kill switch or access) (PRESENTER_GUIDE.md §15.3).
 - **Human-only permissions** (`HUMAN_ONLY_PERMS`: approvals, policy, access management, rollback) are never granted
   to API-key principals, whatever roles they hold.
 - **Domain scope:** a principal may be limited to phishing / incident / vulnerability.

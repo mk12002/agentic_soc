@@ -59,6 +59,7 @@ class Perm(str, Enum):
     MANAGE_REPORT_STYLE = "manage_report_style"  # the organisation's report templates, logo, brand and writing guide
     MANAGE_OWNERSHIP = "manage_ownership"  # the uploaded asset / cloud resource -> owning team mapping
     TUNE_DETECTIONS = "tune_detections"  # propose / approve / revoke detection tuning rules (two leads)
+    VIEW_EXECUTIVE = "view_executive"    # the executive view and its brief: the CISO's screen, no one else's
 
 
 DOMAINS = ("phishing", "incident", "vulnerability")
@@ -86,7 +87,7 @@ ROLE_PERMS: dict[Role, set[Perm]] = {
     Role.AUDITOR: {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE},
     # The executive view and every screen behind it, the audit trail and evidence exports; never an approval, a
     # policy, the kill switch or access management - those stay with the SOC's leads (separation of duties).
-    Role.CISO: {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE},
+    Role.CISO: {Perm.READ, Perm.READ_AUDIT, Perm.EXPORT_EVIDENCE, Perm.VIEW_EXECUTIVE},
 }
 
 

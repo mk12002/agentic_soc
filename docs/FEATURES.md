@@ -364,9 +364,14 @@ legitimate vendor, internal and marketing mail).
 ### 5.00 Executive view (CISO)
 
 The first screen a **CISO** sees (a read-only role: Entra app role `SOC.CISO`; it reads every screen, the audit trail
-and evidence exports, and never approves, changes policy or uses the kill switch). Leads and auditors open it too
-(*Command -> Executive view*; it needs all-domain access). Every figure is computed from the records by the same
-functions as the screen it links to - none is written by AI:
+and evidence exports, and never approves, changes policy or uses the kill switch). It is the CISO's alone: the
+`view_executive` permission belongs to the CISO role only, so leads, analysts, auditors and administrators are refused
+and do not see it in the menu. A CISO's menu holds the essentials only - *Executive view*, *Dome Score* and
+*Reports* (the board pack) - and each figure still drills down into the screen behind it; someone who also holds
+another role keeps that role's full menu. On the screen, the headline figures, *What needs a decision* (the five most
+pressing per tab, the rest behind *+N more*), the posture and the brief come first; the detail cards (incidents, vulnerabilities, phishing, coverage, operations, governance,
+third parties, AI use) sit behind one *More detail* bar, closed by default. Every figure is computed from the records
+by the same functions as the screen it links to - none is written by AI:
 
 * **Headline figures** for the last 7, 30 or 90 days, each against the period before (better / worse): Dome Score,
   open critical / high incidents, median time to resolve an incident, known-exploited vulnerabilities open,

@@ -613,7 +613,7 @@ def _err(exc: Exception) -> HTTPException:
 # ----------------------------------------------------------------------------- system
 
 
-_CHAIN_CACHE: dict[str, Any] = {"at": None, "ok": None, "since": None}   # "at" None = never verified this process
+_CHAIN_CACHE: dict[str, Any] = {"at": None, "ok": None, "since": None, "db": None}   # "at" None = never verified
 
 
 def _audit_chain_ok(s: Session) -> bool | None:
@@ -621,6 +621,11 @@ def _audit_chain_ok(s: Session) -> bool | None:
     (a failure there stays reported), only the records added since are re-hashed, at most once a minute per process.
     The full pass on every call grew with the log - which is never pruned - and anyone could trigger it."""
     now = __import__("time").monotonic()
+    # the result and the verified head belong to one database: another one (a test's fresh database) starts over -
+    # its chain checked against the other's head read as broken, a false tampering alarm
+    db = str(s.get_bind().url)
+    if _CHAIN_CACHE["db"] != db:
+        _CHAIN_CACHE.update(at=None, ok=None, since=None, db=db)
     if _CHAIN_CACHE["at"] is not None and now - _CHAIN_CACHE["at"] < 60:
         return _CHAIN_CACHE["ok"]
     log = AuditLog(s)
@@ -632,6 +637,10 @@ def _audit_chain_ok(s: Session) -> bool | None:
         if cp is not None and cp.get("ok") and (since is None or cp["seq"] > since[0]):
             since = (int(cp["seq"]), str(cp["hash"]))
         v = log.verify(since=since)
+        if not v["ok"] and since is not None and since == _CHAIN_CACHE["since"]:
+            # the head this process remembers is gone (the database was restored from a backup): judge the chain
+            # from the stored checkpoint, or in full, before calling it broken - real tampering still fails there
+            v = log.verify(since=(int(cp["seq"]), str(cp["hash"])) if cp is not None and cp.get("ok") else None)
         ok = bool(v["ok"])
         if ok and v.get("head_seq"):
             _CHAIN_CACHE["since"] = (v["head_seq"], v["head"])
@@ -3023,10 +3032,9 @@ def dome_score_set(body: DomeWeightsBody, p: Principal = Depends(need(Perm.APPRO
 
 @app.get("/api/v1/executive")
 def executive_get(days: int = Query(30), tz_offset_minutes: int = Query(0),
-                  _: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
+                  _: Principal = Depends(need(Perm.VIEW_EXECUTIVE, "*")), s: Session = Depends(db_session, scope="function")):
     """The executive view: posture, headline figures against the period before, the agenda by due date (in the
-    viewer's day: ``tz_offset_minutes`` east of UTC) and every section - all computed from the records. Spans every
-    domain, so it needs all-domain access (a CISO, a lead, an auditor)."""
+    viewer's day: ``tz_offset_minutes`` east of UTC) and every section - all computed from the records. The CISO's screen only (``view_executive``)."""
     from soc_platform.api.executive import view
 
     try:
@@ -3037,7 +3045,7 @@ def executive_get(days: int = Query(30), tz_offset_minutes: int = Query(0),
 
 @app.post("/api/v1/executive/brief")
 def executive_brief(days: int = Query(30), tz_offset_minutes: int = Query(0),
-                    p: Principal = Depends(need(Perm.READ, "*")), s: Session = Depends(db_session, scope="function")):
+                    p: Principal = Depends(need(Perm.VIEW_EXECUTIVE, "*")), s: Session = Depends(db_session, scope="function")):
     """A short written brief over the executive view's figures. The model only narrates figures it is handed and
     cites them; without a model (or over a limit) the platform writes it from the same figures."""
     from soc_platform.api.executive import deterministic_brief, evidence, view

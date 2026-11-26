@@ -1795,8 +1795,9 @@ function execAgenda(a) {
   const items = a.items.filter(x => x.bucket === EXEC.bucket);
   const rows = items.map(x => `<div class="list-row"><div>${status(x.severity === 'critical' ? 'critical' : x.severity === 'high' ? 'high' : x.severity === 'medium' ? 'medium' : 'info', cap(x.severity))}</div>
     <div class="grow"><div class="t-title"><a href="${esc(x.link)}">${esc(x.title)}</a></div><div class="t-sub">${esc(KIND_LABEL[x.kind] || cap(x.kind))} · ${esc(x.why)} · owner ${esc(x.owner)}</div></div>
-    <div class="small mono" title="due (UTC)">${esc(dt(x.due))}</div></div>`).join('');
-  return card('What needs a decision', `${tabs}<div class="mt" id="exec-items">${rows || `<div class="empty">Nothing ${EXEC.bucket === 'overdue' ? 'overdue' : 'due ' + BUCKET_LABEL[EXEC.bucket].toLowerCase()}.</div>`}</div>`,
+    <div class="small mono" title="due (UTC)">${esc(dt(x.due))}</div></div>`);
+  // the five most pressing per tab (already ordered by severity, then due date); the rest one click away
+  return card('What needs a decision', `${tabs}<div class="mt" id="exec-items">${moreList(rows, 5, '', k => `+${k} more ${EXEC.bucket === 'overdue' ? 'overdue' : 'due ' + BUCKET_LABEL[EXEC.bucket].toLowerCase()}`) ||`<div class="empty">Nothing ${EXEC.bucket === 'overdue' ? 'overdue' : 'due ' + BUCKET_LABEL[EXEC.bucket].toLowerCase()}.</div>`}</div>`,
     {sub: 'due dates from response targets, SLAs, CISA KEV dates and expiries; "today" is your local day'});
 }
 function weekly(trend) {
@@ -1849,9 +1850,10 @@ async function Executive() {
     `<div class="grid g-4 exec-kpis">${v.headline.map(execTile).join('')}</div>
     <div class="grid g-2e mt">${execAgenda(v.agenda)}${posture}</div>
     <div class="mt">${card('Brief', brief, {sub: 'the model only narrates the figures above and cites each one; without it the platform writes the brief'})}</div>
+    <details class="exec-more mt"><summary>More detail - incidents, vulnerabilities, phishing, coverage, operations, governance, third parties${v.ai ? ', AI use' : ''}</summary>
     <div class="grid g-2 mt">${inc}${vul}</div>
     <div class="grid g-3 mt">${ph}${cov}${ops}</div>
-    <div class="grid g-3 mt">${gov}${sup}${ai}</div>`));
+    <div class="grid g-3 mt">${gov}${sup}${ai}</div></details>`));
 }
 function execPeriod(d) { EXEC.days = d; Executive(); }
 function execBucket(b) { EXEC.bucket = b; const v = window.__exec; if (v) { const el = $('#exec-items'); const tmp = document.createElement('div'); tmp.innerHTML = execAgenda(v.agenda); const card = el.closest('.card'); card.outerHTML = tmp.innerHTML; } }

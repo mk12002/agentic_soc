@@ -415,6 +415,50 @@ def test_http_hardening_scope_body_limit_health_and_streams(client):
     assert client.post("/api/v1/connectors/nope/sync?stream=x", headers=aa).status_code == 404
 
 
+def _audited_db(path, records: int):
+    from soc_platform.core.audit import AuditLog
+
+    db = Database(f"sqlite:///{path.as_posix()}")
+    db.create_all()
+    with db.session() as s:
+        for i in range(records):
+            AuditLog(s).append(actor_type="human", actor_id="probe", event_type="probe.event", subject_type="case",
+                               subject_id=str(i), payload={"n": i})
+        s.commit()
+    return db
+
+
+def test_the_health_audit_check_belongs_to_one_database_and_survives_a_restore(tmp_path):
+    """/health cached the head it last verified for the whole process: a second database (or one restored from a
+    backup under the same address) was checked against a head it never had and reported a broken chain - a false
+    tampering alarm. Real tampering must still be reported."""
+    from sqlalchemy import text
+
+    from soc_platform.api import app as appmod
+
+    appmod._CHAIN_CACHE.update(at=None, ok=None, since=None, db=None)
+    a, b = _audited_db(tmp_path / "a.db", 3), _audited_db(tmp_path / "b.db", 7)
+    with a.session() as s:
+        assert appmod._audit_chain_ok(s) is True
+    with b.session() as s:                                 # another database: not judged against a's head
+        appmod._CHAIN_CACHE["at"] = None                   # (a minute later: the cached answer has expired)
+        assert appmod._audit_chain_ok(s) is True
+        appmod._CHAIN_CACHE.update(at=None, since=(99, "f" * 64))   # a head this database no longer has (restored)
+        assert appmod._audit_chain_ok(s) is True
+    with b.engine.begin() as c:                            # an owner with direct database access edits a record
+        if b.engine.dialect.name == "sqlite":
+            c.execute(text("DROP TRIGGER IF EXISTS audit_log_no_update"))
+        else:
+            c.execute(text("DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log"))
+        c.execute(text("UPDATE audit_log SET actor_id = 'someone-else' WHERE seq = 2"))
+    with b.session() as s:
+        appmod._CHAIN_CACHE.update(at=None, since=None)
+        assert appmod._audit_chain_ok(s) is False
+    appmod._CHAIN_CACHE.update(at=None, ok=None, since=None, db=None)
+    for d in (a, b):
+        d.engine.dispose()
+
+
 def test_rate_limit_is_per_client_not_per_token():
     from starlette.requests import Request
 

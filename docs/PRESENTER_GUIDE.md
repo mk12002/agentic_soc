@@ -165,7 +165,9 @@ The full demo takes 25-30 minutes. For a 10-minute slot, do W1 → W4 → W6 →
 **Click:** sign out, sign in as `cleo@acme-demo.com`, role **CISO**. The console opens on the Executive view.
 **Say:** "This is what the CISO sees first. Every figure is computed from the records by the same calculation as the
 screen behind it - each tile is a link - and none of it is written by AI. The CISO can read everything and change
-nothing: approvals, policy and the kill switch stay with the SOC's leads."
+nothing: approvals, policy and the kill switch stay with the SOC's leads. The menu is three pages - this view, the
+Dome Score and the reports - because a CISO needs the picture, not every queue; the detail is one click away, under
+*More detail* or behind any figure."
 **Point at:**
 - The headline tiles against the period before (7, 30 or 90 days): Dome Score, open critical / high incidents, time
   to resolve, known-exploited vulnerabilities, SLA compliance, people who clicked, EDR coverage, automation.
@@ -1035,7 +1037,7 @@ it is recorded as executing before the tool is called, and the result is recorde
 | Automation admin | read, read audit, manage connectors, propose policy, kill switch |
 | Admin | read, read audit, manage access (roles, service accounts, session revocation; a privileged grant needs a second admin), manage connectors, kill switch (on only), export evidence |
 | Auditor | read, read audit, export evidence |
-| CISO | read, read audit, export evidence - lands on the Executive view; never approves, changes policy, uses the kill switch or manages access (Entra app role `SOC.CISO`) |
+| CISO | read, read audit, export evidence, view executive (the CISO's alone) - lands on the Executive view, menu limited to Executive view, Dome Score and Reports; never approves, changes policy, uses the kill switch or manages access (Entra app role `SOC.CISO`) |
 
 - **Domain scope:** any role can be limited to phishing, incident and/or vulnerability data. Records outside the
   scope answer "not found", including inside reports, the audit log and the access log.
