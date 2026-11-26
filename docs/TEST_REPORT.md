@@ -1,6 +1,6 @@
 # Test report - CyberDome platform
 
-Date: 2026-11-25 (rounds 15-38; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9 and 3.13.17, CPU only · Branch: `main`
+Date: 2026-11-26 (rounds 15-39; earlier rounds 2026-09-24 to 2026-09-30) · Environment: Windows 11, Python 3.11.9 and 3.13.17, CPU only · Branch: `main`
 
 This report covers what was tested, on what data, what was found, what was fixed, and what can
 **not** be claimed yet. Accuracy figures below come from synthetic or public data; they are design
@@ -8,7 +8,29 @@ evidence, not a statement of performance in the client's environment. That is me
 the client's own analyst dispositions (PH-T08, NFR-15), which the platform records automatically
 (`/api/v1/metrics/shadow`).
 
-## 0. Round 38 (2026-11-24/25) - latest results: Windows Server hosting, Python 3.13
+## 0. Round 39 (2026-11-26) - latest results: platform capabilities, Needs immediate attention
+
+Aim: a missing system library must never again switch a capability off with only a log warning, and a recent
+serious case nobody owns must be visible on the first screen (Overview and the executive view).
+
+**What changed.** `core/capabilities.py` (QR decoding, fuzzy hashing, ML engine + models, YARA: ok / off /
+not_installed / broken) on `/health`, the Integrations screen, a header pill, `config check`, the
+`soc_capability_ok` gauge with an alert rule, and one high finding per host. `api/urgent.py` and
+`/api/v1/dashboard/urgent`: recent unowned critical cases, high cases with an urgency signal from the risk engine,
+unacknowledged attack findings; one item per story; response targets; pickup time from the audit trail; no model.
+
+**Found and fixed.** The every-route sweep found a vulnerability-only reader seeing an incident case's id through a
+two-domain finding: findings are now all-domain only and reasons keep to the reader's domains. Ties in score or
+detection time gave a varying order (fixed order added). The browser tour's accessibility scan found the "N more"
+link distinguishable by colour only (now underlined).
+
+**Counts.** New tests: 11 (`test_capabilities.py`) + 12 (`test_urgent.py`). Consistency, API, executive, urgent and
+pentest files: 112 passed, 4 skipped, 0 failed. Feature verification on Python 3.13 with
+`--browser --engine --live --llm`: **115 of 115**; 301 mapped tests run, 0 failed (405 passed, 3 skipped); browser
+tour with the live model, 0 problems; engine 205 passed, 2 skipped. The full platform suite was not re-run in this
+round (round 38's counts stand for it). ruff, bandit and the secret / confidential-name scan clean.
+
+## 0.0a Round 38 (2026-11-24/25): Windows Server hosting, Python 3.13
 
 Aim: the platform is hosted on **Windows Server** (agreed with the client) on **Python 3.13** - make that a tested
 deployment, not a statement, and prove nothing behaves differently from the container image.

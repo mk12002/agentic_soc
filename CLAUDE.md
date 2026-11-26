@@ -128,7 +128,7 @@ SOC_LIVE_LLM=1 python -m pytest soc_platform/tests/test_live_llm.py      # real 
 SOC_LIVE_TESTS=1 python -m pytest soc_platform/tests/test_live_public_feeds.py   # real NVD / EPSS / CISA KEV
 
 # verification report (writes docs/FEATURE_VERIFICATION.md)
-python scripts/verify_features.py                                 # tests mapped to 113 features
+python scripts/verify_features.py                                 # tests mapped to 115 features
 python scripts/verify_features.py --browser --engine --live --llm # + browser tour, engine, live feeds, real LLM (~25 min)
 
 # quality gates (all must be clean before a commit)
@@ -181,6 +181,8 @@ soc_platform/
   api/app.py             FastAPI: middleware (body cap, NUL/rate limit, headers, access log), auth deps, ALL routes
   api/dashboards.py      read models: overview, ATT&CK coverage, shadow IT, Prometheus text
   api/executive.py       the executive (CISO) view + agenda + `posture_snapshots` (job posture_snapshot)
+  api/urgent.py          Needs immediate attention (Overview + executive view): recent critical cases / high with an
+                         urgency signal (risk factors) / attack findings, unowned; one item per story; pickup times
   api/static/            index.html, app.js (shell/router/auth/click delegation), views.js (screens), theme.js, styles.css
   connectors/base.py     BaseConnector, TokenBucket, with_backoff, SyncRunner (sync, sync_many), Page, LookupResult
   connectors/http.py     Transport protocol, HttpTransport, FixtureTransport (fake mode; `times`, `headers`), auth
@@ -218,6 +220,8 @@ soc_platform/
   core/blobstore.py      BlobStore: stored e-mails / reports behind one reference - a path (file store) or
                          `db:<key>` (`blobs` table, SOC_BLOB_STORE=database); reads follow the reference;
                          store_generated, migrate_to_database, check_references (`blobs` CLI)
+  core/capabilities.py   optional capabilities (QR decoding, fuzzy hashing, ML engine + models, YARA): ok / off /
+                         not_installed / broken, on /health, /api/v1/admin/capabilities, config check, a gauge, a finding
   core/retention.py      retention + legal hold;  core/selfcheck.py  cross-surface consistency proof
   core/connector_config.py  ConfigStore: console connector config + supplier / sanctioned lists over the files;
                          propose / approve (four-eyes) / reject / pause / restore / export / import; preflight gate
@@ -448,6 +452,12 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   (per-connector paging and behaviour),
   `test_high_availability.py` (database blob store, migration, lease renewal / takeover / stuck release, poison items,
   schema race, liveness / readiness, Entra key outage, one sync per stream, raw payload opt-in),
+  `test_urgent.py` (the strip's rules: critical / high-with-signal, window, owner or decision removes, attack findings
+  only, one story one item, domain scope, pickup from the audit trail, no model; on the demo data with the real
+  risk engine),
+  `test_capabilities.py` (a library installed but unable to load is `broken` with its error, impact and fix on
+  /health, the capabilities API, config check, the gauge and a notified finding; an option not installed or off is
+  not an alarm),
   `test_windows_deployment.py` (the Windows host package: scripts parse on PowerShell 5.1, the settings template names
   only real settings, the launcher prints no value / runs config check / restarts / stops the process tree, the image's
   defaults, folder permissions, the installer refuses an unsupported Python, Windows locks match the image; the real
@@ -491,7 +501,7 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
 - Current counts (keep docs in sync when they change): 1060 platform tests passing on SQLite on Python 3.11 and 3.13, and 1055 on PostgreSQL (full run; the 2 tests added
   after it passed on PostgreSQL in a re-run of their files) - 1079 collected; skips: 14 opt-in live tests, the opt-in
   real Windows install, 3 per-estate repeats of input fuzzing, and database-specific checks (1 on SQLite, 4 on
-  PostgreSQL); 205 engine tests on 3.11 and 3.13, 113/113 features verified with `--browser --engine --live --llm` on Python 3.13 (round 38); the go-live round's
+  PostgreSQL); 205 engine tests on 3.11 and 3.13, 115/115 features verified with `--browser --engine --live --llm` on Python 3.13 (round 39); the go-live round's
   offline run: 104/108 (the 4 opt-in live features need `--live --llm`, which calls the real model).
 
 ---
@@ -815,6 +825,9 @@ of comments: short, explaining *why*. Tests read like specifications (`test_<beh
   skip its YARA rules on Windows only. Ask whether a platform marker is still needed before keeping it.
 - **`Path.write_text` on Windows writes CRLF**, and a heredoc can turn `\r` into a bare carriage return: git then shows
   the whole file changed. Patch with bytes (`read_bytes` / `write_bytes`) and check `git diff --stat` after editing docs.
+- **An optional import that fails must be reported, not swallowed.** A missing system library (libzbar, libgomp)
+  switched QR decoding and the ML engine off with one log warning. A new optional capability gets a probe in
+  `core/capabilities.py` (installed-but-broken is the state that must be loud).
 - **Never pipe a program that starts a server** (`pg_ctl start | Out-Null`, `$(pg_ctl ...)`): the server inherits the
   pipe and the pipeline waits for ever. `deploy/windows/common.ps1` `Invoke-Starter` waits for the starter alone.
 - **A CLI path must not call `create_all()` after `get_database()`**: with `SOC_SCHEMA_MANAGE=0` the runtime role has

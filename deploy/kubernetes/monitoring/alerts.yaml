@@ -40,6 +40,16 @@ spec:
           expr: max(soc_actions{status="unverified"}) > 0
           labels: {severity: critical}
           annotations: {summary: "An action reached a tool but its result was not recorded: verify it in the tool"}
+        - alert: SocUrgentUnattended
+          expr: max(soc_urgent_oldest_wait_minutes) > 60
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "A recent critical case or attack finding has waited over an hour with no owner (Overview -> Needs immediate attention)"}
+        - alert: SocCapabilityBroken
+          expr: min by (capability) (soc_capability_ok) == 0
+          for: 10m
+          labels: {severity: warning}
+          annotations: {summary: "Capability {{ $labels.capability }} cannot load on a replica (a missing system library?): Integrations -> Platform capabilities names the fix"}
         - alert: SocConnectorStale
           expr: max by (connector, stream) (soc_connector_last_success_age_seconds) > 21600
           for: 30m

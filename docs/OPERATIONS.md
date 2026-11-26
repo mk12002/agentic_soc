@@ -288,6 +288,7 @@ PostgreSQL in production.
 | `SOC_WATERMARK_OVERLAP_MINUTES` (or a connector's `watermark_overlap_minutes` setting) | 30 | Event streams (sign-ins, audits, alerts, DNS, Sentinel incidents) resume from the newest change time seen, minus this overlap: logs are indexed minutes late, and asking exactly from the mark would lose them. Re-read records are de-duplicated. A time more than an hour in the future (a device with a wrong clock) never moves the mark |
 | `SOC_SYNC_MAX_PAGES` | 1000 | Pages one stream reads per sync. A larger backlog is not dropped: the stream keeps its place and the next sync continues (the sync report says `truncated`) |
 | `SOC_RESOLUTION_AUTO_THRESHOLD` | 0.85 | Score at which a weak-hint host match merges without analyst review. 0.75 lets "same unique hostname and OS, nothing else" merge: on the 400-host stress estate the unresolved share fell from 5.4 % to 2.2 % with no false merge. Decide on the client's shadow-mode review queue; 0.6 is the floor |
+| `SOC_URGENT_WINDOW_HOURS` | 24 | How recent a case or attack finding must be to appear in *Needs immediate attention* at the top of the Overview and the executive view (1-168) |
 | `SOC_CONNECTOR_RATE_SHARE` | 1 (5 in the compose file) | How many processes call the tools at once (API workers + a separate scheduler service). Each process holds its own request budget per tool, so each takes 1/N of it and together they stay within the rate the vendor allows |
 | Umbrella `dns_sync` | security | `security`: only DNS queries in Umbrella's security categories (allowed or blocked) are stored - the only DNS events any analysis uses; a tenant makes tens of millions of queries a day. `all`: every query (small tenants). "Did anyone reach this site?" and shadow IT always ask Umbrella live |
 
@@ -381,14 +382,18 @@ platform. The monthly board pack and the CISO weekly brief include the scorecard
 
 * `/health` - anonymous callers get `{"status": "ok"}` only. Signed in (any role with read, or an auditor
   key): version, audit-chain state, kill switch, scheduler state (`running` / `stuck` / `stale` / `never`, number of
-  live schedulers). The audit chain is fully re-hashed by the hourly self-check, which stores where it reached;
+  live schedulers), and `capabilities` (`ok`, or `degraded` with the names of what cannot run - the top-level
+  `status` then reads `degraded`; anonymous callers and `/health/ready` are unaffected: the server still serves).
+  The audit chain is fully re-hashed by the hourly self-check, which stores where it reached;
   `/health` re-hashes only the records added since, at most once a minute (the full pass on every call grew with
   the log and anyone could trigger it). A failed full pass stays reported until a later one succeeds.
 * `/health/live` (liveness: the process answers, no database) and `/health/ready` (readiness: the database answers,
   503 + Retry-After otherwise) - for load balancers and orchestrator probes.
 * `/metrics` - Prometheus: open cases, actions by status, insights, unresolved entities, per-stream sync age,
   kill switch, scheduler heartbeat age (`soc_scheduler_heartbeat_age_seconds`), audit chain
-  (`soc_audit_chain_ok`), failing jobs (`soc_job_failing{job_name}`), break-glass uses in 24 h. Scrape with an
+  (`soc_audit_chain_ok`), failing jobs (`soc_job_failing{job_name}`), break-glass uses in 24 h, and
+  `soc_capability_ok{capability}` (1 working, 0 broken, -1 off or not installed), `soc_urgent_waiting` and
+  `soc_urgent_oldest_wait_minutes` (recent critical cases / attack findings nobody has taken). Scrape with an
   **all-domain auditor service-account key**, as `X-API-Key` or as `Authorization: Bearer sk_soc_...` (what a
   ServiceMonitor can send). It carries every domain's counts, so a domain-scoped key gets 403.
 * Kubernetes with the Prometheus Operator: `kubectl apply -k deploy/kubernetes/monitoring` adds the ServiceMonitor
@@ -397,12 +402,19 @@ platform. The monthly board pack and the CISO weekly brief include the scorecard
   pipeline's write-once retention (SIEM / Log Analytics): someone able to rewrite the whole audit table and every
   hash still cannot match heads already shipped. Verify with `python -m soc_platform audit verify --anchor SEQ:HASH`.
 * Integrations screen - connector state (healthy / stale / error / misconfigured), freshness per stream against
-  its expected cadence, reconciliation, job runs.
+  its expected cadence, reconciliation, job runs, and the **Platform capabilities** card (`GET
+  /api/v1/admin/capabilities`, any signed-in reader): platform capabilities - QR decoding, attachment fuzzy hashing, the phishing ML engine (its libraries and its trained models), the engine's YARA rules - each `ok`, `off` (by a setting), `not_installed` (an option this install left out) or `broken` (installed but cannot load: a missing system library such as libzbar or OpenMP, models left as Git LFS pointers, or the engine required by `SOC_PHISHING_ENGINE=1` and missing), with the error, what analysis loses and the fix.
+  A broken capability also shows as a red pill in the console's top bar on every screen (linking to Integrations),
+  one `capability.broken` log line per capability at start-up, a warning in `config check` (so `install.ps1` and
+  `cyberdome.ps1 check` print it), and a high *platform capability* finding raised by the hourly self-check job per
+  host (notified to Teams / Slack like any high finding; it resolves itself once the capability loads again).
 * Overview - enrichment latency (median/p95 per domain and per tool) and verdict-quality drift.
 
 Alert on (deploy/kubernetes/monitoring/alerts.yaml has these rules): an API replica down, scheduler heartbeat
 older than 10 minutes, `soc_audit_chain_ok == 0`, any break-glass use, `soc_kill_switch == 1` for 30 minutes, a job
-failing for 30 minutes, any action `unverified`, `soc_connector_last_success_age_seconds` above 6 hours; also audit
+failing for 30 minutes, any action `unverified`, `soc_connector_last_success_age_seconds` above 6 hours,
+`soc_capability_ok == 0` for 10 minutes (a capability a replica cannot load), `soc_urgent_oldest_wait_minutes`
+above 60 (a recent critical case or attack finding with no owner for an hour); also audit
 events `*.processing_failed` with `final: true` (an item left to an analyst after its retries).
 
 ## Access management

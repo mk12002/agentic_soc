@@ -157,6 +157,16 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-low); }
 .status-pill.halt { background: var(--crit-bg); border-color: var(--crit-bd); color: var(--crit); font-weight: 600; }
 .status-pill.halt .dot { background: var(--c-critical); }
+a.status-pill { text-decoration: none; }
+/* Needs immediate attention: the first thing on Overview and the executive view */
+.urgent { border: 1px solid var(--crit-bd); background: var(--crit-bg); border-radius: 10px; padding: 12px 14px; }
+.urgent-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; color: var(--crit); margin-bottom: 6px; }
+.urgent-head a { text-decoration: underline; }   /* a link inside text must not rely on colour alone (WCAG 1.4.1) */
+.urgent-item { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--crit-bd); }
+.urgent-item:first-of-type { border-top: 0; }
+.urgent-item .t-title { overflow-wrap: anywhere; }
+.urgent-reason { display: inline-block; margin: 2px 6px 2px 0; padding: 1px 8px; border-radius: 12px; border: 1px solid var(--crit-bd); background: var(--surface, transparent); }
+.urgent-ok { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* ---------------------------------------------------------------- page header */
 .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }

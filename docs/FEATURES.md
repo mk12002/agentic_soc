@@ -361,6 +361,41 @@ legitimate vendor, internal and marketing mail).
 
 ## 5. Intelligence layer
 
+### 5.000 Needs immediate attention (top of the Overview and the executive view)
+
+A red strip above everything else on the **Overview** and the **executive view**, visible without scrolling: the recent,
+serious cases nobody has started on, and **why each one is urgent now**. Decided by fixed rules in code
+(`api/urgent.py`, `GET /api/v1/dashboard/urgent`) - never by the model:
+
+* an open **incident or phishing case** from the last 24 hours (`SOC_URGENT_WINDOW_HOURS`) with **no owner** and no
+  decision yet that is **critical**, or **high with an urgency signal** on the people or hosts it involves - the risk
+  engine's own factors: a deception tripwire touched, a risky sign-in (with its IP and country), privileged credentials
+  accessed, a privileged account with compromise indicators, account compromise after a phishing click, a click on a
+  malicious e-mail, a malicious destination reached, a known-exploited vulnerability or an internet-facing vulnerable
+  host, a host without EDR;
+* a **correlated attack finding** (privileged access after compromise, deception corroborated, exposed host under
+  attack, phishing compromise chain, consent after phishing, attacked host without EDR) or any critical finding, first
+  seen in the window and not yet acknowledged. Findings about the platform itself (capabilities, integrity, AI
+  integration, budgets) are not attacks and have their own banners.
+
+**One attack story, one item:** cases about the same person or host are shown under the most urgent of them (the
+others listed as related cases), a finding about a listed case's people, hosts or case joins it as a reason, and
+several findings about one case (a supplier's payment diversion and impersonation) are one item. Each item shows its
+severity, title, up to four reasons with who they were seen on, how long ago it was detected, its owner (*no owner*) and
+whether it is past its response target (critical 4 h, high 1 day). Analysts have **Open** and **Take it** (taking the
+case opens it; it then leaves the strip); the CISO's view is read-only. Three items are shown, the rest behind *N more*;
+with nothing waiting a single line says so. An item leaves only by being taken, decided or acknowledged - it cannot be
+hidden or snoozed. The response carries `pickup`: over 30 days, how many serious cases were taken and the median
+minutes from detection to the first owner (from the audit trail), so the strip's effect is measured. Prometheus:
+`soc_urgent_waiting`, `soc_urgent_oldest_wait_minutes` (alert `SocUrgentUnattended` when an item has waited over an
+hour). Scope follows the viewer's domains: a domain-scoped analyst sees only their domains' cases, with only their
+domains' signals as reasons, and no correlated findings (those span domains, as on the Intelligence screen) - the
+every-route sweep found a vulnerability-only reader seeing an incident case's id through a two-domain finding.
+
+On the demonstration data it leads with the attack on one employee (two phishing cases and the deception incident on
+her laptop as one item: deception tripwire, account compromise after a phishing click, privileged credentials
+accessed or a privileged account with compromise indicators, a risky sign-in from abroad with its IP and country), then the supplier's payment diversion, then the two exploited servers.
+
 ### 5.00 Executive view (CISO)
 
 The first screen a **CISO** sees (a read-only role: Entra app role `SOC.CISO`; it reads every screen, the audit trail
@@ -528,6 +563,12 @@ sanctioned-service lists. One misconfigured tool is isolated with the reason; th
   compared; every stored reference is resolved; nothing that must be unique is duplicated; the audit chain is
   verified. Runs hourly (a failure raises a *platform integrity* finding, which resolves itself once consistent),
   on demand at `GET /api/v1/admin/self-check`, and as a card on the Integrations screen.
+* **Platform capabilities** - the Integrations screen's card says what this server can actually do: platform capabilities - QR decoding, attachment fuzzy hashing, the phishing ML engine (its libraries and its trained models), the engine's YARA rules - each `ok`, `off` (by a setting), `not_installed` (an option this install left out) or `broken` (installed but cannot load: a missing system library such as libzbar or OpenMP, models left as Git LFS pointers, or the engine required by `SOC_PHISHING_ENGINE=1` and missing).
+  A broken one shows the library error, what analysis loses (for example "QR codes in reported e-mails are not
+  decoded") and the fix (for example "install libzbar0 and restart"); it also appears as a red pill in the top bar of
+  every screen, on `/health` (signed in), in `config check`, as a Prometheus gauge and alert, and as a high finding
+  notified to the team. Before, a missing system library switched QR decoding and the ML engine off with only a
+  warning in the server log.
 * **Notifications** - important findings (default: high and critical) are posted to **Microsoft Teams, Slack or any
   webhook** (JSON for a SIEM or SOAR) within a minute: correlated attacks, dead-lettered jobs, break-glass use, a
   failing self-check, the LLM budget. Each finding is sent once per channel and again if it escalates; failed

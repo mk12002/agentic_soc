@@ -62,7 +62,7 @@ estimated. The supporting detail is in the repository:
 | Requirement-by-requirement coverage | `docs/REQUIREMENTS_TRACEABILITY.md` |
 
 Latest verification at the time of writing (`docs/TEST_REPORT.md`): 1060 platform tests passing on SQLite and 1055 on
-PostgreSQL 16, 205 phishing ML engine tests, 113 of 113 features verified (including a browser tour, live public feeds
+PostgreSQL 16, 205 phishing ML engine tests, 115 of 115 features verified (including a browser tour, live public feeds
 and a live LLM), static security analysis (bandit) and dependency audit (pip-audit) with no findings.
 
 ## Open items for the organisation

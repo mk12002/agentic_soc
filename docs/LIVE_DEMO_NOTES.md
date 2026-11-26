@@ -1625,7 +1625,7 @@ The typed text is always treated literally (no injection).
 
 **"How was it tested?"**
 - 1060 platform tests (SQLite, with PostgreSQL's rules enforced) and 1055 on PostgreSQL; 205 engine tests.
-- 113 of 113 features verified feature by feature.
+- 115 of 115 features verified feature by feature.
 - 24 penetration tests and 11 fuzzing properties.
 - Time-travel tests (0 / 45 / 400 days).
 - A consistency suite: the same figure on every surface, every pipeline run twice, AI on vs off identical.

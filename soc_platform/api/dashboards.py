@@ -210,8 +210,18 @@ def prometheus(s: Session, registry: Any) -> str:
             fr.append(({"connector": c.connector, "stream": c.stream}, round((now - _aware(c.last_success_at)).total_seconds(), 1)))
     g("soc_connector_last_success_age_seconds", "Seconds since the last successful sync per stream", fr)
     from soc_platform.config import get_settings
+    from soc_platform.core import capabilities
     from soc_platform.core.access import kill_switch_on
 
+    g("soc_capability_ok", "1 when an optional capability works, 0 when it is installed or required but cannot run, "
+      "-1 when switched off or not installed", [({"capability": c["name"]}, {"ok": 1.0, "broken": 0.0}.get(c["state"], -1.0))
+                                                for c in capabilities.report()])
+    from soc_platform.api.urgent import urgent
+
+    u = urgent(s, frozenset({"*"}), limit=0)
+    g("soc_urgent_waiting", "Recent critical / high-with-urgency cases and attack findings nobody has taken", [({}, float(u["total"]))])
+    g("soc_urgent_oldest_wait_minutes", "Minutes the oldest such item has waited (0 when none)",
+      [({}, float(u["oldest_waiting_minutes"]))])
     g("soc_kill_switch", "1 when all automated actions are halted", [({}, 1.0 if kill_switch_on(s, get_settings()) else 0.0)])
     g("soc_connectors_enabled", "Enabled connectors", [({}, len(registry.enabled_names()))])
     # what the alert rules (deploy/kubernetes/monitoring) watch: a stopped scheduler cannot alert on its own

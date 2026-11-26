@@ -655,7 +655,7 @@ and recommendation is identical."
 | Live LLM suite (Azure AI Foundry, gpt-4.1-mini) | 9 passed: incident summaries, phishing explanations, analyst answers, deep analysis, all 7 standard reports, planner, every call OK on the pinned model, no pseudonym tokens reaching analysts |
 | Live public feeds (NVD, EPSS, CISA KEV) | passed |
 | Phishing ML engine suite | 205 passed |
-| Feature → test mapping | **113 of 113** features verified, each mapped to the tests that prove it, run with the live LLM and live feeds ([FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md)) |
+| Feature → test mapping | **115 of 115** features verified, each mapped to the tests that prove it, run with the live LLM and live feeds ([FEATURE_VERIFICATION.md](FEATURE_VERIFICATION.md)) |
 | Generalisation | whole platform on a renamed organisation: identical results, 0 leaked names |
 | Browser tour | real server + Chrome, 4 roles, every screen, light and dark, layout audited at 1440/1280/1024/768/390 px (390 is a phone): 0 errors, 0 clipped or overflowing elements, no table needing sideways scroll at desktop width; axe-core accessibility scan (WCAG 2.1 A/AA) with 0 findings; stored-XSS probe with nothing executed |
 | Stress tests | 0 false merges (400 hosts; 300 people) |
@@ -784,6 +784,8 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 |---|---|
 | Where is data stored? | PostgreSQL for records, and - with `SOC_BLOB_STORE=database` - for the encrypted reported e-mails and reports too (otherwise a volume). See OPERATIONS.md. |
 | Is data encrypted? | Raw payloads, emails, reports and evidence packs are encrypted at rest (Fernet, rotation). TLS in transit. Database encryption is per the hosting platform. |
+| How do I see what needs action right now? | The red **Needs immediate attention** strip at the top of the Overview (and of the CISO's executive view): recent critical cases, and high ones with an urgency signal - a deception tripwire, a risky sign-in with its country, privileged access after compromise indicators - that nobody has taken, one item per attack story, each with its reasons and response target. Fixed rules decide it, never the AI; *Take it* assigns the case and it leaves the strip. |
+| Will we know if part of the analysis is not running? | Yes. A library that cannot load (for example the QR decoder's system library) shows as a red pill in the top bar of every screen, on Integrations -> Platform capabilities with the fix, on `/health`, in `config check`, and as a high finding sent to Teams / Slack. |
 | Where does it run? | On the client's Windows Server hosts (agreed): Python 3.13, installed from a hash-pinned lock by `deploy\windows\install.ps1`, running as a scheduled task under LOCAL SERVICE behind IIS; PostgreSQL 16 on the host or managed. No Docker, no Linux needed; container images exist as an alternative. Costs: about $520 a month reserved / $723 on demand for two Windows VMs and a zone-redundant database in Azure (INFRASTRUCTURE_AND_COSTS.md 10.1b). |
 | How long is data kept? | Configurable: raw 180 days, LLM logs 180 days, access log 400 days. Open cases are on legal hold. The audit log is never pruned by the platform. |
 | Can we prove to an auditor what happened? | Yes: the hash-chained audit log (verify endpoint), the audit export, and the compliance evidence pack with control tests. |
@@ -894,7 +896,7 @@ added a guardrail that removes any sentence stating a figure that isn't in its e
 | Requirements | 102 implemented and tested + 15 implemented, awaiting client data/environment, 0 blocked |
 | Platform tests / engine tests | 1060 SQLite, 1055 PostgreSQL / 205 |
 | Penetration test groups / fuzzing properties | 24 / 11, all passing |
-| Features verified | 113 of 113 |
+| Features verified | 115 of 115 |
 | Live LLM tests | 9, all passing on Azure AI Foundry gpt-4.1-mini |
 | Stress tests | 0 false merges (400 hosts, 300 people) |
 | Risk half-life / bands | 7 days / critical ≥ 80, high ≥ 60, medium ≥ 30 |

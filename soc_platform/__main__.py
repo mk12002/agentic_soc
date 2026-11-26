@@ -347,6 +347,12 @@ def cmd_config(*args: str) -> None:
             print(pr)
         print(f"{sum(p.level == 'error' for p in env_problems)} error(s), "
               f"{sum(p.level == 'warning' for p in env_problems)} warning(s) in the settings (environment)")
+        from soc_platform.core import capabilities
+
+        bad = capabilities.broken()                  # installed but cannot load: the platform runs without it
+        for c in bad:
+            print(f"WARNING capability {c['name']}: {c['detail']} - impact: {c['impact']} - fix: {c['fix']}")
+        print(f"{len(bad)} platform capability problem(s) on this host")
     ctx = _store_session()
     if a.action == "check":
         doc, problems = load_file(a.file)

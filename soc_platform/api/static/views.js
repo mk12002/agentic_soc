@@ -25,17 +25,36 @@ function showMore(id) {
 }
 
 // ================================================================= Overview
+// Needs immediate attention: recent critical cases (and high ones with an urgency signal) nobody has taken, with why
+// each is urgent now. Rules in api/urgent.py - never the model. Shown above everything on Overview and the executive view.
+const ago = m => m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min ago` : `${Math.floor(m / 1440)} d ago`;
+function urgentStrip(u, {take} = {}) {
+  if (!u) return '';
+  if (!u.total) return `<div class="urgent-ok mb" role="status">${status('ok', 'Nothing needs immediate attention')}<span class="small muted">no critical case or attack finding from the last ${u.window_hours} h is waiting for an owner</span></div>`;
+  const row = it => `<div class="urgent-item">
+      <div class="inline" style="gap:8px;flex-wrap:wrap">${chip(it.severity)}<a class="t-title" href="${esc(it.link)}">${esc(it.title)}</a></div>
+      <div class="small">${it.reasons.slice(0, 4).map(r => `<span class="urgent-reason" title="${esc(r.detail)}">${esc(r.label)}${r.who ? ': ' + esc(r.who) : ''}</span>`).join('')}</div>
+      <div class="t-sub">detected ${esc(ago(it.waiting_minutes))}${it.related_cases && it.related_cases.length ? ` · with ${it.related_cases.length} related case${it.related_cases.length === 1 ? '' : 's'} (same person or host)` : ''} · ${it.owner ? 'owner ' + esc(it.owner) : '<b>no owner</b>'} · ${it.overdue ? '<b>past its response target</b>' : 'respond by ' + esc(dt(it.due_at))}</div>
+      <div class="inline" style="gap:6px">${btn('Open', 'goTo', [it.link], 'sm')}${take && it.kind === 'case' ? btn('Take it', 'takeUrgent', [it.id], 'sm') : ''}</div></div>`;
+  return `<section class="urgent mb" aria-label="Needs immediate attention"><div class="urgent-head"><b>Needs immediate attention</b>
+      <span class="small">${nf(u.total)} recent serious case${u.total === 1 ? '' : 's'} or attack finding${u.total === 1 ? '' : 's'} with no owner yet · oldest ${esc(ago(u.oldest_waiting_minutes))}${u.total > u.items.length ? ` · <a href="#/cases">${nf(u.total - u.items.length)} more</a>` : ''}</span></div>
+    ${u.items.map(row).join('')}</section>`;
+}
+async function takeUrgent(id) {   // take the case from the strip, then open it (it leaves the strip once owned)
+  await post(`/api/v1/cases/${id}/assign`, {assignee: ME.id}); toast('Case taken - it is yours now'); location.hash = `#/cases/${id}`;
+}
 async function Overview() {
   const __g = GEN;
-  const [o, conns, dr, top, val, dome] = await Promise.all([api('/api/v1/dashboard/overview?days=14'), api('/api/v1/dashboard/connectors'),
+  const [o, conns, dr, top, val, dome, urg] = await Promise.all([api('/api/v1/dashboard/overview?days=14'), api('/api/v1/dashboard/connectors'),
     api('/api/v1/metrics/drift'), inDomain('*') ? api('/api/v1/intelligence/risk/top?limit=6') : Promise.resolve([]),
-    api('/api/v1/value/scorecard?days=30'), inDomain('*') ? api('/api/v1/dome-score') : Promise.resolve(null)]);
+    api('/api/v1/value/scorecard?days=30'), inDomain('*') ? api('/api/v1/dome-score') : Promise.resolve(null),
+    api('/api/v1/dashboard/urgent?limit=3')]);
   const c = o.cases, a = o.actions, vm = o.vulnerability || {}, ctx = o.context;
   const bad = conns.filter(x => x.enabled && ['error', 'stale', 'misconfigured'].includes(x.state));
   const perf = o.performance.investigation_enrichment_ms;
   setMainG(__g, page('Overview', `Last ${o.window_days} days across phishing, incidents and vulnerabilities. Every figure is computed from stored records.`,
     btn('Refresh', 'refreshPage', [], 'ghost', 'refresh'),
-    `<div class="grid g-kpi">
+    `${urgentStrip(urg, {take: can('investigate')})}<div class="grid g-kpi">
       ${dome ? kpi('Dome Score', dome.score == null ? '–' : dome.score, `${esc(DOME_BAND[dome.band] || dome.band)} · <a href="#/dome-score">Pillars and weights</a>`, dome.band === 'weak') : ''}
       ${kpi('Open cases', nf(c.open), Object.entries(c.open_by_domain).map(([k, v]) => `${esc(cap(k))} ${v}`).join(' · ') || 'none')}
       ${kpi('Awaiting approval', nf(a.pending_approval), `<a href="#/approvals">Review queue</a>`, a.pending_approval > 0)}
@@ -663,6 +682,18 @@ async function ShadowIt() {
 }
 
 // ================================================================= Integrations
+const CAP_STATE = {ok: ['ok', 'Working'], off: ['info', 'Off by setting'], not_installed: ['info', 'Not installed'], broken: ['high', 'Cannot run']};
+function capabilitiesCard(c) {
+  // what this server can actually do: a library that cannot load used to show only as a warning in the server log
+  if (!c) return '';
+  const bad = c.capabilities.filter(x => x.state === 'broken');
+  const rows = c.capabilities.map(x => `<div class="list-row"><span class="grow"><b>${esc(x.label)}</b>
+      ${x.state === 'ok' ? '' : `<div class="t-sub">${esc(x.detail)}</div>`}
+      ${x.state === 'broken' ? `<div class="t-sub">Impact: ${esc(x.impact)}</div><div class="t-sub"><b>Fix:</b> ${esc(x.fix)}</div>` : ''}</span>
+      ${status(CAP_STATE[x.state][0], CAP_STATE[x.state][1])}</div>`).join('');
+  return `<div class="mb">${card('Platform capabilities', (bad.length ? `<div class="callout danger mb"><div><b>${bad.length} capabilit${bad.length === 1 ? 'y' : 'ies'} cannot run on ${esc(c.host)}</b> - analysis continues without ${bad.length === 1 ? 'it' : 'them'}; the fix is below.</div></div>` : '') + rows,
+    {sub: `optional libraries on ${esc(c.host)}: working, off by a setting, not installed, or installed but unable to load`})}</div>`;
+}
 const STAGE_HELP = {fake: 'Sample data, no credentials', record: 'Live reads; responses saved (sanitised) as test fixtures; no actions',
   read: 'Live reads; recommendations appear as manual steps', recommend: 'Actions offered; a person approves every one (never above L2)',
   automate: 'Actions follow the automation policy'};
@@ -672,10 +703,10 @@ const fmtVal = v => v === null || v === undefined || v === '' ? '–' : typeof v
 async function Integrations() {
   const __g = GEN;
   const canCheck = can('read_audit') && window.ME.domains.includes('*');
-  const [cs, jr, sc, nt, cfg] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200'),
+  const [cs, jr, sc, nt, cfg, caps] = await Promise.all([api('/api/v1/dashboard/connectors'), api('/api/v1/jobs?limit=200'),
     canCheck ? api('/api/v1/admin/self-check') : Promise.resolve(null),
     canCheck ? api('/api/v1/admin/notifications') : Promise.resolve(null),
-    can('read_audit') ? api('/api/v1/config/connectors') : Promise.resolve(null)]);
+    can('read_audit') ? api('/api/v1/config/connectors') : Promise.resolve(null), api('/api/v1/admin/capabilities')]);
   window.__cfg = cfg;
   const byName = cfg ? Object.fromEntries(cfg.connectors.map(c => [c.name, c])) : {};
   const last = {}; jr.runs.forEach(r => { if (!last[r.job]) last[r.job] = r; });
@@ -688,7 +719,7 @@ async function Integrations() {
   const pending = cfg && cfg.pending.length ? `<div class="mb">${card('Configuration changes awaiting approval', cfg.pending.map(v => pendingRow(v)).join(''), {sub: 'proposed by one person, approved by another; a newer approved change makes older proposals stale'})}</div>` : '';
   setMainG(__g, page('Integrations', 'Connect, roll out and monitor every security tool: stage, preflight checks, data freshness and scheduled jobs.',
     cfg ? `<span class="status-pill"><span class="dot"></span>${cfg.active_version ? `Configuration version ${esc(cfg.active_version)}` : 'Configuration from file'}</span>` : '',
-    `${fileProblems}${pending}<div id="cfgpanel"></div>
+    `${fileProblems}${pending}${capabilitiesCard(caps)}<div id="cfgpanel"></div>
     ${sc ? `<div class="mb">${card('Platform self-check', `<div class="inline" style="margin-bottom:${sc.ok ? 0 : 10}px">${status(sc.ok ? 'ok' : 'high', sc.ok ? 'Consistent' : 'Attention')}<span class="small">${sc.passed} of ${sc.total} checks pass - the same figures agree on every screen, report and answer; every stored reference resolves; nothing is duplicated; the audit chain verifies.</span></div>` +
       sc.checks.filter(c => !c.ok).map(c => `<div class="list-row small"><span class="grow"><b>${esc(c.check)}</b></span><span class="mono muted">${esc(JSON.stringify(c.detail)).slice(0, 160)}</span></div>`).join(''), {sub: 'runs hourly; a failure raises a finding'})}</div>` : ''}
     ${card(`Connectors <span class="muted">(${cs.filter(c => c.enabled).length} enabled)</span>`, table(['Tool', 'Stage', 'State', 'Streams · age / expected', ''], cs.map(c => `<tr>
@@ -1809,7 +1840,7 @@ function weekly(trend) {
 async function Executive() {
   const __g = GEN;
   const tz = -new Date().getTimezoneOffset();
-  const v = await api(`/api/v1/executive?days=${EXEC.days}&tz_offset_minutes=${tz}`);
+  const [v, urg] = await Promise.all([api(`/api/v1/executive?days=${EXEC.days}&tz_offset_minutes=${tz}`), api('/api/v1/dashboard/urgent?limit=3')]);
   window.__exec = v;
   if (!v.agenda.counts[EXEC.bucket] && EXEC.bucket === 'today') EXEC.bucket = Object.keys(BUCKET_LABEL).find(b => v.agenda.counts[b]) || 'today';
   const I = v.incidents, V = v.vulnerabilities, P = v.phishing, C = v.coverage, O = v.operations, G = v.governance;
@@ -1847,7 +1878,7 @@ async function Executive() {
   const brief = `<div id="exec-brief">${btn('Write a brief from these figures', 'execBrief', [], 'sm')}</div>`;
   setMainG(__g, page('Executive view', `Everything security across the organisation, computed from the records - no figure here is written by AI. Last ${v.period_days} days against the ${v.period_days} before; computed ${esc(dt(v.generated_at))} UTC.`,
     `${period}${btn('Board pack', 'goTo', ['#/reports'], 'sm')}`,
-    `<div class="grid g-4 exec-kpis">${v.headline.map(execTile).join('')}</div>
+    `${urgentStrip(urg, {take: false})}<div class="grid g-4 exec-kpis">${v.headline.map(execTile).join('')}</div>
     <div class="grid g-2e mt">${execAgenda(v.agenda)}${posture}</div>
     <div class="mt">${card('Brief', brief, {sub: 'the model only narrates the figures above and cites each one; without it the platform writes the brief'})}</div>
     <details class="exec-more mt"><summary>More detail - incidents, vulnerabilities, phishing, coverage, operations, governance, third parties${v.ai ? ', AI use' : ''}</summary>
@@ -1869,6 +1900,6 @@ async function execBrief() {
 window.VIEWS = {executive: Executive, trace: Trace, search: Search, story: Story, overview: Overview, 'dome-score': DomeScore, intelligence: Intelligence, cases: Cases, entity: Entity, approvals: Approvals, phishing: Phishing,
   suppliers: Suppliers, vulnerabilities: Vulnerabilities, cloud: Cloud, coverage: Coverage, 'shadow-it': ShadowIt, integrations: Integrations, 'ai-usage': AiUsage,
   policy: Policy, reports: Reports, access: Access, audit: Audit, watchlists: Watchlists, tuning: Tuning};
-Object.assign(ALLOWED, {execPeriod, execBucket, execBrief, domeWeight, resetDomeWeights, saveDomeWeights, saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
+Object.assign(ALLOWED, {takeUrgent, execPeriod, execBucket, execBrief, domeWeight, resetDomeWeights, saveDomeWeights, saveValueInput, casePage, approvalPage, actDetail, showMore, notifyTest, assignCase, addNote, ownerFilter, reportPlan, buildPlanned, savePlanned, buildTemplate, runDeep, approveBundle, approvalFilter, intelAll, askIntel, refreshIntel, insightAct, intelFilter, caseFilter, runInc, runPh, act, decide, upload, vmRefresh, ticketSync,
   campaign, vmAsk, misRoute, misVerb, ownUpload, ownClear, testConn, runJob, preflight, configure, pauseConn, proposeConfig, approveConfig,
   rejectConfig, closePanel, showHistory, showImport, importConfig, restoreConfig, showLists, proposeLists, saveLlmPolicy, checkModels, loadCalls, aiProvider, saveIntegration, testIntegration, refreshCatalogue, addModel, approveLine, rollbackLine, unblockModel, kill, approvePolicy, report, compliancePack, grant, approveGrant, revokeGrant, revokeKey, newKey, auditExport, wlUpload, wlRemove, tuneDraft, tuneBlank, tuneSuggest, tunePreview, tunePropose, tuneDecide, tuneAutoclose, tuneActSuggest, styleUpload, styleSave, styleRemove, styleReset});

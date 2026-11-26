@@ -61,6 +61,7 @@ SPEC: dict[str, tuple[str, Any]] = {
     "SOC_API_THREADS": ("int", (4, 10_000)),
     "SOC_SHUTDOWN_GRACE_SECONDS": ("int", (1, 3600)),
     "SOC_CONNECTOR_RATE_SHARE": ("int", (1, 64)),
+    "SOC_URGENT_WINDOW_HOURS": ("int", (1, 168)),
     "SOC_DB_POOL_SIZE": ("int", (1, 10_000)),
     "SOC_DB_MAX_OVERFLOW": ("int", (0, 10_000)),
     "SOC_DB_POOL_RECYCLE": ("int", (0, 86_400 * 7)),

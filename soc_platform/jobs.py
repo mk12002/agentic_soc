@@ -167,6 +167,9 @@ def _body(name: str, s: Session) -> dict[str, Any]:
             event("audit.anchor", seq=verified.get("head_seq"), head=verified.get("head"))
         result = confirm(s, checked)                      # alert only on checks that fail twice (no false alarms)
         raise_or_resolve(s, result)
+        from soc_platform.core import capabilities
+
+        capabilities.raise_or_resolve(s)                  # a capability this host cannot load: a notified finding
         budget = llm_budget_alert(s, get_settings())
         return {"passed": result["passed"], "total": result["total"],
                 "failing": [c["check"] for c in result["checks"] if not c["ok"]], "llm_budget": budget}

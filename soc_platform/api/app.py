@@ -69,6 +69,9 @@ async def _lifespan(_app: FastAPI):
 
     threads = int(__import__("os").environ.get("SOC_API_THREADS", "40") or 40)
     __import__("anyio").to_thread.current_default_thread_limiter().total_tokens = max(4, threads)  # request threads
+    from soc_platform.core import capabilities
+
+    capabilities.log_problems()              # a missing system library: said at start, then on /health and screens
     if engine_enabled():   # load the trained models in the background; the server answers meanwhile
         __import__("threading").Thread(target=warm_up_engine, name="soc-engine-warmup", daemon=True).start()
     sch = None
@@ -662,9 +665,12 @@ def health(request: Request, authorization: str | None = Header(default=None),
         return {"status": "ok"}
     if not p.can(Perm.READ):
         return {"status": "ok"}
-    return {"status": "ok", "version": __version__, "audit_chain": _audit_chain_ok(s),
+    from soc_platform.core import capabilities
+
+    caps = capabilities.summary()            # a capability that cannot load (a missing system library) degrades
+    return {"status": caps["status"], "version": __version__, "audit_chain": _audit_chain_ok(s),
             "connectors_enabled": len(registry().enabled_names()), "kill_switch": kill_switch_on(s, get_settings()),
-            "scheduler": _scheduler_heartbeat(s)}
+            "scheduler": _scheduler_heartbeat(s), "capabilities": caps}
 
 
 @app.get("/health/live", include_in_schema=False)
@@ -1724,6 +1730,17 @@ def _audit_domain(s: Session, subject_type: str, subject_id: str) -> str | None:
     if subject_type == "submission":
         return "phishing"
     return "vulnerability" if subject_type in _VM_SUBJECTS else None
+
+
+@app.get("/api/v1/admin/capabilities")
+def platform_capabilities(_: Principal = Depends(need(Perm.READ)), refresh: bool = False) -> dict[str, Any]:
+    """What this server can do: QR decoding, fuzzy hashing, the phishing ML engine, YARA rules - each ok, off by a
+    setting, not installed, or broken (installed but cannot load), with the error, its impact and the fix."""
+    from soc_platform.core import capabilities
+
+    items = capabilities.report(refresh=refresh)
+    return {"host": __import__("socket").gethostname(), "status": "degraded" if capabilities.broken(items) else "ok",
+            "capabilities": items}
 
 
 @app.get("/api/v1/admin/self-check")
@@ -2970,6 +2987,16 @@ def dash_overview(days: int = Query(14, ge=1, le=90), p: Principal = Depends(nee
     from soc_platform.api.dashboards import overview
 
     return overview(s, p.domains, days=days)
+
+
+@app.get("/api/v1/dashboard/urgent")
+def dash_urgent(limit: int = Query(3, ge=0, le=50), p: Principal = Depends(need(Perm.READ)),
+                s: Session = Depends(db_session, scope="function")):
+    """Needs immediate attention (top of the Overview and the executive view): recent critical cases, and high ones with
+    an urgency signal, that nobody has taken - with why each one is urgent now (api/urgent.py; rules, never the model)."""
+    from soc_platform.api.urgent import urgent
+
+    return urgent(s, p.domains, limit=limit)
 
 
 @app.get("/api/v1/dashboard/connectors")

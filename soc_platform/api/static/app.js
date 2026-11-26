@@ -247,6 +247,7 @@ function shell() {
       <header class="topbar">
         <div class="crumbs" id="crumbs"></div><div class="spacer"></div>
         <input class="input search-box" id="global-q" type="search" data-enter="runSearch" aria-label="Search cases, people, hosts, CVEs" placeholder="Search cases, people, hosts, CVEs…">
+        <a class="status-pill halt" id="cap-status" href="#/integrations" hidden title="A platform capability cannot run on this server - details on Integrations"><span class="dot"></span><span id="cap-text">Capability unavailable</span></a>
         <span class="status-pill halt" id="sched-status" hidden><span class="dot"></span><span id="sched-text">Scheduler stopped</span></span>
         <span class="status-pill" id="kill-status" title="Automated action status"><span class="dot"></span>Automation active</span>
         <button class="icon-btn" data-fn="toggleTheme" data-args="[]" title="Toggle light / dark" aria-label="Toggle theme" id="theme-btn"></button>
@@ -285,11 +286,15 @@ function paintNavToggle() {
   b.setAttribute('aria-expanded', String(!collapsed));
 }
 
+const CAP_LABEL = {qr_decoding: 'QR decoding', fuzzy_hashing: 'Fuzzy hashing', phishing_engine: 'ML engine', yara_rules: 'YARA rules'};
 async function refreshStatus() {
   try {
     const h = await api('/health');   // the status details need the signed-in user's token
     const el = $('#kill-status');
     if (el) { el.className = 'status-pill' + (h.kill_switch ? ' halt' : ''); el.innerHTML = `<span class="dot"></span>${h.kill_switch ? 'Automation halted' : 'Automation active'}`; }
+    const cap = $('#cap-status');     // a capability that cannot load (a missing system library) is said on every screen
+    if (cap) { const d = (h.capabilities && h.capabilities.degraded) || []; cap.hidden = !d.length;
+      $('#cap-text').textContent = d.length === 1 ? `${CAP_LABEL[d[0]] || d[0]} unavailable` : `${d.length} capabilities unavailable`; }
     const sch = $('#sched-status');   // a stopped scheduler cannot alert on its own: say so on every screen
     if (sch) { sch.hidden = !(h.scheduler && ['stale', 'stuck'].includes(h.scheduler.state));
       $('#sched-text').textContent = h.scheduler && h.scheduler.state === 'stuck' ? `Scheduler stuck (${h.scheduler.stuck_job})` : 'Scheduler stopped'; sch.title = h.scheduler && h.scheduler.last_run ? 'Last job run ' + h.scheduler.last_run.slice(0, 16).replace('T', ' ') + ' UTC' : ''; }
